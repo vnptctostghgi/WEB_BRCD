@@ -1,28 +1,49 @@
 const form = document.querySelector("#login-form");
 const message = document.querySelector("#login-message");
+const themeToggle = document.querySelector("#theme-toggle");
+
+function setTheme(nextTheme) {
+  document.documentElement.classList.toggle("dark", nextTheme === "dark");
+  localStorage.theme = nextTheme;
+}
+
+themeToggle?.addEventListener("click", () => {
+  setTheme(document.documentElement.classList.contains("dark") ? "light" : "dark");
+});
+
+function showMessage(text, type = "error") {
+  message.className = `result ${type}`;
+  message.textContent = text;
+}
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const submitButton = form.querySelector("button");
+  const submitButton = form.querySelector("button[type='submit']");
   submitButton.disabled = true;
+  submitButton.classList.add("loading");
   message.className = "result hidden";
   const formData = new FormData(form);
 
-  const response = await fetch("/api/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      username: formData.get("username"),
-      password: formData.get("password"),
-    }),
-  });
+  try {
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: formData.get("username"),
+        password: formData.get("password"),
+      }),
+    });
 
-  if (response.ok) {
-    window.location.href = "/";
-    return;
+    if (response.ok) {
+      window.location.href = "/";
+      return;
+    }
+    const body = await response.json();
+    showMessage(body.detail || "Đăng nhập thất bại.");
+  } catch {
+    showMessage("Không kết nối được máy chủ. Vui lòng thử lại.");
+  } finally {
+    submitButton.disabled = false;
+    submitButton.classList.remove("loading");
   }
-  const body = await response.json();
-  message.className = "result error";
-  message.textContent = body.detail || "Đăng nhập thất bại.";
-  submitButton.disabled = false;
 });

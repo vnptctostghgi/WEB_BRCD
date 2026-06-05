@@ -3,40 +3,102 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#082a58" />
+    <meta name="theme-color" content="#07559c" />
     <title>Đăng nhập · {{ app_name }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=4" />
+    <script>
+      tailwind = {
+        config: {
+          darkMode: "class",
+          theme: {
+            extend: {
+              fontFamily: { sans: ["Be Vietnam Pro", "Inter", "ui-sans-serif", "system-ui"] },
+              colors: { vnpt: { 50: "#edf9ff", 100: "#d6f1ff", 500: "#087ccf", 600: "#075fb0", 700: "#07559c", 950: "#082a58" } },
+              boxShadow: { soft: "0 24px 80px rgba(8, 42, 88, .16)" },
+            },
+          },
+        },
+      };
+      if (localStorage.theme === "dark" || (!("theme" in localStorage) && matchMedia("(prefers-color-scheme: dark)").matches)) {
+        document.documentElement.classList.add("dark");
+      }
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/styles.css?v=10" />
   </head>
-  <body class="login-page">
-    <main class="login-shell">
-      <section class="login-intro">
-        <div class="login-brand"><span class="brand-mark">B</span><strong>BRCĐ Admin</strong></div>
-        <p class="eyebrow">HỆ THỐNG QUẢN TRỊ NỘI BỘ</p>
-        <h1>Quản trị tập trung, dữ liệu an toàn.</h1>
-        <p>Đăng nhập bằng tài khoản ứng dụng. Thông tin Oracle không được chia sẻ cho người dùng cuối.</p>
-        <div class="security-points">
-          <span>Phân quyền theo vai trò</span>
-          <span>Ghi nhật ký thao tác</span>
-          <span>Kết nối Oracle chỉ đọc</span>
+  <body class="min-h-screen bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100">
+    <main class="relative grid min-h-screen overflow-hidden px-4 py-6 sm:px-6 lg:grid-cols-[1.08fr_.92fr] lg:p-8">
+      <div class="pointer-events-none absolute inset-0 -z-10">
+        <div class="absolute left-[-12rem] top-[-10rem] h-96 w-96 rounded-full bg-vnpt-100 blur-3xl dark:bg-vnpt-950"></div>
+        <div class="absolute bottom-[-14rem] right-[-10rem] h-[30rem] w-[30rem] rounded-full bg-sky-200/70 blur-3xl dark:bg-sky-900/30"></div>
+      </div>
+
+      <section class="hidden rounded-[2rem] bg-gradient-to-br from-vnpt-950 via-vnpt-700 to-sky-500 p-8 text-white shadow-soft lg:flex lg:flex-col lg:justify-between">
+        <div>
+          <div class="flex items-center gap-3">
+            <div class="grid h-14 w-14 place-items-center rounded-2xl bg-white text-sm font-extrabold text-vnpt-700 shadow-lg">VNPT</div>
+            <div>
+              <p class="text-lg font-extrabold leading-tight">BRCĐ Admin</p>
+              <p class="text-sm text-sky-100">Quản trị băng rộng cố định</p>
+            </div>
+          </div>
+          <div class="mt-20 max-w-2xl">
+            <p class="text-xs font-bold uppercase tracking-[.24em] text-sky-100">Hệ thống quản trị nội bộ</p>
+            <h1 class="mt-4 text-4xl font-extrabold tracking-[-.04em] sm:text-5xl">Vận hành dữ liệu gọn, an toàn và chuyên nghiệp.</h1>
+            <p class="mt-5 text-base leading-8 text-sky-50/90">Giao diện SaaS hiện đại, tối ưu cho báo cáo số liệu BRCĐ, quản trị người dùng, danh mục website và kiểm tra kết nối hệ thống.</p>
+          </div>
+        </div>
+        <div class="grid gap-3 rounded-3xl border border-white/15 bg-white/10 p-5 backdrop-blur">
+          <p class="text-sm font-semibold text-sky-50">Hỗ trợ quản trị viên</p>
+          <a class="text-2xl font-extrabold tracking-tight text-white hover:text-sky-100" href="tel:0949892585">094.989.2585 Quyền</a>
+          <p class="text-sm text-sky-100">Dùng nghe gọi, Zalo và Telegram.</p>
         </div>
       </section>
-      <section class="login-card">
-        <div>
-          <p class="eyebrow">CHÀO MỪNG TRỞ LẠI</p>
-          <h2>Đăng nhập hệ thống</h2>
-          <p class="form-help">Nhập tài khoản do quản trị viên cấp.</p>
+
+      <section class="mx-auto flex w-full max-w-xl items-center justify-center lg:max-w-none lg:px-10">
+        <div class="w-full rounded-[1.75rem] border border-slate-200 bg-white/90 p-5 shadow-soft backdrop-blur sm:p-8 dark:border-slate-800 dark:bg-slate-900/88">
+          <div class="mb-8 flex items-center justify-between gap-4 lg:hidden">
+            <div class="flex items-center gap-3">
+              <div class="grid h-12 w-12 place-items-center rounded-2xl bg-vnpt-600 text-xs font-extrabold text-white">VNPT</div>
+              <div>
+                <p class="font-extrabold">BRCĐ Admin</p>
+                <p class="text-xs text-slate-500 dark:text-slate-400">Quản trị băng rộng</p>
+              </div>
+            </div>
+            <button id="theme-toggle" class="rounded-2xl border border-slate-200 px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800" type="button">Sáng/Tối</button>
+          </div>
+
+          <div>
+            <p class="text-xs font-bold uppercase tracking-[.22em] text-vnpt-600 dark:text-sky-300">Chào mừng trở lại</p>
+            <h2 class="mt-3 text-3xl font-extrabold tracking-[-.035em] text-slate-950 dark:text-white">Đăng nhập hệ thống</h2>
+            <p class="mt-3 text-sm leading-7 text-slate-500 dark:text-slate-400">Nhập tài khoản do quản trị viên cấp. Phiên đăng nhập được bảo vệ bằng cookie HttpOnly.</p>
+          </div>
+
+          <form id="login-form" class="mt-8 grid gap-5">
+            <label class="grid gap-2 text-sm font-bold text-slate-700 dark:text-slate-200">
+              Tên đăng nhập
+              <input class="form-control" name="username" autocomplete="username" required minlength="3" placeholder="admin" />
+            </label>
+            <label class="grid gap-2 text-sm font-bold text-slate-700 dark:text-slate-200">
+              Mật khẩu
+              <input class="form-control" name="password" type="password" autocomplete="current-password" required placeholder="Nhập mật khẩu" />
+            </label>
+            <button class="btn-primary group" type="submit">
+              <span class="button-label">Đăng nhập</span>
+              <span class="spinner"></span>
+            </button>
+            <div id="login-message" class="result hidden" role="alert"></div>
+          </form>
+
+          <div class="mt-8 rounded-2xl border border-vnpt-100 bg-vnpt-50 p-4 text-sm leading-7 text-vnpt-950 dark:border-vnpt-900/80 dark:bg-vnpt-950/40 dark:text-sky-100">
+            <p class="font-bold">Cần hỗ trợ?</p>
+            <p>Liên hệ quản trị viên: <a class="font-extrabold hover:underline" href="tel:0949892585">094.989.2585 Quyền</a> qua nghe gọi, Zalo hoặc Telegram.</p>
+          </div>
         </div>
-        <form id="login-form">
-          <label>Tên đăng nhập<input name="username" autocomplete="username" required minlength="3" /></label>
-          <label>Mật khẩu<input name="password" type="password" autocomplete="current-password" required /></label>
-          <button class="primary-button" type="submit">Đăng nhập</button>
-          <div id="login-message" class="result hidden" role="alert"></div>
-        </form>
       </section>
     </main>
-    <script src="/static/login.js?v=1"></script>
+    <script src="/static/login.js?v=2"></script>
   </body>
 </html>

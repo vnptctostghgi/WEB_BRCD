@@ -7,10 +7,19 @@ let websites = [];
 let features = [];
 
 function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, (character) => ({
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
   }[character]));
 }
+
+function setTheme(nextTheme) {
+  document.documentElement.classList.toggle("dark", nextTheme === "dark");
+  localStorage.theme = nextTheme;
+}
+
+$("#theme-toggle")?.addEventListener("click", () => {
+  setTheme(document.documentElement.classList.contains("dark") ? "light" : "dark");
+});
 
 async function api(url, options = {}) {
   const response = await fetch(url, {
@@ -31,7 +40,25 @@ function showMessage(element, text, type = "success") {
   element.textContent = text;
 }
 
-$("#menu-button").addEventListener("click", () => {
+function loadingRow(colspan, text = "Đang tải dữ liệu...") {
+  return `<tr><td colspan="${colspan}" class="loading-row">${escapeHtml(text)}</td></tr>`;
+}
+
+function emptyRow(colspan, title, description = "Chưa có dữ liệu để hiển thị.") {
+  return `<tr><td colspan="${colspan}"><div class="empty-state"><div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(description)}</p></div></div></td></tr>`;
+}
+
+function setTableLoading(selector, colspan, text) {
+  const element = $(selector);
+  if (element) element.innerHTML = loadingRow(colspan, text);
+}
+
+function setButtonLoading(button, isLoading) {
+  button.disabled = isLoading;
+  button.classList.toggle("loading", isLoading);
+}
+
+$("#menu-button")?.addEventListener("click", () => {
   const open = $("#sidebar").classList.toggle("menu-open");
   $("#menu-button").setAttribute("aria-expanded", String(open));
 });
@@ -41,7 +68,7 @@ document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("
   item.classList.add("active");
   $(`#view-${item.dataset.view}`).classList.add("active");
   $("#sidebar").classList.remove("menu-open");
-  $("#menu-button").setAttribute("aria-expanded", "false");
+  $("#menu-button")?.setAttribute("aria-expanded", "false");
   if (item.dataset.view === "users") await loadUsers();
   if (item.dataset.view === "vault") await loadCredentials();
   if (item.dataset.view === "websites") await loadAdminWebsites();
@@ -52,26 +79,27 @@ document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("
 document.querySelectorAll("[data-open-dialog]").forEach((button) => button.addEventListener("click", () => $(`#${button.dataset.openDialog}`).showModal()));
 document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
 
-$("#logout-button").addEventListener("click", async () => {
+$("#logout-button")?.addEventListener("click", async () => {
   await api("/api/auth/logout", { method: "POST" });
   window.location.href = "/login";
 });
 
-$("#test-button").addEventListener("click", async () => {
+$("#test-button")?.addEventListener("click", async () => {
   const button = $("#test-button");
-  button.disabled = true;
-  button.classList.add("loading");
+  setButtonLoading(button, true);
   try {
     const data = await api("/api/health/database");
     $("#database-summary").textContent = data.ok ? "Đã kết nối" : "Kết nối lỗi";
-    showMessage($("#result"), data.ok ? `${data.message} Oracle ${data.details.database_version}.` : data.message, data.ok ? "success" : "error");
+    const detail = data.ok && data.details?.database_version ? ` Oracle ${data.details.database_version}.` : "";
+    showMessage($("#result"), data.ok ? `${data.message}${detail}` : data.message, data.ok ? "success" : "error");
+  } catch (error) {
+    showMessage($("#result"), error.message, "error");
   } finally {
-    button.disabled = false;
-    button.classList.remove("loading");
+    setButtonLoading(button, false);
   }
 });
 
-$("#password-form").addEventListener("submit", async (event) => {
+$("#password-form")?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
@@ -79,16 +107,22 @@ $("#password-form").addEventListener("submit", async (event) => {
     const response = await api("/api/auth/change-password", { method: "POST", body: JSON.stringify(data) });
     showMessage(form.querySelector(".result"), response.message);
     form.reset();
-  } catch (error) { showMessage(form.querySelector(".result"), error.message, "error"); }
+  } catch (error) {
+    showMessage(form.querySelector(".result"), error.message, "error");
+  }
 });
 
 async function loadUsers() {
+  setTableLoading("#users-table", 5, "Đang tải danh sách người dùng...");
   users = (await api("/api/admin/users")).users;
-  $("#users-table").innerHTML = users.map((user) => `
-    <tr><td><strong>${escapeHtml(user.username)}</strong>${user.must_change_password ? "<small class='cell-note'>Cần đổi mật khẩu</small>" : ""}</td>
-    <td>${escapeHtml(user.full_name)}</td><td><span class="status ${user.role === "admin" ? "admin" : "viewer"}">${user.role === "admin" ? "Quản trị viên" : "Người xem"}</span></td>
-    <td><span class="status ${user.is_active ? "active" : "inactive"}">${user.is_active ? "Hoạt động" : "Đã khóa"}</span></td>
-    <td><button class="table-action" data-edit-user="${user.id}">Chỉnh sửa</button></td></tr>`).join("");
+  $("#users-table").innerHTML = users.length ? users.map((user) => `
+    <tr>
+      <td><strong>${escapeHtml(user.username)}</strong>${user.must_change_password ? "<small class='cell-note'>Cần đổi mật khẩu</small>" : ""}</td>
+      <td>${escapeHtml(user.full_name)}</td>
+      <td><span class="status ${user.role === "admin" ? "admin" : "viewer"}">${user.role === "admin" ? "Quản trị viên" : "Người xem"}</span></td>
+      <td><span class="status ${user.is_active ? "active" : "inactive"}">${user.is_active ? "Hoạt động" : "Đã khóa"}</span></td>
+      <td><button class="table-action" data-edit-user="${user.id}">Chỉnh sửa</button></td>
+    </tr>`).join("") : emptyRow(5, "Chưa có người dùng", "Hãy tạo tài khoản đầu tiên để cấp quyền sử dụng hệ thống.");
   document.querySelectorAll("[data-edit-user]").forEach((button) => button.addEventListener("click", () => openEditUser(Number(button.dataset.editUser))));
 }
 
@@ -105,7 +139,7 @@ async function openEditUser(id) {
   const granted = new Set((await api(`/api/admin/users/${id}/permissions`)).feature_codes);
   $("#permission-tree").innerHTML = features.map((feature) => `
     <label class="permission-item ${feature.parent_code ? "child" : "parent"}">
-      <input type="checkbox" value="${feature.code}" ${granted.has(feature.code) ? "checked" : ""} />
+      <input type="checkbox" value="${escapeHtml(feature.code)}" ${granted.has(feature.code) ? "checked" : ""} />
       <span>${escapeHtml(feature.name)}</span>
     </label>`).join("");
   $("#permission-tree").querySelectorAll(".permission-item.parent input").forEach((parent) => {
@@ -120,15 +154,20 @@ async function openEditUser(id) {
 }
 
 if (role === "admin") {
-  $("#create-user-form").addEventListener("submit", async (event) => {
+  $("#create-user-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     try {
       await api("/api/admin/users", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(form))) });
-      form.reset(); $("#create-user-dialog").close(); await loadUsers();
-    } catch (error) { showMessage(form.querySelector(".result"), error.message, "error"); }
+      form.reset();
+      $("#create-user-dialog").close();
+      await loadUsers();
+    } catch (error) {
+      showMessage(form.querySelector(".result"), error.message, "error");
+    }
   });
-  $("#edit-user-form").addEventListener("submit", async (event) => {
+
+  $("#edit-user-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const data = Object.fromEntries(new FormData(form));
@@ -137,66 +176,77 @@ if (role === "admin") {
       if (data.password) await api(`/api/admin/users/${data.id}/reset-password`, { method: "POST", body: JSON.stringify({ password: data.password }) });
       const feature_codes = [...$("#permission-tree").querySelectorAll("input:checked")].map((input) => input.value);
       await api(`/api/admin/users/${data.id}/permissions`, { method: "PUT", body: JSON.stringify({ feature_codes }) });
-      $("#edit-user-dialog").close(); await loadUsers();
-    } catch (error) { showMessage(form.querySelector(".result"), error.message, "error"); }
+      $("#edit-user-dialog").close();
+      await loadUsers();
+    } catch (error) {
+      showMessage(form.querySelector(".result"), error.message, "error");
+    }
   });
-  $("#refresh-audit").addEventListener("click", loadAudit);
-  $("#website-form").addEventListener("submit", saveWebsite);
+
+  $("#refresh-audit")?.addEventListener("click", loadAudit);
+  $("#website-form")?.addEventListener("submit", saveWebsite);
 }
 
 async function loadSystem() {
+  $("#system-cards").innerHTML = loadingRow(1, "Đang tải thông tin hệ thống...");
   const data = await api("/api/admin/system");
   await loadConnections();
   $("#system-cards").innerHTML = [
     ["APP", "Môi trường", data.environment],
     ["STO", "Database chính", data.storage_backend],
-    ["DB", "Oracle Service", data.oracle_service],
+    ["DB", "Oracle Service", data.oracle_service || "Chưa cấu hình"],
     ["USR", "Người dùng hoạt động", `${data.active_user_count}/${data.user_count}`],
-  ].map(([icon, label, value]) => `<article class="metric-card"><div class="icon blue">${icon}</div><div><span>${label}</span><strong>${value}</strong></div></article>`).join("");
+  ].map(([icon, label, value]) => `<article class="metric-card"><div class="metric-icon">${icon}</div><div><span>${label}</span><strong>${escapeHtml(value)}</strong></div></article>`).join("");
 }
 
 async function loadConnections() {
+  setTableLoading("#connections-table", 6, "Đang tải kết nối hệ thống...");
   const data = await api("/api/admin/connections");
-  $("#connections-table").innerHTML = data.connections.map((connection) => `
+  $("#connections-table").innerHTML = data.connections.length ? data.connections.map((connection) => `
     <tr>
       <td><strong>${escapeHtml(connection.name)}</strong><small class="cell-note">${escapeHtml(connection.description)}</small></td>
       <td><span class="status viewer">${escapeHtml(connection.connection_type)}</span></td>
       <td><span class="status ${connection.is_active ? "active" : "inactive"}">${connection.is_active ? "Đang dùng" : "Chưa cấu hình"}</span></td>
       <td><code>${escapeHtml(JSON.stringify(connection.config))}</code></td>
       <td>${escapeHtml(connection.secret_ref || "Không có")}</td>
-      <td><button class="table-action" data-test-connection="${escapeHtml(connection.code)}">Kiểm tra</button><div class="cell-note" id="connection-result-${escapeHtml(connection.code)}"></div></td>
-    </tr>`).join("");
+      <td><button class="table-action" data-test-connection="${escapeHtml(connection.code)}"><span class="button-label">Kiểm tra</span><span class="spinner"></span></button><div class="cell-note" id="connection-result-${escapeHtml(connection.code)}"></div></td>
+    </tr>`).join("") : emptyRow(6, "Chưa có kết nối", "Hãy cấu hình kết nối trong phần quản trị hệ thống.");
   document.querySelectorAll("[data-test-connection]").forEach((button) => {
-    button.addEventListener("click", () => testConnection(button.dataset.testConnection));
+    button.addEventListener("click", () => testConnection(button.dataset.testConnection, button));
   });
 }
 
-async function testConnection(code) {
-  const resultBox = $(`#connection-result-${code}`);
+async function testConnection(code, button) {
+  const resultBox = $(`#connection-result-${CSS.escape(code)}`);
   resultBox.textContent = "Đang kiểm tra...";
+  setButtonLoading(button, true);
   try {
     const result = await api(`/api/admin/connections/${code}/test`, { method: "POST" });
     resultBox.textContent = result.message;
-    resultBox.style.color = result.ok ? "#08663d" : "#8c3030";
+    resultBox.style.color = result.ok ? "#166534" : "#991b1b";
   } catch (error) {
     resultBox.textContent = error.message;
-    resultBox.style.color = "#8c3030";
+    resultBox.style.color = "#991b1b";
+  } finally {
+    setButtonLoading(button, false);
   }
 }
 
 async function loadAudit() {
+  setTableLoading("#audit-table", 4, "Đang tải nhật ký hoạt động...");
   const logs = (await api("/api/admin/audit-logs")).logs;
-  $("#audit-table").innerHTML = logs.map((log) => `<tr><td>${new Date(log.created_at).toLocaleString("vi-VN")}</td><td><strong>${escapeHtml(log.actor)}</strong></td><td>${escapeHtml(log.action)}</td><td>${escapeHtml(log.details)}</td></tr>`).join("");
+  $("#audit-table").innerHTML = logs.length ? logs.map((log) => `<tr><td>${new Date(log.created_at).toLocaleString("vi-VN")}</td><td><strong>${escapeHtml(log.actor)}</strong></td><td>${escapeHtml(log.action)}</td><td>${escapeHtml(log.details)}</td></tr>`).join("") : emptyRow(4, "Chưa có nhật ký", "Các thao tác quan trọng sẽ xuất hiện tại đây.");
 }
 
 async function loadAdminWebsites() {
+  setTableLoading("#websites-table", 5, "Đang tải danh mục website...");
   websites = (await api("/api/admin/websites")).websites;
-  $("#websites-table").innerHTML = websites.map((website) => `<tr>
+  $("#websites-table").innerHTML = websites.length ? websites.map((website) => `<tr>
     <td><strong>${escapeHtml(website.name)}</strong></td>
-    <td><a href="${escapeHtml(website.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(website.url)}</a></td>
+    <td><a class="font-bold text-vnpt-600 hover:underline dark:text-sky-300" href="${escapeHtml(website.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(website.url)}</a></td>
     <td><span class="status ${website.requires_otp ? "pending" : "viewer"}">${website.requires_otp ? "Có OTP" : "Không OTP"}</span></td>
     <td><span class="status ${website.is_active ? "active" : "inactive"}">${website.is_active ? "Đang dùng" : "Ngừng dùng"}</span></td>
-    <td><button class="table-action" data-edit-website="${website.id}">Chỉnh sửa</button></td></tr>`).join("");
+    <td><button class="table-action" data-edit-website="${website.id}">Chỉnh sửa</button></td></tr>`).join("") : emptyRow(5, "Chưa có website", "Thêm danh mục website để người dùng lưu tài khoản.");
   document.querySelectorAll("[data-edit-website]").forEach((button) => button.addEventListener("click", () => openWebsite(Number(button.dataset.editWebsite))));
 }
 
@@ -217,11 +267,19 @@ async function saveWebsite(event) {
   const data = Object.fromEntries(new FormData(form));
   try {
     await api("/api/admin/websites", { method: "POST", body: JSON.stringify({
-      id: data.id ? Number(data.id) : null, name: data.name, url: data.url,
-      requires_otp: form.requires_otp.checked, is_active: form.is_active.checked,
+      id: data.id ? Number(data.id) : null,
+      name: data.name,
+      url: data.url,
+      requires_otp: form.requires_otp.checked,
+      is_active: form.is_active.checked,
     })});
-    form.reset(); form.is_active.checked = true; $("#website-dialog").close(); await loadAdminWebsites();
-  } catch (error) { showMessage(form.querySelector(".result"), error.message, "error"); }
+    form.reset();
+    form.is_active.checked = true;
+    $("#website-dialog").close();
+    await loadAdminWebsites();
+  } catch (error) {
+    showMessage(form.querySelector(".result"), error.message, "error");
+  }
 }
 
 async function loadCredentialWebsites() {
@@ -241,14 +299,15 @@ function updateCredentialWebsite() {
 }
 
 async function loadCredentials() {
+  setTableLoading("#credentials-table", 5, "Đang tải tài khoản website...");
   await loadCredentialWebsites();
   const credentials = (await api("/api/credentials")).credentials;
-  $("#credentials-table").innerHTML = credentials.map((credential) => `<tr>
+  $("#credentials-table").innerHTML = credentials.length ? credentials.map((credential) => `<tr>
     <td><strong>${escapeHtml(credential.website_name)}</strong></td>
-    <td><a href="${escapeHtml(credential.url)}" target="_blank" rel="noopener noreferrer">Mở website</a></td>
+    <td><a class="font-bold text-vnpt-600 hover:underline dark:text-sky-300" href="${escapeHtml(credential.url)}" target="_blank" rel="noopener noreferrer">Mở website</a></td>
     <td>${escapeHtml(credential.login_username)}</td>
     <td><span class="status ${credential.requires_otp ? "pending" : "viewer"}">${credential.requires_otp ? "Có OTP" : "Không OTP"}</span></td>
-    <td class="action-group">${canRevealVault ? `<button class="table-action" data-reveal="${credential.id}">Xem mật khẩu</button>` : ""}${canManageVault ? `<button class="table-action danger" data-delete-credential="${credential.id}">Xóa</button>` : ""}</td></tr>`).join("");
+    <td class="action-group">${canRevealVault ? `<button class="table-action" data-reveal="${credential.id}">Xem mật khẩu</button>` : ""}${canManageVault ? `<button class="table-action danger" data-delete-credential="${credential.id}">Xóa</button>` : ""}</td></tr>`).join("") : emptyRow(5, "Chưa có tài khoản web", "Bấm thêm tài khoản để lưu thông tin đăng nhập của bạn.");
   document.querySelectorAll("[data-reveal]").forEach((button) => button.addEventListener("click", () => revealCredential(button)));
   document.querySelectorAll("[data-delete-credential]").forEach((button) => button.addEventListener("click", () => deleteCredential(Number(button.dataset.deleteCredential))));
 }
@@ -258,7 +317,9 @@ async function revealCredential(button) {
     const data = await api(`/api/credentials/${button.dataset.reveal}/reveal`, { method: "POST" });
     button.textContent = data.password;
     setTimeout(() => { button.textContent = "Xem mật khẩu"; }, 10000);
-  } catch (error) { alert(error.message); }
+  } catch (error) {
+    alert(error.message);
+  }
 }
 
 async function deleteCredential(id) {
@@ -267,13 +328,17 @@ async function deleteCredential(id) {
   await loadCredentials();
 }
 
-if ($("#credential-website")) $("#credential-website").addEventListener("change", updateCredentialWebsite);
-if ($("#credential-form")) $("#credential-form").addEventListener("submit", async (event) => {
+$("#credential-website")?.addEventListener("change", updateCredentialWebsite);
+$("#credential-form")?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
   try {
     await api("/api/credentials", { method: "POST", body: JSON.stringify({ ...data, id: data.id ? Number(data.id) : null, website_id: Number(data.website_id) }) });
-    form.reset(); $("#credential-dialog").close(); await loadCredentials();
-  } catch (error) { showMessage(form.querySelector(".result"), error.message, "error"); }
+    form.reset();
+    $("#credential-dialog").close();
+    await loadCredentials();
+  } catch (error) {
+    showMessage(form.querySelector(".result"), error.message, "error");
+  }
 });

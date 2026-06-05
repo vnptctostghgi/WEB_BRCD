@@ -3,111 +3,172 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#082a58" />
+    <meta name="theme-color" content="#07559c" />
     <title>{{ app_name }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=5" />
+    <script>
+      tailwind = {
+        config: {
+          darkMode: "class",
+          theme: {
+            extend: {
+              fontFamily: { sans: ["Be Vietnam Pro", "Inter", "ui-sans-serif", "system-ui"] },
+              colors: { vnpt: { 50: "#edf9ff", 100: "#d6f1ff", 500: "#087ccf", 600: "#075fb0", 700: "#07559c", 950: "#082a58" } },
+              boxShadow: { soft: "0 18px 70px rgba(8, 42, 88, .12)" },
+            },
+          },
+        },
+      };
+      if (localStorage.theme === "dark" || (!("theme" in localStorage) && matchMedia("(prefers-color-scheme: dark)").matches)) {
+        document.documentElement.classList.add("dark");
+      }
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/styles.css?v=10" />
   </head>
-  <body data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'vault.manage' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'vault.reveal' in user.permissions }}">
-    <aside class="sidebar" id="sidebar">
-      <div class="sidebar-header">
-        <div class="brand"><span class="brand-mark">B</span><div><strong>BRCĐ Admin</strong><small>Quản trị băng rộng</small></div></div>
-        <button class="menu-button" id="menu-button" type="button" aria-label="Mở menu điều hướng" aria-controls="main-navigation" aria-expanded="false"><span></span><span></span><span></span></button>
-      </div>
-      <nav id="main-navigation" aria-label="Điều hướng chính">
-        <button class="nav-item active" data-view="dashboard"><span>⌂</span> Tổng quan</button>
-        {% if user.role == "admin" or "vault.view" in user.permissions %}
-        <button class="nav-item" data-view="vault"><span>▣</span> Tài khoản web</button>
-        {% endif %}
-        {% if user.role == "admin" %}
-        <button class="nav-item" data-view="users"><span>◎</span> Quản trị người dùng</button>
-        <button class="nav-item" data-view="websites"><span>◇</span> Danh mục website</button>
-        <button class="nav-item" data-view="system"><span>⚙</span> Quản trị hệ thống</button>
-        <button class="nav-item" data-view="audit"><span>▤</span> Nhật ký hoạt động</button>
-        {% endif %}
-      </nav>
-      <div class="sidebar-user">
-        <div class="avatar">{{ user.full_name[0] }}</div>
-        <div><strong>{{ user.full_name }}</strong><small>{{ "Quản trị viên" if user.role == "admin" else "Người xem" }}</small></div>
-        <button id="logout-button" title="Đăng xuất" aria-label="Đăng xuất">↪</button>
-      </div>
-    </aside>
-
-    <main>
-      <section class="app-view active" id="view-dashboard">
-        <header class="page-header">
-          <div><p class="eyebrow">TRUNG TÂM ĐIỀU HÀNH</p><h1>Xin chào, {{ user.full_name }}</h1><p class="subtitle">Theo dõi trạng thái hệ thống trước khi xây dựng báo cáo BRCĐ.</p></div>
-          <button class="secondary-button" data-open-dialog="password-dialog">Đổi mật khẩu</button>
-        </header>
-        {% if user.must_change_password %}
-        <div class="notice warning"><strong>Cần đổi mật khẩu.</strong> Đây là mật khẩu khởi tạo hoặc vừa được đặt lại. Hãy đổi mật khẩu trước khi sử dụng hệ thống lâu dài.</div>
-        {% endif %}
-        <section class="metrics" aria-label="Chỉ số hệ thống">
-          <article class="metric-card"><div class="icon blue">DB</div><div><span>Trạng thái Database</span><strong id="database-summary">Chưa kiểm tra</strong></div></article>
-          <article class="metric-card"><div class="icon cyan">ID</div><div><span>Tài khoản hiện tại</span><strong>{{ user.username }}</strong></div></article>
-          <article class="metric-card"><div class="icon navy">RO</div><div><span>Quyền Oracle</span><strong>Chỉ đọc (SELECT)</strong></div></article>
-        </section>
-        <section class="panel">
-          <div><p class="eyebrow">ORACLE CONNECTION</p><h2>Kiểm tra kết nối Database</h2><p>Backend gửi câu lệnh <code>SELECT</code> an toàn và không đưa mật khẩu Oracle xuống trình duyệt.</p></div>
-          <button class="primary-button" id="test-button" type="button"><span class="button-label">Kiểm tra kết nối</span><span class="spinner"></span></button>
-          <div id="result" class="result hidden" role="status"></div>
-        </section>
-        <section class="data-section">
-          <div class="section-heading"><div><p class="eyebrow">SẴN SÀNG CHO BÁO CÁO</p><h2>Các phân hệ nền tảng</h2><p>Những chức năng cần thiết đã được tách riêng trước khi kết nối dữ liệu nghiệp vụ.</p></div></div>
-          <div class="feature-grid">
-            <article><strong>Đăng nhập và phiên</strong><p>Cookie HttpOnly, tự hết hạn sau 8 giờ.</p></article>
-            <article><strong>Phân quyền</strong><p>Vai trò quản trị viên và người xem.</p></article>
-            <article><strong>Nhật ký hoạt động</strong><p>Theo dõi đăng nhập và thao tác quản trị.</p></article>
-            <article><strong>Oracle chỉ đọc</strong><p>Tách tài khoản ứng dụng khỏi tài khoản Database.</p></article>
+  <body class="min-h-screen bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'vault.manage' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'vault.reveal' in user.permissions }}">
+    <div class="min-h-screen lg:grid lg:grid-cols-[18rem_1fr]">
+      <aside class="sidebar fixed inset-x-0 top-0 z-40 border-b border-white/10 bg-gradient-to-r from-vnpt-950 to-vnpt-700 px-4 py-3 text-white shadow-lg lg:sticky lg:inset-y-0 lg:h-screen lg:border-b-0 lg:px-5 lg:py-6" id="sidebar">
+        <div class="flex items-center justify-between gap-3 lg:block">
+          <div class="flex min-w-0 items-center gap-3 lg:mb-8">
+            <div class="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white text-xs font-extrabold text-vnpt-700 shadow-lg">VNPT</div>
+            <div class="min-w-0">
+              <p class="truncate text-base font-extrabold leading-tight">BRCĐ Admin</p>
+              <p class="truncate text-xs text-sky-100">Quản trị băng rộng cố định</p>
+            </div>
           </div>
+          <button class="menu-button lg:hidden" id="menu-button" type="button" aria-label="Mở menu điều hướng" aria-controls="main-navigation" aria-expanded="false"><span></span><span></span><span></span></button>
+        </div>
+
+        <nav id="main-navigation" class="mt-3 hidden gap-2 lg:grid" aria-label="Điều hướng chính">
+          <button class="nav-item active" data-view="dashboard"><span>01</span> Tổng quan</button>
+          {% if user.role == "admin" or "vault.view" in user.permissions %}
+          <button class="nav-item" data-view="vault"><span>02</span> Tài khoản web</button>
+          {% endif %}
+          {% if user.role == "admin" %}
+          <button class="nav-item" data-view="users"><span>03</span> Quản trị người dùng</button>
+          <button class="nav-item" data-view="websites"><span>04</span> Danh mục website</button>
+          <button class="nav-item" data-view="system"><span>05</span> Quản trị hệ thống</button>
+          <button class="nav-item" data-view="audit"><span>06</span> Nhật ký hoạt động</button>
+          {% endif %}
+        </nav>
+
+        <div class="mt-4 hidden rounded-3xl border border-white/10 bg-white/10 p-4 text-sm leading-6 backdrop-blur lg:block">
+          <p class="font-bold text-white">Hỗ trợ quản trị viên</p>
+          <a class="mt-1 block text-lg font-extrabold text-sky-50 hover:text-white" href="tel:0949892585">094.989.2585</a>
+          <p class="text-sky-100">Quyền · nghe gọi, Zalo, Telegram</p>
+        </div>
+
+        <div class="mt-4 hidden items-center gap-3 rounded-3xl border border-white/10 bg-white/10 p-3 lg:absolute lg:bottom-5 lg:left-5 lg:right-5 lg:flex">
+          <div class="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white font-extrabold text-vnpt-700">{{ user.full_name[0] }}</div>
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-sm font-bold">{{ user.full_name }}</p>
+            <p class="truncate text-xs text-sky-100">{{ "Quản trị viên" if user.role == "admin" else "Người xem" }}</p>
+          </div>
+          <button id="logout-button" class="rounded-2xl border border-white/15 px-3 py-2 text-xs font-bold text-white hover:bg-white/10" type="button">Thoát</button>
+        </div>
+      </aside>
+
+      <main class="px-4 pb-10 pt-24 sm:px-6 lg:px-8 lg:pt-8 xl:px-10">
+        <header class="mb-6 flex flex-col gap-4 rounded-[1.75rem] border border-slate-200 bg-white/85 p-4 shadow-soft backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:p-5 dark:border-slate-800 dark:bg-slate-900/80">
+          <div>
+            <p class="text-xs font-bold uppercase tracking-[.22em] text-vnpt-600 dark:text-sky-300">VNPT Cần Thơ</p>
+            <h1 class="mt-2 text-2xl font-extrabold tracking-[-.035em] text-slate-950 sm:text-3xl dark:text-white">Bảng điều khiển BRCĐ</h1>
+            <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Xin chào, {{ user.full_name }}.</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button class="btn-secondary" id="theme-toggle" type="button">Sáng/Tối</button>
+            <button class="btn-secondary" data-open-dialog="password-dialog" type="button">Đổi mật khẩu</button>
+          </div>
+        </header>
+
+        <section class="app-view active" id="view-dashboard">
+          {% if user.must_change_password %}
+          <div class="notice warning"><strong>Cần đổi mật khẩu.</strong> Đây là mật khẩu khởi tạo hoặc vừa được đặt lại. Hãy đổi mật khẩu trước khi sử dụng lâu dài.</div>
+          {% endif %}
+          <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="Chỉ số hệ thống">
+            <article class="metric-card"><div class="metric-icon">DB</div><div><span>Trạng thái Database</span><strong id="database-summary">Chưa kiểm tra</strong></div></article>
+            <article class="metric-card"><div class="metric-icon">ID</div><div><span>Tài khoản hiện tại</span><strong>{{ user.username }}</strong></div></article>
+            <article class="metric-card"><div class="metric-icon">RO</div><div><span>Quyền Oracle</span><strong>Chỉ đọc SELECT</strong></div></article>
+            <article class="metric-card"><div class="metric-icon">SP</div><div><span>Hỗ trợ</span><strong>094.989.2585 Quyền</strong></div></article>
+          </section>
+
+          <section class="panel mt-4">
+            <div>
+              <p class="eyebrow">Oracle connection</p>
+              <h2>Kiểm tra kết nối Database</h2>
+              <p>Backend gửi lệnh kiểm tra an toàn. Nếu lỗi, hệ thống gửi cảnh báo Telegram ngắn gọn cho quản trị viên.</p>
+            </div>
+            <button class="btn-primary" id="test-button" type="button"><span class="button-label">Kiểm tra kết nối</span><span class="spinner"></span></button>
+            <div id="result" class="result hidden" role="status"></div>
+          </section>
+
+          <section class="data-card mt-4">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Sẵn sàng cho báo cáo</p>
+                <h2>Các phân hệ nền tảng</h2>
+                <p>Đã tách riêng xác thực, phân quyền, danh mục, kết nối hệ thống và kho tài khoản web.</p>
+              </div>
+            </div>
+            <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <article class="feature-card"><strong>Đăng nhập an toàn</strong><p>Cookie HttpOnly, phiên hết hạn sau 8 giờ.</p></article>
+              <article class="feature-card"><strong>Phân quyền theo cây</strong><p>Admin cấp quyền theo từng chức năng.</p></article>
+              <article class="feature-card"><strong>Nhật ký hoạt động</strong><p>Theo dõi đăng nhập và thao tác quản trị.</p></article>
+              <article class="feature-card"><strong>Cảnh báo Telegram</strong><p>Chỉ gửi cảnh báo khi có lỗi kết nối hoặc lỗi web.</p></article>
+            </div>
+          </section>
         </section>
-      </section>
 
-      {% if user.role == "admin" or "vault.view" in user.permissions %}
-      <section class="app-view" id="view-vault">
-        <header class="page-header"><div><p class="eyebrow">KHO CÁ NHÂN</p><h1>Tài khoản website</h1><p class="subtitle">Mật khẩu được mã hóa khi lưu. Thao tác xem mật khẩu được ghi nhật ký.</p></div>{% if user.role == "admin" or "vault.manage" in user.permissions %}<button class="primary-button" data-open-dialog="credential-dialog">Thêm tài khoản</button>{% endif %}</header>
-        <div class="notice warning"><strong>Lưu ý bảo mật.</strong> Chỉ lưu tài khoản phục vụ công việc và được đơn vị cho phép.</div>
-        <section class="data-section no-margin"><div class="table-scroll"><table><thead><tr><th>Website</th><th>Địa chỉ</th><th>Tài khoản</th><th>OTP</th><th>Thao tác</th></tr></thead><tbody id="credentials-table"></tbody></table></div></section>
-      </section>
-      {% endif %}
+        {% if user.role == "admin" or "vault.view" in user.permissions %}
+        <section class="app-view" id="view-vault">
+          <div class="page-header">
+            <div><p class="eyebrow">Kho cá nhân</p><h1>Tài khoản website</h1><p class="subtitle">Mật khẩu được mã hóa khi lưu. Thao tác xem mật khẩu được ghi nhật ký.</p></div>
+            {% if user.role == "admin" or "vault.manage" in user.permissions %}<button class="btn-primary" data-open-dialog="credential-dialog">Thêm tài khoản</button>{% endif %}
+          </div>
+          <div class="notice warning"><strong>Lưu ý bảo mật.</strong> Chỉ lưu tài khoản phục vụ công việc và được đơn vị cho phép.</div>
+          <section class="data-card"><div class="table-scroll"><table><thead><tr><th>Website</th><th>Địa chỉ</th><th>Tài khoản</th><th>OTP</th><th>Thao tác</th></tr></thead><tbody id="credentials-table"></tbody></table></div></section>
+        </section>
+        {% endif %}
 
-      {% if user.role == "admin" %}
-      <section class="app-view" id="view-users">
-        <header class="page-header"><div><p class="eyebrow">QUẢN TRỊ HỆ THỐNG</p><h1>Người dùng</h1><p class="subtitle">Tạo tài khoản, phân quyền, khóa tài khoản và đặt lại mật khẩu.</p></div><button class="primary-button" data-open-dialog="create-user-dialog">Tạo người dùng</button></header>
-        <section class="data-section no-margin"><div id="users-message" class="result hidden"></div><div class="table-scroll"><table><thead><tr><th>Tài khoản</th><th>Họ tên</th><th>Vai trò</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody id="users-table"></tbody></table></div></section>
-      </section>
+        {% if user.role == "admin" %}
+        <section class="app-view" id="view-users">
+          <div class="page-header"><div><p class="eyebrow">Quản trị hệ thống</p><h1>Quản trị người dùng</h1><p class="subtitle">Tạo tài khoản, phân quyền, khóa tài khoản và đặt lại mật khẩu.</p></div><button class="btn-primary" data-open-dialog="create-user-dialog">Tạo người dùng</button></div>
+          <section class="data-card"><div id="users-message" class="result hidden"></div><div class="table-scroll"><table><thead><tr><th>Tài khoản</th><th>Họ tên</th><th>Vai trò</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody id="users-table"></tbody></table></div></section>
+        </section>
 
-      <section class="app-view" id="view-system">
-        <header class="page-header"><div><p class="eyebrow">QUẢN TRỊ HỆ THỐNG</p><h1>Cấu hình và trạng thái</h1><p class="subtitle">Thông tin an toàn phục vụ vận hành ứng dụng.</p></div></header>
-        <section class="metrics" id="system-cards"></section>
-        <section class="data-section"><div class="section-heading"><div><p class="eyebrow">KẾT NỐI HỆ THỐNG</p><h2>DB, FTP và Drive</h2><p>Thông tin nhạy cảm được che; secret nằm trong biến môi trường.</p></div></div><div class="table-scroll"><table><thead><tr><th>Tên kết nối</th><th>Loại</th><th>Trạng thái</th><th>Cấu hình</th><th>Secret</th><th>Kiểm tra</th></tr></thead><tbody id="connections-table"></tbody></table></div></section>
-        <section class="data-section"><h2>Kiểm tra vận hành</h2><div class="checklist"><p><span>✓</span> Mật khẩu được băm, không lưu dạng rõ.</p><p><span>✓</span> Cookie phiên không đọc được bằng JavaScript.</p><p><span>✓</span> Oracle chỉ được truy cập từ Data Access Layer.</p><p><span>✓</span> Route quản trị yêu cầu vai trò admin.</p></div></section>
-      </section>
+        <section class="app-view" id="view-websites">
+          <div class="page-header"><div><p class="eyebrow">Quản trị danh mục</p><h1>Danh mục website</h1><p class="subtitle">Cấu hình địa chỉ và yêu cầu OTP dùng chung.</p></div><button class="btn-primary" data-open-dialog="website-dialog">Thêm website</button></div>
+          <section class="data-card"><div class="table-scroll"><table><thead><tr><th>Tên website</th><th>Địa chỉ</th><th>OTP</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody id="websites-table"></tbody></table></div></section>
+        </section>
 
-      <section class="app-view" id="view-websites">
-        <header class="page-header"><div><p class="eyebrow">QUẢN TRỊ DANH MỤC</p><h1>Danh mục website</h1><p class="subtitle">Cấu hình địa chỉ và yêu cầu OTP dùng chung.</p></div><button class="primary-button" data-open-dialog="website-dialog">Thêm website</button></header>
-        <section class="data-section no-margin"><div class="table-scroll"><table><thead><tr><th>Tên website</th><th>Địa chỉ</th><th>OTP</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody id="websites-table"></tbody></table></div></section>
-      </section>
+        <section class="app-view" id="view-system">
+          <div class="page-header"><div><p class="eyebrow">Quản trị hệ thống</p><h1>Cấu hình và trạng thái</h1><p class="subtitle">Theo dõi DB cơ quan, DB web, FTP, Drive và Telegram.</p></div></div>
+          <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" id="system-cards"></section>
+          <section class="data-card mt-4"><div class="section-heading"><div><p class="eyebrow">Kết nối hệ thống</p><h2>DB, FTP, Drive và Telegram</h2><p>Secret được lưu trong biến môi trường, không hiển thị trên trình duyệt.</p></div></div><div class="table-scroll"><table><thead><tr><th>Tên kết nối</th><th>Loại</th><th>Trạng thái</th><th>Cấu hình</th><th>Secret</th><th>Kiểm tra</th></tr></thead><tbody id="connections-table"></tbody></table></div></section>
+          <section class="data-card mt-4"><h2>Kiểm tra vận hành</h2><div class="mt-4 grid gap-3 md:grid-cols-2"><p class="check-item">Mật khẩu được băm, không lưu dạng rõ.</p><p class="check-item">Cookie phiên không đọc được bằng JavaScript.</p><p class="check-item">Oracle chỉ truy cập từ Data Access Layer.</p><p class="check-item">Route quản trị yêu cầu vai trò admin.</p></div></section>
+        </section>
 
-      <section class="app-view" id="view-audit">
-        <header class="page-header"><div><p class="eyebrow">KIỂM SOÁT TRUY CẬP</p><h1>Nhật ký hoạt động</h1><p class="subtitle">100 sự kiện gần nhất của hệ thống.</p></div><button class="secondary-button" id="refresh-audit">Làm mới</button></header>
-        <section class="data-section no-margin"><div class="table-scroll"><table><thead><tr><th>Thời gian</th><th>Người thực hiện</th><th>Hành động</th><th>Chi tiết</th></tr></thead><tbody id="audit-table"></tbody></table></div></section>
-      </section>
-      {% endif %}
-    </main>
+        <section class="app-view" id="view-audit">
+          <div class="page-header"><div><p class="eyebrow">Kiểm soát truy cập</p><h1>Nhật ký hoạt động</h1><p class="subtitle">100 sự kiện gần nhất của hệ thống.</p></div><button class="btn-secondary" id="refresh-audit">Làm mới</button></div>
+          <section class="data-card"><div class="table-scroll"><table><thead><tr><th>Thời gian</th><th>Người thực hiện</th><th>Hành động</th><th>Chi tiết</th></tr></thead><tbody id="audit-table"></tbody></table></div></section>
+        </section>
+        {% endif %}
+      </main>
+    </div>
 
-    <dialog id="password-dialog"><form class="dialog-form" id="password-form"><div class="dialog-heading"><div><p class="eyebrow">BẢO MẬT</p><h2>Đổi mật khẩu</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mật khẩu hiện tại<input type="password" name="current_password" required /></label><label>Mật khẩu mới<input type="password" name="new_password" minlength="10" required /><small>Tối thiểu 10 ký tự.</small></label><div class="result hidden" role="alert"></div><button class="primary-button" type="submit">Lưu mật khẩu mới</button></form></dialog>
+    <dialog id="password-dialog"><form class="dialog-form" id="password-form"><div class="dialog-heading"><div><p class="eyebrow">Bảo mật</p><h2>Đổi mật khẩu</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mật khẩu hiện tại<input class="form-control" type="password" name="current_password" required /></label><label>Mật khẩu mới<input class="form-control" type="password" name="new_password" minlength="10" required /><small>Tối thiểu 10 ký tự.</small></label><div class="result hidden" role="alert"></div><button class="btn-primary" type="submit">Lưu mật khẩu mới</button></form></dialog>
 
     {% if user.role == "admin" %}
-    <dialog id="website-dialog"><form class="dialog-form" id="website-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">DANH MỤC</p><h2>Website</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<input name="name" required /></label><label>Địa chỉ website<input name="url" type="url" placeholder="https://..." required /></label><label class="checkbox-label"><input type="checkbox" name="requires_otp" /> Website yêu cầu OTP</label><label class="checkbox-label"><input type="checkbox" name="is_active" checked /> Đang sử dụng</label><div class="result hidden"></div><button class="primary-button" type="submit">Lưu danh mục</button></form></dialog>
-    <dialog id="create-user-dialog"><form class="dialog-form" id="create-user-form"><div class="dialog-heading"><div><p class="eyebrow">TÀI KHOẢN MỚI</p><h2>Tạo người dùng</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên đăng nhập<input name="username" minlength="3" required /></label><label>Họ và tên<input name="full_name" required /></label><label>Vai trò<select name="role"><option value="viewer">Người xem</option><option value="admin">Quản trị viên</option></select></label><label>Mật khẩu khởi tạo<input type="password" name="password" minlength="10" required /></label><div class="result hidden" role="alert"></div><button class="primary-button" type="submit">Tạo tài khoản</button></form></dialog>
-    <dialog id="edit-user-dialog"><form class="dialog-form" id="edit-user-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">CẬP NHẬT</p><h2>Chỉnh sửa người dùng</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Họ và tên<input name="full_name" required /></label><label>Vai trò<select name="role"><option value="viewer">Người xem</option><option value="admin">Quản trị viên</option></select></label><label class="checkbox-label"><input type="checkbox" name="is_active" /> Tài khoản đang hoạt động</label><label>Mật khẩu đặt lại (để trống nếu không đổi)<input type="password" name="password" minlength="10" /></label><fieldset><legend>Cây quyền chức năng</legend><div id="permission-tree" class="permission-tree"></div></fieldset><div class="result hidden" role="alert"></div><button class="primary-button" type="submit">Lưu thay đổi</button></form></dialog>
+    <dialog id="website-dialog"><form class="dialog-form" id="website-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Danh mục</p><h2>Website</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<input class="form-control" name="name" required /></label><label>Địa chỉ website<input class="form-control" name="url" type="url" placeholder="https://..." required /></label><label class="checkbox-label"><input type="checkbox" name="requires_otp" /> Website yêu cầu OTP</label><label class="checkbox-label"><input type="checkbox" name="is_active" checked /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu danh mục</button></form></dialog>
+    <dialog id="create-user-dialog"><form class="dialog-form" id="create-user-form"><div class="dialog-heading"><div><p class="eyebrow">Tài khoản mới</p><h2>Tạo người dùng</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên đăng nhập<input class="form-control" name="username" minlength="3" required /></label><label>Họ và tên<input class="form-control" name="full_name" required /></label><label>Vai trò<select class="form-control" name="role"><option value="viewer">Người xem</option><option value="admin">Quản trị viên</option></select></label><label>Mật khẩu khởi tạo<input class="form-control" type="password" name="password" minlength="10" required /></label><div class="result hidden" role="alert"></div><button class="btn-primary" type="submit">Tạo tài khoản</button></form></dialog>
+    <dialog id="edit-user-dialog"><form class="dialog-form" id="edit-user-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Cập nhật</p><h2>Chỉnh sửa người dùng</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Họ và tên<input class="form-control" name="full_name" required /></label><label>Vai trò<select class="form-control" name="role"><option value="viewer">Người xem</option><option value="admin">Quản trị viên</option></select></label><label class="checkbox-label"><input type="checkbox" name="is_active" /> Tài khoản đang hoạt động</label><label>Mật khẩu đặt lại<input class="form-control" type="password" name="password" minlength="10" placeholder="Để trống nếu không đổi" /></label><fieldset><legend>Cây quyền chức năng</legend><div id="permission-tree" class="permission-tree"></div></fieldset><div class="result hidden" role="alert"></div><button class="btn-primary" type="submit">Lưu thay đổi</button></form></dialog>
     {% endif %}
     {% if user.role == "admin" or "vault.manage" in user.permissions %}
-    <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">KHO CÁ NHÂN</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input id="credential-url" readonly /></label><div id="credential-otp" class="otp-hint"></div><label>Tài khoản<input name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="primary-button" type="submit">Mã hóa và lưu</button></form></dialog>
+    <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
-    <script src="/static/app.js?v=9"></script>
+    <script src="/static/app.js?v=10"></script>
   </body>
 </html>
