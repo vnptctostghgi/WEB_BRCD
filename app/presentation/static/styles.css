@@ -205,19 +205,18 @@ p {
 .panel,
 .data-card,
 .feature-card {
-  border: 1px solid #e2e8f0;
-  background: rgba(255, 255, 255, .88);
-  box-shadow: 0 18px 70px rgba(8, 42, 88, .08);
-  backdrop-filter: blur(14px);
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(8, 42, 88, .08);
 }
 
 .dark .metric-card,
 .dark .panel,
 .dark .data-card,
 .dark .feature-card {
-  border-color: #1e293b;
-  background: rgba(15, 23, 42, .84);
-  box-shadow: 0 18px 70px rgba(0, 0, 0, .22);
+  border-color: #334155;
+  background: #0f172a;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .28);
 }
 
 .metric-card {
@@ -295,7 +294,7 @@ p {
 .panel p,
 .section-heading p,
 .feature-card p {
-  color: #64748b;
+  color: #475569;
 }
 
 .dark .panel p,
@@ -399,7 +398,7 @@ p {
 .form-control {
   width: 100%;
   min-height: 48px;
-  border: 1px solid #cbd5e1;
+  border: 1px solid #94a3b8;
   border-radius: 16px;
   background: #fff;
   padding: .75rem .9rem;
@@ -416,7 +415,7 @@ p {
 
 .form-control:focus {
   border-color: #087ccf;
-  box-shadow: 0 0 0 4px rgba(8, 124, 207, .14);
+  box-shadow: 0 0 0 4px rgba(8, 124, 207, .22);
 }
 
 .result {
@@ -478,7 +477,7 @@ p {
   width: 100%;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #cbd5e1;
   border-radius: 22px;
   scrollbar-color: #087ccf #d6f1ff;
   -webkit-overflow-scrolling: touch;
@@ -513,7 +512,7 @@ td {
 
 th {
   color: #07559c;
-  background: #f8fcff;
+  background: #eff8ff;
   font-size: .72rem;
   font-weight: 900;
   letter-spacing: .06em;
@@ -530,7 +529,7 @@ tbody tr:last-child td {
 }
 
 tbody tr:hover {
-  background: #f8fcff;
+  background: #eff8ff;
 }
 
 .dark tbody tr:hover {
