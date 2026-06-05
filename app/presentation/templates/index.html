@@ -21,16 +21,13 @@
           },
         },
       };
-      if (localStorage.theme === "dark" || (!("theme" in localStorage) && matchMedia("(prefers-color-scheme: dark)").matches)) {
-        document.documentElement.classList.add("dark");
-      }
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=10" />
+    <link rel="stylesheet" href="/static/styles.css?v=15" />
   </head>
-  <body class="min-h-screen bg-slate-100 text-slate-950 antialiased dark:bg-slate-950 dark:text-slate-100" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'vault.manage' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'vault.reveal' in user.permissions }}">
+  <body class="app-dark min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'vault.manage' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'vault.reveal' in user.permissions }}">
     <div class="min-h-screen lg:grid lg:grid-cols-[18rem_1fr]">
-      <aside class="sidebar fixed inset-x-0 top-0 z-40 border-b border-white/10 bg-vnpt-700 px-4 py-3 text-white shadow-lg lg:sticky lg:inset-y-0 lg:h-screen lg:border-b-0 lg:bg-vnpt-950 lg:px-5 lg:py-6" id="sidebar">
+      <aside class="sidebar fixed inset-x-0 top-0 z-40 border-b border-sky-500/20 bg-[#04182f] px-4 py-3 text-white shadow-lg lg:sticky lg:inset-y-0 lg:h-screen lg:border-b-0 lg:border-r lg:border-sky-500/20 lg:px-5 lg:py-6" id="sidebar">
         <div class="flex items-center justify-between gap-3 lg:block">
           <div class="flex min-w-0 items-center gap-3 lg:mb-8">
             <div class="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white text-xs font-extrabold text-vnpt-700 shadow-lg">VNPT</div>
@@ -58,7 +55,7 @@
         <div class="mt-4 hidden rounded-3xl border border-white/10 bg-white/10 p-4 text-sm leading-6 backdrop-blur lg:block">
           <p class="font-bold text-white">Hỗ trợ quản trị viên</p>
           <a class="mt-1 block text-lg font-extrabold text-sky-50 hover:text-white" href="tel:0949892585">094.989.2585</a>
-          <p class="text-sky-100">Quyền · nghe gọi, Zalo, Telegram</p>
+          <p class="text-sky-100">Nghe gọi · Zalo · Telegram</p>
         </div>
 
         <div class="mt-4 hidden items-center gap-3 rounded-3xl border border-white/10 bg-white/10 p-3 lg:absolute lg:bottom-5 lg:left-5 lg:right-5 lg:flex">
@@ -71,16 +68,20 @@
         </div>
       </aside>
 
-      <main class="px-4 pb-10 pt-24 sm:px-6 lg:px-8 lg:pt-8 xl:px-10">
-        <header class="mb-6 flex flex-col gap-4 rounded-[1.5rem] border border-slate-300 bg-white p-4 shadow-md sm:flex-row sm:items-center sm:justify-between sm:p-5 dark:border-slate-700 dark:bg-slate-900">
+      <main class="flex min-h-screen min-w-0 flex-col px-4 pb-6 pt-24 sm:px-6 lg:px-8 lg:pt-8 xl:px-10">
+        <header class="mb-6 flex flex-col gap-4 rounded-[1.5rem] border border-sky-500/30 bg-[#061d38] p-4 shadow-[0_18px_45px_rgba(0,0,0,.28)] sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div>
-            <p class="text-xs font-bold uppercase tracking-[.22em] text-vnpt-600 dark:text-sky-300">VNPT Cần Thơ</p>
-            <h1 class="mt-2 text-2xl font-extrabold tracking-[-.035em] text-slate-950 sm:text-3xl dark:text-white">Bảng điều khiển BRCĐ</h1>
-            <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Xin chào, {{ user.full_name }}.</p>
+            <p class="text-xs font-bold uppercase tracking-[.22em] text-sky-300">Hệ thống quản trị đặc biệt</p>
+            <h1 class="mt-2 text-2xl font-extrabold tracking-[-.035em] text-white sm:text-3xl">Dashboard BRCĐ</h1>
+            <p class="mt-1 text-sm text-sky-100">Vùng điều hành các phân hệ chức năng.</p>
           </div>
-          <div class="flex flex-wrap gap-2">
-            <button class="btn-secondary" id="theme-toggle" type="button">Sáng/Tối</button>
-            <button class="btn-secondary" data-open-dialog="password-dialog" type="button">Đổi mật khẩu</button>
+          <div class="flex min-w-0 items-center gap-3 rounded-2xl border border-sky-500/25 bg-sky-400/10 p-3">
+            <div class="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-sky-200 font-extrabold text-vnpt-950">{{ user.full_name[0] }}</div>
+            <div class="min-w-0">
+              <p class="truncate text-sm font-extrabold text-white">{{ user.full_name }}</p>
+              <p class="truncate text-xs font-semibold text-sky-200">{{ "Quản trị viên" if user.role == "admin" else "Người xem" }}</p>
+            </div>
+            <button class="btn-secondary" data-open-dialog="password-dialog" type="button">Quản trị thông tin</button>
           </div>
         </header>
 
@@ -92,7 +93,7 @@
             <article class="metric-card"><div class="metric-icon">DB</div><div><span>Trạng thái Database</span><strong id="database-summary">Chưa kiểm tra</strong></div></article>
             <article class="metric-card"><div class="metric-icon">ID</div><div><span>Tài khoản hiện tại</span><strong>{{ user.username }}</strong></div></article>
             <article class="metric-card"><div class="metric-icon">RO</div><div><span>Quyền Oracle</span><strong>Chỉ đọc SELECT</strong></div></article>
-            <article class="metric-card"><div class="metric-icon">SP</div><div><span>Hỗ trợ</span><strong>094.989.2585 Quyền</strong></div></article>
+            <article class="metric-card"><div class="metric-icon">SP</div><div><span>Hỗ trợ</span><strong>094.989.2585</strong></div></article>
           </section>
 
           <section class="panel mt-4">
@@ -118,6 +119,20 @@
               <article class="feature-card"><strong>Phân quyền theo cây</strong><p>Admin cấp quyền theo từng chức năng.</p></article>
               <article class="feature-card"><strong>Nhật ký hoạt động</strong><p>Theo dõi đăng nhập và thao tác quản trị.</p></article>
               <article class="feature-card"><strong>Cảnh báo Telegram</strong><p>Chỉ gửi cảnh báo khi có lỗi kết nối hoặc lỗi web.</p></article>
+            </div>
+          </section>
+          <section class="data-card mt-4">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Dashboard báo cáo</p>
+                <h2>Khu vực biểu đồ phân tích</h2>
+                <p>Các biểu đồ số liệu BRCĐ sẽ được bổ sung theo yêu cầu báo cáo ở bước sau.</p>
+              </div>
+            </div>
+            <div class="grid gap-4 md:grid-cols-3">
+              <div class="chart-placeholder">Biểu đồ thuê bao</div>
+              <div class="chart-placeholder">Biểu đồ doanh thu</div>
+              <div class="chart-placeholder">Biểu đồ chất lượng</div>
             </div>
           </section>
         </section>
@@ -156,6 +171,11 @@
           <section class="data-card"><div class="table-scroll"><table><thead><tr><th>Thời gian</th><th>Người thực hiện</th><th>Hành động</th><th>Chi tiết</th></tr></thead><tbody id="audit-table"></tbody></table></div></section>
         </section>
         {% endif %}
+        <footer class="mt-auto pt-6">
+          <div class="rounded-2xl border border-sky-500/25 bg-[#061d38] px-4 py-4 text-center text-sm font-semibold text-sky-100">
+            Hỗ trợ quản trị viên: <a class="font-extrabold text-white hover:underline" href="tel:0949892585">094.989.2585</a> · gọi/Zalo/Telegram
+          </div>
+        </footer>
       </main>
     </div>
 
@@ -169,6 +189,6 @@
     {% if user.role == "admin" or "vault.manage" in user.permissions %}
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
-    <script src="/static/app.js?v=10"></script>
+    <script src="/static/app.js?v=11"></script>
   </body>
 </html>

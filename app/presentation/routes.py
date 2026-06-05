@@ -103,6 +103,26 @@ def notify_if_failed(title: str, result: dict, extra: dict | None = None) -> Non
     TelegramNotifier(settings).send_message(title, result.get("message", "Không rõ lỗi."), details or None)
 
 
+def notify_login_failed_threshold(request: Request, username: str) -> None:
+    repository = build_app_repository()
+    normalized_username = username.strip() or "unknown"
+    failures = 0
+    for log in repository.list_audit_logs(limit=50):
+        if log.get("actor") != normalized_username:
+            continue
+        if log.get("action") == "login_success":
+            break
+        if log.get("action") == "login_failed":
+            failures += 1
+    if failures and failures % 5 == 0:
+        client_host = request.client.host if request.client else "unknown"
+        TelegramNotifier(get_settings()).send_message(
+            "Cảnh báo đăng nhập sai",
+            f"Tài khoản {normalized_username} đã đăng nhập sai {failures} lần liên tiếp.",
+            {"ip": client_host, "nguong_canh_bao": 5},
+        )
+
+
 def current_user(request: Request) -> dict:
     session_user = request.session.get("user")
     if not session_user:
@@ -160,6 +180,7 @@ def dashboard(request: Request) -> Response:
 def login(request: Request, payload: LoginPayload) -> dict:
     user = build_auth_service().authenticate(payload.username, payload.password)
     if not user:
+        notify_login_failed_threshold(request, payload.username)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Tên đăng nhập hoặc mật khẩu không đúng.")
     request.session.clear()
     request.session["user"] = user

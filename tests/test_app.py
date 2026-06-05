@@ -35,6 +35,25 @@ def test_admin_can_login_and_open_dashboard() -> None:
         assert "Quản trị người dùng" in response.text
 
 
+def test_five_failed_logins_send_telegram_alert(monkeypatch) -> None:
+    sent_messages = []
+
+    def fake_send_message(self, title, message, details=None):
+        sent_messages.append((title, message, details))
+        return True
+
+    monkeypatch.setattr("app.presentation.routes.TelegramNotifier.send_message", fake_send_message)
+    with TestClient(app) as client:
+        for _ in range(4):
+            response = client.post("/api/auth/login", json={"username": "bad_admin", "password": "wrong"})
+            assert response.status_code == 401
+        assert sent_messages == []
+        response = client.post("/api/auth/login", json={"username": "bad_admin", "password": "wrong"})
+        assert response.status_code == 401
+        assert len(sent_messages) == 1
+        assert sent_messages[0][0] == "Cảnh báo đăng nhập sai"
+
+
 def test_database_health_requires_login_and_uses_mock_mode() -> None:
     with TestClient(app) as client:
         assert client.get("/api/health/database").status_code == 401

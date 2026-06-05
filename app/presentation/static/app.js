@@ -12,15 +12,6 @@ function escapeHtml(value) {
   }[character]));
 }
 
-function setTheme(nextTheme) {
-  document.documentElement.classList.toggle("dark", nextTheme === "dark");
-  localStorage.theme = nextTheme;
-}
-
-$("#theme-toggle")?.addEventListener("click", () => {
-  setTheme(document.documentElement.classList.contains("dark") ? "light" : "dark");
-});
-
 async function api(url, options = {}) {
   const response = await fetch(url, {
     ...options,
