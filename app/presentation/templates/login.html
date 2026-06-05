@@ -23,61 +23,46 @@
       if (localStorage.theme === "dark") document.documentElement.classList.add("dark");
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=12" />
+    <link rel="stylesheet" href="/static/styles.css?v=13" />
   </head>
-  <body class="min-h-screen bg-vnpt-50 text-slate-950 antialiased dark:bg-slate-950 dark:text-white">
+  <body class="min-h-screen bg-sky-500 text-white antialiased dark:bg-slate-950 dark:text-white">
     <main class="min-h-screen p-3 sm:p-5">
-      <section class="mx-auto grid min-h-[calc(100vh-1.5rem)] max-w-7xl overflow-hidden rounded-[1.75rem] border border-sky-200 bg-white shadow-2xl sm:min-h-[calc(100vh-2.5rem)] lg:grid-cols-[minmax(0,1.12fr)_minmax(420px,.88fr)] dark:border-slate-700 dark:bg-slate-900">
-        <div class="relative min-h-[300px] bg-vnpt-700 sm:min-h-[420px] lg:min-h-full">
-          <img class="absolute inset-0 h-full w-full object-cover object-center" src="/static/login-hero.png" alt="Ảnh minh họa hệ thống quản trị nội bộ" />
-          <div class="absolute inset-0 bg-gradient-to-t from-vnpt-950/55 via-vnpt-900/10 to-transparent"></div>
-          <div class="absolute left-4 right-4 top-4 flex items-center justify-between gap-3 sm:left-6 sm:right-6 sm:top-6">
-            <div class="flex items-center gap-3 rounded-2xl bg-white/95 px-3 py-2 shadow-lg">
-              <div class="grid h-10 w-10 place-items-center rounded-xl bg-vnpt-600 text-[11px] font-extrabold text-white">VNPT</div>
-              <div>
-                <p class="text-sm font-extrabold leading-tight text-vnpt-950">BRCĐ Admin</p>
-                <p class="text-[11px] font-semibold text-slate-600">VNPT Cần Thơ</p>
-              </div>
-            </div>
-            <button id="theme-toggle" class="rounded-2xl border border-white/70 bg-white/95 px-4 py-2 text-sm font-extrabold text-vnpt-900 shadow-lg hover:bg-vnpt-50 dark:border-slate-600 dark:bg-slate-900 dark:text-sky-100 dark:hover:bg-slate-800" type="button" aria-label="Chuyển chế độ sáng tối">Sáng/Tối</button>
-          </div>
-          <div class="absolute bottom-0 left-0 right-0 p-5 text-white sm:p-7">
-            <p class="text-xs font-extrabold uppercase tracking-[.22em] text-sky-100">Hệ thống quản trị nội bộ đặc biệt</p>
-            <h1 class="mt-3 max-w-3xl text-3xl font-extrabold leading-tight tracking-[-.035em] sm:text-4xl lg:text-5xl">Quản trị BRCĐ tập trung, rõ ràng và an toàn.</h1>
-          </div>
+      <section class="mx-auto grid min-h-[calc(100vh-1.5rem)] max-w-7xl overflow-hidden rounded-[1.75rem] border border-white/40 bg-sky-500 shadow-2xl sm:min-h-[calc(100vh-2.5rem)] lg:grid-cols-[minmax(0,1.12fr)_minmax(410px,.88fr)] dark:border-slate-700 dark:bg-slate-900">
+        <div class="relative flex min-h-[360px] items-center justify-center bg-sky-600 p-3 sm:min-h-[520px] sm:p-5 lg:min-h-full dark:bg-slate-950">
+          <img class="h-full max-h-[calc(100vh-3rem)] w-full object-contain" src="/static/login-hero.png" alt="Ảnh minh họa hệ thống quản trị nội bộ" />
         </div>
 
-        <div class="flex items-center justify-center bg-white px-4 py-8 sm:px-8 lg:px-10 dark:bg-slate-900">
-          <div class="w-full max-w-md">
-            <div class="mb-8">
-              <p class="text-sm font-extrabold uppercase tracking-[.2em] text-vnpt-600 dark:text-sky-300">Cổng truy cập quản trị</p>
-              <h2 class="mt-3 text-3xl font-extrabold tracking-[-.03em] text-slate-950 dark:text-white">Đăng nhập tài khoản nội bộ</h2>
-              <p class="mt-3 text-base leading-7 text-slate-700 dark:text-slate-300">Dành cho quản trị và vận hành dữ liệu băng rộng cố định.</p>
+        <div class="flex items-center justify-center bg-sky-500 px-4 py-8 sm:px-8 lg:px-10 dark:bg-slate-900">
+          <div class="flex w-full max-w-md flex-col">
+            <div class="rounded-3xl border border-white/60 bg-white/12 p-6 shadow-xl sm:p-8 dark:border-slate-700 dark:bg-slate-950">
+              <h1 class="text-3xl font-extrabold leading-tight tracking-[-.03em] text-white sm:text-4xl dark:text-white">Hệ thống quản trị nội bộ đặc biệt</h1>
+
+              <form id="login-form" class="mt-8 grid gap-5">
+                <label class="grid gap-2 text-sm font-extrabold text-white dark:text-slate-100">
+                  Tên đăng nhập
+                  <input class="form-control login-light-control" name="username" autocomplete="username" required minlength="3" placeholder="Nhập tên đăng nhập" />
+                </label>
+                <label class="grid gap-2 text-sm font-extrabold text-white dark:text-slate-100">
+                  Mật khẩu
+                  <input class="form-control login-light-control" name="password" type="password" autocomplete="current-password" required placeholder="Nhập mật khẩu" />
+                </label>
+                <button class="btn-primary login-submit w-full" type="submit">
+                  <span class="button-label">Đăng nhập</span>
+                  <span class="spinner"></span>
+                </button>
+                <div id="login-message" class="result hidden" role="alert"></div>
+              </form>
+
+              <div class="mt-6 rounded-2xl border border-white/50 bg-white/15 px-4 py-3 text-sm font-semibold text-white dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                Hỗ trợ: <a class="font-extrabold text-white underline-offset-4 hover:underline dark:text-sky-300" href="tel:0949892585">094.989.2585 Quyền</a> · gọi/Zalo/Telegram
+              </div>
             </div>
 
-            <form id="login-form" class="grid gap-5">
-              <label class="grid gap-2 text-sm font-extrabold text-slate-800 dark:text-slate-100">
-                Tên đăng nhập
-                <input class="form-control" name="username" autocomplete="username" required minlength="3" placeholder="Nhập tên đăng nhập" />
-              </label>
-              <label class="grid gap-2 text-sm font-extrabold text-slate-800 dark:text-slate-100">
-                Mật khẩu
-                <input class="form-control" name="password" type="password" autocomplete="current-password" required placeholder="Nhập mật khẩu" />
-              </label>
-              <button class="btn-primary w-full" type="submit">
-                <span class="button-label">Đăng nhập</span>
-                <span class="spinner"></span>
-              </button>
-              <div id="login-message" class="result hidden" role="alert"></div>
-            </form>
-
-            <div class="mt-6 rounded-2xl border border-sky-200 bg-vnpt-50 px-4 py-3 text-sm font-semibold text-vnpt-950 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
-              Hỗ trợ: <a class="font-extrabold text-vnpt-700 hover:underline dark:text-sky-300" href="tel:0949892585">094.989.2585 Quyền</a> · gọi/Zalo/Telegram
-            </div>
+            <button id="theme-toggle" class="mt-5 w-full rounded-2xl border border-white/60 bg-white/15 px-4 py-3 text-sm font-extrabold text-white hover:bg-white/25 dark:border-slate-700 dark:bg-slate-800 dark:text-sky-100 dark:hover:bg-slate-700" type="button" aria-label="Chuyển chế độ sáng tối">Chế độ sáng</button>
           </div>
         </div>
       </section>
     </main>
-    <script src="/static/login.js?v=4"></script>
+    <script src="/static/login.js?v=5"></script>
   </body>
 </html>

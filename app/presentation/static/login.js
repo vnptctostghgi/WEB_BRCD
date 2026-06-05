@@ -2,16 +2,16 @@ const form = document.querySelector("#login-form");
 const message = document.querySelector("#login-message");
 const themeToggle = document.querySelector("#theme-toggle");
 
-function setTheme(nextTheme) {
+function applyTheme(nextTheme) {
   document.documentElement.classList.toggle("dark", nextTheme === "dark");
   localStorage.theme = nextTheme;
   if (themeToggle) themeToggle.textContent = nextTheme === "dark" ? "Chế độ tối" : "Chế độ sáng";
 }
 
-setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
+applyTheme(localStorage.theme === "dark" ? "dark" : "light");
 
 themeToggle?.addEventListener("click", () => {
-  setTheme(document.documentElement.classList.contains("dark") ? "light" : "dark");
+  applyTheme(document.documentElement.classList.contains("dark") ? "light" : "dark");
 });
 
 function showMessage(text, type = "error") {

@@ -418,6 +418,37 @@ p {
   box-shadow: 0 0 0 4px rgba(8, 124, 207, .22);
 }
 
+.login-light-control {
+  border-color: rgba(255, 255, 255, .85);
+  background: rgba(255, 255, 255, .96);
+  color: #082f49;
+}
+
+.login-light-control::placeholder {
+  color: #64748b;
+}
+
+.dark .login-light-control {
+  border-color: #334155;
+  background: #020617;
+  color: #f8fafc;
+}
+
+.login-submit {
+  background: #ffffff;
+  color: #0369a1;
+  box-shadow: 0 16px 34px rgba(3, 105, 161, .28);
+}
+
+.login-submit:hover {
+  background: #effaff;
+}
+
+.dark .login-submit {
+  color: #ffffff;
+  background: linear-gradient(135deg, #075fb0, #20b8e6);
+}
+
 .result {
   border-radius: 16px;
   padding: .85rem 1rem;
