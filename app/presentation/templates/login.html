@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0ea5e9" />
+    <meta name="theme-color" content="#0369a1" />
     <title>Đăng nhập · {{ app_name }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -11,7 +11,6 @@
     <script>
       tailwind = {
         config: {
-          darkMode: "class",
           theme: {
             extend: {
               fontFamily: { sans: ["Be Vietnam Pro", "Inter", "ui-sans-serif", "system-ui"] },
@@ -20,29 +19,28 @@
           },
         },
       };
-      if (localStorage.theme === "dark") document.documentElement.classList.add("dark");
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=13" />
+    <link rel="stylesheet" href="/static/styles.css?v=14" />
   </head>
-  <body class="min-h-screen bg-sky-500 text-white antialiased dark:bg-slate-950 dark:text-white">
+  <body class="min-h-screen bg-vnpt-700 text-white antialiased">
     <main class="min-h-screen p-3 sm:p-5">
-      <section class="mx-auto grid min-h-[calc(100vh-1.5rem)] max-w-7xl overflow-hidden rounded-[1.75rem] border border-white/40 bg-sky-500 shadow-2xl sm:min-h-[calc(100vh-2.5rem)] lg:grid-cols-[minmax(0,1.12fr)_minmax(410px,.88fr)] dark:border-slate-700 dark:bg-slate-900">
-        <div class="relative flex min-h-[360px] items-center justify-center bg-sky-600 p-3 sm:min-h-[520px] sm:p-5 lg:min-h-full dark:bg-slate-950">
+      <section class="mx-auto grid min-h-[calc(100vh-1.5rem)] max-w-7xl overflow-hidden rounded-[1.75rem] border border-sky-300/60 bg-vnpt-700 shadow-2xl sm:min-h-[calc(100vh-2.5rem)] lg:grid-cols-[minmax(0,1.08fr)_minmax(420px,.92fr)]">
+        <div class="relative flex min-h-[360px] items-center justify-center bg-vnpt-900 p-3 sm:min-h-[520px] sm:p-5 lg:min-h-full">
           <img class="h-full max-h-[calc(100vh-3rem)] w-full object-contain" src="/static/login-hero.png" alt="Ảnh minh họa hệ thống quản trị nội bộ" />
         </div>
 
-        <div class="flex items-center justify-center bg-sky-500 px-4 py-8 sm:px-8 lg:px-10 dark:bg-slate-900">
-          <div class="flex w-full max-w-md flex-col">
-            <div class="rounded-3xl border border-white/60 bg-white/12 p-6 shadow-xl sm:p-8 dark:border-slate-700 dark:bg-slate-950">
-              <h1 class="text-3xl font-extrabold leading-tight tracking-[-.03em] text-white sm:text-4xl dark:text-white">Hệ thống quản trị nội bộ đặc biệt</h1>
+        <div class="flex items-center justify-center bg-vnpt-700 px-4 py-8 sm:px-8 lg:px-10">
+          <div class="w-full max-w-[34rem]">
+            <div class="rounded-[2rem] border border-sky-200 bg-vnpt-950 p-5 shadow-[0_30px_80px_rgba(0,0,0,.34)] sm:p-8 lg:p-9">
+              <h1 class="whitespace-nowrap text-center text-[1.45rem] font-extrabold leading-tight tracking-[-.03em] text-white sm:text-3xl lg:text-[1.95rem]">Hệ thống quản trị nội bộ đặc biệt</h1>
 
               <form id="login-form" class="mt-8 grid gap-5">
-                <label class="grid gap-2 text-sm font-extrabold text-white dark:text-slate-100">
+                <label class="grid gap-2 text-sm font-extrabold text-sky-50">
                   Tên đăng nhập
                   <input class="form-control login-light-control" name="username" autocomplete="username" required minlength="3" placeholder="Nhập tên đăng nhập" />
                 </label>
-                <label class="grid gap-2 text-sm font-extrabold text-white dark:text-slate-100">
+                <label class="grid gap-2 text-sm font-extrabold text-sky-50">
                   Mật khẩu
                   <input class="form-control login-light-control" name="password" type="password" autocomplete="current-password" required placeholder="Nhập mật khẩu" />
                 </label>
@@ -53,16 +51,16 @@
                 <div id="login-message" class="result hidden" role="alert"></div>
               </form>
 
-              <div class="mt-6 rounded-2xl border border-white/50 bg-white/15 px-4 py-3 text-sm font-semibold text-white dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
-                Hỗ trợ: <a class="font-extrabold text-white underline-offset-4 hover:underline dark:text-sky-300" href="tel:0949892585">094.989.2585 Quyền</a> · gọi/Zalo/Telegram
+              <div class="mt-7 rounded-2xl border border-cyan-300 bg-sky-100 px-4 py-4 text-center text-sm font-bold text-vnpt-950 shadow-lg">
+                <span class="block text-xs uppercase tracking-[.16em] text-vnpt-700">Hỗ trợ quản trị viên</span>
+                <a class="mt-1 block text-xl font-extrabold text-vnpt-950 hover:underline" href="tel:0949892585">094.989.2585 Quyền</a>
+                <span class="mt-1 block text-sm text-vnpt-700">Gọi · Zalo · Telegram</span>
               </div>
             </div>
-
-            <button id="theme-toggle" class="mt-5 w-full rounded-2xl border border-white/60 bg-white/15 px-4 py-3 text-sm font-extrabold text-white hover:bg-white/25 dark:border-slate-700 dark:bg-slate-800 dark:text-sky-100 dark:hover:bg-slate-700" type="button" aria-label="Chuyển chế độ sáng tối">Chế độ sáng</button>
           </div>
         </div>
       </section>
     </main>
-    <script src="/static/login.js?v=5"></script>
+    <script src="/static/login.js?v=6"></script>
   </body>
 </html>
