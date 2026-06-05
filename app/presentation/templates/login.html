@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#082a58" />
+    <title>Đăng nhập · {{ app_name }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css?v=4" />
+  </head>
+  <body class="login-page">
+    <main class="login-shell">
+      <section class="login-intro">
+        <div class="login-brand"><span class="brand-mark">B</span><strong>BRCĐ Admin</strong></div>
+        <p class="eyebrow">HỆ THỐNG QUẢN TRỊ NỘI BỘ</p>
+        <h1>Quản trị tập trung, dữ liệu an toàn.</h1>
+        <p>Đăng nhập bằng tài khoản ứng dụng. Thông tin Oracle không được chia sẻ cho người dùng cuối.</p>
+        <div class="security-points">
+          <span>Phân quyền theo vai trò</span>
+          <span>Ghi nhật ký thao tác</span>
+          <span>Kết nối Oracle chỉ đọc</span>
+        </div>
+      </section>
+      <section class="login-card">
+        <div>
+          <p class="eyebrow">CHÀO MỪNG TRỞ LẠI</p>
+          <h2>Đăng nhập hệ thống</h2>
+          <p class="form-help">Nhập tài khoản do quản trị viên cấp.</p>
+        </div>
+        <form id="login-form">
+          <label>Tên đăng nhập<input name="username" autocomplete="username" required minlength="3" /></label>
+          <label>Mật khẩu<input name="password" type="password" autocomplete="current-password" required /></label>
+          <button class="primary-button" type="submit">Đăng nhập</button>
+          <div id="login-message" class="result hidden" role="alert"></div>
+        </form>
+      </section>
+    </main>
+    <script src="/static/login.js?v=1"></script>
+  </body>
+</html>
