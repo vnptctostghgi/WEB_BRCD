@@ -1,5 +1,13 @@
 const form = document.querySelector("#login-form");
 const message = document.querySelector("#login-message");
+const rememberLogin = document.querySelector("#remember-login");
+const usernameInput = form.elements.namedItem("username");
+
+const rememberedUsername = localStorage.getItem("brcd_remember_username");
+if (rememberedUsername) {
+  usernameInput.value = rememberedUsername;
+  rememberLogin.checked = true;
+}
 
 function showMessage(text, type = "error") {
   message.className = `result ${type}`;
@@ -13,6 +21,11 @@ form.addEventListener("submit", async (event) => {
   submitButton.classList.add("loading");
   message.className = "result hidden";
   const formData = new FormData(form);
+  if (rememberLogin.checked) {
+    localStorage.setItem("brcd_remember_username", String(formData.get("username") || ""));
+  } else {
+    localStorage.removeItem("brcd_remember_username");
+  }
 
   try {
     const response = await fetch("/api/auth/login", {

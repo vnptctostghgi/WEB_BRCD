@@ -419,34 +419,39 @@ p {
 }
 
 .login-light-control {
-  border-color: rgba(255, 255, 255, .85);
-  background: rgba(255, 255, 255, .96);
-  color: #082f49;
-}
-
-.login-light-control::placeholder {
-  color: #64748b;
-}
-
-.dark .login-light-control {
-  border-color: #334155;
-  background: #020617;
+  border-color: rgba(56, 189, 248, .45);
+  background: rgba(2, 6, 23, .62);
   color: #f8fafc;
 }
 
+.login-light-control::placeholder {
+  color: #94a3b8;
+}
+
 .login-submit {
-  background: #ffffff;
-  color: #0369a1;
-  box-shadow: 0 16px 34px rgba(3, 105, 161, .28);
+  color: #ffffff;
+  background: linear-gradient(135deg, #0284c7, #38bdf8);
+  box-shadow: 0 16px 34px rgba(14, 165, 233, .28);
 }
 
 .login-submit:hover {
-  background: #effaff;
+  background: linear-gradient(135deg, #0369a1, #0ea5e9);
 }
 
-.dark .login-submit {
-  color: #ffffff;
-  background: linear-gradient(135deg, #075fb0, #20b8e6);
+.remember-row {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: .55rem;
+  color: #dff5ff;
+  font-size: .86rem;
+  font-weight: 800;
+}
+
+.remember-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: #38bdf8;
 }
 
 .result {
