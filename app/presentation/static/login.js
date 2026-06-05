@@ -5,7 +5,10 @@ const themeToggle = document.querySelector("#theme-toggle");
 function setTheme(nextTheme) {
   document.documentElement.classList.toggle("dark", nextTheme === "dark");
   localStorage.theme = nextTheme;
+  if (themeToggle) themeToggle.textContent = nextTheme === "dark" ? "Chế độ tối" : "Chế độ sáng";
 }
+
+setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
 
 themeToggle?.addEventListener("click", () => {
   setTheme(document.documentElement.classList.contains("dark") ? "light" : "dark");
