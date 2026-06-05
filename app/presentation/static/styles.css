@@ -23,6 +23,28 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+}
+
+h1,
+h2,
+h3,
+p,
+a,
+label,
+button,
+input,
+select,
+textarea,
+td,
+th {
+  overflow-wrap: anywhere;
+}
+
 button,
 input,
 select,
@@ -452,6 +474,11 @@ p {
   width: 18px;
   height: 18px;
   accent-color: #38bdf8;
+}
+
+#login-form,
+#login-form * {
+  min-width: 0;
 }
 
 .result {
