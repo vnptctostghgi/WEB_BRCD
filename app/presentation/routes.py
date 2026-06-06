@@ -111,11 +111,19 @@ def notify_login_failed_threshold(request: Request, username: str) -> None:
     FAILED_LOGIN_COUNTS[counter_key] = failures
     if failures % 5 == 0:
         client_host = request.client.host if request.client else "unknown"
-        TelegramNotifier(get_settings()).send_message(
+        sent = TelegramNotifier(get_settings()).send_message(
             "Canh bao dang nhap sai",
             f"Tai khoan {display_username} dang nhap sai {failures} lan lien tiep.",
             {"ip": client_host, "nguong_canh_bao": 5},
         )
+        try:
+            build_app_repository().add_audit_log(
+                "system",
+                "telegram_login_alert_sent" if sent else "telegram_login_alert_failed",
+                f"Login failed alert for {display_username}: {failures} failures",
+            )
+        except Exception:
+            pass
 
 
 def reset_failed_login_counter(username: str) -> None:
@@ -320,6 +328,41 @@ def test_system_connection(request: Request, code: str) -> dict:
     build_app_repository().add_audit_log(actor["username"], "system_connection_tested", f"Kiểm tra kết nối {code}: {result['ok']}")
     notify_if_failed("Lỗi kiểm tra kết nối", result, {"ma_ket_noi": code})
     return result
+
+
+@router.post("/api/admin/telegram/test-message")
+def send_telegram_test_message(request: Request) -> dict:
+    actor = admin_user(request)
+    sent = TelegramNotifier(get_settings()).send_message(
+        "Kiem tra Telegram",
+        "Day la tin nhan kiem tra tu web quan tri BRCD.",
+        {"nguoi_kiem_tra": actor["username"]},
+    )
+    build_app_repository().add_audit_log(
+        actor["username"],
+        "telegram_test_message_sent" if sent else "telegram_test_message_failed",
+        "Kiem tra gui tin nhan Telegram that",
+    )
+    if not sent:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Không gửi được Telegram. Kiểm tra TELEGRAM_TOKEN, MY_TELEGRAM_ID và hãy bấm Start trong bot.",
+        )
+    return {"ok": True, "message": "Đã gửi tin nhắn thử đến Telegram."}
+
+
+@router.get("/api/notifications")
+def notifications(request: Request) -> dict:
+    current_user(request)
+    return {
+        "notifications": [
+            {
+                "title": "Thông báo hệ thống",
+                "message": "Kênh thông báo nội bộ đã sẵn sàng. Thông báo của quản trị viên sẽ hiển thị tại đây.",
+                "created_at": "2026-06-07T00:00:00+07:00",
+            }
+        ]
+    }
 
 
 @router.get("/api/websites")

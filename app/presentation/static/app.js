@@ -70,10 +70,63 @@ document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("
 document.querySelectorAll("[data-open-dialog]").forEach((button) => button.addEventListener("click", () => $(`#${button.dataset.openDialog}`).showModal()));
 document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
 
-$("#logout-button")?.addEventListener("click", async () => {
+function closeTopDropdowns(except = null) {
+  ["notification-menu", "user-menu"].forEach((id) => {
+    const menu = $(`#${id}`);
+    if (menu && menu !== except) menu.classList.add("hidden");
+  });
+  ["notification-toggle", "user-menu-toggle"].forEach((id) => {
+    const button = $(`#${id}`);
+    if (button && (except === null || button.getAttribute("aria-controls") !== except?.id)) {
+      button.setAttribute("aria-expanded", "false");
+    }
+  });
+}
+
+function toggleTopDropdown(buttonSelector, menuSelector) {
+  const button = $(buttonSelector);
+  const menu = $(menuSelector);
+  if (!button || !menu) return;
+  button.setAttribute("aria-controls", menu.id);
+  button.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    const willOpen = menu.classList.contains("hidden");
+    closeTopDropdowns(menu);
+    menu.classList.toggle("hidden", !willOpen);
+    button.setAttribute("aria-expanded", String(willOpen));
+    if (willOpen && menu.id === "notification-menu") await loadNotifications();
+  });
+}
+
+toggleTopDropdown("#notification-toggle", "#notification-menu");
+toggleTopDropdown("#user-menu-toggle", "#user-menu");
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".dropdown-wrap")) closeTopDropdowns();
+});
+
+document.querySelectorAll("[data-logout]").forEach((button) => button.addEventListener("click", async () => {
   await api("/api/auth/logout", { method: "POST" });
   window.location.href = "/login";
-});
+}));
+
+async function loadNotifications() {
+  const list = $("#notification-list");
+  if (!list) return;
+  list.innerHTML = `<div class="dropdown-empty">Đang tải thông báo...</div>`;
+  try {
+    const data = await api("/api/notifications");
+    list.innerHTML = data.notifications.length ? data.notifications.map((item) => `
+      <article class="notification-item">
+        <strong>${escapeHtml(item.title)}</strong>
+        <p>${escapeHtml(item.message)}</p>
+        <small>${new Date(item.created_at).toLocaleString("vi-VN")}</small>
+      </article>
+    `).join("") : `<div class="dropdown-empty">Chưa có thông báo mới.</div>`;
+  } catch (error) {
+    list.innerHTML = `<div class="dropdown-empty error">${escapeHtml(error.message)}</div>`;
+  }
+}
 
 $("#test-button")?.addEventListener("click", async () => {
   const button = $("#test-button");
@@ -222,6 +275,20 @@ async function testConnection(code, button) {
     setButtonLoading(button, false);
   }
 }
+
+$("#telegram-test-message")?.addEventListener("click", async () => {
+  const button = $("#telegram-test-message");
+  const resultBox = $("#telegram-test-result");
+  setButtonLoading(button, true);
+  try {
+    const response = await api("/api/admin/telegram/test-message", { method: "POST" });
+    showMessage(resultBox, response.message);
+  } catch (error) {
+    showMessage(resultBox, error.message, "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+});
 
 async function loadAudit() {
   setTableLoading("#audit-table", 4, "Đang tải nhật ký hoạt động...");
