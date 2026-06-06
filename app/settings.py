@@ -29,7 +29,13 @@ class Settings(BaseSettings):
     my_telegram_id: int = 0
     bot_username: str = ""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    vpn_host: str = ""
+    vpn_port: int = 4443
+    vpn_username: str = ""
+    vpn_password: SecretStr = Field(default=SecretStr(""))
+    vpn_type: str = "ssl"
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
 
 
 @lru_cache

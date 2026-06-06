@@ -41,6 +41,20 @@ class ConnectionService:
             is_active=self.settings.app_database_backend == "supabase",
         )
         self.repository.upsert_system_connection(
+            code="agency_ssl_vpn",
+            name="VPN SSL co quan",
+            connection_type="vpn_ssl",
+            description="Ket noi VPN SSL truoc khi truy cap cac he thong noi bo.",
+            config={
+                "host": self.settings.vpn_host,
+                "port": self.settings.vpn_port,
+                "username": self.settings.vpn_username,
+                "type": self.settings.vpn_type,
+                "secret_ref": "VPN_PASSWORD",
+            },
+            is_active=bool(self.settings.vpn_host and self.settings.vpn_username),
+        )
+        self.repository.upsert_system_connection(
             code="ftp_storage",
             name="FTP",
             connection_type="ftp",
@@ -83,6 +97,9 @@ class ConnectionService:
 
         if connection["connection_type"] == "telegram":
             return self._with_connection(TelegramNotifier(self.settings).test(), connection)
+
+        if connection["connection_type"] == "vpn_ssl":
+            return self._with_connection(self._test_vpn_ssl(connection), connection)
 
         return self._with_connection(
             {
@@ -128,6 +145,25 @@ class ConnectionService:
         if status_code >= 500:
             return "Supabase đang lỗi máy chủ."
         return f"Supabase trả lỗi HTTP {status_code}."
+
+    def _test_vpn_ssl(self, connection: dict[str, Any]) -> dict[str, Any]:
+        config = connection.get("config", {})
+        host = config.get("host")
+        port = config.get("port", 4443)
+        if not host:
+            return {"ok": False, "message": "Chua cau hinh host VPN.", "details": None}
+        try:
+            with httpx.Client(timeout=10, verify=False) as client:
+                response = client.get(f"https://{host}:{port}")
+            return {
+                "ok": response.status_code < 500,
+                "message": f"VPN phan hoi HTTP {response.status_code}. Cong VPN co phan hoi.",
+                "details": {"status_code": response.status_code},
+            }
+        except httpx.TimeoutException:
+            return {"ok": False, "message": "VPN phan hoi qua lau hoac bi chan.", "details": {"host": host, "port": port}}
+        except httpx.RequestError:
+            return {"ok": False, "message": "Khong ket noi duoc cong VPN SSL.", "details": {"host": host, "port": port}}
 
     @staticmethod
     def _with_connection(result: dict[str, Any], connection: dict[str, Any]) -> dict[str, Any]:

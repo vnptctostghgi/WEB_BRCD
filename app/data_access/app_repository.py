@@ -118,8 +118,38 @@ class AppRepository:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS data_regions (
+                    code TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS user_data_permissions (
+                    user_id INTEGER NOT NULL,
+                    region_code TEXT NOT NULL,
+                    PRIMARY KEY(user_id, region_code),
+                    FOREIGN KEY(user_id) REFERENCES users(id),
+                    FOREIGN KEY(region_code) REFERENCES data_regions(code)
+                );
                 """
             )
+            for column, definition in {
+                "employee_code": "TEXT COLLATE NOCASE",
+                "email": "TEXT COLLATE NOCASE",
+                "phone": "TEXT",
+                "birth_date": "TEXT",
+                "gender": "TEXT",
+                "department": "TEXT",
+                "job_title": "TEXT",
+            }.items():
+                try:
+                    connection.execute(f"ALTER TABLE users ADD COLUMN {column} {definition}")
+                except sqlite3.OperationalError:
+                    pass
             connection.executemany(
                 "INSERT OR IGNORE INTO features (code, name, parent_code, sort_order) VALUES (?, ?, ?, ?)",
                 [
@@ -136,6 +166,32 @@ class AppRepository:
                     ("admin.connections", "Quản trị kết nối hệ thống", "admin", 35),
                     ("admin.connections.test", "Kiểm tra kết nối hệ thống", "admin.connections", 36),
                 ],
+            )
+            connection.executemany(
+                "INSERT OR REPLACE INTO features (code, name, parent_code, sort_order) VALUES (?, ?, ?, ?)",
+                [
+                    ("dashboard", "Tong quan", None, 10),
+                    ("admin.web", "Quan tri web", None, 20),
+                    ("admin.users", "Quan tri nguoi dung", "admin.web", 21),
+                    ("admin.connections", "Quan tri ket noi", "admin.web", 22),
+                    ("admin.permissions", "Phan quyen nguoi dung", "admin.web", 23),
+                    ("admin.data_permissions", "Phan quyen du lieu nguoi dung", "admin.web", 24),
+                    ("admin.catalogs", "Quan tri danh muc", "admin.web", 25),
+                    ("reports", "Bao cao thong ke", None, 30),
+                    ("vault", "Kho tai khoan web", None, 40),
+                    ("vault.view", "Xem danh sach tai khoan", "vault", 41),
+                    ("vault.manage", "Them va sua tai khoan", "vault", 42),
+                    ("vault.reveal", "Xem mat khau da luu", "vault", 43),
+                    ("admin.audit", "Xem nhat ky hoat dong", "admin.web", 90),
+                ],
+            )
+            now = self._now()
+            connection.executemany(
+                """
+                INSERT OR IGNORE INTO data_regions (code, name, is_active, sort_order, created_at, updated_at)
+                VALUES (?, ?, 1, ?, ?, ?)
+                """,
+                [("13", "Can Tho", 10, now, now), ("66", "Hau Giang", 20, now, now), ("47", "Soc Trang", 30, now, now)],
             )
             exists = connection.execute(
                 "SELECT id FROM users WHERE username = ?", (admin_username,)
@@ -172,22 +228,29 @@ class AppRepository:
         with self.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+                SELECT id, username, full_name, employee_code, email, phone, birth_date, gender, department, job_title,
+                       role, is_active, must_change_password, created_at, updated_at
                 FROM users ORDER BY id
                 """
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def create_user(self, username: str, full_name: str, password: str, role: str) -> int:
+    def create_user(self, username: str, full_name: str, password: str, role: str, employee: dict[str, Any] | None = None) -> int:
         now = self._now()
+        employee = employee or {}
         with self.connect() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO users
-                (username, full_name, password_hash, role, is_active, must_change_password, created_at, updated_at)
-                VALUES (?, ?, ?, ?, 1, 1, ?, ?)
+                (username, full_name, employee_code, email, phone, birth_date, gender, department, job_title,
+                 password_hash, role, is_active, must_change_password, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?)
                 """,
-                (username, full_name, hash_password(password), role, now, now),
+                (
+                    username, full_name, employee.get("employee_code"), employee.get("email"), employee.get("phone"),
+                    employee.get("birth_date"), employee.get("gender"), employee.get("department"), employee.get("job_title"),
+                    hash_password(password), role, now, now,
+                ),
             )
             return int(cursor.lastrowid)
 
@@ -200,6 +263,18 @@ class AppRepository:
                 """,
                 (full_name, role, int(is_active), self._now(), user_id),
             )
+
+    def delete_user(self, user_id: int) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM users WHERE id=?", (user_id,))
+
+    def get_user_by_employee_or_email(self, employee_code: str, email: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM users WHERE lower(employee_code)=lower(?) OR lower(email)=lower(?)",
+                (employee_code, email),
+            ).fetchone()
+            return dict(row) if row else None
 
     def change_password(self, user_id: int, password: str, must_change: bool = False) -> None:
         with self.connect() as connection:
@@ -315,6 +390,51 @@ class AppRepository:
                 "INSERT INTO user_permissions (user_id, feature_code) VALUES (?, ?)",
                 [(user_id, code) for code in feature_codes],
             )
+
+    def set_bulk_user_permissions(self, user_ids: list[int], feature_codes: list[str]) -> None:
+        with self.connect() as connection:
+            for user_id in user_ids:
+                connection.execute("DELETE FROM user_permissions WHERE user_id=?", (user_id,))
+                connection.executemany(
+                    "INSERT INTO user_permissions (user_id, feature_code) VALUES (?, ?)",
+                    [(user_id, code) for code in feature_codes],
+                )
+
+    def list_data_regions(self, active_only: bool = False) -> list[dict[str, Any]]:
+        query = "SELECT * FROM data_regions"
+        if active_only:
+            query += " WHERE is_active = 1"
+        query += " ORDER BY sort_order, code"
+        with self.connect() as connection:
+            return [dict(row) for row in connection.execute(query).fetchall()]
+
+    def save_data_region(self, code: str, name: str, is_active: bool, sort_order: int) -> None:
+        now = self._now()
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO data_regions (code, name, is_active, sort_order, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(code) DO UPDATE SET name=excluded.name, is_active=excluded.is_active,
+                  sort_order=excluded.sort_order, updated_at=excluded.updated_at
+                """,
+                (code, name, int(is_active), sort_order, now, now),
+            )
+
+    def get_user_data_permissions(self, user_id: int) -> list[str]:
+        with self.connect() as connection:
+            return [row["region_code"] for row in connection.execute(
+                "SELECT region_code FROM user_data_permissions WHERE user_id=? ORDER BY region_code", (user_id,)
+            ).fetchall()]
+
+    def set_bulk_user_data_permissions(self, user_ids: list[int], region_codes: list[str]) -> None:
+        with self.connect() as connection:
+            for user_id in user_ids:
+                connection.execute("DELETE FROM user_data_permissions WHERE user_id=?", (user_id,))
+                connection.executemany(
+                    "INSERT INTO user_data_permissions (user_id, region_code) VALUES (?, ?)",
+                    [(user_id, code) for code in region_codes],
+                )
 
     def list_system_connections(self) -> list[dict[str, Any]]:
         with self.connect() as connection:

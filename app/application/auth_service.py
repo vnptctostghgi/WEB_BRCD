@@ -16,10 +16,10 @@ class AuthService:
         self.repository.add_audit_log(user["username"], "login_success", "Đăng nhập thành công")
         return self.public_user(user)
 
-    def create_user(self, actor: str, username: str, full_name: str, password: str, role: str) -> dict[str, Any]:
+    def create_user(self, actor: str, username: str, full_name: str, password: str, role: str, employee: dict[str, Any] | None = None) -> dict[str, Any]:
         self._validate_user_input(username, full_name, password, role)
         try:
-            user_id = self.repository.create_user(username.strip(), full_name.strip(), password, role)
+            user_id = self.repository.create_user(username.strip(), full_name.strip(), password, role, employee)
         except sqlite3.IntegrityError as error:
             raise ValueError("Tên đăng nhập đã tồn tại.") from error
         self.repository.add_audit_log(actor, "user_created", f"Tạo người dùng {username.strip()} ({role})")
@@ -62,11 +62,15 @@ class AuthService:
     def public_user(user: dict[str, Any] | None) -> dict[str, Any]:
         if not user:
             return {}
-        return {key: user[key] for key in ("id", "username", "full_name", "role", "is_active", "must_change_password")}
+        keys = (
+            "id", "username", "full_name", "employee_code", "email", "phone", "birth_date", "gender",
+            "department", "job_title", "role", "is_active", "must_change_password",
+        )
+        return {key: user.get(key) for key in keys if key in user}
 
     @staticmethod
     def _validate_user_input(username: str, full_name: str, password: str, role: str) -> None:
-        if len(username.strip()) < 3 or not username.strip().replace("_", "").isalnum():
+        if len(username.strip()) < 3 or any(character not in "._-" and not character.isalnum() for character in username.strip()):
             raise ValueError("Tên đăng nhập phải có ít nhất 3 ký tự, chỉ gồm chữ, số hoặc dấu gạch dưới.")
         if not full_name.strip():
             raise ValueError("Họ tên không được để trống.")

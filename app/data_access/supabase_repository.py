@@ -8,23 +8,30 @@ from app.data_access.app_repository import hash_password
 
 
 FEATURE_ROWS = [
-    {"code": "dashboard", "name": "Tổng quan", "parent_code": None, "sort_order": 10},
-    {"code": "vault", "name": "Kho tài khoản web", "parent_code": None, "sort_order": 20},
-    {"code": "vault.view", "name": "Xem danh sách tài khoản", "parent_code": "vault", "sort_order": 21},
-    {"code": "vault.manage", "name": "Thêm và sửa tài khoản", "parent_code": "vault", "sort_order": 22},
-    {"code": "vault.reveal", "name": "Xem mật khẩu đã lưu", "parent_code": "vault", "sort_order": 23},
-    {"code": "admin", "name": "Quản trị", "parent_code": None, "sort_order": 30},
-    {"code": "admin.users", "name": "Quản trị người dùng", "parent_code": "admin", "sort_order": 31},
-    {"code": "admin.catalogs", "name": "Quản trị danh mục website", "parent_code": "admin", "sort_order": 32},
-    {"code": "admin.permissions", "name": "Phân quyền chức năng", "parent_code": "admin", "sort_order": 33},
-    {"code": "admin.audit", "name": "Xem nhật ký hoạt động", "parent_code": "admin", "sort_order": 34},
-    {"code": "admin.connections", "name": "Quản trị kết nối hệ thống", "parent_code": "admin", "sort_order": 35},
-    {"code": "admin.connections.test", "name": "Kiểm tra kết nối hệ thống", "parent_code": "admin.connections", "sort_order": 36},
+    {"code": "dashboard", "name": "Tong quan", "parent_code": None, "sort_order": 10},
+    {"code": "admin.web", "name": "Quan tri web", "parent_code": None, "sort_order": 20},
+    {"code": "admin.users", "name": "Quan tri nguoi dung", "parent_code": "admin.web", "sort_order": 21},
+    {"code": "admin.connections", "name": "Quan tri ket noi", "parent_code": "admin.web", "sort_order": 22},
+    {"code": "admin.permissions", "name": "Phan quyen nguoi dung", "parent_code": "admin.web", "sort_order": 23},
+    {"code": "admin.data_permissions", "name": "Phan quyen du lieu nguoi dung", "parent_code": "admin.web", "sort_order": 24},
+    {"code": "admin.catalogs", "name": "Quan tri danh muc", "parent_code": "admin.web", "sort_order": 25},
+    {"code": "reports", "name": "Bao cao thong ke", "parent_code": None, "sort_order": 30},
+    {"code": "vault", "name": "Kho tai khoan web", "parent_code": None, "sort_order": 40},
+    {"code": "vault.view", "name": "Xem danh sach tai khoan", "parent_code": "vault", "sort_order": 41},
+    {"code": "vault.manage", "name": "Them va sua tai khoan", "parent_code": "vault", "sort_order": 42},
+    {"code": "vault.reveal", "name": "Xem mat khau da luu", "parent_code": "vault", "sort_order": 43},
+    {"code": "admin.audit", "name": "Xem nhat ky hoat dong", "parent_code": "admin.web", "sort_order": 90},
+]
+
+REGION_ROWS = [
+    {"code": "13", "name": "Can Tho", "is_active": True, "sort_order": 10},
+    {"code": "66", "name": "Hau Giang", "is_active": True, "sort_order": 20},
+    {"code": "47", "name": "Soc Trang", "is_active": True, "sort_order": 30},
 ]
 
 
 class SupabaseRepository:
-    """Data Access Layer dùng Supabase REST/PostgREST làm DB chính."""
+    """Data Access Layer dung Supabase REST/PostgREST lam DB chinh."""
 
     def __init__(self, rest_url: str, secret_key: str) -> None:
         self.rest_url = rest_url.rstrip("/")
@@ -33,9 +40,17 @@ class SupabaseRepository:
     def initialize(self, admin_username: str, admin_password: str) -> None:
         for feature in FEATURE_ROWS:
             self._upsert("features", feature, "code")
+        for region in REGION_ROWS:
+            now = self._now()
+            try:
+                self._upsert("data_regions", {**region, "created_at": now, "updated_at": now}, "code")
+            except RuntimeError:
+                # Production can deploy before the operator runs the new SQL patch.
+                # Feature routes will report the schema error until the patch is applied.
+                pass
         admin = self.get_user_by_username(admin_username)
         if not admin:
-            user_id = self.create_user(admin_username, "Quản trị viên hệ thống", admin_password, "admin")
+            user_id = self.create_user(admin_username, "Quan tri vien he thong", admin_password, "admin")
             admin = self.get_user_by_id(user_id)
         if admin:
             self.set_user_permissions(admin["id"], [feature["code"] for feature in FEATURE_ROWS])
@@ -49,21 +64,79 @@ class SupabaseRepository:
         return rows[0] if rows else None
 
     def list_users(self) -> list[dict[str, Any]]:
-        return self._get("users", {"select": "id,username,full_name,role,is_active,must_change_password,created_at,updated_at", "order": "id.asc"})
+        try:
+            return self._get("users", {
+                "select": "id,username,full_name,employee_code,email,phone,birth_date,gender,department,job_title,role,is_active,must_change_password,created_at,updated_at",
+                "order": "id.asc",
+            })
+        except RuntimeError as error:
+            if "employee_code" not in str(error):
+                raise
+            return self._get("users", {"select": "id,username,full_name,role,is_active,must_change_password,created_at,updated_at", "order": "id.asc"})
 
-    def create_user(self, username: str, full_name: str, password: str, role: str) -> int:
+    def create_user(self, username: str, full_name: str, password: str, role: str, employee: dict[str, Any] | None = None) -> int:
         now = self._now()
-        row = self._insert("users", {
-            "username": username, "full_name": full_name, "password_hash": hash_password(password),
-            "role": role, "is_active": True, "must_change_password": True, "created_at": now, "updated_at": now,
-        })
+        employee = employee or {}
+        payload = {
+            "username": username,
+            "full_name": full_name,
+            "employee_code": employee.get("employee_code"),
+            "email": employee.get("email"),
+            "phone": employee.get("phone"),
+            "birth_date": employee.get("birth_date"),
+            "gender": employee.get("gender"),
+            "department": employee.get("department"),
+            "job_title": employee.get("job_title"),
+            "password_hash": hash_password(password),
+            "role": role,
+            "is_active": True,
+            "must_change_password": True,
+            "created_at": now,
+            "updated_at": now,
+        }
+        try:
+            row = self._insert("users", payload)
+        except RuntimeError as error:
+            if employee or "employee_code" not in str(error):
+                raise
+            row = self._insert("users", {
+                "username": username,
+                "full_name": full_name,
+                "password_hash": hash_password(password),
+                "role": role,
+                "is_active": True,
+                "must_change_password": True,
+                "created_at": now,
+                "updated_at": now,
+            })
         return int(row["id"])
 
     def update_user(self, user_id: int, full_name: str, role: str, is_active: bool) -> None:
-        self._patch("users", {"id": f"eq.{user_id}"}, {"full_name": full_name, "role": role, "is_active": is_active, "updated_at": self._now()})
+        self._patch("users", {"id": f"eq.{user_id}"}, {
+            "full_name": full_name,
+            "role": role,
+            "is_active": is_active,
+            "updated_at": self._now(),
+        })
+
+    def delete_user(self, user_id: int) -> None:
+        self._delete("users", {"id": f"eq.{user_id}"})
+
+    def get_user_by_employee_or_email(self, employee_code: str, email: str) -> dict[str, Any] | None:
+        try:
+            rows = self._get("users", {"or": f"(employee_code.eq.{employee_code},email.eq.{email})"})
+        except RuntimeError as error:
+            if "employee_code" in str(error) or "email" in str(error):
+                raise RuntimeError("Supabase chua co cot employee_code/email. Hay chay lai sql/supabase_schema.sql truoc khi import nguoi dung.") from error
+            raise
+        return rows[0] if rows else None
 
     def change_password(self, user_id: int, password: str, must_change: bool = False) -> None:
-        self._patch("users", {"id": f"eq.{user_id}"}, {"password_hash": hash_password(password), "must_change_password": must_change, "updated_at": self._now()})
+        self._patch("users", {"id": f"eq.{user_id}"}, {
+            "password_hash": hash_password(password),
+            "must_change_password": must_change,
+            "updated_at": self._now(),
+        })
 
     def count_active_admins(self) -> int:
         return len(self._get("users", {"role": "eq.admin", "is_active": "eq.true", "select": "id"}))
@@ -131,6 +204,29 @@ class SupabaseRepository:
         if feature_codes:
             self._post("user_permissions", [{"user_id": user_id, "feature_code": code} for code in feature_codes], {"Prefer": "return=minimal"})
 
+    def set_bulk_user_permissions(self, user_ids: list[int], feature_codes: list[str]) -> None:
+        for user_id in user_ids:
+            self.set_user_permissions(user_id, feature_codes)
+
+    def list_data_regions(self, active_only: bool = False) -> list[dict[str, Any]]:
+        params = {"order": "sort_order.asc"}
+        if active_only:
+            params["is_active"] = "eq.true"
+        return self._get("data_regions", params)
+
+    def save_data_region(self, code: str, name: str, is_active: bool, sort_order: int) -> None:
+        now = self._now()
+        self._upsert("data_regions", {"code": code, "name": name, "is_active": is_active, "sort_order": sort_order, "created_at": now, "updated_at": now}, "code")
+
+    def get_user_data_permissions(self, user_id: int) -> list[str]:
+        return [row["region_code"] for row in self._get("user_data_permissions", {"user_id": f"eq.{user_id}", "select": "region_code"})]
+
+    def set_bulk_user_data_permissions(self, user_ids: list[int], region_codes: list[str]) -> None:
+        for user_id in user_ids:
+            self._delete("user_data_permissions", {"user_id": f"eq.{user_id}"})
+            if region_codes:
+                self._post("user_data_permissions", [{"user_id": user_id, "region_code": code} for code in region_codes], {"Prefer": "return=minimal"})
+
     def list_system_connections(self) -> list[dict[str, Any]]:
         rows = self._get("system_connections", {"order": "id.asc"})
         return [self._decode_connection(row) for row in rows]
@@ -178,7 +274,7 @@ class SupabaseRepository:
         if response.status_code == 409:
             raise sqlite3.IntegrityError(response.text)
         if response.status_code >= 400:
-            raise RuntimeError(f"Supabase REST lỗi {response.status_code}: {response.text[:300]}")
+            raise RuntimeError(f"Supabase REST loi {response.status_code}: {response.text[:300]}")
         if response.text:
             return response.json()
         return None

@@ -1,9 +1,11 @@
 from pathlib import Path
 import sqlite3
+from io import BytesIO
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+import openpyxl
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
@@ -70,6 +72,31 @@ class PermissionPayload(BaseModel):
     feature_codes: list[str]
 
 
+class BulkPermissionPayload(BaseModel):
+    user_ids: list[int]
+    feature_codes: list[str]
+
+
+class BulkDataPermissionPayload(BaseModel):
+    user_ids: list[int]
+    region_codes: list[str]
+
+
+class DataRegionPayload(BaseModel):
+    code: str
+    name: str
+    is_active: bool = True
+    sort_order: int = 0
+
+
+class SystemConnectionPayload(BaseModel):
+    name: str
+    connection_type: str
+    description: str = ""
+    config: dict = {}
+    is_active: bool = False
+
+
 def build_app_repository() -> AppRepository:
     return build_repository(get_settings())
 
@@ -128,6 +155,44 @@ def notify_login_failed_threshold(request: Request, username: str) -> None:
 
 def reset_failed_login_counter(username: str) -> None:
     FAILED_LOGIN_COUNTS.pop((username.strip() or "unknown").lower(), None)
+
+
+def normalize_email_username(email: str) -> str:
+    return (email or "").strip().split("@", 1)[0].lower()
+
+
+def normalize_cell(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def parse_employee_workbook(content: bytes) -> list[dict]:
+    workbook = openpyxl.load_workbook(BytesIO(content), data_only=True)
+    sheet = workbook[workbook.sheetnames[0]]
+    headers = [normalize_cell(cell.value).upper() for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
+    index = {header: position for position, header in enumerate(headers)}
+    required = ["MÃ NHÂN VIÊN", "TÊN NHÂN VIÊN", "THƯ ĐIỆN TỬ"]
+    if not all(column in index for column in required):
+        raise ValueError("File Excel thiếu cột MÃ NHÂN VIÊN, TÊN NHÂN VIÊN hoặc THƯ ĐIỆN TỬ.")
+    employees = []
+    for row in sheet.iter_rows(min_row=2, values_only=True):
+        employee_code = normalize_cell(row[index["MÃ NHÂN VIÊN"]])
+        full_name = normalize_cell(row[index["TÊN NHÂN VIÊN"]])
+        email = normalize_cell(row[index["THƯ ĐIỆN TỬ"]]).lower()
+        if not employee_code and not full_name and not email:
+            continue
+        employees.append({
+            "employee_code": employee_code,
+            "full_name": full_name,
+            "email": email,
+            "phone": normalize_cell(row[index.get("SỐ ĐIỆN THOẠI", -1)]) if "SỐ ĐIỆN THOẠI" in index else "",
+            "birth_date": normalize_cell(row[index.get("NGÀY SINH", -1)])[:10] if "NGÀY SINH" in index else "",
+            "gender": normalize_cell(row[index.get("GIỚI TÍNH", -1)]) if "GIỚI TÍNH" in index else "",
+            "department": normalize_cell(row[index.get("PHÒNG BAN", -1)]) if "PHÒNG BAN" in index else "",
+            "job_title": normalize_cell(row[index.get("VTCV", -1)]) if "VTCV" in index else "",
+        })
+    return employees
 
 
 def current_user(request: Request) -> dict:
@@ -249,6 +314,58 @@ def create_user(request: Request, payload: CreateUserPayload) -> dict:
     return {"ok": True, "user": user}
 
 
+@router.get("/api/admin/users/import-template")
+def download_user_import_template(request: Request) -> Response:
+    admin_user(request)
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "NguoiDung"
+    sheet.append(["MÃ NHÂN VIÊN", "TÊN NHÂN VIÊN", "SỐ ĐIỆN THOẠI", "THƯ ĐIỆN TỬ", "NGÀY SINH", "GIỚI TÍNH", "PHÒNG BAN", "VTCV"])
+    sheet.append(["VNPT008888", "Nguyen Van A", "0912345678", "vana@vnpt.vn", "1990-01-01", "Nam", "Phong kinh doanh", "Nhan vien"])
+    stream = BytesIO()
+    workbook.save(stream)
+    stream.seek(0)
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="mau_import_nguoi_dung.xlsx"'},
+    )
+
+
+@router.post("/api/admin/users/import")
+async def import_users(request: Request, file: UploadFile = File(...)) -> dict:
+    actor = admin_user(request)
+    if not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chỉ hỗ trợ file Excel .xlsx.")
+    try:
+        employees = parse_employee_workbook(await file.read())
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    repository = build_app_repository()
+    auth_service = AuthService(repository)
+    created = []
+    skipped = []
+    for employee in employees:
+        username = normalize_email_username(employee["email"])
+        if not employee["employee_code"] or not employee["full_name"] or not username:
+            skipped.append({"employee_code": employee.get("employee_code"), "reason": "Thiếu mã nhân viên, họ tên hoặc email."})
+            continue
+        try:
+            existing_user = repository.get_user_by_employee_or_email(employee["employee_code"], employee["email"])
+        except RuntimeError as error:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+        if existing_user:
+            skipped.append({"employee_code": employee["employee_code"], "reason": "Mã nhân viên hoặc email đã tồn tại."})
+            continue
+        try:
+            user = auth_service.create_user(actor["username"], username, employee["full_name"], employee["employee_code"], "viewer", employee)
+            created.append(user)
+        except (ValueError, sqlite3.IntegrityError, RuntimeError) as error:
+            skipped.append({"employee_code": employee["employee_code"], "reason": str(error)})
+    repository.add_audit_log(actor["username"], "users_imported", f"Import users: created={len(created)}, skipped={len(skipped)}")
+    return {"ok": True, "created_count": len(created), "skipped_count": len(skipped), "created": created, "skipped": skipped}
+
+
 @router.put("/api/admin/users/{user_id}")
 def update_user(request: Request, user_id: int, payload: UpdateUserPayload) -> dict:
     actor = admin_user(request)
@@ -259,6 +376,21 @@ def update_user(request: Request, user_id: int, payload: UpdateUserPayload) -> d
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     return {"ok": True, "user": user}
+
+
+@router.delete("/api/admin/users/{user_id}")
+def delete_user(request: Request, user_id: int) -> dict:
+    actor = admin_user(request)
+    user = build_app_repository().get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy người dùng.")
+    if user["id"] == actor["id"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bạn không thể tự xóa tài khoản đang đăng nhập.")
+    if user["role"] == "admin" and build_app_repository().count_active_admins() <= 1:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Hệ thống phải còn ít nhất một admin.")
+    build_app_repository().delete_user(user_id)
+    build_app_repository().add_audit_log(actor["username"], "user_deleted", f"Xoa user {user['username']}")
+    return {"ok": True}
 
 
 @router.post("/api/admin/users/{user_id}/reset-password")
@@ -328,6 +460,22 @@ def test_system_connection(request: Request, code: str) -> dict:
     build_app_repository().add_audit_log(actor["username"], "system_connection_tested", f"Kiểm tra kết nối {code}: {result['ok']}")
     notify_if_failed("Lỗi kiểm tra kết nối", result, {"ma_ket_noi": code})
     return result
+
+
+@router.put("/api/admin/connections/{code}")
+def save_system_connection(request: Request, code: str, payload: SystemConnectionPayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    repository.upsert_system_connection(
+        code.strip(),
+        payload.name.strip(),
+        payload.connection_type.strip(),
+        payload.description.strip(),
+        payload.config,
+        payload.is_active,
+    )
+    repository.add_audit_log(actor["username"], "system_connection_saved", f"Luu ket noi {code}")
+    return {"ok": True}
 
 
 @router.post("/api/admin/telegram/test-message")
@@ -447,4 +595,50 @@ def update_permissions(request: Request, user_id: int, payload: PermissionPayloa
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Danh sách quyền không hợp lệ.")
     build_app_repository().set_user_permissions(user_id, payload.feature_codes)
     build_app_repository().add_audit_log(actor["username"], "permissions_updated", f"Cập nhật quyền người dùng #{user_id}")
+    return {"ok": True}
+
+
+@router.put("/api/admin/permissions/bulk")
+def update_bulk_permissions(request: Request, payload: BulkPermissionPayload) -> dict:
+    actor = admin_user(request)
+    valid_codes = {feature["code"] for feature in build_app_repository().list_features()}
+    if not payload.user_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chưa chọn người dùng.")
+    if not set(payload.feature_codes).issubset(valid_codes):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Danh sách quyền không hợp lệ.")
+    build_app_repository().set_bulk_user_permissions(payload.user_ids, payload.feature_codes)
+    build_app_repository().add_audit_log(actor["username"], "bulk_permissions_updated", f"Cap quyen cho {len(payload.user_ids)} user")
+    return {"ok": True}
+
+
+@router.get("/api/admin/regions")
+def list_regions(request: Request) -> dict:
+    admin_user(request)
+    return {"regions": build_app_repository().list_data_regions()}
+
+
+@router.post("/api/admin/regions")
+def save_region(request: Request, payload: DataRegionPayload) -> dict:
+    actor = admin_user(request)
+    build_app_repository().save_data_region(payload.code.strip(), payload.name.strip(), payload.is_active, payload.sort_order)
+    build_app_repository().add_audit_log(actor["username"], "region_saved", f"Luu phan vung {payload.code}")
+    return {"ok": True}
+
+
+@router.get("/api/admin/users/{user_id}/data-permissions")
+def user_data_permissions(request: Request, user_id: int) -> dict:
+    admin_user(request)
+    return {"region_codes": build_app_repository().get_user_data_permissions(user_id)}
+
+
+@router.put("/api/admin/data-permissions/bulk")
+def update_bulk_data_permissions(request: Request, payload: BulkDataPermissionPayload) -> dict:
+    actor = admin_user(request)
+    valid_codes = {region["code"] for region in build_app_repository().list_data_regions()}
+    if not payload.user_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chưa chọn người dùng.")
+    if not set(payload.region_codes).issubset(valid_codes):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Danh sách phân vùng không hợp lệ.")
+    build_app_repository().set_bulk_user_data_permissions(payload.user_ids, payload.region_codes)
+    build_app_repository().add_audit_log(actor["username"], "bulk_data_permissions_updated", f"Cap vung du lieu cho {len(payload.user_ids)} user")
     return {"ok": True}
