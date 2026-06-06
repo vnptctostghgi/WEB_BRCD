@@ -13,6 +13,7 @@ test_database.unlink(missing_ok=True)
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.presentation import routes
 
 
 def login(client: TestClient, username: str = "admin", password: str = "Admin@Brcd2026!") -> None:
@@ -37,6 +38,7 @@ def test_admin_can_login_and_open_dashboard() -> None:
 
 def test_five_failed_logins_send_telegram_alert(monkeypatch) -> None:
     sent_messages = []
+    routes.FAILED_LOGIN_COUNTS.clear()
 
     def fake_send_message(self, title, message, details=None):
         sent_messages.append((title, message, details))
@@ -51,7 +53,7 @@ def test_five_failed_logins_send_telegram_alert(monkeypatch) -> None:
         response = client.post("/api/auth/login", json={"username": "bad_admin", "password": "wrong"})
         assert response.status_code == 401
         assert len(sent_messages) == 1
-        assert sent_messages[0][0] == "Cảnh báo đăng nhập sai"
+        assert sent_messages[0][0] == "Canh bao dang nhap sai"
 
 
 def test_database_health_requires_login_and_uses_mock_mode() -> None:

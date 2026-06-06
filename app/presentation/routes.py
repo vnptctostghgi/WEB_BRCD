@@ -20,6 +20,7 @@ from app.settings import get_settings
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path("app/presentation/templates"))
+FAILED_LOGIN_COUNTS: dict[str, int] = {}
 
 
 class LoginPayload(BaseModel):
@@ -104,23 +105,21 @@ def notify_if_failed(title: str, result: dict, extra: dict | None = None) -> Non
 
 
 def notify_login_failed_threshold(request: Request, username: str) -> None:
-    repository = build_app_repository()
-    normalized_username = username.strip() or "unknown"
-    failures = 0
-    for log in repository.list_audit_logs(limit=50):
-        if log.get("actor") != normalized_username:
-            continue
-        if log.get("action") == "login_success":
-            break
-        if log.get("action") == "login_failed":
-            failures += 1
-    if failures and failures % 5 == 0:
+    display_username = username.strip() or "unknown"
+    counter_key = display_username.lower()
+    failures = FAILED_LOGIN_COUNTS.get(counter_key, 0) + 1
+    FAILED_LOGIN_COUNTS[counter_key] = failures
+    if failures % 5 == 0:
         client_host = request.client.host if request.client else "unknown"
         TelegramNotifier(get_settings()).send_message(
-            "Cảnh báo đăng nhập sai",
-            f"Tài khoản {normalized_username} đã đăng nhập sai {failures} lần liên tiếp.",
+            "Canh bao dang nhap sai",
+            f"Tai khoan {display_username} dang nhap sai {failures} lan lien tiep.",
             {"ip": client_host, "nguong_canh_bao": 5},
         )
+
+
+def reset_failed_login_counter(username: str) -> None:
+    FAILED_LOGIN_COUNTS.pop((username.strip() or "unknown").lower(), None)
 
 
 def current_user(request: Request) -> dict:
@@ -182,6 +181,7 @@ def login(request: Request, payload: LoginPayload) -> dict:
     if not user:
         notify_login_failed_threshold(request, payload.username)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Tên đăng nhập hoặc mật khẩu không đúng.")
+    reset_failed_login_counter(payload.username)
     request.session.clear()
     request.session["user"] = user
     return {"ok": True, "user": user}
