@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     vpn_username: str = ""
     vpn_password: SecretStr = Field(default=SecretStr(""))
     vpn_type: str = "ssl"
+    openvpn_binary: str = "openvpn"
+    openvpn_config_path: str = ""
+    vpn_test_targets: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
 

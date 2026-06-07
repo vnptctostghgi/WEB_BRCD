@@ -58,6 +58,10 @@ $("#menu-button")?.addEventListener("click", () => {
   $("#menu-button").setAttribute("aria-expanded", String(open));
 });
 
+document.querySelectorAll(".nav-group").forEach((group) => {
+  group.open = false;
+});
+
 document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("click", async () => {
   document.querySelectorAll(".nav-item, .app-view").forEach((element) => element.classList.remove("active"));
   item.classList.add("active");

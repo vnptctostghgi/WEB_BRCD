@@ -1,6 +1,11 @@
-from typing import Any
+from pathlib import Path
+import shutil
 import socket
 import ssl
+import subprocess
+import tempfile
+import time
+from typing import Any
 
 import httpx
 
@@ -44,14 +49,19 @@ class ConnectionService:
         )
         self.repository.upsert_system_connection(
             code="agency_ssl_vpn",
-            name="VPN SSL cơ quan",
+            name="VPN OpenVPN cơ quan",
             connection_type="vpn_ssl",
-            description="Kết nối VPN SSL trước khi truy cập FTP và Database nội bộ.",
+            description="Kết nối OpenVPN SSL/TLS trước khi truy cập FTP và Database nội bộ.",
             config={
                 "host": self.settings.vpn_host or "14.241.183.190",
                 "port": self.settings.vpn_port or 4443,
                 "username": self.settings.vpn_username or "quyennt.cto",
-                "type": (self.settings.vpn_type or "ssl").upper(),
+                "type": "OpenVPN SSL/TLS",
+                "openvpn_binary": self.settings.openvpn_binary,
+                "openvpn_config_path": self.settings.openvpn_config_path,
+                "test_targets": self._parse_targets(self.settings.vpn_test_targets) or [
+                    {"host": self.settings.db_host or "10.92.53.53", "port": self.settings.db_port or 1521, "name": "Oracle DB cơ quan"},
+                ],
                 "secret_ref": "VPN_PASSWORD",
             },
             is_active=True,
@@ -159,8 +169,12 @@ class ConnectionService:
             "host": host,
             "port": port,
             "username": config.get("username"),
-            "type": config.get("type", "SSL"),
+            "type": config.get("type", "OpenVPN SSL/TLS"),
         }
+
+        openvpn_result = self._test_openvpn_tunnel(config, base_details)
+        if openvpn_result is not None:
+            return openvpn_result
 
         try:
             with socket.create_connection((host, port), timeout=8) as tcp_socket:
@@ -194,9 +208,135 @@ class ConnectionService:
         except OSError as error:
             return {
                 "ok": False,
-                "message": "Không kết nối được VPN SSL. Kiểm tra IP, cổng 4443, firewall hoặc trạng thái thiết bị VPN.",
+                "message": "Không kết nối được cổng OpenVPN. Kiểm tra IP, cổng 4443, firewall hoặc trạng thái thiết bị VPN.",
                 "details": {**base_details, "stage": "tcp_connect", "error": str(error)},
             }
+
+    def _test_openvpn_tunnel(self, config: dict[str, Any], base_details: dict[str, Any]) -> dict[str, Any] | None:
+        config_path = config.get("openvpn_config_path") or self.settings.openvpn_config_path
+        binary_name = config.get("openvpn_binary") or self.settings.openvpn_binary or "openvpn"
+        username = config.get("username") or self.settings.vpn_username
+        password = self.settings.vpn_password.get_secret_value()
+        targets = config.get("test_targets") or self._parse_targets(self.settings.vpn_test_targets)
+
+        if not config_path:
+            return {
+                "ok": False,
+                "message": "Chưa có file cấu hình OpenVPN (.ovpn) trên máy chủ web nên chưa thể khởi chạy tunnel.",
+                "details": {**base_details, "stage": "openvpn_config", "required": "OPENVPN_CONFIG_PATH hoặc config.openvpn_config_path"},
+            }
+        if not Path(config_path).exists():
+            return {
+                "ok": False,
+                "message": "Không tìm thấy file cấu hình OpenVPN trên máy chủ web.",
+                "details": {**base_details, "stage": "openvpn_config", "openvpn_config_path": config_path},
+            }
+        binary = shutil.which(binary_name) or (binary_name if Path(binary_name).exists() else None)
+        if not binary:
+            return {
+                "ok": False,
+                "message": "Máy chủ web chưa cài OpenVPN CLI nên không thể mở tunnel từ backend.",
+                "details": {**base_details, "stage": "openvpn_binary", "openvpn_binary": binary_name},
+            }
+        if not username or not password:
+            return {
+                "ok": False,
+                "message": "Chưa cấu hình tài khoản hoặc mật khẩu OpenVPN trong biến môi trường.",
+                "details": {**base_details, "stage": "openvpn_auth", "required": "VPN_USERNAME và VPN_PASSWORD"},
+            }
+
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as auth_file:
+            auth_file.write(f"{username}\n{password}\n")
+            auth_path = auth_file.name
+        command = [
+            binary,
+            "--config", config_path,
+            "--auth-user-pass", auth_path,
+            "--connect-retry-max", "1",
+            "--verb", "3",
+            "--pull-filter", "ignore", "redirect-gateway",
+        ]
+        process: subprocess.Popen | None = None
+        log_lines: list[str] = []
+        started_at = time.time()
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            assert process.stdout is not None
+            while time.time() - started_at < 30:
+                line = process.stdout.readline()
+                if line:
+                    clean = self._redact_secret(line.strip(), password)
+                    log_lines.append(clean)
+                    if "Initialization Sequence Completed" in line:
+                        route_results = self._test_targets(targets)
+                        all_ok = all(item["ok"] for item in route_results) if route_results else True
+                        return {
+                            "ok": all_ok,
+                            "message": "OpenVPN đã kết nối. Kiểm tra tuyến nội bộ thành công." if all_ok else "OpenVPN đã kết nối nhưng tuyến tới DB/FTP còn lỗi.",
+                            "details": {**base_details, "stage": "route_test", "targets": route_results, "log_tail": log_lines[-30:]},
+                        }
+                if process.poll() is not None:
+                    break
+            return {
+                "ok": False,
+                "message": "OpenVPN chưa kết nối thành công trong thời gian kiểm tra.",
+                "details": {**base_details, "stage": "openvpn_connect", "exit_code": process.poll(), "log_tail": log_lines[-50:]},
+            }
+        except OSError as error:
+            return {
+                "ok": False,
+                "message": "Không chạy được lệnh OpenVPN trên máy chủ web.",
+                "details": {**base_details, "stage": "openvpn_spawn", "error": str(error), "command": command[:2]},
+            }
+        finally:
+            try:
+                Path(auth_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+            if process and process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+
+    @staticmethod
+    def _redact_secret(value: str, secret: str) -> str:
+        return value.replace(secret, "***") if secret else value
+
+    @staticmethod
+    def _parse_targets(raw_targets: str) -> list[dict[str, Any]]:
+        targets = []
+        for item in (raw_targets or "").split(","):
+            value = item.strip()
+            if not value or ":" not in value:
+                continue
+            host, port_text = value.rsplit(":", 1)
+            try:
+                targets.append({"host": host.strip(), "port": int(port_text), "name": value})
+            except ValueError:
+                continue
+        return targets
+
+    @staticmethod
+    def _test_targets(targets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        results = []
+        for target in targets:
+            host = target.get("host")
+            port = int(target.get("port", 0))
+            try:
+                with socket.create_connection((host, port), timeout=8):
+                    results.append({"ok": True, "name": target.get("name"), "host": host, "port": port, "message": "Kết nối được."})
+            except OSError as error:
+                results.append({"ok": False, "name": target.get("name"), "host": host, "port": port, "message": str(error)})
+        return results
 
     def _legacy_vpn_http_probe(self, host: str, port: int) -> dict[str, Any]:
         try:
