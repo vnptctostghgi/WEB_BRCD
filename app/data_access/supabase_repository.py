@@ -8,20 +8,21 @@ from app.data_access.app_repository import hash_password
 
 
 FEATURE_ROWS = [
-    {"code": "dashboard", "name": "Tong quan", "parent_code": None, "sort_order": 10},
-    {"code": "admin.web", "name": "Quan tri web", "parent_code": None, "sort_order": 20},
-    {"code": "admin.users", "name": "Quan tri nguoi dung", "parent_code": "admin.web", "sort_order": 21},
-    {"code": "admin.connections", "name": "Quan tri ket noi", "parent_code": "admin.web", "sort_order": 22},
-    {"code": "admin.permissions", "name": "Phan quyen nguoi dung", "parent_code": "admin.web", "sort_order": 23},
-    {"code": "admin.data_permissions", "name": "Phan quyen du lieu nguoi dung", "parent_code": "admin.web", "sort_order": 24},
-    {"code": "admin.catalogs", "name": "Quan tri danh muc", "parent_code": "admin.web", "sort_order": 25},
-    {"code": "admin.roles", "name": "Quan tri vai tro", "parent_code": "admin.web", "sort_order": 26},
-    {"code": "reports", "name": "Bao cao thong ke", "parent_code": None, "sort_order": 30},
-    {"code": "vault", "name": "Kho tai khoan web", "parent_code": None, "sort_order": 40},
-    {"code": "vault.view", "name": "Xem danh sach tai khoan", "parent_code": "vault", "sort_order": 41},
-    {"code": "vault.manage", "name": "Them va sua tai khoan", "parent_code": "vault", "sort_order": 42},
-    {"code": "vault.reveal", "name": "Xem mat khau da luu", "parent_code": "vault", "sort_order": 43},
-    {"code": "admin.audit", "name": "Xem nhat ky hoat dong", "parent_code": "admin.web", "sort_order": 90},
+    {"code": "dashboard", "name": "Tổng quan", "parent_code": None, "sort_order": 10},
+    {"code": "admin.web", "name": "Quản trị web", "parent_code": None, "sort_order": 20},
+    {"code": "admin.users", "name": "Quản trị người dùng", "parent_code": "admin.web", "sort_order": 21},
+    {"code": "admin.connections", "name": "Quản trị kết nối", "parent_code": "admin.web", "sort_order": 22},
+    {"code": "admin.permissions", "name": "Phân quyền người dùng", "parent_code": "admin.web", "sort_order": 23},
+    {"code": "admin.data_permissions", "name": "Phân quyền dữ liệu người dùng", "parent_code": "admin.web", "sort_order": 24},
+    {"code": "admin.catalogs", "name": "Quản trị danh mục", "parent_code": "admin.web", "sort_order": 25},
+    {"code": "admin.roles", "name": "Quản trị vai trò", "parent_code": "admin.catalogs", "sort_order": 26},
+    {"code": "admin.menu", "name": "Quản trị menu", "parent_code": "admin.web", "sort_order": 27},
+    {"code": "reports", "name": "Báo cáo thống kê", "parent_code": None, "sort_order": 30},
+    {"code": "vault", "name": "Tài khoản web", "parent_code": None, "sort_order": 40},
+    {"code": "vault.view", "name": "Xem danh sách tài khoản", "parent_code": "vault", "sort_order": 41},
+    {"code": "vault.manage", "name": "Thêm và sửa tài khoản", "parent_code": "vault", "sort_order": 42},
+    {"code": "vault.reveal", "name": "Xem mật khẩu đã lưu", "parent_code": "vault", "sort_order": 43},
+    {"code": "admin.audit", "name": "Nhật ký hoạt động", "parent_code": "admin.web", "sort_order": 90},
 ]
 
 REGION_ROWS = [
@@ -48,7 +49,7 @@ class SupabaseRepository:
 
     def initialize(self, admin_username: str, admin_password: str) -> None:
         for feature in FEATURE_ROWS:
-            self._upsert("features", feature, "code")
+            self._seed_feature(feature)
         for region in REGION_ROWS:
             now = self._now()
             try:
@@ -63,6 +64,7 @@ class SupabaseRepository:
                 self._upsert("system_roles", {**role, "created_at": now, "updated_at": now}, "code")
             except RuntimeError:
                 pass
+        self._delete_obsolete_features()
         admin = self.get_user_by_username(admin_username)
         if not admin:
             user_id = self.create_user(admin_username, "Quan tri vien he thong", admin_password, "admin")
@@ -73,6 +75,22 @@ class SupabaseRepository:
     def get_user_by_username(self, username: str) -> dict[str, Any] | None:
         rows = self._get("users", {"username": f"eq.{username}"})
         return rows[0] if rows else None
+
+    def _seed_feature(self, feature: dict[str, Any]) -> None:
+        rows = self._get("features", {"code": f"eq.{feature['code']}", "select": "code", "limit": "1"})
+        if rows:
+            # Giữ nguyên parent_code/sort_order vì admin có thể đã sắp xếp menu trong giao diện.
+            self._patch("features", {"code": f"eq.{feature['code']}"}, {"name": feature["name"]})
+            return
+        self._insert("features", feature)
+
+    def _delete_obsolete_features(self) -> None:
+        for code in ("admin", "admin.connections.test"):
+            try:
+                self._delete("user_permissions", {"feature_code": f"eq.{code}"})
+                self._delete("features", {"code": f"eq.{code}"})
+            except RuntimeError:
+                pass
 
     def get_user_by_id(self, user_id: int) -> dict[str, Any] | None:
         rows = self._get("users", {"id": f"eq.{user_id}"})
@@ -210,6 +228,15 @@ class SupabaseRepository:
 
     def list_features(self) -> list[dict[str, Any]]:
         return self._get("features", {"order": "sort_order.asc"})
+
+    def update_feature_layout(self, code: str, name: str, parent_code: str | None, sort_order: int) -> None:
+        if parent_code == code:
+            raise ValueError("Chức năng cha không được trùng chính nó.")
+        self._patch("features", {"code": f"eq.{code}"}, {
+            "name": name,
+            "parent_code": parent_code or None,
+            "sort_order": sort_order,
+        })
 
     def get_user_permissions(self, user_id: int) -> list[str]:
         return [row["feature_code"] for row in self._get("user_permissions", {"user_id": f"eq.{user_id}", "select": "feature_code"})]

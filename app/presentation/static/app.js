@@ -69,10 +69,10 @@ document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("
   if (item.dataset.view === "vault") await loadCredentials();
   if (item.dataset.view === "websites") await loadAdminWebsites();
   if (item.dataset.view === "system") await loadSystem();
-  if (item.dataset.view === "roles") await loadRoles();
+  if (item.dataset.view === "menu-admin") await loadMenuLayout();
   if (item.dataset.view === "permissions") await loadPermissionManager();
   if (item.dataset.view === "data-permissions") await loadDataPermissionManager();
-  if (item.dataset.view === "catalogs") await loadRegions();
+  if (item.dataset.view === "catalogs") await loadCatalogs();
   if (item.dataset.view === "audit") await loadAudit();
 }));
 
@@ -122,6 +122,10 @@ if (mustChangePassword) {
   if (dialog && !dialog.open) {
     dialog.showModal();
   }
+}
+
+if (role === "admin") {
+  syncNavigationFromFeatures();
 }
 
 function closeTopDropdowns(except = null) {
@@ -315,6 +319,7 @@ if (role === "admin") {
   $("#user-import-file")?.addEventListener("change", importUserFile);
   $("#save-bulk-permissions")?.addEventListener("click", saveBulkPermissions);
   $("#save-data-permissions")?.addEventListener("click", saveDataPermissions);
+  $("#save-menu-layout")?.addEventListener("click", saveMenuLayout);
 }
 
 async function importUserFile(event) {
@@ -404,6 +409,10 @@ async function loadRoles() {
   document.querySelectorAll("[data-delete-role]").forEach((button) => button.addEventListener("click", () => deleteRole(button.dataset.deleteRole)));
 }
 
+async function loadCatalogs() {
+  await Promise.all([loadRegions(), loadRoles()]);
+}
+
 function openRole(code = "") {
   const roleItem = systemRoles.find((item) => item.code === code);
   const form = $("#role-form");
@@ -448,6 +457,73 @@ async function deleteRole(code) {
     await loadRoles();
   } catch (error) {
     showMessage($("#roles-message"), error.message, "error");
+  }
+}
+
+async function syncNavigationFromFeatures() {
+  try {
+    features = (await api("/api/admin/features")).features;
+    const featureByCode = new Map(features.map((feature) => [feature.code, feature]));
+    document.querySelectorAll(".nav-item[data-feature-code]").forEach((item) => {
+      const feature = featureByCode.get(item.dataset.featureCode);
+      if (!feature) return;
+      item.style.order = String(feature.sort_order ?? 0);
+      item.dataset.title = feature.name || item.dataset.title;
+      const label = item.querySelector("span:last-child");
+      if (label && feature.name) label.textContent = feature.name;
+      const adminGroup = document.querySelector('summary[data-feature-code="admin.web"]')?.closest(".nav-group");
+      const reportsGroup = document.querySelector('summary[data-feature-code="reports"]')?.closest(".nav-group");
+      if (feature.parent_code === "admin.web" && adminGroup && item.parentElement !== adminGroup) {
+        item.classList.add("child");
+        adminGroup.appendChild(item);
+      }
+      if (feature.parent_code === "reports" && reportsGroup && item.parentElement !== reportsGroup) {
+        item.classList.add("child");
+        reportsGroup.appendChild(item);
+      }
+    });
+  } catch {
+    // Nếu API layout chưa sẵn sàng, sidebar vẫn dùng cấu trúc tĩnh đã render từ server.
+  }
+}
+
+async function loadMenuLayout() {
+  features = (await api("/api/admin/features")).features;
+  const options = [`<option value="">Không thuộc nhóm</option>`]
+    .concat(features.map((feature) => `<option value="${escapeHtml(feature.code)}">${escapeHtml(feature.name)} (${escapeHtml(feature.code)})</option>`))
+    .join("");
+  $("#menu-layout-table").innerHTML = features.map((feature) => `
+    <tr data-feature-row="${escapeHtml(feature.code)}">
+      <td><strong>${escapeHtml(feature.code)}</strong></td>
+      <td><input class="form-control" name="name" value="${escapeHtml(feature.name)}" /></td>
+      <td><select class="form-control" name="parent_code" data-current-parent="${escapeHtml(feature.parent_code || "")}">${options}</select></td>
+      <td><input class="form-control" name="sort_order" type="number" value="${escapeHtml(feature.sort_order ?? 0)}" /></td>
+    </tr>
+  `).join("");
+  document.querySelectorAll("#menu-layout-table select[name='parent_code']").forEach((select) => {
+    const rowCode = select.closest("tr").dataset.featureRow;
+    [...select.options].forEach((option) => {
+      if (option.value === rowCode) option.disabled = true;
+    });
+    select.value = select.dataset.currentParent || "";
+  });
+}
+
+async function saveMenuLayout() {
+  const payload = [...document.querySelectorAll("#menu-layout-table tr[data-feature-row]")].map((row) => ({
+    code: row.dataset.featureRow,
+    name: row.querySelector("[name='name']").value,
+    parent_code: row.querySelector("[name='parent_code']").value || null,
+    sort_order: Number(row.querySelector("[name='sort_order']").value || 0),
+  }));
+  try {
+    await api("/api/admin/features/layout", { method: "PUT", body: JSON.stringify({ features: payload }) });
+    showMessage($("#menu-layout-message"), "Đã lưu cấu trúc menu. Sidebar sẽ cập nhật ngay.");
+    features = [];
+    await syncNavigationFromFeatures();
+    await loadMenuLayout();
+  } catch (error) {
+    showMessage($("#menu-layout-message"), error.message, "error");
   }
 }
 

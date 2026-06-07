@@ -141,6 +141,16 @@ p {
   box-shadow: 0 16px 36px rgba(14, 165, 233, .24);
 }
 
+.brand-title {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(1.05rem, 1.5vw, 1.28rem);
+  font-weight: 900;
+  line-height: 1.18;
+  letter-spacing: -.035em;
+  white-space: normal;
+}
+
 .dynamic-module-title {
   margin: 0;
   color: #fff;
@@ -1334,6 +1344,21 @@ legend {
 .selection-item small {
   color: #bae6fd;
   font-weight: 700;
+}
+
+.catalog-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (min-width: 1280px) {
+  .catalog-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+#menu-layout-table .form-control {
+  min-width: 220px;
 }
 
 .permission-item {

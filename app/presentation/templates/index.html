@@ -23,7 +23,7 @@
       };
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=21" />
+    <link rel="stylesheet" href="/static/styles.css?v=22" />
   </head>
   <body class="app-dark min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'vault.manage' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'vault.reveal' in user.permissions }}">
     <svg class="icon-sprite" aria-hidden="true">
@@ -44,8 +44,7 @@
           <div class="flex min-w-0 items-center gap-3 lg:mb-8">
             <img class="brand-logo" src="/static/images/system-logo.png" alt="Logo hệ thống" />
             <div class="min-w-0">
-              <p class="truncate text-base font-extrabold leading-tight">Hệ thống quản trị đặc biệt</p>
-              <p class="truncate text-xs text-sky-100">VNPT Cần Thơ</p>
+              <p class="brand-title">Hệ thống quản trị đặc biệt</p>
             </div>
           </div>
           <button class="menu-button lg:hidden" id="menu-button" type="button" aria-label="Mở menu điều hướng" aria-controls="main-navigation" aria-expanded="false"><span></span><span></span><span></span></button>
@@ -57,27 +56,28 @@
             <input id="menu-search" type="search" placeholder="Nhập tên chức năng..." autocomplete="off" />
           </label>
           <div class="nav-tree" id="nav-tree">
-            <button class="nav-item active" data-view="dashboard" data-title="Tổng quan" data-keywords="tong quan dashboard"><svg class="nav-svg"><use href="#icon-dashboard"></use></svg><span>Tổng quan</span></button>
+            <button class="nav-item active" data-feature-code="dashboard" data-view="dashboard" data-title="Tổng quan" data-keywords="tong quan dashboard"><svg class="nav-svg"><use href="#icon-dashboard"></use></svg><span>Tổng quan</span></button>
             {% if user.role == "admin" or "vault.view" in user.permissions %}
             <details class="nav-group" open>
-              <summary><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-vault"></use></svg><strong>Cá nhân</strong></summary>
-              <button class="nav-item child" data-view="vault" data-title="Tài khoản web" data-keywords="tai khoan web mat khau"><svg class="nav-svg"><use href="#icon-vault"></use></svg><span>Tài khoản web</span></button>
+              <summary data-feature-code="admin.web"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-shield"></use></svg><strong>Quản trị web</strong></summary>
+              {% if user.role == "admin" or "vault.view" in user.permissions %}
+              <button class="nav-item child" data-feature-code="vault" data-view="vault" data-title="Tài khoản web" data-keywords="tai khoan web mat khau"><svg class="nav-svg"><use href="#icon-vault"></use></svg><span>Tài khoản web</span></button>
+              {% endif %}
+              {% if user.role == "admin" %}
+              <button class="nav-item child" data-feature-code="admin.users" data-view="users" data-title="Quản trị người dùng" data-keywords="quan tri nguoi dung user"><svg class="nav-svg"><use href="#icon-users"></use></svg><span>Quản trị người dùng</span></button>
+              <button class="nav-item child" data-feature-code="admin.connections" data-view="system" data-title="Quản trị kết nối" data-keywords="quan tri ket noi vpn db ftp drive telegram"><svg class="nav-svg"><use href="#icon-plug"></use></svg><span>Quản trị kết nối</span></button>
+              <button class="nav-item child" data-feature-code="admin.menu" data-view="menu-admin" data-title="Quản trị menu" data-keywords="quan tri menu sap xep di chuyen module"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản trị menu</span></button>
+              <button class="nav-item child" data-feature-code="admin.permissions" data-view="permissions" data-title="Phân quyền người dùng" data-keywords="phan quyen nguoi dung chuc nang"><svg class="nav-svg"><use href="#icon-shield"></use></svg><span>Phân quyền người dùng</span></button>
+              <button class="nav-item child" data-feature-code="admin.data_permissions" data-view="data-permissions" data-title="Phân quyền dữ liệu người dùng" data-keywords="phan quyen du lieu phan vung"><svg class="nav-svg"><use href="#icon-database"></use></svg><span>Phân quyền dữ liệu</span></button>
+              <button class="nav-item child" data-feature-code="admin.catalogs" data-view="catalogs" data-title="Quản trị danh mục" data-keywords="quan tri danh muc phan vung vai tro bien"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản trị danh mục</span></button>
+              <button class="nav-item child" data-feature-code="admin.audit" data-view="audit" data-title="Nhật ký hoạt động" data-keywords="nhat ky audit log"><svg class="nav-svg"><use href="#icon-audit"></use></svg><span>Nhật ký hoạt động</span></button>
+              {% endif %}
             </details>
             {% endif %}
             {% if user.role == "admin" %}
             <details class="nav-group" open>
-              <summary><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-shield"></use></svg><strong>Quản trị web</strong></summary>
-              <button class="nav-item child" data-view="users" data-title="Quản trị người dùng" data-keywords="quan tri nguoi dung user"><svg class="nav-svg"><use href="#icon-users"></use></svg><span>Quản trị người dùng</span></button>
-              <button class="nav-item child" data-view="system" data-title="Quản trị kết nối" data-keywords="quan tri ket noi vpn db ftp drive telegram"><svg class="nav-svg"><use href="#icon-plug"></use></svg><span>Quản trị kết nối</span></button>
-              <button class="nav-item child" data-view="roles" data-title="Quản trị vai trò người dùng" data-keywords="quan tri vai tro role"><svg class="nav-svg"><use href="#icon-role"></use></svg><span>Quản trị vai trò</span></button>
-              <button class="nav-item child" data-view="permissions" data-title="Phân quyền người dùng" data-keywords="phan quyen nguoi dung chuc nang"><svg class="nav-svg"><use href="#icon-shield"></use></svg><span>Phân quyền người dùng</span></button>
-              <button class="nav-item child" data-view="data-permissions" data-title="Phân quyền dữ liệu người dùng" data-keywords="phan quyen du lieu phan vung"><svg class="nav-svg"><use href="#icon-database"></use></svg><span>Phân quyền dữ liệu</span></button>
-              <button class="nav-item child" data-view="catalogs" data-title="Quản trị danh mục" data-keywords="quan tri danh muc phan vung bien"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản trị danh mục</span></button>
-              <button class="nav-item child" data-view="audit" data-title="Nhật ký hoạt động" data-keywords="nhat ky audit log"><svg class="nav-svg"><use href="#icon-audit"></use></svg><span>Nhật ký hoạt động</span></button>
-            </details>
-            <details class="nav-group" open>
-              <summary><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-chart"></use></svg><strong>Báo cáo thống kê</strong></summary>
-              <button class="nav-item child" data-view="reports" data-title="Báo cáo thống kê" data-keywords="bao cao thong ke bieu do"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Báo cáo thống kê</span></button>
+              <summary data-feature-code="reports"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-chart"></use></svg><strong>Báo cáo thống kê</strong></summary>
+              <button class="nav-item child" data-feature-code="reports" data-view="reports" data-title="Báo cáo thống kê" data-keywords="bao cao thong ke bieu do"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Báo cáo thống kê</span></button>
             </details>
             {% endif %}
           </div>
@@ -222,11 +222,6 @@
           <section class="data-card"><div class="table-scroll"><table><thead><tr><th>Tên website</th><th>Địa chỉ</th><th>OTP</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody id="websites-table"></tbody></table></div></section>
         </section>
 
-        <section class="app-view" id="view-roles">
-          <div class="page-header"><div><p class="eyebrow">Quản trị web</p><h1>Quản trị vai trò người dùng</h1><p class="subtitle">Định nghĩa các vai trò vận hành như Admin, quản lý phân vùng, nhân viên nhập liệu.</p></div><button class="btn-primary" data-open-dialog="role-dialog">Thêm vai trò</button></div>
-          <section class="data-card"><div id="roles-message" class="result hidden mb-4"></div><div class="table-scroll"><table><thead><tr><th>Mã vai trò</th><th>Tên vai trò</th><th>Mô tả</th><th>Trạng thái</th><th>Thứ tự</th><th>Thao tác</th></tr></thead><tbody id="roles-table"></tbody></table></div></section>
-        </section>
-
         <section class="app-view" id="view-permissions">
           <div class="page-header"><div><p class="eyebrow">Quản trị web</p><h1>Phân quyền người dùng</h1><p class="subtitle">Chọn một hoặc nhiều người dùng, chọn chức năng được phép sử dụng rồi bấm lưu.</p></div><button class="btn-primary" id="save-bulk-permissions">Lưu phân quyền</button></div>
           <section class="grid gap-4 lg:grid-cols-2">
@@ -244,8 +239,16 @@
         </section>
 
         <section class="app-view" id="view-catalogs">
-          <div class="page-header"><div><p class="eyebrow">Quản trị web</p><h1>Quản trị danh mục</h1><p class="subtitle">Quản trị các biến dùng chung như phân vùng.</p></div><button class="btn-primary" data-open-dialog="region-dialog">Thêm phân vùng</button></div>
-          <section class="data-card"><div id="regions-message" class="result hidden mb-4"></div><div class="table-scroll"><table><thead><tr><th>Mã</th><th>Tên phân vùng</th><th>Trạng thái</th><th>Thứ tự</th><th>Thao tác</th></tr></thead><tbody id="regions-table"></tbody></table></div></section>
+          <div class="page-header"><div><p class="eyebrow">Quản trị web</p><h1>Quản trị danh mục</h1><p class="subtitle">Quản trị các biến dùng chung như phân vùng và vai trò người dùng.</p></div><div class="action-group"><button class="btn-secondary" data-open-dialog="role-dialog">Thêm vai trò</button><button class="btn-primary" data-open-dialog="region-dialog">Thêm phân vùng</button></div></div>
+          <section class="catalog-grid">
+            <div class="data-card"><div class="section-heading"><div><p class="eyebrow">Danh mục</p><h2>Phân vùng dữ liệu</h2></div></div><div id="regions-message" class="result hidden mb-4"></div><div class="table-scroll"><table><thead><tr><th>Mã</th><th>Tên phân vùng</th><th>Trạng thái</th><th>Thứ tự</th><th>Thao tác</th></tr></thead><tbody id="regions-table"></tbody></table></div></div>
+            <div class="data-card"><div class="section-heading"><div><p class="eyebrow">Danh mục</p><h2>Vai trò người dùng</h2></div></div><div id="roles-message" class="result hidden mb-4"></div><div class="table-scroll"><table><thead><tr><th>Mã vai trò</th><th>Tên vai trò</th><th>Mô tả</th><th>Trạng thái</th><th>Thứ tự</th><th>Thao tác</th></tr></thead><tbody id="roles-table"></tbody></table></div></div>
+          </section>
+        </section>
+
+        <section class="app-view" id="view-menu-admin">
+          <div class="page-header"><div><p class="eyebrow">Quản trị web</p><h1>Quản trị menu</h1><p class="subtitle">Sắp xếp thứ tự module hoặc di chuyển module sang nhóm chức năng khác.</p></div><button class="btn-primary" id="save-menu-layout">Lưu cấu trúc menu</button></div>
+          <section class="data-card"><div id="menu-layout-message" class="result hidden mb-4"></div><div class="table-scroll"><table><thead><tr><th>Mã chức năng</th><th>Tên hiển thị</th><th>Thuộc nhóm</th><th>Thứ tự</th></tr></thead><tbody id="menu-layout-table"></tbody></table></div></section>
         </section>
 
         <section class="app-view" id="view-reports">
@@ -286,6 +289,6 @@
     {% if user.role == "admin" or "vault.manage" in user.permissions %}
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
-    <script src="/static/app.js?v=17"></script>
+    <script src="/static/app.js?v=18"></script>
   </body>
 </html>

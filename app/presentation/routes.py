@@ -105,6 +105,17 @@ class SystemRolePayload(BaseModel):
     sort_order: int = 0
 
 
+class FeatureLayoutItem(BaseModel):
+    code: str
+    name: str
+    parent_code: str | None = None
+    sort_order: int = 0
+
+
+class FeatureLayoutPayload(BaseModel):
+    features: list[FeatureLayoutItem]
+
+
 def build_app_repository() -> AppRepository:
     return build_repository(get_settings())
 
@@ -587,6 +598,24 @@ def save_admin_website(request: Request, payload: WebsitePayload) -> dict:
 def features(request: Request) -> dict:
     admin_user(request)
     return {"features": build_app_repository().list_features()}
+
+
+@router.put("/api/admin/features/layout")
+def save_feature_layout(request: Request, payload: FeatureLayoutPayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    valid_codes = {feature["code"] for feature in repository.list_features()}
+    for item in payload.features:
+        if item.code not in valid_codes:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Chức năng {item.code} không hợp lệ.")
+        if item.parent_code and item.parent_code not in valid_codes:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Chức năng cha {item.parent_code} không hợp lệ.")
+        try:
+            repository.update_feature_layout(item.code, item.name.strip(), item.parent_code, item.sort_order)
+        except ValueError as error:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    repository.add_audit_log(actor["username"], "feature_layout_saved", f"Cap nhat cau truc menu {len(payload.features)} chuc nang")
+    return {"ok": True}
 
 
 @router.get("/api/admin/roles")

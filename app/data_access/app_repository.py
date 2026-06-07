@@ -178,24 +178,47 @@ class AppRepository:
                 ],
             )
             connection.executemany(
-                "INSERT OR REPLACE INTO features (code, name, parent_code, sort_order) VALUES (?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO features (code, name, parent_code, sort_order) VALUES (?, ?, ?, ?)",
                 [
-                    ("dashboard", "Tong quan", None, 10),
-                    ("admin.web", "Quan tri web", None, 20),
-                    ("admin.users", "Quan tri nguoi dung", "admin.web", 21),
-                    ("admin.connections", "Quan tri ket noi", "admin.web", 22),
-                    ("admin.permissions", "Phan quyen nguoi dung", "admin.web", 23),
-                    ("admin.data_permissions", "Phan quyen du lieu nguoi dung", "admin.web", 24),
-                    ("admin.catalogs", "Quan tri danh muc", "admin.web", 25),
-                    ("admin.roles", "Quan tri vai tro", "admin.web", 26),
-                    ("reports", "Bao cao thong ke", None, 30),
-                    ("vault", "Kho tai khoan web", None, 40),
-                    ("vault.view", "Xem danh sach tai khoan", "vault", 41),
-                    ("vault.manage", "Them va sua tai khoan", "vault", 42),
-                    ("vault.reveal", "Xem mat khau da luu", "vault", 43),
-                    ("admin.audit", "Xem nhat ky hoat dong", "admin.web", 90),
+                    ("dashboard", "Tổng quan", None, 10),
+                    ("admin.web", "Quản trị web", None, 20),
+                    ("admin.users", "Quản trị người dùng", "admin.web", 21),
+                    ("admin.connections", "Quản trị kết nối", "admin.web", 22),
+                    ("admin.permissions", "Phân quyền người dùng", "admin.web", 23),
+                    ("admin.data_permissions", "Phân quyền dữ liệu người dùng", "admin.web", 24),
+                    ("admin.catalogs", "Quản trị danh mục", "admin.web", 25),
+                    ("admin.roles", "Quản trị vai trò", "admin.catalogs", 26),
+                    ("admin.menu", "Quản trị menu", "admin.web", 27),
+                    ("reports", "Báo cáo thống kê", None, 30),
+                    ("vault", "Tài khoản web", None, 40),
+                    ("vault.view", "Xem danh sách tài khoản", "vault", 41),
+                    ("vault.manage", "Thêm và sửa tài khoản", "vault", 42),
+                    ("vault.reveal", "Xem mật khẩu đã lưu", "vault", 43),
+                    ("admin.audit", "Nhật ký hoạt động", "admin.web", 90),
                 ],
             )
+            connection.executemany(
+                "UPDATE features SET name=? WHERE code=?",
+                [
+                    ("Tổng quan", "dashboard"),
+                    ("Quản trị web", "admin.web"),
+                    ("Quản trị người dùng", "admin.users"),
+                    ("Quản trị kết nối", "admin.connections"),
+                    ("Phân quyền người dùng", "admin.permissions"),
+                    ("Phân quyền dữ liệu người dùng", "admin.data_permissions"),
+                    ("Quản trị danh mục", "admin.catalogs"),
+                    ("Quản trị vai trò", "admin.roles"),
+                    ("Quản trị menu", "admin.menu"),
+                    ("Báo cáo thống kê", "reports"),
+                    ("Tài khoản web", "vault"),
+                    ("Xem danh sách tài khoản", "vault.view"),
+                    ("Thêm và sửa tài khoản", "vault.manage"),
+                    ("Xem mật khẩu đã lưu", "vault.reveal"),
+                    ("Nhật ký hoạt động", "admin.audit"),
+                ],
+            )
+            connection.execute("DELETE FROM user_permissions WHERE feature_code IN ('admin', 'admin.connections.test')")
+            connection.execute("DELETE FROM features WHERE code IN ('admin', 'admin.connections.test')")
             now = self._now()
             connection.executemany(
                 """
@@ -399,6 +422,16 @@ class AppRepository:
     def list_features(self) -> list[dict[str, Any]]:
         with self.connect() as connection:
             return [dict(row) for row in connection.execute("SELECT * FROM features ORDER BY sort_order").fetchall()]
+
+    def update_feature_layout(self, code: str, name: str, parent_code: str | None, sort_order: int) -> None:
+        with self.connect() as connection:
+            parent = parent_code or None
+            if parent == code:
+                raise ValueError("Chức năng cha không được trùng chính nó.")
+            connection.execute(
+                "UPDATE features SET name=?, parent_code=?, sort_order=? WHERE code=?",
+                (name, parent, sort_order, code),
+            )
 
     def get_user_permissions(self, user_id: int) -> list[str]:
         with self.connect() as connection:

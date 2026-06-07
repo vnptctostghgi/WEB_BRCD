@@ -9,6 +9,31 @@ alter table public.users add column if not exists gender text;
 alter table public.users add column if not exists department text;
 alter table public.users add column if not exists job_title text;
 
+insert into public.features (code, name, parent_code, sort_order)
+values
+  ('admin.menu', 'Quản trị menu', 'admin.web', 27),
+  ('admin.roles', 'Quản trị vai trò', 'admin.catalogs', 26),
+  ('dashboard', 'Tổng quan', null, 10),
+  ('admin.web', 'Quản trị web', null, 20),
+  ('admin.users', 'Quản trị người dùng', 'admin.web', 21),
+  ('admin.connections', 'Quản trị kết nối', 'admin.web', 22),
+  ('admin.permissions', 'Phân quyền người dùng', 'admin.web', 23),
+  ('admin.data_permissions', 'Phân quyền dữ liệu người dùng', 'admin.web', 24),
+  ('admin.catalogs', 'Quản trị danh mục', 'admin.web', 25),
+  ('reports', 'Báo cáo thống kê', null, 30),
+  ('vault', 'Tài khoản web', 'admin.web', 40),
+  ('vault.view', 'Xem danh sách tài khoản', 'vault', 41),
+  ('vault.manage', 'Thêm và sửa tài khoản', 'vault', 42),
+  ('vault.reveal', 'Xem mật khẩu đã lưu', 'vault', 43),
+  ('admin.audit', 'Nhật ký hoạt động', 'admin.web', 90)
+on conflict (code) do update
+set name = excluded.name,
+    parent_code = excluded.parent_code,
+    sort_order = excluded.sort_order;
+
+delete from public.user_permissions where feature_code in ('admin', 'admin.connections.test');
+delete from public.features where code in ('admin', 'admin.connections.test');
+
 create unique index if not exists users_employee_code_lower_idx
 on public.users (lower(employee_code))
 where employee_code is not null;
