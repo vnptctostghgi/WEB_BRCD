@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "BRCĐ Admin"
+    app_name: str = "Hệ thống quản trị đặc biệt"
     app_env: str = "development"
     app_database_backend: str = "sqlite"
     app_database_path: str = "data/app.db"

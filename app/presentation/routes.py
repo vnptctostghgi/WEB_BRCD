@@ -97,6 +97,14 @@ class SystemConnectionPayload(BaseModel):
     is_active: bool = False
 
 
+class SystemRolePayload(BaseModel):
+    code: str
+    name: str
+    description: str = ""
+    is_active: bool = True
+    sort_order: int = 0
+
+
 def build_app_repository() -> AppRepository:
     return build_repository(get_settings())
 
@@ -579,6 +587,37 @@ def save_admin_website(request: Request, payload: WebsitePayload) -> dict:
 def features(request: Request) -> dict:
     admin_user(request)
     return {"features": build_app_repository().list_features()}
+
+
+@router.get("/api/admin/roles")
+def list_roles(request: Request) -> dict:
+    admin_user(request)
+    return {"roles": build_app_repository().list_system_roles()}
+
+
+@router.post("/api/admin/roles")
+def save_role(request: Request, payload: SystemRolePayload) -> dict:
+    actor = admin_user(request)
+    code = payload.code.strip().lower()
+    if not code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mã vai trò không được để trống.")
+    build_app_repository().save_system_role(
+        code,
+        payload.name.strip(),
+        payload.description.strip(),
+        payload.is_active,
+        payload.sort_order,
+    )
+    build_app_repository().add_audit_log(actor["username"], "role_saved", f"Luu vai tro {code}")
+    return {"ok": True}
+
+
+@router.delete("/api/admin/roles/{code}")
+def delete_role(request: Request, code: str) -> dict:
+    actor = admin_user(request)
+    build_app_repository().delete_system_role(code.strip().lower())
+    build_app_repository().add_audit_log(actor["username"], "role_deleted", f"Xoa vai tro {code}")
+    return {"ok": True}
 
 
 @router.get("/api/admin/users/{user_id}/permissions")

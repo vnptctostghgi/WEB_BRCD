@@ -15,6 +15,7 @@ FEATURE_ROWS = [
     {"code": "admin.permissions", "name": "Phan quyen nguoi dung", "parent_code": "admin.web", "sort_order": 23},
     {"code": "admin.data_permissions", "name": "Phan quyen du lieu nguoi dung", "parent_code": "admin.web", "sort_order": 24},
     {"code": "admin.catalogs", "name": "Quan tri danh muc", "parent_code": "admin.web", "sort_order": 25},
+    {"code": "admin.roles", "name": "Quan tri vai tro", "parent_code": "admin.web", "sort_order": 26},
     {"code": "reports", "name": "Bao cao thong ke", "parent_code": None, "sort_order": 30},
     {"code": "vault", "name": "Kho tai khoan web", "parent_code": None, "sort_order": 40},
     {"code": "vault.view", "name": "Xem danh sach tai khoan", "parent_code": "vault", "sort_order": 41},
@@ -28,6 +29,13 @@ REGION_ROWS = [
     {"code": "13", "name": "Can Tho", "is_active": True, "sort_order": 10},
     {"code": "66", "name": "Hau Giang", "is_active": True, "sort_order": 20},
     {"code": "47", "name": "Soc Trang", "is_active": True, "sort_order": 30},
+]
+
+ROLE_ROWS = [
+    {"code": "admin", "name": "Quan tri he thong", "description": "Toan quyen quan tri va cau hinh he thong.", "is_active": True, "sort_order": 10},
+    {"code": "region_manager", "name": "Quan ly phan vung", "description": "Quan ly so lieu va nguoi dung theo phan vung duoc cap.", "is_active": True, "sort_order": 20},
+    {"code": "data_entry", "name": "Nhan vien nhap lieu", "description": "Nhap va kiem tra du lieu nghiep vu.", "is_active": True, "sort_order": 30},
+    {"code": "viewer", "name": "Nguoi xem", "description": "Xem bao cao va chuc nang duoc phan quyen.", "is_active": True, "sort_order": 40},
 ]
 
 
@@ -48,6 +56,12 @@ class SupabaseRepository:
             except RuntimeError:
                 # Production can deploy before the operator runs the new SQL patch.
                 # Feature routes will report the schema error until the patch is applied.
+                pass
+        for role in ROLE_ROWS:
+            now = self._now()
+            try:
+                self._upsert("system_roles", {**role, "created_at": now, "updated_at": now}, "code")
+            except RuntimeError:
                 pass
         admin = self.get_user_by_username(admin_username)
         if not admin:
@@ -208,6 +222,24 @@ class SupabaseRepository:
     def set_bulk_user_permissions(self, user_ids: list[int], feature_codes: list[str]) -> None:
         for user_id in user_ids:
             self.set_user_permissions(user_id, feature_codes)
+
+    def list_system_roles(self) -> list[dict[str, Any]]:
+        return self._get("system_roles", {"order": "sort_order.asc"})
+
+    def save_system_role(self, code: str, name: str, description: str, is_active: bool, sort_order: int) -> None:
+        now = self._now()
+        self._upsert("system_roles", {
+            "code": code,
+            "name": name,
+            "description": description,
+            "is_active": is_active,
+            "sort_order": sort_order,
+            "created_at": now,
+            "updated_at": now,
+        }, "code")
+
+    def delete_system_role(self, code: str) -> None:
+        self._delete("system_roles", {"code": f"eq.{code}"})
 
     def list_data_regions(self, active_only: bool = False) -> list[dict[str, Any]]:
         params = {"order": "sort_order.asc"}

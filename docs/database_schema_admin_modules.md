@@ -5,10 +5,11 @@ Dự án đang dùng FastAPI + Jinja2 + JavaScript thuần ở frontend và Supa
 ## Bảng người dùng và vai trò
 
 - `users`: lưu tài khoản đăng nhập, họ tên, vai trò, trạng thái, mã nhân viên, email, phòng ban và cờ `must_change_password`.
+- `system_roles`: danh mục vai trò do quản trị viên cấu hình, ví dụ `admin`, `region_manager`, `data_entry`, `viewer`.
 - `role`: hiện dùng trực tiếp trên bảng `users` với 2 giá trị chính:
   - `admin`: quản trị hệ thống, mặc định xem và thao tác tất cả chức năng.
   - `viewer`: người dùng thường, chỉ thấy chức năng được phân quyền.
-- Khi cần mở rộng nhiều vai trò hơn, có thể tách thêm bảng `roles(id, code, name, description)` và đổi `users.role` thành khóa ngoại `role_id`.
+- Khi cần ràng buộc chặt hơn ở bước sau, có thể đổi `users.role` thành khóa ngoại tham chiếu `system_roles.code`.
 
 ## Bảng chức năng và phân quyền chức năng
 

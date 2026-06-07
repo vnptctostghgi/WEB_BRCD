@@ -32,6 +32,29 @@ create table if not exists public.user_data_permissions (
   primary key (user_id, region_code)
 );
 
+create table if not exists public.system_roles (
+  code text primary key,
+  name text not null,
+  description text not null default '',
+  is_active boolean not null default true,
+  sort_order integer not null default 0,
+  created_at timestamptz not null,
+  updated_at timestamptz not null
+);
+
+insert into public.system_roles (code, name, description, is_active, sort_order, created_at, updated_at)
+values
+  ('admin', 'Quan tri he thong', 'Toan quyen quan tri va cau hinh he thong.', true, 10, now(), now()),
+  ('region_manager', 'Quan ly phan vung', 'Quan ly so lieu va nguoi dung theo phan vung duoc cap.', true, 20, now(), now()),
+  ('data_entry', 'Nhan vien nhap lieu', 'Nhap va kiem tra du lieu nghiep vu.', true, 30, now(), now()),
+  ('viewer', 'Nguoi xem', 'Xem bao cao va chuc nang duoc phan quyen.', true, 40, now(), now())
+on conflict (code) do update
+set name = excluded.name,
+    description = excluded.description,
+    is_active = excluded.is_active,
+    sort_order = excluded.sort_order,
+    updated_at = now();
+
 insert into public.data_regions (code, name, is_active, sort_order, created_at, updated_at)
 values
   ('ALL', 'Tat ca', true, 0, now(), now()),
@@ -46,3 +69,4 @@ set name = excluded.name,
 
 alter table public.data_regions enable row level security;
 alter table public.user_data_permissions enable row level security;
+alter table public.system_roles enable row level security;

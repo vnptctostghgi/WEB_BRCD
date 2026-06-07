@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#07559c" />
-    <title>{{ app_name }}</title>
+    <title>Hệ thống quản trị đặc biệt</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -23,38 +23,65 @@
       };
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=20" />
+    <link rel="stylesheet" href="/static/styles.css?v=21" />
   </head>
   <body class="app-dark min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'vault.manage' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'vault.reveal' in user.permissions }}">
+    <svg class="icon-sprite" aria-hidden="true">
+      <symbol id="icon-dashboard" viewBox="0 0 24 24"><path d="M4 13h7V4H4v9Zm0 7h7v-5H4v5Zm9 0h7v-9h-7v9Zm0-16v5h7V4h-7Z"/></symbol>
+      <symbol id="icon-vault" viewBox="0 0 24 24"><path d="M6 10V8a6 6 0 1 1 12 0v2h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1Zm2 0h8V8a4 4 0 0 0-8 0v2Zm4 4a2 2 0 0 0-1 3.73V19h2v-1.27A2 2 0 0 0 12 14Z"/></symbol>
+      <symbol id="icon-users" viewBox="0 0 24 24"><path d="M8 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8.5 1a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM2 21a6 6 0 0 1 12 0H2Zm12.5-1.5c-.2-1.6-.9-3-2-4.1A5 5 0 0 1 21 19.5V21h-6.3c0-.5 0-1-.2-1.5Z"/></symbol>
+      <symbol id="icon-plug" viewBox="0 0 24 24"><path d="M7 2h2v6h2V2h2v6h2V2h2v7a5 5 0 0 1-4 4.9V22h-2v-8.1A5 5 0 0 1 7 9V2Z"/></symbol>
+      <symbol id="icon-role" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Zm0 4a3 3 0 1 1 0 6 3 3 0 0 1 0-6Zm0 14a8.5 8.5 0 0 1-5-3.2c.8-2.1 2.7-3.3 5-3.3s4.2 1.2 5 3.3A8.5 8.5 0 0 1 12 20Z"/></symbol>
+      <symbol id="icon-shield" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Zm-1 14-4-4 1.4-1.4L11 13.2l5.6-5.6L18 9l-7 7Z"/></symbol>
+      <symbol id="icon-database" viewBox="0 0 24 24"><path d="M12 3C7 3 3 4.8 3 7v10c0 2.2 4 4 9 4s9-1.8 9-4V7c0-2.2-4-4-9-4Zm0 2c4.4 0 7 1.4 7 2s-2.6 2-7 2-7-1.4-7-2 2.6-2 7-2Zm0 14c-4.4 0-7-1.4-7-2v-2.2c1.6 1 4.1 1.7 7 1.7s5.4-.7 7-1.7V17c0 .6-2.6 2-7 2Z"/></symbol>
+      <symbol id="icon-list" viewBox="0 0 24 24"><path d="M4 5h4v4H4V5Zm6 1h10v2H10V6ZM4 10h4v4H4v-4Zm6 1h10v2H10v-2ZM4 15h4v4H4v-4Zm6 1h10v2H10v-2Z"/></symbol>
+      <symbol id="icon-chart" viewBox="0 0 24 24"><path d="M4 20V4h2v14h14v2H4Zm4-4V9h3v7H8Zm5 0V5h3v11h-3Zm5 0v-5h3v5h-3Z"/></symbol>
+      <symbol id="icon-audit" viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6V2Zm8 1.5V8h4.5L14 3.5ZM8 12h8v2H8v-2Zm0 4h8v2H8v-2Z"/></symbol>
+    </svg>
     <div class="min-h-screen lg:grid lg:grid-cols-[18rem_1fr]">
       <aside class="sidebar fixed inset-x-0 top-0 z-40 border-b border-sky-500/20 bg-[#04182f] px-4 py-3 text-white shadow-lg lg:sticky lg:inset-y-0 lg:h-screen lg:border-b-0 lg:border-r lg:border-sky-500/20 lg:px-5 lg:py-6" id="sidebar">
         <div class="flex items-center justify-between gap-3 lg:block">
           <div class="flex min-w-0 items-center gap-3 lg:mb-8">
-            <div class="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white text-xs font-extrabold text-vnpt-700 shadow-lg">VNPT</div>
+            <img class="brand-logo" src="/static/images/system-logo.png" alt="Logo hệ thống" />
             <div class="min-w-0">
-              <p class="truncate text-base font-extrabold leading-tight">BRCĐ Admin</p>
-              <p class="truncate text-xs text-sky-100">Quản trị băng rộng cố định</p>
+              <p class="truncate text-base font-extrabold leading-tight">Hệ thống quản trị đặc biệt</p>
+              <p class="truncate text-xs text-sky-100">VNPT Cần Thơ</p>
             </div>
           </div>
           <button class="menu-button lg:hidden" id="menu-button" type="button" aria-label="Mở menu điều hướng" aria-controls="main-navigation" aria-expanded="false"><span></span><span></span><span></span></button>
         </div>
 
         <nav id="main-navigation" class="mt-3 hidden gap-2 lg:grid" aria-label="Điều hướng chính">
-          <button class="nav-item active" data-view="dashboard"><span>01</span> Tổng quan</button>
-          {% if user.role == "admin" or "vault.view" in user.permissions %}
-          <button class="nav-item" data-view="vault"><span>02</span> Tài khoản web</button>
-          {% endif %}
-          {% if user.role == "admin" %}
-          <div class="nav-group-title">Quản trị web</div>
-          <button class="nav-item" data-view="users"><span>03</span> Quản trị người dùng</button>
-          <button class="nav-item" data-view="system"><span>04</span> Quản trị kết nối</button>
-          <button class="nav-item" data-view="permissions"><span>05</span> Phân quyền người dùng</button>
-          <button class="nav-item" data-view="data-permissions"><span>06</span> Phân quyền dữ liệu</button>
-          <button class="nav-item" data-view="catalogs"><span>07</span> Quản trị danh mục</button>
-          <div class="nav-group-title">Báo cáo thống kê</div>
-          <button class="nav-item" data-view="reports"><span>08</span> Báo cáo thống kê</button>
-          <button class="nav-item" data-view="audit"><span>09</span> Nhật ký hoạt động</button>
-          {% endif %}
+          <label class="sidebar-search">
+            <span>Tìm chức năng</span>
+            <input id="menu-search" type="search" placeholder="Nhập tên chức năng..." autocomplete="off" />
+          </label>
+          <div class="nav-tree" id="nav-tree">
+            <button class="nav-item active" data-view="dashboard" data-title="Tổng quan" data-keywords="tong quan dashboard"><svg class="nav-svg"><use href="#icon-dashboard"></use></svg><span>Tổng quan</span></button>
+            {% if user.role == "admin" or "vault.view" in user.permissions %}
+            <details class="nav-group" open>
+              <summary><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-vault"></use></svg><strong>Cá nhân</strong></summary>
+              <button class="nav-item child" data-view="vault" data-title="Tài khoản web" data-keywords="tai khoan web mat khau"><svg class="nav-svg"><use href="#icon-vault"></use></svg><span>Tài khoản web</span></button>
+            </details>
+            {% endif %}
+            {% if user.role == "admin" %}
+            <details class="nav-group" open>
+              <summary><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-shield"></use></svg><strong>Quản trị web</strong></summary>
+              <button class="nav-item child" data-view="users" data-title="Quản trị người dùng" data-keywords="quan tri nguoi dung user"><svg class="nav-svg"><use href="#icon-users"></use></svg><span>Quản trị người dùng</span></button>
+              <button class="nav-item child" data-view="system" data-title="Quản trị kết nối" data-keywords="quan tri ket noi vpn db ftp drive telegram"><svg class="nav-svg"><use href="#icon-plug"></use></svg><span>Quản trị kết nối</span></button>
+              <button class="nav-item child" data-view="roles" data-title="Quản trị vai trò người dùng" data-keywords="quan tri vai tro role"><svg class="nav-svg"><use href="#icon-role"></use></svg><span>Quản trị vai trò</span></button>
+              <button class="nav-item child" data-view="permissions" data-title="Phân quyền người dùng" data-keywords="phan quyen nguoi dung chuc nang"><svg class="nav-svg"><use href="#icon-shield"></use></svg><span>Phân quyền người dùng</span></button>
+              <button class="nav-item child" data-view="data-permissions" data-title="Phân quyền dữ liệu người dùng" data-keywords="phan quyen du lieu phan vung"><svg class="nav-svg"><use href="#icon-database"></use></svg><span>Phân quyền dữ liệu</span></button>
+              <button class="nav-item child" data-view="catalogs" data-title="Quản trị danh mục" data-keywords="quan tri danh muc phan vung bien"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản trị danh mục</span></button>
+              <button class="nav-item child" data-view="audit" data-title="Nhật ký hoạt động" data-keywords="nhat ky audit log"><svg class="nav-svg"><use href="#icon-audit"></use></svg><span>Nhật ký hoạt động</span></button>
+            </details>
+            <details class="nav-group" open>
+              <summary><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-chart"></use></svg><strong>Báo cáo thống kê</strong></summary>
+              <button class="nav-item child" data-view="reports" data-title="Báo cáo thống kê" data-keywords="bao cao thong ke bieu do"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Báo cáo thống kê</span></button>
+            </details>
+            {% endif %}
+          </div>
+          <div class="nav-empty hidden" id="nav-empty">Không tìm thấy chức năng phù hợp.</div>
         </nav>
 
         <div class="mt-4 hidden rounded-3xl border border-white/10 bg-white/10 p-4 text-sm leading-6 backdrop-blur lg:block">
@@ -75,10 +102,8 @@
 
       <main class="flex min-h-screen min-w-0 flex-col px-4 pb-6 pt-24 sm:px-6 lg:px-8 lg:pt-8 xl:px-10">
         <header class="mb-6 flex flex-col gap-4 rounded-[1.5rem] border border-sky-500/30 bg-[#061d38] p-4 shadow-[0_18px_45px_rgba(0,0,0,.28)] sm:flex-row sm:items-center sm:justify-between sm:p-5">
-          <div>
-            <p class="text-xs font-bold uppercase tracking-[.22em] text-sky-300">Hệ thống quản trị đặc biệt</p>
-            <h1 class="mt-2 text-2xl font-extrabold tracking-[-.035em] text-white sm:text-3xl">Dashboard BRCĐ</h1>
-            <p class="mt-1 text-sm text-sky-100">Vùng điều hành các phân hệ chức năng.</p>
+          <div class="min-w-0">
+            <h1 class="dynamic-module-title" id="module-title">Tổng quan</h1>
           </div>
           <div class="top-actions">
             <div class="dropdown-wrap">
@@ -197,6 +222,11 @@
           <section class="data-card"><div class="table-scroll"><table><thead><tr><th>Tên website</th><th>Địa chỉ</th><th>OTP</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody id="websites-table"></tbody></table></div></section>
         </section>
 
+        <section class="app-view" id="view-roles">
+          <div class="page-header"><div><p class="eyebrow">Quản trị web</p><h1>Quản trị vai trò người dùng</h1><p class="subtitle">Định nghĩa các vai trò vận hành như Admin, quản lý phân vùng, nhân viên nhập liệu.</p></div><button class="btn-primary" data-open-dialog="role-dialog">Thêm vai trò</button></div>
+          <section class="data-card"><div id="roles-message" class="result hidden mb-4"></div><div class="table-scroll"><table><thead><tr><th>Mã vai trò</th><th>Tên vai trò</th><th>Mô tả</th><th>Trạng thái</th><th>Thứ tự</th><th>Thao tác</th></tr></thead><tbody id="roles-table"></tbody></table></div></section>
+        </section>
+
         <section class="app-view" id="view-permissions">
           <div class="page-header"><div><p class="eyebrow">Quản trị web</p><h1>Phân quyền người dùng</h1><p class="subtitle">Chọn một hoặc nhiều người dùng, chọn chức năng được phép sử dụng rồi bấm lưu.</p></div><button class="btn-primary" id="save-bulk-permissions">Lưu phân quyền</button></div>
           <section class="grid gap-4 lg:grid-cols-2">
@@ -249,12 +279,13 @@
     <dialog id="website-dialog"><form class="dialog-form" id="website-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Danh mục</p><h2>Website</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<input class="form-control" name="name" required /></label><label>Địa chỉ website<input class="form-control" name="url" type="url" placeholder="https://..." required /></label><label class="checkbox-label"><input type="checkbox" name="requires_otp" /> Website yêu cầu OTP</label><label class="checkbox-label"><input type="checkbox" name="is_active" checked /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu danh mục</button></form></dialog>
     <dialog id="create-user-dialog"><form class="dialog-form" id="create-user-form"><div class="dialog-heading"><div><p class="eyebrow">Tài khoản mới</p><h2>Tạo người dùng</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên đăng nhập<input class="form-control" name="username" minlength="3" required /></label><label>Họ và tên<input class="form-control" name="full_name" required /></label><label>Vai trò<select class="form-control" name="role"><option value="viewer">Người xem</option><option value="admin">Quản trị viên</option></select></label><label>Mật khẩu khởi tạo<input class="form-control" type="password" name="password" minlength="10" required /></label><div class="result hidden" role="alert"></div><button class="btn-primary" type="submit">Tạo tài khoản</button></form></dialog>
     <dialog id="region-dialog"><form class="dialog-form" id="region-form"><div class="dialog-heading"><div><p class="eyebrow">Danh mục</p><h2>Phân vùng dữ liệu</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mã phân vùng<input class="form-control" name="code" required /></label><label>Tên phân vùng<input class="form-control" name="name" required /></label><label>Thứ tự<input class="form-control" name="sort_order" type="number" value="0" /></label><label class="checkbox-label"><input type="checkbox" name="is_active" checked /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu phân vùng</button></form></dialog>
+    <dialog id="role-dialog"><form class="dialog-form" id="role-form"><div class="dialog-heading"><div><p class="eyebrow">Vai trò người dùng</p><h2>Cấu hình vai trò</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mã vai trò<input class="form-control" name="code" required placeholder="vi_du: region_manager" /></label><label>Tên vai trò<input class="form-control" name="name" required /></label><label>Mô tả<textarea class="form-control min-h-24" name="description" rows="3"></textarea></label><label>Thứ tự<input class="form-control" name="sort_order" type="number" value="0" /></label><label class="checkbox-label"><input type="checkbox" name="is_active" checked /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu vai trò</button></form></dialog>
     <dialog id="connection-dialog"><form class="dialog-form" id="connection-form"><div class="dialog-heading"><div><p class="eyebrow">Quản trị kết nối</p><h2>Cấu hình kết nối</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mã kết nối<input class="form-control" name="code" readonly /></label><label>Tên kết nối<input class="form-control" name="name" required /></label><label>Loại kết nối<select class="form-control" name="connection_type"><option value="oracle">Oracle Database</option><option value="supabase">Supabase REST</option><option value="ftp">FTP/SFTP</option><option value="drive">Drive/API</option><option value="telegram">Telegram Bot</option><option value="vpn_ssl">VPN SSL</option></select></label><label>Mô tả<textarea class="form-control min-h-20" name="description" rows="2"></textarea></label><label>Cấu hình JSON<textarea class="form-control min-h-32 font-mono text-xs" name="config_json" rows="7" placeholder='{"host":"example.com"}'></textarea><small>Không nhập mật khẩu thật tại đây. Mật khẩu/secret nên để trong biến môi trường.</small></label><label class="checkbox-label"><input type="checkbox" name="is_active" /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu kết nối</button></form></dialog>
     <dialog id="edit-user-dialog"><form class="dialog-form" id="edit-user-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Cập nhật</p><h2>Chỉnh sửa người dùng</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Họ và tên<input class="form-control" name="full_name" required /></label><label>Vai trò<select class="form-control" name="role"><option value="viewer">Người xem</option><option value="admin">Quản trị viên</option></select></label><label class="checkbox-label"><input type="checkbox" name="is_active" /> Tài khoản đang hoạt động</label><label>Mật khẩu đặt lại<input class="form-control" type="password" name="password" minlength="10" placeholder="Để trống nếu không đổi" /></label><fieldset><legend>Cây quyền chức năng</legend><div id="permission-tree" class="permission-tree"></div></fieldset><div class="result hidden" role="alert"></div><button class="btn-primary" type="submit">Lưu thay đổi</button></form></dialog>
     {% endif %}
     {% if user.role == "admin" or "vault.manage" in user.permissions %}
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
-    <script src="/static/app.js?v=16"></script>
+    <script src="/static/app.js?v=17"></script>
   </body>
 </html>

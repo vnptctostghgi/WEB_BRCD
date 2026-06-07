@@ -107,6 +107,16 @@ class AppRepository:
                     FOREIGN KEY(feature_code) REFERENCES features(code)
                 );
 
+                CREATE TABLE IF NOT EXISTS system_roles (
+                    code TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS system_connections (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     code TEXT NOT NULL UNIQUE,
@@ -177,6 +187,7 @@ class AppRepository:
                     ("admin.permissions", "Phan quyen nguoi dung", "admin.web", 23),
                     ("admin.data_permissions", "Phan quyen du lieu nguoi dung", "admin.web", 24),
                     ("admin.catalogs", "Quan tri danh muc", "admin.web", 25),
+                    ("admin.roles", "Quan tri vai tro", "admin.web", 26),
                     ("reports", "Bao cao thong ke", None, 30),
                     ("vault", "Kho tai khoan web", None, 40),
                     ("vault.view", "Xem danh sach tai khoan", "vault", 41),
@@ -186,6 +197,18 @@ class AppRepository:
                 ],
             )
             now = self._now()
+            connection.executemany(
+                """
+                INSERT OR IGNORE INTO system_roles (code, name, description, is_active, sort_order, created_at, updated_at)
+                VALUES (?, ?, ?, 1, ?, ?, ?)
+                """,
+                [
+                    ("admin", "Quản trị hệ thống", "Toàn quyền quản trị và cấu hình hệ thống.", 10, now, now),
+                    ("region_manager", "Quản lý phân vùng", "Quản lý số liệu và người dùng theo phân vùng được cấp.", 20, now, now),
+                    ("data_entry", "Nhân viên nhập liệu", "Nhập và kiểm tra dữ liệu nghiệp vụ.", 30, now, now),
+                    ("viewer", "Người xem", "Xem báo cáo và chức năng được phân quyền.", 40, now, now),
+                ],
+            )
             connection.executemany(
                 """
                 INSERT OR IGNORE INTO data_regions (code, name, is_active, sort_order, created_at, updated_at)
@@ -399,6 +422,29 @@ class AppRepository:
                     "INSERT INTO user_permissions (user_id, feature_code) VALUES (?, ?)",
                     [(user_id, code) for code in feature_codes],
                 )
+
+    def list_system_roles(self) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            return [dict(row) for row in connection.execute(
+                "SELECT * FROM system_roles ORDER BY sort_order, code"
+            ).fetchall()]
+
+    def save_system_role(self, code: str, name: str, description: str, is_active: bool, sort_order: int) -> None:
+        now = self._now()
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO system_roles (code, name, description, is_active, sort_order, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(code) DO UPDATE SET name=excluded.name, description=excluded.description,
+                  is_active=excluded.is_active, sort_order=excluded.sort_order, updated_at=excluded.updated_at
+                """,
+                (code, name, description, int(is_active), sort_order, now, now),
+            )
+
+    def delete_system_role(self, code: str) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM system_roles WHERE code=?", (code,))
 
     def list_data_regions(self, active_only: bool = False) -> list[dict[str, Any]]:
         query = "SELECT * FROM data_regions"

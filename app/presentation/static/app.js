@@ -8,6 +8,7 @@ let websites = [];
 let features = [];
 let regions = [];
 let connections = [];
+let systemRoles = [];
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -60,13 +61,15 @@ $("#menu-button")?.addEventListener("click", () => {
 document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("click", async () => {
   document.querySelectorAll(".nav-item, .app-view").forEach((element) => element.classList.remove("active"));
   item.classList.add("active");
-  $(`#view-${item.dataset.view}`).classList.add("active");
+  $(`#view-${item.dataset.view}`)?.classList.add("active");
+  $("#module-title").textContent = item.dataset.title || item.textContent.trim();
   $("#sidebar").classList.remove("menu-open");
   $("#menu-button")?.setAttribute("aria-expanded", "false");
   if (item.dataset.view === "users") await loadUsers();
   if (item.dataset.view === "vault") await loadCredentials();
   if (item.dataset.view === "websites") await loadAdminWebsites();
   if (item.dataset.view === "system") await loadSystem();
+  if (item.dataset.view === "roles") await loadRoles();
   if (item.dataset.view === "permissions") await loadPermissionManager();
   if (item.dataset.view === "data-permissions") await loadDataPermissionManager();
   if (item.dataset.view === "catalogs") await loadRegions();
@@ -78,9 +81,41 @@ document.querySelectorAll("[data-open-dialog]").forEach((button) => button.addEv
     openRegion("");
     return;
   }
+  if (button.dataset.openDialog === "role-dialog") {
+    openRole("");
+    return;
+  }
   $(`#${button.dataset.openDialog}`).showModal();
 }));
 document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
+
+$("#menu-search")?.addEventListener("input", (event) => filterNavigation(event.currentTarget.value));
+
+function filterNavigation(keyword) {
+  const query = keyword.trim().toLowerCase();
+  let visibleItems = 0;
+  document.querySelectorAll(".nav-group").forEach((group) => {
+    let groupHasVisibleChild = false;
+    group.querySelectorAll(".nav-item").forEach((item) => {
+      const text = `${item.textContent} ${item.dataset.keywords || ""}`.toLowerCase();
+      const visible = !query || text.includes(query);
+      item.classList.toggle("hidden-by-search", !visible);
+      if (visible) {
+        groupHasVisibleChild = true;
+        visibleItems += 1;
+      }
+    });
+    group.classList.toggle("hidden-by-search", !groupHasVisibleChild);
+    if (query && groupHasVisibleChild) group.open = true;
+  });
+  document.querySelectorAll("#nav-tree > .nav-item").forEach((item) => {
+    const text = `${item.textContent} ${item.dataset.keywords || ""}`.toLowerCase();
+    const visible = !query || text.includes(query);
+    item.classList.toggle("hidden-by-search", !visible);
+    if (visible) visibleItems += 1;
+  });
+  $("#nav-empty")?.classList.toggle("hidden", visibleItems > 0);
+}
 
 if (mustChangePassword) {
   const dialog = $("#password-dialog");
@@ -274,6 +309,7 @@ if (role === "admin") {
   $("#refresh-audit")?.addEventListener("click", loadAudit);
   $("#website-form")?.addEventListener("submit", saveWebsite);
   $("#region-form")?.addEventListener("submit", saveRegion);
+  $("#role-form")?.addEventListener("submit", saveRole);
   $("#connection-form")?.addEventListener("submit", saveConnection);
   $("#user-search")?.addEventListener("input", renderUsersTable);
   $("#user-import-file")?.addEventListener("change", importUserFile);
@@ -349,6 +385,70 @@ async function saveDataPermissions() {
   const region_codes = selectedValues("#data-region-options");
   await api("/api/admin/data-permissions/bulk", { method: "PUT", body: JSON.stringify({ user_ids, region_codes }) });
   alert("Đã lưu phân quyền dữ liệu.");
+}
+
+async function loadRoles() {
+  setTableLoading("#roles-table", 6, "Đang tải vai trò người dùng...");
+  systemRoles = (await api("/api/admin/roles")).roles;
+  $("#roles-table").innerHTML = systemRoles.length ? systemRoles.map((roleItem) => `
+    <tr>
+      <td><strong>${escapeHtml(roleItem.code)}</strong></td>
+      <td>${escapeHtml(roleItem.name)}</td>
+      <td>${escapeHtml(roleItem.description || "")}</td>
+      <td><span class="status ${roleItem.is_active ? "active" : "inactive"}">${roleItem.is_active ? "Đang dùng" : "Ngừng dùng"}</span></td>
+      <td>${escapeHtml(roleItem.sort_order)}</td>
+      <td><button class="table-action" data-edit-role="${escapeHtml(roleItem.code)}">Sửa</button> <button class="table-action danger" data-delete-role="${escapeHtml(roleItem.code)}">Xóa</button></td>
+    </tr>
+  `).join("") : emptyRow(6, "Chưa có vai trò", "Thêm vai trò để chuẩn hóa nhóm người dùng.");
+  document.querySelectorAll("[data-edit-role]").forEach((button) => button.addEventListener("click", () => openRole(button.dataset.editRole)));
+  document.querySelectorAll("[data-delete-role]").forEach((button) => button.addEventListener("click", () => deleteRole(button.dataset.deleteRole)));
+}
+
+function openRole(code = "") {
+  const roleItem = systemRoles.find((item) => item.code === code);
+  const form = $("#role-form");
+  form.elements.namedItem("code").value = roleItem?.code || "";
+  form.elements.namedItem("code").readOnly = Boolean(roleItem);
+  form.elements.namedItem("name").value = roleItem?.name || "";
+  form.elements.namedItem("description").value = roleItem?.description || "";
+  form.elements.namedItem("sort_order").value = roleItem?.sort_order ?? 0;
+  form.elements.namedItem("is_active").checked = roleItem ? Boolean(roleItem.is_active) : true;
+  form.querySelector(".result").className = "result hidden";
+  $("#role-dialog").showModal();
+}
+
+async function saveRole(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  try {
+    await api("/api/admin/roles", { method: "POST", body: JSON.stringify({
+      code: data.code,
+      name: data.name,
+      description: data.description || "",
+      sort_order: Number(data.sort_order || 0),
+      is_active: form.is_active.checked,
+    })});
+    form.reset();
+    form.elements.namedItem("code").readOnly = false;
+    form.is_active.checked = true;
+    $("#role-dialog").close();
+    showMessage($("#roles-message"), "Đã lưu vai trò.");
+    await loadRoles();
+  } catch (error) {
+    showMessage(form.querySelector(".result"), error.message, "error");
+  }
+}
+
+async function deleteRole(code) {
+  if (!confirm(`Xóa vai trò ${code}?`)) return;
+  try {
+    await api(`/api/admin/roles/${encodeURIComponent(code)}`, { method: "DELETE" });
+    showMessage($("#roles-message"), `Đã xóa vai trò ${code}.`);
+    await loadRoles();
+  } catch (error) {
+    showMessage($("#roles-message"), error.message, "error");
+  }
 }
 
 async function loadRegions() {
@@ -489,7 +589,8 @@ async function testConnection(code, button) {
   setButtonLoading(button, true);
   try {
     const result = await api(`/api/admin/connections/${code}/test`, { method: "POST" });
-    resultBox.textContent = result.message;
+    const details = result.details ? ` Chi tiết: ${JSON.stringify(result.details)}` : "";
+    resultBox.textContent = `${result.message}${details}`;
     resultBox.style.color = result.ok ? "#166534" : "#991b1b";
   } catch (error) {
     resultBox.textContent = error.message;

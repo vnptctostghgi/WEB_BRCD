@@ -1,4 +1,6 @@
 from typing import Any
+import socket
+import ssl
 
 import httpx
 
@@ -42,17 +44,17 @@ class ConnectionService:
         )
         self.repository.upsert_system_connection(
             code="agency_ssl_vpn",
-            name="VPN SSL co quan",
+            name="VPN SSL cơ quan",
             connection_type="vpn_ssl",
-            description="Ket noi VPN SSL truoc khi truy cap cac he thong noi bo.",
+            description="Kết nối VPN SSL trước khi truy cập FTP và Database nội bộ.",
             config={
-                "host": self.settings.vpn_host,
-                "port": self.settings.vpn_port,
-                "username": self.settings.vpn_username,
-                "type": self.settings.vpn_type,
+                "host": self.settings.vpn_host or "14.241.183.190",
+                "port": self.settings.vpn_port or 4443,
+                "username": self.settings.vpn_username or "quyennt.cto",
+                "type": (self.settings.vpn_type or "ssl").upper(),
                 "secret_ref": "VPN_PASSWORD",
             },
-            is_active=bool(self.settings.vpn_host and self.settings.vpn_username),
+            is_active=True,
         )
         self.repository.upsert_system_connection(
             code="ftp_storage",
@@ -149,9 +151,54 @@ class ConnectionService:
     def _test_vpn_ssl(self, connection: dict[str, Any]) -> dict[str, Any]:
         config = connection.get("config", {})
         host = config.get("host")
-        port = config.get("port", 4443)
+        port = int(config.get("port", 4443))
         if not host:
-            return {"ok": False, "message": "Chua cau hinh host VPN.", "details": None}
+            return {"ok": False, "message": "Chưa cấu hình host VPN.", "details": None}
+
+        base_details = {
+            "host": host,
+            "port": port,
+            "username": config.get("username"),
+            "type": config.get("type", "SSL"),
+        }
+
+        try:
+            with socket.create_connection((host, port), timeout=8) as tcp_socket:
+                tcp_socket.settimeout(8)
+                context = ssl.create_default_context()
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+                try:
+                    with context.wrap_socket(tcp_socket, server_hostname=host) as tls_socket:
+                        return {
+                            "ok": True,
+                            "message": f"VPN SSL phản hồi tốt. TCP và SSL handshake thành công tới {host}:{port}.",
+                            "details": {
+                                **base_details,
+                                "tls_version": tls_socket.version(),
+                                "cipher": tls_socket.cipher()[0] if tls_socket.cipher() else None,
+                            },
+                        }
+                except ssl.SSLError as error:
+                    return {
+                        "ok": False,
+                        "message": "Đã mở được cổng VPN nhưng bắt tay SSL thất bại. Kiểm tra chứng chỉ, giao thức SSL/TLS hoặc thiết bị VPN.",
+                        "details": {**base_details, "stage": "ssl_handshake", "error": str(error)},
+                    }
+        except TimeoutError as error:
+            return {
+                "ok": False,
+                "message": "Không kết nối được VPN: máy chủ phản hồi quá lâu hoặc đường mạng/VPN bị chặn.",
+                "details": {**base_details, "stage": "tcp_connect", "error": str(error)},
+            }
+        except OSError as error:
+            return {
+                "ok": False,
+                "message": "Không kết nối được VPN SSL. Kiểm tra IP, cổng 4443, firewall hoặc trạng thái thiết bị VPN.",
+                "details": {**base_details, "stage": "tcp_connect", "error": str(error)},
+            }
+
+    def _legacy_vpn_http_probe(self, host: str, port: int) -> dict[str, Any]:
         try:
             with httpx.Client(timeout=10, verify=False) as client:
                 response = client.get(f"https://{host}:{port}")
