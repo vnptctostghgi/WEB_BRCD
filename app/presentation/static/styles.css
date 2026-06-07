@@ -136,6 +136,43 @@ p {
   overflow: hidden;
 }
 
+.app-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+@media (min-width: 1024px) {
+  .app-shell {
+    grid-template-columns: minmax(17rem, 18rem) minmax(0, 1fr);
+  }
+}
+
+.sidebar {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  align-self: start;
+}
+
+@media (min-width: 1024px) {
+  .sidebar {
+    position: sticky;
+    top: 0;
+    display: flex;
+    height: 100vh;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+}
+
+.app-main {
+  width: 100%;
+  min-width: 0;
+  transition: padding .18s ease;
+}
+
 .brand-logo {
   width: 54px;
   height: 54px;
@@ -447,6 +484,14 @@ p {
   border-radius: 18px;
   background: rgba(255, 255, 255, .04);
   padding: .35rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.nav-subgroup {
+  margin-left: 1.65rem;
+  border-color: rgba(125, 211, 252, .1);
+  background: rgba(2, 6, 23, .18);
 }
 
 .nav-group summary {
@@ -528,6 +573,10 @@ p {
 .nav-item.child {
   min-height: 44px;
   padding-left: 2.2rem;
+}
+
+.nav-item.subchild {
+  padding-left: 2.6rem;
 }
 
 .nav-svg {

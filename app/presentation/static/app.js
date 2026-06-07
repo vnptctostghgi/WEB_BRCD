@@ -474,9 +474,20 @@ async function syncNavigationFromFeatures() {
       item.style.order = String(feature.sort_order ?? 0);
       item.dataset.title = feature.name || item.dataset.title;
       const label = item.querySelector("span:last-child");
-      if (label && feature.name) label.textContent = feature.name;
+      if (label && feature.name) {
+        if (feature.code === "admin.permissions") label.textContent = "Người dùng";
+        else if (feature.code === "admin.data_permissions") label.textContent = "Dữ liệu";
+        else label.textContent = feature.name;
+      }
       const adminGroup = document.querySelector('summary[data-feature-code="admin.web"]')?.closest(".nav-group");
+      const permissionGroup = document.querySelector('summary[data-feature-code="admin.permissions.group"]')?.closest(".nav-group");
       const reportsGroup = document.querySelector('summary[data-feature-code="reports"]')?.closest(".nav-group");
+      if (["admin.permissions", "admin.data_permissions"].includes(feature.code) && permissionGroup && item.parentElement !== permissionGroup) {
+        item.classList.add("child", "subchild");
+        permissionGroup.appendChild(item);
+        return;
+      }
+      if (["admin.permissions", "admin.data_permissions"].includes(feature.code)) return;
       if (feature.parent_code === "admin.web" && adminGroup && item.parentElement !== adminGroup) {
         item.classList.add("child");
         adminGroup.appendChild(item);
