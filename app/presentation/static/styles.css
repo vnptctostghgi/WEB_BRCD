@@ -1490,6 +1490,31 @@ legend {
   font-weight: 700;
 }
 
+.practice-list {
+  display: grid;
+  gap: .8rem;
+}
+
+.practice-item {
+  border: 1px solid rgba(125, 211, 252, .22);
+  border-radius: 20px;
+  background: rgba(14, 165, 233, .08);
+  padding: 1rem;
+}
+
+.practice-item strong {
+  display: block;
+  color: #fff;
+  line-height: 1.55;
+}
+
+.practice-item ul {
+  margin: .7rem 0 0;
+  padding-left: 1.2rem;
+  color: #bae6fd;
+  font-weight: 700;
+}
+
 .catalog-grid {
   display: grid;
   gap: 1rem;

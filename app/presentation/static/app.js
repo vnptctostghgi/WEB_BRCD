@@ -9,6 +9,7 @@ let features = [];
 let regions = [];
 let connections = [];
 let systemRoles = [];
+let atttLinks = [];
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -78,6 +79,8 @@ document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("
   if (item.dataset.view === "data-permissions") await loadDataPermissionManager();
   if (item.dataset.view === "catalogs") await loadCatalogs();
   if (item.dataset.view === "audit") await loadAudit();
+  if (item.dataset.view === "attt-quarterly") await loadATTTQuarterly();
+  if (item.dataset.view === "attt-links") await loadATTTLinks();
 }));
 
 document.querySelectorAll("[data-open-dialog]").forEach((button) => button.addEventListener("click", () => {
@@ -324,6 +327,8 @@ if (role === "admin") {
   $("#save-bulk-permissions")?.addEventListener("click", saveBulkPermissions);
   $("#save-data-permissions")?.addEventListener("click", saveDataPermissions);
   $("#save-menu-layout")?.addEventListener("click", saveMenuLayout);
+  $("#create-attt-link")?.addEventListener("click", () => openATTTLink());
+  $("#attt-link-form")?.addEventListener("submit", saveATTTLink);
 }
 
 async function importUserFile(event) {
@@ -714,6 +719,118 @@ async function loadAudit() {
   setTableLoading("#audit-table", 4, "Đang tải nhật ký hoạt động...");
   const logs = (await api("/api/admin/audit-logs")).logs;
   $("#audit-table").innerHTML = logs.length ? logs.map((log) => `<tr><td>${new Date(log.created_at).toLocaleString("vi-VN")}</td><td><strong>${escapeHtml(log.actor)}</strong></td><td>${escapeHtml(log.action)}</td><td>${escapeHtml(log.details)}</td></tr>`).join("") : emptyRow(4, "Chưa có nhật ký", "Các thao tác quan trọng sẽ xuất hiện tại đây.");
+}
+
+async function loadATTTQuarterly() {
+  const currentBox = $("#attt-current");
+  const practiceBox = $("#attt-practice-list");
+  if (!currentBox || !practiceBox) return;
+  currentBox.innerHTML = `<div class="empty-state"><div><strong>Đang tải kỳ thi ATTT...</strong><p>Vui lòng chờ trong giây lát.</p></div></div>`;
+  practiceBox.innerHTML = "";
+  try {
+    const data = await api("/api/attt/current");
+    if (!data.exam) {
+      currentBox.innerHTML = `<div class="empty-state"><div><strong>Chưa có kỳ thi đang sử dụng</strong><p>Quản trị viên cần cấu hình link bài thi trong module Quản trị link.</p></div></div>`;
+      $("#attt-login-link")?.classList.add("hidden");
+      $("#attt-exam-link")?.classList.add("hidden");
+      return;
+    }
+    $("#attt-login-link").href = data.login_url;
+    $("#attt-exam-link").href = data.exam.exam_url;
+    $("#attt-login-link")?.classList.remove("hidden");
+    $("#attt-exam-link")?.classList.remove("hidden");
+    currentBox.innerHTML = `
+      <div class="notice warning"><strong>Chế độ an toàn.</strong> ${escapeHtml(data.message)}</div>
+      <div class="grid gap-4 md:grid-cols-3">
+        <article class="feature-card"><strong>${escapeHtml(data.exam.period_name)}</strong><p>Kỳ thi đang được cấu hình.</p></article>
+        <article class="feature-card"><strong>${escapeHtml(data.exam.answer_count)}</strong><p>Câu hỏi/đáp án ôn tập đã nạp.</p></article>
+        <article class="feature-card"><strong>${escapeHtml(data.exam.answer_file_name || "Chưa có tệp")}</strong><p>Tệp đáp án hiện tại.</p></article>
+      </div>`;
+    practiceBox.innerHTML = data.exam.answers?.length ? data.exam.answers.map((item, index) => {
+      const answers = [1, 2, 3, 4, 5].map((number) => item[`ans${number}`]).filter(Boolean);
+      return `<article class="practice-item"><strong>Câu ${index + 1}: ${escapeHtml(item.ques)}</strong><ul>${answers.map((answer) => `<li>${escapeHtml(answer)}</li>`).join("")}</ul></article>`;
+    }).join("") : `<div class="empty-state"><div><strong>Chưa có bộ đáp án ôn tập</strong><p>Admin có thể nạp file đáp án trong Quản trị link.</p></div></div>`;
+  } catch (error) {
+    currentBox.innerHTML = `<div class="result error">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function loadATTTLinks() {
+  setTableLoading("#attt-links-table", 5, "Đang tải danh sách kỳ thi ATTT...");
+  atttLinks = (await api("/api/admin/attt-links")).links;
+  $("#attt-links-table").innerHTML = atttLinks.length ? atttLinks.map((item) => `
+    <tr>
+      <td><strong>${escapeHtml(item.period_name)}</strong><small class="cell-note">ID #${escapeHtml(item.id)}</small></td>
+      <td><a class="font-bold text-vnpt-600 hover:underline dark:text-sky-300" href="${escapeHtml(item.exam_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.exam_url)}</a></td>
+      <td><strong>${escapeHtml(item.answer_count || 0)} câu</strong><small class="cell-note">${escapeHtml(item.answer_file_name || "Chưa nạp đáp án")}</small></td>
+      <td><span class="status ${item.is_active ? "active" : "inactive"}">${item.is_active ? "Đang dùng" : "Tạm dừng"}</span></td>
+      <td><div class="action-group"><button class="table-action" data-edit-attt="${item.id}">Sửa</button><label class="table-action cursor-pointer">Nạp đáp án<input class="hidden" type="file" accept=".xlsx,.json,.txt,.js" data-attt-answer-file="${item.id}" /></label><button class="table-action danger" data-delete-attt="${item.id}">Xóa</button></div></td>
+    </tr>
+  `).join("") : emptyRow(5, "Chưa có kỳ thi", "Bấm Thêm kỳ thi để cấu hình link Elearning và bộ đáp án ôn tập.");
+  document.querySelectorAll("[data-edit-attt]").forEach((button) => button.addEventListener("click", () => openATTTLink(Number(button.dataset.editAttt))));
+  document.querySelectorAll("[data-delete-attt]").forEach((button) => button.addEventListener("click", () => deleteATTTLink(Number(button.dataset.deleteAttt))));
+  document.querySelectorAll("[data-attt-answer-file]").forEach((input) => input.addEventListener("change", uploadATTTAnswers));
+}
+
+function openATTTLink(id = null) {
+  const item = id ? atttLinks.find((link) => link.id === id) : null;
+  const form = $("#attt-link-form");
+  form.elements.namedItem("id").value = item?.id || "";
+  form.elements.namedItem("period_name").value = item?.period_name || "";
+  form.elements.namedItem("exam_url").value = item?.exam_url || "";
+  form.elements.namedItem("is_active").checked = item ? Boolean(item.is_active) : true;
+  form.querySelector(".result").className = "result hidden";
+  $("#attt-link-dialog").showModal();
+}
+
+async function saveATTTLink(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  try {
+    await api("/api/admin/attt-links", { method: "POST", body: JSON.stringify({
+      id: data.id ? Number(data.id) : null,
+      period_name: data.period_name,
+      exam_url: data.exam_url,
+      is_active: form.is_active.checked,
+    })});
+    form.reset();
+    form.is_active.checked = true;
+    $("#attt-link-dialog").close();
+    showMessage($("#attt-links-message"), "Đã lưu kỳ thi ATTT.");
+    await loadATTTLinks();
+  } catch (error) {
+    showMessage(form.querySelector(".result"), error.message, "error");
+  }
+}
+
+async function deleteATTTLink(id) {
+  if (!confirm("Xóa kỳ thi ATTT này?")) return;
+  try {
+    await api(`/api/admin/attt-links/${id}`, { method: "DELETE" });
+    showMessage($("#attt-links-message"), "Đã xóa kỳ thi ATTT.");
+    await loadATTTLinks();
+  } catch (error) {
+    showMessage($("#attt-links-message"), error.message, "error");
+  }
+}
+
+async function uploadATTTAnswers(event) {
+  const input = event.currentTarget;
+  const file = input.files?.[0];
+  const id = Number(input.dataset.atttAnswerFile);
+  if (!file || !id) return;
+  const formData = new FormData();
+  formData.append("file", file);
+  try {
+    const result = await api(`/api/admin/attt-links/${id}/answers`, { method: "POST", body: formData });
+    showMessage($("#attt-links-message"), `Đã nạp ${result.answer_count} câu hỏi/đáp án.`);
+    await loadATTTLinks();
+  } catch (error) {
+    showMessage($("#attt-links-message"), error.message, "error");
+  } finally {
+    input.value = "";
+  }
 }
 
 async function loadAdminWebsites() {

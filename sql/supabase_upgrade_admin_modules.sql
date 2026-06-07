@@ -27,6 +27,7 @@ values
   ('vault.reveal', 'Xem mật khẩu đã lưu', 'vault', 43),
   ('auto', 'Auto', null, 50),
   ('auto.attt_quarterly', 'Thi ATTT hàng quý', 'auto', 51),
+  ('auto.attt_links', 'Quản trị link ATTT', 'auto', 52),
   ('admin.audit', 'Nhật ký hoạt động', 'admin.web', 90)
 on conflict (code) do update
 set name = excluded.name,
@@ -57,6 +58,17 @@ create table if not exists public.user_data_permissions (
   user_id bigint not null references public.users(id) on delete cascade,
   region_code text not null references public.data_regions(code) on delete cascade,
   primary key (user_id, region_code)
+);
+
+create table if not exists public.attt_exam_links (
+  id bigserial primary key,
+  period_name text not null,
+  exam_url text not null,
+  answer_file_name text not null default '',
+  answer_json jsonb not null default '[]'::jsonb,
+  is_active boolean not null default true,
+  created_at timestamptz not null,
+  updated_at timestamptz not null
 );
 
 create table if not exists public.system_roles (
