@@ -1,10 +1,13 @@
 const $ = (selector) => document.querySelector(selector);
 const role = document.body.dataset.role;
+let mustChangePassword = ["1", "True", "true"].includes(document.body.dataset.mustChange);
 const canManageVault = document.body.dataset.canManageVault === "True";
 const canRevealVault = document.body.dataset.canRevealVault === "True";
 let users = [];
 let websites = [];
 let features = [];
+let regions = [];
+let connections = [];
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -70,8 +73,21 @@ document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("
   if (item.dataset.view === "audit") await loadAudit();
 }));
 
-document.querySelectorAll("[data-open-dialog]").forEach((button) => button.addEventListener("click", () => $(`#${button.dataset.openDialog}`).showModal()));
+document.querySelectorAll("[data-open-dialog]").forEach((button) => button.addEventListener("click", () => {
+  if (button.dataset.openDialog === "region-dialog") {
+    openRegion("");
+    return;
+  }
+  $(`#${button.dataset.openDialog}`).showModal();
+}));
 document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
+
+if (mustChangePassword) {
+  const dialog = $("#password-dialog");
+  if (dialog && !dialog.open) {
+    dialog.showModal();
+  }
+}
 
 function closeTopDropdowns(except = null) {
   ["notification-menu", "user-menu"].forEach((id) => {
@@ -153,6 +169,8 @@ $("#password-form")?.addEventListener("submit", async (event) => {
   try {
     const response = await api("/api/auth/change-password", { method: "POST", body: JSON.stringify(data) });
     showMessage(form.querySelector(".result"), response.message);
+    mustChangePassword = false;
+    document.body.dataset.mustChange = "False";
     form.reset();
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
@@ -162,14 +180,30 @@ $("#password-form")?.addEventListener("submit", async (event) => {
 async function loadUsers() {
   setTableLoading("#users-table", 5, "Đang tải danh sách người dùng...");
   users = (await api("/api/admin/users")).users;
-  $("#users-table").innerHTML = users.length ? users.map((user) => `
+  renderUsersTable();
+}
+
+function renderUsersTable() {
+  const keyword = ($("#user-search")?.value || "").trim().toLowerCase();
+  const filteredUsers = keyword ? users.filter((user) => [
+    user.username,
+    user.full_name,
+    user.employee_code,
+    user.email,
+    user.department,
+    user.job_title,
+    user.phone,
+  ].some((value) => String(value || "").toLowerCase().includes(keyword))) : users;
+  const count = $("#user-count");
+  if (count) count.textContent = `${filteredUsers.length}/${users.length} người dùng`;
+  $("#users-table").innerHTML = filteredUsers.length ? filteredUsers.map((user) => `
     <tr>
       <td><strong>${escapeHtml(user.username)}</strong><small class='cell-note'>${escapeHtml(user.email || user.employee_code || "")}</small>${user.must_change_password ? "<small class='cell-note'>Cần đổi mật khẩu</small>" : ""}</td>
       <td>${escapeHtml(user.full_name)}<small class='cell-note'>${escapeHtml(user.department || "")}</small></td>
       <td><span class="status ${user.role === "admin" ? "admin" : "viewer"}">${user.role === "admin" ? "Quản trị viên" : "Người xem"}</span></td>
       <td><span class="status ${user.is_active ? "active" : "inactive"}">${user.is_active ? "Hoạt động" : "Đã khóa"}</span></td>
       <td><button class="table-action" data-edit-user="${user.id}">Chỉnh sửa</button> <button class="table-action danger" data-delete-user="${user.id}">Xóa</button></td>
-    </tr>`).join("") : emptyRow(5, "Chưa có người dùng", "Hãy tạo hoặc import người dùng từ Excel.");
+    </tr>`).join("") : emptyRow(5, keyword ? "Không tìm thấy người dùng" : "Chưa có người dùng", keyword ? "Hãy thử nhập từ khóa khác." : "Hãy tạo hoặc import người dùng từ Excel.");
   document.querySelectorAll("[data-edit-user]").forEach((button) => button.addEventListener("click", () => openEditUser(Number(button.dataset.editUser))));
   document.querySelectorAll("[data-delete-user]").forEach((button) => button.addEventListener("click", () => deleteUser(Number(button.dataset.deleteUser))));
 }
@@ -240,6 +274,8 @@ if (role === "admin") {
   $("#refresh-audit")?.addEventListener("click", loadAudit);
   $("#website-form")?.addEventListener("submit", saveWebsite);
   $("#region-form")?.addEventListener("submit", saveRegion);
+  $("#connection-form")?.addEventListener("submit", saveConnection);
+  $("#user-search")?.addEventListener("input", renderUsersTable);
   $("#user-import-file")?.addEventListener("change", importUserFile);
   $("#save-bulk-permissions")?.addEventListener("click", saveBulkPermissions);
   $("#save-data-permissions")?.addEventListener("click", saveDataPermissions);
@@ -300,7 +336,7 @@ async function saveBulkPermissions() {
 async function loadDataPermissionManager() {
   if (!users.length) users = (await api("/api/admin/users")).users;
   renderUserSelection("#data-permission-users");
-  const regions = (await api("/api/admin/regions")).regions;
+  regions = (await api("/api/admin/regions")).regions;
   $("#data-region-options").innerHTML = regions.map((region) => `
     <label class="selection-item">
       <input type="checkbox" value="${escapeHtml(region.code)}" />
@@ -316,26 +352,63 @@ async function saveDataPermissions() {
 }
 
 async function loadRegions() {
-  const regions = (await api("/api/admin/regions")).regions;
+  regions = (await api("/api/admin/regions")).regions;
   $("#regions-table").innerHTML = regions.length ? regions.map((region) => `
-    <tr><td><strong>${escapeHtml(region.code)}</strong></td><td>${escapeHtml(region.name)}</td><td><span class="status ${region.is_active ? "active" : "inactive"}">${region.is_active ? "Đang dùng" : "Ngừng dùng"}</span></td><td>${escapeHtml(region.sort_order)}</td></tr>
-  `).join("") : emptyRow(4, "Chưa có phân vùng", "Thêm phân vùng để phân quyền dữ liệu.");
+    <tr>
+      <td><strong>${escapeHtml(region.code)}</strong></td>
+      <td>${escapeHtml(region.name)}</td>
+      <td><span class="status ${region.is_active ? "active" : "inactive"}">${region.is_active ? "Đang dùng" : "Ngừng dùng"}</span></td>
+      <td>${escapeHtml(region.sort_order)}</td>
+      <td><button class="table-action" data-edit-region="${escapeHtml(region.code)}">Sửa</button> <button class="table-action danger" data-delete-region="${escapeHtml(region.code)}">Xóa</button></td>
+    </tr>
+  `).join("") : emptyRow(5, "Chưa có phân vùng", "Thêm phân vùng để phân quyền dữ liệu.");
+  document.querySelectorAll("[data-edit-region]").forEach((button) => button.addEventListener("click", () => openRegion(button.dataset.editRegion)));
+  document.querySelectorAll("[data-delete-region]").forEach((button) => button.addEventListener("click", () => deleteRegion(button.dataset.deleteRegion)));
+}
+
+function openRegion(code = "") {
+  const region = regions.find((item) => item.code === code);
+  const form = $("#region-form");
+  form.elements.namedItem("code").value = region?.code || "";
+  form.elements.namedItem("code").readOnly = Boolean(region);
+  form.elements.namedItem("name").value = region?.name || "";
+  form.elements.namedItem("sort_order").value = region?.sort_order ?? 0;
+  form.elements.namedItem("is_active").checked = region ? Boolean(region.is_active) : true;
+  form.querySelector(".result").className = "result hidden";
+  $("#region-dialog").showModal();
 }
 
 async function saveRegion(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
-  await api("/api/admin/regions", { method: "POST", body: JSON.stringify({
-    code: data.code,
-    name: data.name,
-    sort_order: Number(data.sort_order || 0),
-    is_active: form.is_active.checked,
-  })});
-  form.reset();
-  form.is_active.checked = true;
-  $("#region-dialog").close();
-  await loadRegions();
+  try {
+    await api("/api/admin/regions", { method: "POST", body: JSON.stringify({
+      code: data.code,
+      name: data.name,
+      sort_order: Number(data.sort_order || 0),
+      is_active: form.is_active.checked,
+    })});
+    form.reset();
+    form.elements.namedItem("code").readOnly = false;
+    form.is_active.checked = true;
+    $("#region-dialog").close();
+    showMessage($("#regions-message"), "Đã lưu phân vùng.");
+    await loadRegions();
+  } catch (error) {
+    showMessage(form.querySelector(".result"), error.message, "error");
+  }
+}
+
+async function deleteRegion(code) {
+  if (!confirm(`Xóa phân vùng ${code}? Các phân quyền dữ liệu liên quan cũng sẽ được xóa.`)) return;
+  try {
+    await api(`/api/admin/regions/${encodeURIComponent(code)}`, { method: "DELETE" });
+    showMessage($("#regions-message"), `Đã xóa phân vùng ${code}.`);
+    await loadRegions();
+  } catch (error) {
+    showMessage($("#regions-message"), error.message, "error");
+  }
 }
 
 async function loadSystem() {
@@ -353,18 +426,61 @@ async function loadSystem() {
 async function loadConnections() {
   setTableLoading("#connections-table", 6, "Đang tải kết nối hệ thống...");
   const data = await api("/api/admin/connections");
-  $("#connections-table").innerHTML = data.connections.length ? data.connections.map((connection) => `
+  connections = data.connections;
+  $("#connections-table").innerHTML = connections.length ? connections.map((connection) => `
     <tr>
       <td><strong>${escapeHtml(connection.name)}</strong><small class="cell-note">${escapeHtml(connection.description)}</small></td>
       <td><span class="status viewer">${escapeHtml(connection.connection_type)}</span></td>
       <td><span class="status ${connection.is_active ? "active" : "inactive"}">${connection.is_active ? "Đang dùng" : "Chưa cấu hình"}</span></td>
       <td><code>${escapeHtml(JSON.stringify(connection.config))}</code></td>
       <td>${escapeHtml(connection.secret_ref || "Không có")}</td>
-      <td><button class="table-action" data-test-connection="${escapeHtml(connection.code)}"><span class="button-label">Kiểm tra</span><span class="spinner"></span></button><div class="cell-note" id="connection-result-${escapeHtml(connection.code)}"></div></td>
+      <td><div class="action-group"><button class="table-action" data-edit-connection="${escapeHtml(connection.code)}">Cấu hình</button><button class="table-action" data-test-connection="${escapeHtml(connection.code)}"><span class="button-label">Kiểm tra</span><span class="spinner"></span></button></div><div class="cell-note" id="connection-result-${escapeHtml(connection.code)}"></div></td>
     </tr>`).join("") : emptyRow(6, "Chưa có kết nối", "Hãy cấu hình kết nối trong phần quản trị hệ thống.");
+  document.querySelectorAll("[data-edit-connection]").forEach((button) => {
+    button.addEventListener("click", () => openConnection(button.dataset.editConnection));
+  });
   document.querySelectorAll("[data-test-connection]").forEach((button) => {
     button.addEventListener("click", () => testConnection(button.dataset.testConnection, button));
   });
+}
+
+function openConnection(code) {
+  const connection = connections.find((item) => item.code === code);
+  const form = $("#connection-form");
+  form.elements.namedItem("code").value = connection.code;
+  form.elements.namedItem("name").value = connection.name;
+  form.elements.namedItem("connection_type").value = connection.connection_type;
+  form.elements.namedItem("description").value = connection.description || "";
+  form.elements.namedItem("config_json").value = JSON.stringify(connection.config || {}, null, 2);
+  form.elements.namedItem("is_active").checked = Boolean(connection.is_active);
+  form.querySelector(".result").className = "result hidden";
+  $("#connection-dialog").showModal();
+}
+
+async function saveConnection(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  let config = {};
+  try {
+    config = data.config_json ? JSON.parse(data.config_json) : {};
+  } catch {
+    showMessage(form.querySelector(".result"), "Cấu hình JSON chưa đúng định dạng.", "error");
+    return;
+  }
+  try {
+    await api(`/api/admin/connections/${encodeURIComponent(data.code)}`, { method: "PUT", body: JSON.stringify({
+      name: data.name,
+      connection_type: data.connection_type,
+      description: data.description || "",
+      config,
+      is_active: form.is_active.checked,
+    })});
+    $("#connection-dialog").close();
+    await loadConnections();
+  } catch (error) {
+    showMessage(form.querySelector(".result"), error.message, "error");
+  }
 }
 
 async function testConnection(code, button) {
@@ -507,4 +623,3 @@ $("#credential-form")?.addEventListener("submit", async (event) => {
     showMessage(form.querySelector(".result"), error.message, "error");
   }
 });
-

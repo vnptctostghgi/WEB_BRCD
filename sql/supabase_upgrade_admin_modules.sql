@@ -34,6 +34,7 @@ create table if not exists public.user_data_permissions (
 
 insert into public.data_regions (code, name, is_active, sort_order, created_at, updated_at)
 values
+  ('ALL', 'Tat ca', true, 0, now(), now()),
   ('13', 'Can Tho', true, 10, now(), now()),
   ('66', 'Hau Giang', true, 20, now(), now()),
   ('47', 'Soc Trang', true, 30, now(), now())

@@ -23,7 +23,7 @@
       };
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=18" />
+    <link rel="stylesheet" href="/static/styles.css?v=20" />
   </head>
   <body class="app-dark min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'vault.manage' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'vault.reveal' in user.permissions }}">
     <div class="min-h-screen lg:grid lg:grid-cols-[18rem_1fr]">
@@ -181,7 +181,15 @@
         {% if user.role == "admin" %}
         <section class="app-view" id="view-users">
           <div class="page-header"><div><p class="eyebrow">Quản trị web</p><h1>Quản trị người dùng</h1><p class="subtitle">Tạo, xóa, sửa và thêm người dùng hàng loạt bằng Excel.</p></div><div class="action-group"><a class="btn-secondary" href="/api/admin/users/import-template">Tải file mẫu</a><label class="btn-secondary cursor-pointer">Nạp Excel<input id="user-import-file" type="file" accept=".xlsx" class="hidden" /></label><button class="btn-primary" data-open-dialog="create-user-dialog">Tạo người dùng</button></div></div>
-          <section class="data-card"><div id="users-message" class="result hidden"></div><div class="table-scroll"><table><thead><tr><th>Tài khoản</th><th>Họ tên</th><th>Vai trò</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody id="users-table"></tbody></table></div></section>
+          <section class="data-card">
+            <div class="mb-4 grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
+              <label class="sr-only" for="user-search">Tìm kiếm người dùng</label>
+              <input id="user-search" class="form-control" type="search" placeholder="Tìm theo tài khoản, mã nhân viên, họ tên, email, phòng ban..." autocomplete="off" />
+              <span class="text-sm font-semibold text-sky-200" id="user-count">0 người dùng</span>
+            </div>
+            <div id="users-message" class="result hidden"></div>
+            <div class="table-scroll"><table><thead><tr><th>Tài khoản</th><th>Họ tên</th><th>Vai trò</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody id="users-table"></tbody></table></div>
+          </section>
         </section>
 
         <section class="app-view" id="view-websites">
@@ -207,7 +215,7 @@
 
         <section class="app-view" id="view-catalogs">
           <div class="page-header"><div><p class="eyebrow">Quản trị web</p><h1>Quản trị danh mục</h1><p class="subtitle">Quản trị các biến dùng chung như phân vùng.</p></div><button class="btn-primary" data-open-dialog="region-dialog">Thêm phân vùng</button></div>
-          <section class="data-card"><div class="table-scroll"><table><thead><tr><th>Mã</th><th>Tên phân vùng</th><th>Trạng thái</th><th>Thứ tự</th></tr></thead><tbody id="regions-table"></tbody></table></div></section>
+          <section class="data-card"><div id="regions-message" class="result hidden mb-4"></div><div class="table-scroll"><table><thead><tr><th>Mã</th><th>Tên phân vùng</th><th>Trạng thái</th><th>Thứ tự</th><th>Thao tác</th></tr></thead><tbody id="regions-table"></tbody></table></div></section>
         </section>
 
         <section class="app-view" id="view-reports">
@@ -218,7 +226,7 @@
         <section class="app-view" id="view-system">
           <div class="page-header"><div><p class="eyebrow">Quản trị hệ thống</p><h1>Cấu hình và trạng thái</h1><p class="subtitle">Theo dõi DB cơ quan, DB web, FTP, Drive và Telegram.</p></div></div>
           <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" id="system-cards"></section>
-          <section class="data-card mt-4"><div class="section-heading"><div><p class="eyebrow">Kết nối hệ thống</p><h2>DB, FTP, Drive và Telegram</h2><p>Secret được lưu trong biến môi trường, không hiển thị trên trình duyệt.</p></div><button class="btn-secondary" id="telegram-test-message" type="button"><span class="button-label">Gửi thử Telegram</span><span class="spinner"></span></button></div><div id="telegram-test-result" class="result hidden mb-4"></div><div class="table-scroll"><table><thead><tr><th>Tên kết nối</th><th>Loại</th><th>Trạng thái</th><th>Cấu hình</th><th>Secret</th><th>Kiểm tra</th></tr></thead><tbody id="connections-table"></tbody></table></div></section>
+          <section class="data-card mt-4"><div class="section-heading"><div><p class="eyebrow">Kết nối hệ thống</p><h2>DB, FTP, Drive và Telegram</h2><p>Secret được lưu trong biến môi trường, không hiển thị trên trình duyệt.</p></div><button class="btn-secondary" id="telegram-test-message" type="button"><span class="button-label">Gửi thử Telegram</span><span class="spinner"></span></button></div><div id="telegram-test-result" class="result hidden mb-4"></div><div class="table-scroll"><table><thead><tr><th>Tên kết nối</th><th>Loại</th><th>Trạng thái</th><th>Cấu hình</th><th>Secret</th><th>Thao tác</th></tr></thead><tbody id="connections-table"></tbody></table></div></section>
           <section class="data-card mt-4"><h2>Kiểm tra vận hành</h2><div class="mt-4 grid gap-3 md:grid-cols-2"><p class="check-item">Mật khẩu được băm, không lưu dạng rõ.</p><p class="check-item">Cookie phiên không đọc được bằng JavaScript.</p><p class="check-item">Oracle chỉ truy cập từ Data Access Layer.</p><p class="check-item">Route quản trị yêu cầu vai trò admin.</p></div></section>
         </section>
 
@@ -241,11 +249,12 @@
     <dialog id="website-dialog"><form class="dialog-form" id="website-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Danh mục</p><h2>Website</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<input class="form-control" name="name" required /></label><label>Địa chỉ website<input class="form-control" name="url" type="url" placeholder="https://..." required /></label><label class="checkbox-label"><input type="checkbox" name="requires_otp" /> Website yêu cầu OTP</label><label class="checkbox-label"><input type="checkbox" name="is_active" checked /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu danh mục</button></form></dialog>
     <dialog id="create-user-dialog"><form class="dialog-form" id="create-user-form"><div class="dialog-heading"><div><p class="eyebrow">Tài khoản mới</p><h2>Tạo người dùng</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên đăng nhập<input class="form-control" name="username" minlength="3" required /></label><label>Họ và tên<input class="form-control" name="full_name" required /></label><label>Vai trò<select class="form-control" name="role"><option value="viewer">Người xem</option><option value="admin">Quản trị viên</option></select></label><label>Mật khẩu khởi tạo<input class="form-control" type="password" name="password" minlength="10" required /></label><div class="result hidden" role="alert"></div><button class="btn-primary" type="submit">Tạo tài khoản</button></form></dialog>
     <dialog id="region-dialog"><form class="dialog-form" id="region-form"><div class="dialog-heading"><div><p class="eyebrow">Danh mục</p><h2>Phân vùng dữ liệu</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mã phân vùng<input class="form-control" name="code" required /></label><label>Tên phân vùng<input class="form-control" name="name" required /></label><label>Thứ tự<input class="form-control" name="sort_order" type="number" value="0" /></label><label class="checkbox-label"><input type="checkbox" name="is_active" checked /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu phân vùng</button></form></dialog>
+    <dialog id="connection-dialog"><form class="dialog-form" id="connection-form"><div class="dialog-heading"><div><p class="eyebrow">Quản trị kết nối</p><h2>Cấu hình kết nối</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mã kết nối<input class="form-control" name="code" readonly /></label><label>Tên kết nối<input class="form-control" name="name" required /></label><label>Loại kết nối<select class="form-control" name="connection_type"><option value="oracle">Oracle Database</option><option value="supabase">Supabase REST</option><option value="ftp">FTP/SFTP</option><option value="drive">Drive/API</option><option value="telegram">Telegram Bot</option><option value="vpn_ssl">VPN SSL</option></select></label><label>Mô tả<textarea class="form-control min-h-20" name="description" rows="2"></textarea></label><label>Cấu hình JSON<textarea class="form-control min-h-32 font-mono text-xs" name="config_json" rows="7" placeholder='{"host":"example.com"}'></textarea><small>Không nhập mật khẩu thật tại đây. Mật khẩu/secret nên để trong biến môi trường.</small></label><label class="checkbox-label"><input type="checkbox" name="is_active" /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu kết nối</button></form></dialog>
     <dialog id="edit-user-dialog"><form class="dialog-form" id="edit-user-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Cập nhật</p><h2>Chỉnh sửa người dùng</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Họ và tên<input class="form-control" name="full_name" required /></label><label>Vai trò<select class="form-control" name="role"><option value="viewer">Người xem</option><option value="admin">Quản trị viên</option></select></label><label class="checkbox-label"><input type="checkbox" name="is_active" /> Tài khoản đang hoạt động</label><label>Mật khẩu đặt lại<input class="form-control" type="password" name="password" minlength="10" placeholder="Để trống nếu không đổi" /></label><fieldset><legend>Cây quyền chức năng</legend><div id="permission-tree" class="permission-tree"></div></fieldset><div class="result hidden" role="alert"></div><button class="btn-primary" type="submit">Lưu thay đổi</button></form></dialog>
     {% endif %}
     {% if user.role == "admin" or "vault.manage" in user.permissions %}
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
-    <script src="/static/app.js?v=14"></script>
+    <script src="/static/app.js?v=16"></script>
   </body>
 </html>

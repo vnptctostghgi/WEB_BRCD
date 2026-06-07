@@ -625,6 +625,15 @@ def save_region(request: Request, payload: DataRegionPayload) -> dict:
     return {"ok": True}
 
 
+@router.delete("/api/admin/regions/{code}")
+def delete_region(request: Request, code: str) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    repository.delete_data_region(code.strip())
+    repository.add_audit_log(actor["username"], "region_deleted", f"Xoa phan vung {code}")
+    return {"ok": True}
+
+
 @router.get("/api/admin/users/{user_id}/data-permissions")
 def user_data_permissions(request: Request, user_id: int) -> dict:
     admin_user(request)

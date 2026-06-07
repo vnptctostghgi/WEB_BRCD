@@ -191,7 +191,7 @@ class AppRepository:
                 INSERT OR IGNORE INTO data_regions (code, name, is_active, sort_order, created_at, updated_at)
                 VALUES (?, ?, 1, ?, ?, ?)
                 """,
-                [("13", "Can Tho", 10, now, now), ("66", "Hau Giang", 20, now, now), ("47", "Soc Trang", 30, now, now)],
+                [("ALL", "Tat ca", 0, now, now), ("13", "Can Tho", 10, now, now), ("66", "Hau Giang", 20, now, now), ("47", "Soc Trang", 30, now, now)],
             )
             exists = connection.execute(
                 "SELECT id FROM users WHERE username = ?", (admin_username,)
@@ -420,6 +420,11 @@ class AppRepository:
                 """,
                 (code, name, int(is_active), sort_order, now, now),
             )
+
+    def delete_data_region(self, code: str) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM user_data_permissions WHERE region_code=?", (code,))
+            connection.execute("DELETE FROM data_regions WHERE code=?", (code,))
 
     def get_user_data_permissions(self, user_id: int) -> list[str]:
         with self.connect() as connection:

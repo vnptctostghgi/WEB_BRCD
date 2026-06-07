@@ -837,6 +837,18 @@ p {
   display: none !important;
 }
 
+@media (min-width: 1024px) {
+  #main-navigation.hidden {
+    display: grid !important;
+  }
+}
+
+@media (max-width: 1023.98px) {
+  .sidebar.menu-open #main-navigation {
+    display: grid !important;
+  }
+}
+
 .notice {
   margin-bottom: 1rem;
   border-radius: 22px;

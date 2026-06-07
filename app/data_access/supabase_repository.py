@@ -24,6 +24,7 @@ FEATURE_ROWS = [
 ]
 
 REGION_ROWS = [
+    {"code": "ALL", "name": "Tat ca", "is_active": True, "sort_order": 0},
     {"code": "13", "name": "Can Tho", "is_active": True, "sort_order": 10},
     {"code": "66", "name": "Hau Giang", "is_active": True, "sort_order": 20},
     {"code": "47", "name": "Soc Trang", "is_active": True, "sort_order": 30},
@@ -217,6 +218,10 @@ class SupabaseRepository:
     def save_data_region(self, code: str, name: str, is_active: bool, sort_order: int) -> None:
         now = self._now()
         self._upsert("data_regions", {"code": code, "name": name, "is_active": is_active, "sort_order": sort_order, "created_at": now, "updated_at": now}, "code")
+
+    def delete_data_region(self, code: str) -> None:
+        self._delete("user_data_permissions", {"region_code": f"eq.{code}"})
+        self._delete("data_regions", {"code": f"eq.{code}"})
 
     def get_user_data_permissions(self, user_id: int) -> list[str]:
         return [row["region_code"] for row in self._get("user_data_permissions", {"user_id": f"eq.{user_id}", "select": "region_code"})]
