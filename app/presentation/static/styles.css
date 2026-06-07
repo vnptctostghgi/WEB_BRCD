@@ -187,13 +187,17 @@ p {
 .brand-title {
   margin: 0;
   color: #fff;
-  font-size: 1rem;
-  font-weight: 800;
-  line-height: 1.18;
-  letter-spacing: -.035em;
+  display: -webkit-box;
+  max-height: 54px;
   overflow: hidden;
+  font-size: clamp(1.12rem, 2vw, 1.28rem);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -.035em;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .dynamic-module-title {

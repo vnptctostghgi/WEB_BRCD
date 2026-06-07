@@ -25,6 +25,8 @@ values
   ('vault.view', 'Xem danh sách tài khoản', 'vault', 41),
   ('vault.manage', 'Thêm và sửa tài khoản', 'vault', 42),
   ('vault.reveal', 'Xem mật khẩu đã lưu', 'vault', 43),
+  ('auto', 'Auto', null, 50),
+  ('auto.attt_quarterly', 'Thi ATTT hàng quý', 'auto', 51),
   ('admin.audit', 'Nhật ký hoạt động', 'admin.web', 90)
 on conflict (code) do update
 set name = excluded.name,

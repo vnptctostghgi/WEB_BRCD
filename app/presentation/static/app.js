@@ -481,6 +481,7 @@ async function syncNavigationFromFeatures() {
       }
       const adminGroup = document.querySelector('summary[data-feature-code="admin.web"]')?.closest(".nav-group");
       const permissionGroup = document.querySelector('summary[data-feature-code="admin.permissions.group"]')?.closest(".nav-group");
+      const autoGroup = document.querySelector('summary[data-feature-code="auto"]')?.closest(".nav-group");
       const reportsGroup = document.querySelector('summary[data-feature-code="reports"]')?.closest(".nav-group");
       if (["admin.permissions", "admin.data_permissions"].includes(feature.code) && permissionGroup && item.parentElement !== permissionGroup) {
         item.classList.add("child", "subchild");
@@ -491,6 +492,10 @@ async function syncNavigationFromFeatures() {
       if (feature.parent_code === "admin.web" && adminGroup && item.parentElement !== adminGroup) {
         item.classList.add("child");
         adminGroup.appendChild(item);
+      }
+      if (feature.parent_code === "auto" && autoGroup && item.parentElement !== autoGroup) {
+        item.classList.add("child");
+        autoGroup.appendChild(item);
       }
       if (feature.parent_code === "reports" && reportsGroup && item.parentElement !== reportsGroup) {
         item.classList.add("child");

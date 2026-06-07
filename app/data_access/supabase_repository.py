@@ -22,6 +22,8 @@ FEATURE_ROWS = [
     {"code": "vault.view", "name": "Xem danh sách tài khoản", "parent_code": "vault", "sort_order": 41},
     {"code": "vault.manage", "name": "Thêm và sửa tài khoản", "parent_code": "vault", "sort_order": 42},
     {"code": "vault.reveal", "name": "Xem mật khẩu đã lưu", "parent_code": "vault", "sort_order": 43},
+    {"code": "auto", "name": "Auto", "parent_code": None, "sort_order": 50},
+    {"code": "auto.attt_quarterly", "name": "Thi ATTT hàng quý", "parent_code": "auto", "sort_order": 51},
     {"code": "admin.audit", "name": "Nhật ký hoạt động", "parent_code": "admin.web", "sort_order": 90},
 ]
 

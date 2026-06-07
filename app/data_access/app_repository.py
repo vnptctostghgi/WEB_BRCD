@@ -194,6 +194,8 @@ class AppRepository:
                     ("vault.view", "Xem danh sách tài khoản", "vault", 41),
                     ("vault.manage", "Thêm và sửa tài khoản", "vault", 42),
                     ("vault.reveal", "Xem mật khẩu đã lưu", "vault", 43),
+                    ("auto", "Auto", None, 50),
+                    ("auto.attt_quarterly", "Thi ATTT hàng quý", "auto", 51),
                     ("admin.audit", "Nhật ký hoạt động", "admin.web", 90),
                 ],
             )
@@ -214,6 +216,8 @@ class AppRepository:
                     ("Xem danh sách tài khoản", "vault.view"),
                     ("Thêm và sửa tài khoản", "vault.manage"),
                     ("Xem mật khẩu đã lưu", "vault.reveal"),
+                    ("Auto", "auto"),
+                    ("Thi ATTT hàng quý", "auto.attt_quarterly"),
                     ("Nhật ký hoạt động", "admin.audit"),
                 ],
             )
