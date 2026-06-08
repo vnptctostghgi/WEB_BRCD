@@ -17,7 +17,7 @@ FEATURE_ROWS = [
     {"code": "admin.catalogs", "name": "Quản trị danh mục", "parent_code": "admin.web", "sort_order": 25},
     {"code": "admin.roles", "name": "Quản trị vai trò", "parent_code": "admin.catalogs", "sort_order": 26},
     {"code": "admin.menu", "name": "Quản trị menu", "parent_code": "admin.web", "sort_order": 27},
-    {"code": "admin.work_tasks", "name": "Quản lý công việc", "parent_code": "admin.web", "sort_order": 28},
+    {"code": "admin.work_tasks", "name": "Quản lý công việc", "parent_code": None, "sort_order": 28},
     {"code": "reports", "name": "Báo cáo thống kê", "parent_code": None, "sort_order": 30},
     {"code": "vault", "name": "Tài khoản web", "parent_code": None, "sort_order": 40},
     {"code": "vault.view", "name": "Xem danh sách tài khoản", "parent_code": "vault", "sort_order": 41},
@@ -177,6 +177,24 @@ class SupabaseRepository:
 
     def add_audit_log(self, actor: str, action: str, details: str) -> None:
         self._insert("audit_logs", {"actor": actor, "action": action, "details": details, "created_at": self._now()})
+
+    def record_login_failure(self, username: str, ip_address: str) -> int:
+        normalized = (username or "unknown").strip().lower() or "unknown"
+        rows = self._get("login_attempts", {"username": f"eq.{normalized}", "select": "fail_count", "limit": "1"})
+        fail_count = int(rows[0]["fail_count"]) + 1 if rows else 1
+        now = self._now()
+        self._upsert("login_attempts", {
+            "username": normalized,
+            "fail_count": fail_count,
+            "last_ip": ip_address,
+            "last_failed_at": now,
+            "updated_at": now,
+        }, "username")
+        return fail_count
+
+    def reset_login_failures(self, username: str) -> None:
+        normalized = (username or "unknown").strip().lower() or "unknown"
+        self._delete("login_attempts", {"username": f"eq.{normalized}"})
 
     def list_audit_logs(self, limit: int = 100) -> list[dict[str, Any]]:
         return self._get("audit_logs", {"order": "id.desc", "limit": str(limit)})

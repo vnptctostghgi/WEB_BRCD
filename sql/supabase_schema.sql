@@ -132,6 +132,14 @@ create table if not exists public.work_tasks (
   updated_at timestamptz not null
 );
 
+create table if not exists public.login_attempts (
+  username text primary key,
+  fail_count integer not null default 0,
+  last_ip text not null default '',
+  last_failed_at timestamptz not null,
+  updated_at timestamptz not null
+);
+
 
 -- Service/secret key cua backend se lam viec duoi quyen cao.
 -- Neu bat RLS, nen tao policy rieng. Trong giai do noi bo, REST service key co the bypass RLS.
@@ -146,3 +154,7 @@ alter table public.system_connections enable row level security;
 alter table public.data_regions enable row level security;
 alter table public.user_data_permissions enable row level security;
 alter table public.work_tasks enable row level security;
+alter table public.login_attempts enable row level security;
+
+grant select, insert, update, delete on public.work_tasks to anon, authenticated, service_role;
+grant select, insert, update, delete on public.login_attempts to anon, authenticated, service_role;

@@ -36,6 +36,16 @@ function showMessage(element, text, type = "success") {
   element.textContent = text;
 }
 
+let toastTimer;
+function showToast(text, type = "success") {
+  const toast = $("#toast");
+  if (!toast) return;
+  window.clearTimeout(toastTimer);
+  toast.textContent = text;
+  toast.className = `toast ${type === "error" ? "error" : ""}`.trim();
+  toastTimer = window.setTimeout(() => toast.classList.add("hidden"), 3200);
+}
+
 function loadingRow(colspan, text = "Đang tải dữ liệu...") {
   return `<tr><td colspan="${colspan}" class="loading-row">${escapeHtml(text)}</td></tr>`;
 }
@@ -325,6 +335,7 @@ if (role === "admin") {
   $("#region-form")?.addEventListener("submit", saveRegion);
   $("#role-form")?.addEventListener("submit", saveRole);
   $("#work-task-form")?.addEventListener("submit", saveWorkTask);
+  $("#save-work-task-button")?.addEventListener("click", () => $("#work-task-form")?.requestSubmit());
   $("#connection-form")?.addEventListener("submit", saveConnection);
   $("#user-search")?.addEventListener("input", renderUsersTable);
   $("#user-import-file")?.addEventListener("change", importUserFile);
@@ -494,7 +505,7 @@ async function syncNavigationFromFeatures() {
         permissionGroup.appendChild(item);
         return;
       }
-      if (["admin.permissions", "admin.data_permissions"].includes(feature.code)) return;
+      if (["admin.permissions", "admin.data_permissions", "admin.work_tasks"].includes(feature.code)) return;
       if (feature.parent_code === "admin.web" && adminGroup && item.parentElement !== adminGroup) {
         item.classList.add("child");
         adminGroup.appendChild(item);
@@ -680,9 +691,11 @@ async function saveWorkTask(event) {
     form.elements.namedItem("group").value = "ME";
     $("#work-task-dialog").close();
     showMessage($("#work-tasks-message"), "Đã lưu công việc.");
+    showToast("Đã lưu lịch công việc.");
     await loadWorkTasks();
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
+    showToast(error.message, "error");
   }
 }
 

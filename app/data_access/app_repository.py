@@ -163,6 +163,14 @@ class AppRepository:
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS login_attempts (
+                    username TEXT PRIMARY KEY COLLATE NOCASE,
+                    fail_count INTEGER NOT NULL DEFAULT 0,
+                    last_ip TEXT NOT NULL DEFAULT '',
+                    last_failed_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 """
             )
             for column, definition in {
@@ -207,7 +215,7 @@ class AppRepository:
                     ("admin.catalogs", "Quản trị danh mục", "admin.web", 25),
                     ("admin.roles", "Quản trị vai trò", "admin.catalogs", 26),
                     ("admin.menu", "Quản trị menu", "admin.web", 27),
-                    ("admin.work_tasks", "Quản lý công việc", "admin.web", 28),
+                    ("admin.work_tasks", "Quản lý công việc", None, 28),
                     ("reports", "Báo cáo thống kê", None, 30),
                     ("vault", "Tài khoản web", None, 40),
                     ("vault.view", "Xem danh sách tài khoản", "vault", 41),
@@ -364,6 +372,34 @@ class AppRepository:
                 "INSERT INTO audit_logs (actor, action, details, created_at) VALUES (?, ?, ?, ?)",
                 (actor, action, details, self._now()),
             )
+
+    def record_login_failure(self, username: str, ip_address: str) -> int:
+        now = self._now()
+        normalized = (username or "unknown").strip().lower() or "unknown"
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT fail_count FROM login_attempts WHERE username=?",
+                (normalized,),
+            ).fetchone()
+            fail_count = int(row["fail_count"]) + 1 if row else 1
+            connection.execute(
+                """
+                INSERT INTO login_attempts (username, fail_count, last_ip, last_failed_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(username) DO UPDATE SET
+                  fail_count=excluded.fail_count,
+                  last_ip=excluded.last_ip,
+                  last_failed_at=excluded.last_failed_at,
+                  updated_at=excluded.updated_at
+                """,
+                (normalized, fail_count, ip_address, now, now),
+            )
+            return fail_count
+
+    def reset_login_failures(self, username: str) -> None:
+        normalized = (username or "unknown").strip().lower() or "unknown"
+        with self.connect() as connection:
+            connection.execute("DELETE FROM login_attempts WHERE username=?", (normalized,))
 
     def list_audit_logs(self, limit: int = 100) -> list[dict[str, Any]]:
         with self.connect() as connection:

@@ -408,6 +408,37 @@ p {
   color: #fecaca;
 }
 
+.toast {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 80;
+  max-width: min(24rem, calc(100vw - 2rem));
+  border: 1px solid rgba(56, 189, 248, .45);
+  border-radius: 1rem;
+  background: linear-gradient(135deg, rgba(5, 31, 62, .96), rgba(7, 85, 156, .92));
+  color: #f8fafc;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, .35);
+  font-size: .875rem;
+  font-weight: 700;
+  line-height: 1.45;
+  padding: .85rem 1rem;
+  transform: translateY(0);
+  transition: opacity .2s ease, transform .2s ease;
+}
+
+.toast.error {
+  border-color: rgba(248, 113, 113, .5);
+  background: linear-gradient(135deg, rgba(69, 10, 10, .96), rgba(153, 27, 27, .92));
+}
+
+.toast.hidden {
+  display: block;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(.75rem);
+}
+
 .dropdown-action {
   display: flex;
   width: 100%;

@@ -174,11 +174,17 @@ def raise_work_task_schema_error(error: RuntimeError) -> None:
 
 def notify_login_failed_threshold(request: Request, username: str) -> None:
     display_username = username.strip() or "unknown"
-    counter_key = display_username.lower()
-    failures = FAILED_LOGIN_COUNTS.get(counter_key, 0) + 1
-    FAILED_LOGIN_COUNTS[counter_key] = failures
+    client_host = request.client.host if request.client else "unknown"
+    repository = build_app_repository()
+    try:
+        failures = repository.record_login_failure(display_username, client_host)
+    except RuntimeError as error:
+        try:
+            repository.add_audit_log("system", "login_attempt_counter_failed", str(error)[:500])
+        except Exception:
+            pass
+        failures = 5
     if failures >= 5:
-        client_host = request.client.host if request.client else "unknown"
         sent = TelegramNotifier(get_settings()).send_message(
             "Canh bao dang nhap sai",
             f"Tai khoan {display_username} dang nhap sai {failures} lan lien tiep.",
@@ -195,7 +201,10 @@ def notify_login_failed_threshold(request: Request, username: str) -> None:
 
 
 def reset_failed_login_counter(username: str) -> None:
-    FAILED_LOGIN_COUNTS.pop((username.strip() or "unknown").lower(), None)
+    try:
+        build_app_repository().reset_login_failures(username)
+    except Exception:
+        pass
 
 
 def normalize_email_username(email: str) -> str:
@@ -558,6 +567,29 @@ def send_telegram_test_message(request: Request) -> dict:
             detail=result.get("message") or "Không gửi được Telegram. Kiểm tra TELEGRAM_TOKEN, MY_TELEGRAM_ID và hãy bấm Start trong bot.",
         )
     return result
+
+
+@router.get("/api/test/telegram-alert")
+def test_telegram_alert() -> dict:
+    sent = TelegramNotifier(get_settings()).send_message(
+        "TEST Telegram",
+        "\u26a0\ufe0f [TEST] Hệ thống kiểm tra kết nối Bot Telegram hoạt động bình thường!",
+        {"route": "/api/test/telegram-alert"},
+    )
+    try:
+        build_app_repository().add_audit_log(
+            "system",
+            "telegram_public_test_sent" if sent else "telegram_public_test_failed",
+            "GET /api/test/telegram-alert",
+        )
+    except Exception:
+        pass
+    if not sent:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Không gửi được Telegram. Kiểm tra token, chat ID và log Render.",
+        )
+    return {"ok": True, "message": "Đã gửi tin nhắn test Telegram."}
 
 
 @router.get("/api/admin/work-tasks")

@@ -46,12 +46,15 @@ class TelegramNotifier:
                         "text": "\n".join(lines),
                         "disable_web_page_preview": True,
                     },
-                )
+            )
             if response.status_code >= 400:
                 logger.warning("Telegram send failed: %s %s", response.status_code, response.text[:300])
                 return False
             body = response.json()
-            return bool(body.get("ok", True))
+            if not body.get("ok", True):
+                logger.warning("Telegram API returned ok=false: %s", body)
+                return False
+            return True
         except Exception:
             logger.exception("Telegram send failed")
             return False

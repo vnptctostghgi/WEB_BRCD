@@ -12,7 +12,7 @@ alter table public.users add column if not exists job_title text;
 insert into public.features (code, name, parent_code, sort_order)
 values
   ('admin.menu', 'Quản trị menu', 'admin.web', 27),
-  ('admin.work_tasks', 'Quản lý công việc', 'admin.web', 28),
+  ('admin.work_tasks', 'Quản lý công việc', null, 28),
   ('admin.roles', 'Quản trị vai trò', 'admin.catalogs', 26),
   ('dashboard', 'Tổng quan', null, 10),
   ('admin.web', 'Quản trị web', null, 20),
@@ -87,6 +87,14 @@ create table if not exists public.work_tasks (
   updated_at timestamptz not null
 );
 
+create table if not exists public.login_attempts (
+  username text primary key,
+  fail_count integer not null default 0,
+  last_ip text not null default '',
+  last_failed_at timestamptz not null,
+  updated_at timestamptz not null
+);
+
 insert into public.system_roles (code, name, description, is_active, sort_order, created_at, updated_at)
 values
   ('admin', 'Quan tri he thong', 'Toan quyen quan tri va cau hinh he thong.', true, 10, now(), now()),
@@ -116,3 +124,7 @@ alter table public.data_regions enable row level security;
 alter table public.user_data_permissions enable row level security;
 alter table public.system_roles enable row level security;
 alter table public.work_tasks enable row level security;
+alter table public.login_attempts enable row level security;
+
+grant select, insert, update, delete on public.work_tasks to anon, authenticated, service_role;
+grant select, insert, update, delete on public.login_attempts to anon, authenticated, service_role;

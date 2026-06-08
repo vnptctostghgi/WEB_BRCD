@@ -67,6 +67,22 @@ def test_five_failed_logins_send_telegram_alert(monkeypatch) -> None:
         assert len(sent_messages) == 2
 
 
+def test_public_telegram_alert_test_route(monkeypatch) -> None:
+    sent_messages = []
+
+    def fake_send_message(self, title, message, details=None):
+        sent_messages.append((title, message, details))
+        return True
+
+    monkeypatch.setattr("app.presentation.routes.TelegramNotifier.send_message", fake_send_message)
+    with TestClient(app) as client:
+        response = client.get("/api/test/telegram-alert")
+        assert response.status_code == 200
+        assert response.json()["ok"] is True
+        assert sent_messages[0][0] == "TEST Telegram"
+        assert "[TEST]" in sent_messages[0][1]
+
+
 def test_admin_can_manage_work_tasks() -> None:
     with TestClient(app) as client:
         login(client)
