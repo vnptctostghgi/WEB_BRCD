@@ -17,6 +17,7 @@ FEATURE_ROWS = [
     {"code": "admin.catalogs", "name": "Quản trị danh mục", "parent_code": "admin.web", "sort_order": 25},
     {"code": "admin.roles", "name": "Quản trị vai trò", "parent_code": "admin.catalogs", "sort_order": 26},
     {"code": "admin.menu", "name": "Quản trị menu", "parent_code": "admin.web", "sort_order": 27},
+    {"code": "admin.work_tasks", "name": "Quản lý công việc", "parent_code": "admin.web", "sort_order": 28},
     {"code": "reports", "name": "Báo cáo thống kê", "parent_code": None, "sort_order": 30},
     {"code": "vault", "name": "Tài khoản web", "parent_code": None, "sort_order": 40},
     {"code": "vault.view", "name": "Xem danh sách tài khoản", "parent_code": "vault", "sort_order": 41},
@@ -316,6 +317,53 @@ class SupabaseRepository:
         payload["created_at"] = self._now()
         return int(self._insert("system_connections", payload)["id"])
 
+    def list_work_tasks(self, include_completed: bool = False) -> list[dict[str, Any]]:
+        params = {"order": "run_time.asc,task_id.asc"}
+        if not include_completed:
+            params.update({"is_active": "eq.true", "is_done": "eq.false"})
+        rows = self._get("work_tasks", params)
+        return [self._decode_work_task(row) for row in rows]
+
+    def get_work_task(self, task_id: str) -> dict[str, Any] | None:
+        rows = self._get("work_tasks", {"task_id": f"eq.{task_id}"})
+        return self._decode_work_task(rows[0]) if rows else None
+
+    def save_work_task(self, payload: dict[str, Any]) -> None:
+        now = self._now()
+        is_done = bool(payload.get("check", False))
+        row = {
+            "task_id": str(payload["task_id"]).strip(),
+            "ten_cong_viec": str(payload.get("ten_cong_viec", "")).strip(),
+            "schedule_type": str(payload.get("type", "Daily")).strip() or "Daily",
+            "run_time": str(payload.get("time", "07:00")).strip() or "07:00",
+            "weekday": str(payload.get("weekday", "")).strip(),
+            "once_date": str(payload.get("once_date") or "").strip() or None,
+            "group_name": str(payload.get("group", "")).strip(),
+            "is_done": is_done,
+            "is_active": False if is_done else bool(payload.get("is_active", True)),
+            "created_at": now,
+            "updated_at": now,
+        }
+        self._upsert("work_tasks", row, "task_id")
+
+    def delete_work_task(self, task_id: str) -> None:
+        self._delete("work_tasks", {"task_id": f"eq.{task_id}"})
+
+    def complete_work_task(self, task_id: str) -> None:
+        self._patch("work_tasks", {"task_id": f"eq.{task_id}"}, {
+            "is_done": True,
+            "is_active": False,
+            "completed_at": self._now(),
+            "updated_at": self._now(),
+        })
+
+    def mark_work_task_notified(self, task_id: str, notified_date: str) -> None:
+        self._patch("work_tasks", {"task_id": f"eq.{task_id}"}, {
+            "last_notified_date": notified_date,
+            "last_notified_at": self._now(),
+            "updated_at": self._now(),
+        })
+
     def health_check(self) -> dict[str, Any]:
         rows = self._get("features", {"select": "code", "limit": "1"})
         return {"ok": True, "backend": "supabase", "feature_rows_seen": len(rows)}
@@ -324,6 +372,25 @@ class SupabaseRepository:
     def _decode_connection(row: dict[str, Any]) -> dict[str, Any]:
         row["config"] = row.get("config") or {}
         return row
+
+    @staticmethod
+    def _decode_work_task(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "task_id": row.get("task_id"),
+            "ten_cong_viec": row.get("ten_cong_viec"),
+            "type": row.get("schedule_type"),
+            "time": row.get("run_time"),
+            "weekday": row.get("weekday") or "",
+            "once_date": row.get("once_date") or "",
+            "group": row.get("group_name") or "",
+            "check": bool(row.get("is_done")),
+            "is_active": bool(row.get("is_active")),
+            "last_notified_date": row.get("last_notified_date") or "",
+            "last_notified_at": row.get("last_notified_at") or "",
+            "completed_at": row.get("completed_at") or "",
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        }
 
     def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         headers = {"apikey": self.secret_key, "Content-Type": "application/json"}

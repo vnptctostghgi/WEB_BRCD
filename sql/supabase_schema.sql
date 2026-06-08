@@ -115,6 +115,23 @@ create table if not exists public.user_data_permissions (
   primary key (user_id, region_code)
 );
 
+create table if not exists public.work_tasks (
+  task_id text primary key,
+  ten_cong_viec text not null,
+  schedule_type text not null default 'Daily',
+  run_time text not null default '07:00',
+  weekday text not null default '',
+  once_date date,
+  group_name text not null default '',
+  is_done boolean not null default false,
+  is_active boolean not null default true,
+  last_notified_date date,
+  last_notified_at timestamptz,
+  completed_at timestamptz,
+  created_at timestamptz not null,
+  updated_at timestamptz not null
+);
+
 
 -- Service/secret key cua backend se lam viec duoi quyen cao.
 -- Neu bat RLS, nen tao policy rieng. Trong giai do noi bo, REST service key co the bypass RLS.
@@ -128,3 +145,4 @@ alter table public.system_roles enable row level security;
 alter table public.system_connections enable row level security;
 alter table public.data_regions enable row level security;
 alter table public.user_data_permissions enable row level security;
+alter table public.work_tasks enable row level security;

@@ -10,6 +10,7 @@ from app.data_access.repository_factory import build_repository
 from app.application.connection_service import ConnectionService
 from app.application.openvpn_service import openvpn_service
 from app.application.oracle_pool import oracle_pool_service
+from app.application.task_scheduler import work_task_scheduler
 from app.application.telegram_notifier import TelegramNotifier
 from app.presentation.routes import router
 from app.settings import get_settings
@@ -28,11 +29,14 @@ async def lifespan(_: FastAPI):
     ConnectionService(repository, settings).seed_current_connections()
     openvpn_service.configure(settings)
     oracle_pool_service.configure(settings)
+    work_task_scheduler.configure(repository, settings)
     openvpn_service.start()
     oracle_pool_service.start()
+    work_task_scheduler.start()
     try:
         yield
     finally:
+        work_task_scheduler.stop()
         oracle_pool_service.stop()
         openvpn_service.stop()
 

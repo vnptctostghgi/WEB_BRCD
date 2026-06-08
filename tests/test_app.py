@@ -64,6 +64,35 @@ def test_five_failed_logins_send_telegram_alert(monkeypatch) -> None:
         assert sent_messages[0][0] == "Canh bao dang nhap sai"
 
 
+def test_admin_can_manage_work_tasks() -> None:
+    with TestClient(app) as client:
+        login(client)
+        payload = {
+            "task_id": "Word1",
+            "ten_cong_viec": "Gia cuoc",
+            "type": "Daily",
+            "time": "07:00",
+            "weekday": "",
+            "once_date": "",
+            "group": "ME",
+            "check": False,
+        }
+        created = client.post("/api/admin/work-tasks", json=payload)
+        assert created.status_code == 200
+        assert created.json()["task"]["task_id"] == "Word1"
+
+        tasks = client.get("/api/admin/work-tasks").json()["tasks"]
+        assert any(task["task_id"] == "Word1" and task["check"] is False for task in tasks)
+
+        completed = client.post("/api/admin/work-tasks/Word1/complete")
+        assert completed.status_code == 200
+        active_tasks = client.get("/api/admin/work-tasks").json()["tasks"]
+        assert all(task["task_id"] != "Word1" for task in active_tasks)
+
+        all_tasks = client.get("/api/admin/work-tasks?include_completed=true").json()["tasks"]
+        assert any(task["task_id"] == "Word1" and task["check"] is True for task in all_tasks)
+
+
 def test_database_health_requires_login_and_uses_mock_mode() -> None:
     with TestClient(app) as client:
         assert client.get("/api/health/database").status_code == 401

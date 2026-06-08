@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 
 class TelegramNotifier:
+    """Gui thong bao Telegram duy nhat den MY_TELEGRAM_ID cua quan tri vien."""
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.token = settings.telegram_token.get_secret_value() or settings.bot_token.get_secret_value()
@@ -32,8 +34,8 @@ class TelegramNotifier:
             message,
         ]
         if details:
-            safe_details = "\n".join(f"- {key}: {value}" for key, value in details.items())
-            lines.extend(["", safe_details])
+            lines.append("")
+            lines.extend(f"- {key}: {value}" for key, value in details.items())
         try:
             with httpx.Client(timeout=15) as client:
                 response = client.post(
@@ -47,17 +49,32 @@ class TelegramNotifier:
             if response.status_code >= 400:
                 logger.warning("Telegram send failed: %s %s", response.status_code, response.text[:300])
                 return False
-            return True
+            body = response.json()
+            return bool(body.get("ok", True))
         except Exception:
             logger.exception("Telegram send failed")
             return False
+
+    def send_task_reminder(self, task: dict[str, Any]) -> bool:
+        return self.send_message(
+            "Nhac viec den gio",
+            f"{task.get('task_id')} - {task.get('ten_cong_viec')}",
+            {
+                "loai_lich": task.get("type"),
+                "gio": task.get("time"),
+                "thu": task.get("weekday") or "-",
+                "ngay_chay_mot_lan": task.get("once_date") or "-",
+                "nhom": task.get("group") or "-",
+                "huong_dan": "Vao module Quan ly cong viec va bam Hoan thanh de tat/an lich.",
+            },
+        )
 
     def test(self) -> dict[str, Any]:
         if not self.enabled:
             return {
                 "ok": False,
-                "message": "Chưa cấu hình token hoặc chat ID Telegram.",
-                "details": {"bot": self.settings.bot_username},
+                "message": "Chua cau hinh TELEGRAM_TOKEN/BOT_TOKEN hoac MY_TELEGRAM_ID.",
+                "details": {"bot": self.settings.bot_username, "chat_id": self.chat_id},
             }
         try:
             with httpx.Client(timeout=15) as client:
@@ -65,24 +82,30 @@ class TelegramNotifier:
             if response.status_code >= 400:
                 return {
                     "ok": False,
-                    "message": "Token Telegram không hợp lệ hoặc Bot API không phản hồi.",
+                    "message": "Token Telegram khong hop le hoac Bot API khong phan hoi.",
                     "details": {"status_code": response.status_code, "bot": self.settings.bot_username},
                 }
             data = response.json()
+            bot_username = data.get("result", {}).get("username") or self.settings.bot_username
+            sent = self.send_message(
+                "Kiem tra Telegram",
+                "Bot da ket noi thanh cong va chi gui tin ve MY_TELEGRAM_ID da cau hinh.",
+                {"chat_id": self.chat_id, "bot": bot_username},
+            )
             return {
-                "ok": bool(data.get("ok")),
-                "message": "Kết nối Telegram thành công.",
-                "details": {"bot": self.settings.bot_username},
+                "ok": bool(data.get("ok") and sent),
+                "message": "Ket noi Telegram thanh cong." if sent else "Bot hop le nhung chua gui duoc tin den MY_TELEGRAM_ID. Hay bam Start trong bot.",
+                "details": {"bot": bot_username, "chat_id": self.chat_id, "sent_to_owner": sent},
             }
         except httpx.TimeoutException:
             return {
                 "ok": False,
-                "message": "Telegram phản hồi quá lâu.",
-                "details": {"bot": self.settings.bot_username},
+                "message": "Telegram phan hoi qua lau.",
+                "details": {"bot": self.settings.bot_username, "chat_id": self.chat_id},
             }
         except httpx.RequestError:
             return {
                 "ok": False,
-                "message": "Không kết nối được Telegram Bot API.",
-                "details": {"bot": self.settings.bot_username},
+                "message": "Khong ket noi duoc Telegram Bot API.",
+                "details": {"bot": self.settings.bot_username, "chat_id": self.chat_id},
             }

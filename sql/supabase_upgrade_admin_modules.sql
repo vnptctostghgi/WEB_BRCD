@@ -12,6 +12,7 @@ alter table public.users add column if not exists job_title text;
 insert into public.features (code, name, parent_code, sort_order)
 values
   ('admin.menu', 'Quản trị menu', 'admin.web', 27),
+  ('admin.work_tasks', 'Quản lý công việc', 'admin.web', 28),
   ('admin.roles', 'Quản trị vai trò', 'admin.catalogs', 26),
   ('dashboard', 'Tổng quan', null, 10),
   ('admin.web', 'Quản trị web', null, 20),
@@ -69,6 +70,23 @@ create table if not exists public.system_roles (
   updated_at timestamptz not null
 );
 
+create table if not exists public.work_tasks (
+  task_id text primary key,
+  ten_cong_viec text not null,
+  schedule_type text not null default 'Daily',
+  run_time text not null default '07:00',
+  weekday text not null default '',
+  once_date date,
+  group_name text not null default '',
+  is_done boolean not null default false,
+  is_active boolean not null default true,
+  last_notified_date date,
+  last_notified_at timestamptz,
+  completed_at timestamptz,
+  created_at timestamptz not null,
+  updated_at timestamptz not null
+);
+
 insert into public.system_roles (code, name, description, is_active, sort_order, created_at, updated_at)
 values
   ('admin', 'Quan tri he thong', 'Toan quyen quan tri va cau hinh he thong.', true, 10, now(), now()),
@@ -97,3 +115,4 @@ set name = excluded.name,
 alter table public.data_regions enable row level security;
 alter table public.user_data_permissions enable row level security;
 alter table public.system_roles enable row level security;
+alter table public.work_tasks enable row level security;

@@ -146,6 +146,23 @@ class AppRepository:
                     FOREIGN KEY(region_code) REFERENCES data_regions(code)
                 );
 
+                CREATE TABLE IF NOT EXISTS work_tasks (
+                    task_id TEXT PRIMARY KEY,
+                    ten_cong_viec TEXT NOT NULL,
+                    schedule_type TEXT NOT NULL DEFAULT 'Daily',
+                    run_time TEXT NOT NULL DEFAULT '07:00',
+                    weekday TEXT NOT NULL DEFAULT '',
+                    once_date TEXT NOT NULL DEFAULT '',
+                    group_name TEXT NOT NULL DEFAULT '',
+                    is_done INTEGER NOT NULL DEFAULT 0,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    last_notified_date TEXT NOT NULL DEFAULT '',
+                    last_notified_at TEXT NOT NULL DEFAULT '',
+                    completed_at TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 """
             )
             for column, definition in {
@@ -190,6 +207,7 @@ class AppRepository:
                     ("admin.catalogs", "Quản trị danh mục", "admin.web", 25),
                     ("admin.roles", "Quản trị vai trò", "admin.catalogs", 26),
                     ("admin.menu", "Quản trị menu", "admin.web", 27),
+                    ("admin.work_tasks", "Quản lý công việc", "admin.web", 28),
                     ("reports", "Báo cáo thống kê", None, 30),
                     ("vault", "Tài khoản web", None, 40),
                     ("vault.view", "Xem danh sách tài khoản", "vault", 41),
@@ -210,6 +228,7 @@ class AppRepository:
                     ("Quản trị danh mục", "admin.catalogs"),
                     ("Quản trị vai trò", "admin.roles"),
                     ("Quản trị menu", "admin.menu"),
+                    ("Quản lý công việc", "admin.work_tasks"),
                     ("Báo cáo thống kê", "reports"),
                     ("Tài khoản web", "vault"),
                     ("Xem danh sách tài khoản", "vault.view"),
@@ -555,10 +574,109 @@ class AppRepository:
             )
             return int(cursor.lastrowid)
 
+    def list_work_tasks(self, include_completed: bool = False) -> list[dict[str, Any]]:
+        query = "SELECT * FROM work_tasks"
+        if not include_completed:
+            query += " WHERE is_active = 1 AND is_done = 0"
+        query += " ORDER BY run_time, task_id"
+        with self.connect() as connection:
+            rows = connection.execute(query).fetchall()
+            return [self._decode_work_task(dict(row)) for row in rows]
+
+    def get_work_task(self, task_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM work_tasks WHERE task_id=?", (task_id,)).fetchone()
+            return self._decode_work_task(dict(row)) if row else None
+
+    def save_work_task(self, payload: dict[str, Any]) -> None:
+        now = self._now()
+        task_id = str(payload["task_id"]).strip()
+        is_done = int(bool(payload.get("check", False)))
+        is_active = 0 if is_done else int(bool(payload.get("is_active", True)))
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO work_tasks
+                (task_id, ten_cong_viec, schedule_type, run_time, weekday, once_date, group_name,
+                 is_done, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(task_id) DO UPDATE SET
+                  ten_cong_viec=excluded.ten_cong_viec,
+                  schedule_type=excluded.schedule_type,
+                  run_time=excluded.run_time,
+                  weekday=excluded.weekday,
+                  once_date=excluded.once_date,
+                  group_name=excluded.group_name,
+                  is_done=excluded.is_done,
+                  is_active=excluded.is_active,
+                  updated_at=excluded.updated_at
+                """,
+                (
+                    task_id,
+                    str(payload.get("ten_cong_viec", "")).strip(),
+                    str(payload.get("type", "Daily")).strip() or "Daily",
+                    str(payload.get("time", "07:00")).strip() or "07:00",
+                    str(payload.get("weekday", "")).strip(),
+                    str(payload.get("once_date", "")).strip(),
+                    str(payload.get("group", "")).strip(),
+                    is_done,
+                    is_active,
+                    now,
+                    now,
+                ),
+            )
+
+    def delete_work_task(self, task_id: str) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM work_tasks WHERE task_id=?", (task_id,))
+
+    def complete_work_task(self, task_id: str) -> None:
+        now = self._now()
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE work_tasks
+                SET is_done=1, is_active=0, completed_at=?, updated_at=?
+                WHERE task_id=?
+                """,
+                (now, now, task_id),
+            )
+
+    def mark_work_task_notified(self, task_id: str, notified_date: str) -> None:
+        now = self._now()
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE work_tasks
+                SET last_notified_date=?, last_notified_at=?, updated_at=?
+                WHERE task_id=?
+                """,
+                (notified_date, now, now, task_id),
+            )
+
     @staticmethod
     def _decode_connection(row: dict[str, Any]) -> dict[str, Any]:
         row["config"] = json.loads(row.pop("config_json") or "{}")
         return row
+
+    @staticmethod
+    def _decode_work_task(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "task_id": row.get("task_id"),
+            "ten_cong_viec": row.get("ten_cong_viec"),
+            "type": row.get("schedule_type"),
+            "time": row.get("run_time"),
+            "weekday": row.get("weekday") or "",
+            "once_date": row.get("once_date") or "",
+            "group": row.get("group_name") or "",
+            "check": bool(row.get("is_done")),
+            "is_active": bool(row.get("is_active")),
+            "last_notified_date": row.get("last_notified_date") or "",
+            "last_notified_at": row.get("last_notified_at") or "",
+            "completed_at": row.get("completed_at") or "",
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        }
 
     @staticmethod
     def _now() -> str:

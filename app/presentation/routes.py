@@ -118,6 +118,17 @@ class FeatureLayoutPayload(BaseModel):
     features: list[FeatureLayoutItem]
 
 
+class WorkTaskPayload(BaseModel):
+    task_id: str
+    ten_cong_viec: str
+    type: Literal["Daily", "Weekly", "Once"] = "Daily"
+    time: str = "07:00"
+    weekday: str = ""
+    once_date: str = ""
+    group: str = ""
+    check: bool = False
+
+
 def build_app_repository() -> AppRepository:
     return build_repository(get_settings())
 
@@ -150,6 +161,15 @@ def notify_if_failed(title: str, result: dict, extra: dict | None = None) -> Non
     if connection_name:
         details = {**details, "ket_noi": connection_name}
     TelegramNotifier(settings).send_message(title, result.get("message", "Không rõ lỗi."), details or None)
+
+
+def raise_work_task_schema_error(error: RuntimeError) -> None:
+    if "work_tasks" in str(error):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Supabase chưa có bảng work_tasks. Hãy chạy lại file sql/supabase_upgrade_admin_modules.sql.",
+        ) from error
+    raise error
 
 
 def notify_login_failed_threshold(request: Request, username: str) -> None:
@@ -526,22 +546,88 @@ def save_system_connection(request: Request, code: str, payload: SystemConnectio
 @router.post("/api/admin/telegram/test-message")
 def send_telegram_test_message(request: Request) -> dict:
     actor = admin_user(request)
-    sent = TelegramNotifier(get_settings()).send_message(
-        "Kiem tra Telegram",
-        "Day la tin nhan kiem tra tu web quan tri BRCD.",
-        {"nguoi_kiem_tra": actor["username"]},
-    )
+    result = TelegramNotifier(get_settings()).test()
     build_app_repository().add_audit_log(
         actor["username"],
-        "telegram_test_message_sent" if sent else "telegram_test_message_failed",
-        "Kiem tra gui tin nhan Telegram that",
+        "telegram_test_message_sent" if result.get("ok") else "telegram_test_message_failed",
+        f"Kiem tra gui tin nhan Telegram: {result.get('message')}",
     )
-    if not sent:
+    if not result.get("ok"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Không gửi được Telegram. Kiểm tra TELEGRAM_TOKEN, MY_TELEGRAM_ID và hãy bấm Start trong bot.",
+            detail=result.get("message") or "Không gửi được Telegram. Kiểm tra TELEGRAM_TOKEN, MY_TELEGRAM_ID và hãy bấm Start trong bot.",
         )
-    return {"ok": True, "message": "Đã gửi tin nhắn thử đến Telegram."}
+    return result
+
+
+@router.get("/api/admin/work-tasks")
+def list_work_tasks(request: Request, include_completed: bool = False) -> dict:
+    admin_user(request)
+    try:
+        return {"tasks": build_app_repository().list_work_tasks(include_completed=include_completed)}
+    except RuntimeError as error:
+        raise_work_task_schema_error(error)
+
+
+@router.post("/api/admin/work-tasks")
+def save_work_task(request: Request, payload: WorkTaskPayload) -> dict:
+    actor = admin_user(request)
+    task_id = payload.task_id.strip()
+    task_name = payload.ten_cong_viec.strip()
+    if not task_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mã tác vụ không được để trống.")
+    if not task_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tên công việc không được để trống.")
+    if not payload.time or len(payload.time.split(":")) < 2:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Thời gian chạy chưa đúng định dạng HH:MM.")
+    if payload.type == "Once" and not payload.once_date:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Lịch chạy một lần cần nhập ngày chạy.")
+    if payload.type == "Weekly" and not payload.weekday:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Lịch hàng tuần cần nhập ngày trong tuần.")
+    repository = build_app_repository()
+    try:
+        repository.save_work_task({
+            "task_id": task_id,
+            "ten_cong_viec": task_name,
+            "type": payload.type,
+            "time": payload.time[:5],
+            "weekday": payload.weekday.strip(),
+            "once_date": payload.once_date.strip(),
+            "group": payload.group.strip(),
+            "check": payload.check,
+        })
+    except RuntimeError as error:
+        raise_work_task_schema_error(error)
+    repository.add_audit_log(actor["username"], "work_task_saved", f"Luu lich cong viec {task_id}")
+    return {"ok": True, "task": repository.get_work_task(task_id)}
+
+
+@router.delete("/api/admin/work-tasks/{task_id}")
+def delete_work_task(request: Request, task_id: str) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    try:
+        if not repository.get_work_task(task_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy tác vụ.")
+        repository.delete_work_task(task_id)
+    except RuntimeError as error:
+        raise_work_task_schema_error(error)
+    repository.add_audit_log(actor["username"], "work_task_deleted", f"Xoa lich cong viec {task_id}")
+    return {"ok": True}
+
+
+@router.post("/api/admin/work-tasks/{task_id}/complete")
+def complete_work_task(request: Request, task_id: str) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    try:
+        if not repository.get_work_task(task_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy tác vụ.")
+        repository.complete_work_task(task_id)
+    except RuntimeError as error:
+        raise_work_task_schema_error(error)
+    repository.add_audit_log(actor["username"], "work_task_completed", f"Hoan thanh va an lich cong viec {task_id}")
+    return {"ok": True, "message": "Đã đánh dấu hoàn thành và ẩn lịch công việc."}
 
 
 @router.get("/api/notifications")
