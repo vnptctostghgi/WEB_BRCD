@@ -33,7 +33,15 @@ def test_admin_can_login_and_open_dashboard() -> None:
         login(client)
         response = client.get("/")
         assert response.status_code == 200
+        assert 'rel="icon" type="image/png" href="/static/images/system-logo.png"' in response.text
         assert "Quản trị người dùng" in response.text
+
+
+def test_favicon_redirects_to_system_logo() -> None:
+    with TestClient(app) as client:
+        response = client.get("/favicon.ico", follow_redirects=False)
+        assert response.status_code == 307
+        assert response.headers["location"] == "/static/images/system-logo.png"
 
 
 def test_five_failed_logins_send_telegram_alert(monkeypatch) -> None:
@@ -73,6 +81,7 @@ def test_system_status_requires_login_and_reports_pool_policy() -> None:
         assert response.status_code == 200
         payload = response.json()
         assert payload["database_pool"]["state"] == "mock"
+        assert payload["vpn"]["client"] == "openconnect"
         assert payload["query_policy"]["select_star_allowed"] is False
         assert payload["query_policy"]["page_size_max"] == 50
 

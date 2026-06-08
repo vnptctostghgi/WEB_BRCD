@@ -257,6 +257,11 @@ def login_page(request: Request) -> Response:
     )
 
 
+@router.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    return RedirectResponse("/static/images/system-logo.png", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request) -> Response:
     try:

@@ -34,10 +34,10 @@ class Settings(BaseSettings):
     vpn_username: str = ""
     vpn_password: SecretStr = Field(default=SecretStr(""))
     vpn_type: str = "ssl"
-    openvpn_binary: str = "openvpn"
-    openvpn_config_path: str = ""
-    openvpn_auth_file_path: str = ""
-    openvpn_restart_seconds: int = 10
+    ssl_vpn_binary: str = "openconnect"
+    ssl_vpn_protocol: str = "fortinet"
+    ssl_vpn_restart_seconds: int = 10
+    vpn_tls_verify: bool = False
     vpn_test_targets: str = ""
 
     oracle_pool_min: int = 5
