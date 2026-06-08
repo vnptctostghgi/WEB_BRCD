@@ -119,7 +119,7 @@ class FeatureLayoutPayload(BaseModel):
 
 
 class WorkTaskPayload(BaseModel):
-    task_id: str
+    task_id: str = ""
     ten_cong_viec: str
     type: Literal["Daily", "Weekly", "Once"] = "Daily"
     time: str = "07:00"
@@ -177,12 +177,12 @@ def notify_login_failed_threshold(request: Request, username: str) -> None:
     counter_key = display_username.lower()
     failures = FAILED_LOGIN_COUNTS.get(counter_key, 0) + 1
     FAILED_LOGIN_COUNTS[counter_key] = failures
-    if failures % 5 == 0:
+    if failures >= 5:
         client_host = request.client.host if request.client else "unknown"
         sent = TelegramNotifier(get_settings()).send_message(
             "Canh bao dang nhap sai",
             f"Tai khoan {display_username} dang nhap sai {failures} lan lien tiep.",
-            {"ip": client_host, "nguong_canh_bao": 5},
+            {"ip": client_host, "nguong_canh_bao": 5, "so_lan_sai": failures},
         )
         try:
             build_app_repository().add_audit_log(
@@ -572,10 +572,7 @@ def list_work_tasks(request: Request, include_completed: bool = False) -> dict:
 @router.post("/api/admin/work-tasks")
 def save_work_task(request: Request, payload: WorkTaskPayload) -> dict:
     actor = admin_user(request)
-    task_id = payload.task_id.strip()
     task_name = payload.ten_cong_viec.strip()
-    if not task_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mã tác vụ không được để trống.")
     if not task_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tên công việc không được để trống.")
     if not payload.time or len(payload.time.split(":")) < 2:
@@ -585,6 +582,10 @@ def save_work_task(request: Request, payload: WorkTaskPayload) -> dict:
     if payload.type == "Weekly" and not payload.weekday:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Lịch hàng tuần cần nhập ngày trong tuần.")
     repository = build_app_repository()
+    try:
+        task_id = payload.task_id.strip() or repository.generate_work_task_id()
+    except RuntimeError as error:
+        raise_work_task_schema_error(error)
     try:
         repository.save_work_task({
             "task_id": task_id,

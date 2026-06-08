@@ -62,13 +62,15 @@ def test_five_failed_logins_send_telegram_alert(monkeypatch) -> None:
         assert response.status_code == 401
         assert len(sent_messages) == 1
         assert sent_messages[0][0] == "Canh bao dang nhap sai"
+        response = client.post("/api/auth/login", json={"username": "bad_admin", "password": "wrong"})
+        assert response.status_code == 401
+        assert len(sent_messages) == 2
 
 
 def test_admin_can_manage_work_tasks() -> None:
     with TestClient(app) as client:
         login(client)
         payload = {
-            "task_id": "Word1",
             "ten_cong_viec": "Gia cuoc",
             "type": "Daily",
             "time": "07:00",
@@ -79,18 +81,19 @@ def test_admin_can_manage_work_tasks() -> None:
         }
         created = client.post("/api/admin/work-tasks", json=payload)
         assert created.status_code == 200
-        assert created.json()["task"]["task_id"] == "Word1"
+        task_id = created.json()["task"]["task_id"]
+        assert task_id.startswith("TASK")
 
         tasks = client.get("/api/admin/work-tasks").json()["tasks"]
-        assert any(task["task_id"] == "Word1" and task["check"] is False for task in tasks)
+        assert any(task["task_id"] == task_id and task["check"] is False for task in tasks)
 
-        completed = client.post("/api/admin/work-tasks/Word1/complete")
+        completed = client.post(f"/api/admin/work-tasks/{task_id}/complete")
         assert completed.status_code == 200
         active_tasks = client.get("/api/admin/work-tasks").json()["tasks"]
-        assert all(task["task_id"] != "Word1" for task in active_tasks)
+        assert all(task["task_id"] != task_id for task in active_tasks)
 
         all_tasks = client.get("/api/admin/work-tasks?include_completed=true").json()["tasks"]
-        assert any(task["task_id"] == "Word1" and task["check"] is True for task in all_tasks)
+        assert any(task["task_id"] == task_id and task["check"] is True for task in all_tasks)
 
 
 def test_database_health_requires_login_and_uses_mock_mode() -> None:

@@ -15,7 +15,8 @@ class TelegramNotifier:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.token = settings.telegram_token.get_secret_value() or settings.bot_token.get_secret_value()
+        raw_token = settings.telegram_token.get_secret_value() or settings.bot_token.get_secret_value()
+        self.token = raw_token.strip().strip('"').strip("'")
         self.chat_id = settings.my_telegram_id
 
     @property

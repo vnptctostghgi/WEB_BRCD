@@ -328,6 +328,15 @@ class SupabaseRepository:
         rows = self._get("work_tasks", {"task_id": f"eq.{task_id}"})
         return self._decode_work_task(rows[0]) if rows else None
 
+    def generate_work_task_id(self) -> str:
+        rows = self._get("work_tasks", {"select": "task_id", "task_id": "like.TASK%", "order": "task_id.desc"})
+        max_number = 0
+        for row in rows:
+            suffix = str(row.get("task_id", ""))[4:]
+            if suffix.isdigit():
+                max_number = max(max_number, int(suffix))
+        return f"TASK{max_number + 1:04d}"
+
     def save_work_task(self, payload: dict[str, Any]) -> None:
         now = self._now()
         is_done = bool(payload.get("check", False))

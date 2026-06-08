@@ -646,7 +646,7 @@ function openWorkTask(taskId = "") {
   const task = workTasks.find((item) => item.task_id === taskId);
   const form = $("#work-task-form");
   form.elements.namedItem("task_id").value = task?.task_id || "";
-  form.elements.namedItem("task_id").readOnly = Boolean(task);
+  form.elements.namedItem("task_id").readOnly = true;
   form.elements.namedItem("ten_cong_viec").value = task?.ten_cong_viec || "";
   form.elements.namedItem("type").value = task?.type || "Daily";
   form.elements.namedItem("time").value = task?.time || "07:00";
@@ -674,7 +674,8 @@ async function saveWorkTask(event) {
       check: form.check.checked,
     })});
     form.reset();
-    form.elements.namedItem("task_id").readOnly = false;
+    form.elements.namedItem("task_id").readOnly = true;
+    form.elements.namedItem("type").value = "Daily";
     form.elements.namedItem("time").value = "07:00";
     form.elements.namedItem("group").value = "ME";
     $("#work-task-dialog").close();

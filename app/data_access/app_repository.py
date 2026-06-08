@@ -588,6 +588,16 @@ class AppRepository:
             row = connection.execute("SELECT * FROM work_tasks WHERE task_id=?", (task_id,)).fetchone()
             return self._decode_work_task(dict(row)) if row else None
 
+    def generate_work_task_id(self) -> str:
+        with self.connect() as connection:
+            rows = connection.execute("SELECT task_id FROM work_tasks WHERE task_id LIKE 'TASK%'").fetchall()
+        max_number = 0
+        for row in rows:
+            suffix = str(row["task_id"])[4:]
+            if suffix.isdigit():
+                max_number = max(max_number, int(suffix))
+        return f"TASK{max_number + 1:04d}"
+
     def save_work_task(self, payload: dict[str, Any]) -> None:
         now = self._now()
         task_id = str(payload["task_id"]).strip()
