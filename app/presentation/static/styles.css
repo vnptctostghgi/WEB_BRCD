@@ -144,7 +144,7 @@ p {
 
 @media (min-width: 1024px) {
   .app-shell {
-    grid-template-columns: minmax(17rem, 18rem) minmax(0, 1fr);
+    grid-template-columns: minmax(19rem, 20rem) minmax(0, 1fr);
   }
 }
 
