@@ -23,7 +23,7 @@
       };
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=27" />
+    <link rel="stylesheet" href="/static/styles.css?v=28" />
   </head>
   <body class="app-dark min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'vault.manage' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'vault.reveal' in user.permissions }}">
     <svg class="icon-sprite" aria-hidden="true">
@@ -37,7 +37,6 @@
       <symbol id="icon-list" viewBox="0 0 24 24"><path d="M4 5h4v4H4V5Zm6 1h10v2H10V6ZM4 10h4v4H4v-4Zm6 1h10v2H10v-2ZM4 15h4v4H4v-4Zm6 1h10v2H10v-2Z"/></symbol>
       <symbol id="icon-chart" viewBox="0 0 24 24"><path d="M4 20V4h2v14h14v2H4Zm4-4V9h3v7H8Zm5 0V5h3v11h-3Zm5 0v-5h3v5h-3Z"/></symbol>
       <symbol id="icon-audit" viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6V2Zm8 1.5V8h4.5L14 3.5ZM8 12h8v2H8v-2Zm0 4h8v2H8v-2Z"/></symbol>
-      <symbol id="icon-auto" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 10-13h-7l1-7Z"/></symbol>
     </svg>
     <div class="app-shell min-h-screen">
       <aside class="sidebar border-b border-sky-500/20 bg-[#04182f] px-4 py-3 text-white shadow-lg lg:border-b-0 lg:border-r lg:border-sky-500/20 lg:px-5 lg:py-6" id="sidebar">
@@ -75,15 +74,6 @@
                 <button class="nav-item child subchild" data-feature-code="admin.data_permissions" data-view="data-permissions" data-title="Phân quyền dữ liệu người dùng" data-keywords="phan quyen du lieu phan vung"><svg class="nav-svg"><use href="#icon-database"></use></svg><span>Dữ liệu</span></button>
               </details>
               <button class="nav-item child" data-feature-code="admin.audit" data-view="audit" data-title="Nhật ký hoạt động" data-keywords="nhat ky audit log"><svg class="nav-svg"><use href="#icon-audit"></use></svg><span>Nhật ký hoạt động</span></button>
-              {% endif %}
-            </details>
-            {% endif %}
-            {% if user.role == "admin" or "auto.attt_quarterly" in user.permissions %}
-            <details class="nav-group">
-              <summary data-feature-code="auto"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-auto"></use></svg><strong>Auto</strong></summary>
-              <button class="nav-item child" data-feature-code="auto.attt_quarterly" data-view="attt-quarterly" data-title="Thi ATTT hàng quý" data-keywords="auto thi attt hang quy an toan thong tin"><svg class="nav-svg"><use href="#icon-shield"></use></svg><span>Thi ATTT hàng quý</span></button>
-              {% if user.role == "admin" %}
-              <button class="nav-item child" data-feature-code="auto.attt_links" data-view="attt-links" data-title="Quản trị link ATTT" data-keywords="quan tri link attt elearning dap an"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản trị link</span></button>
               {% endif %}
             </details>
             {% endif %}
@@ -281,43 +271,8 @@
           <section class="data-card"><div class="table-scroll"><table><thead><tr><th>Thời gian</th><th>Người thực hiện</th><th>Hành động</th><th>Chi tiết</th></tr></thead><tbody id="audit-table"></tbody></table></div></section>
         </section>
         {% endif %}
-        {% if user.role == "admin" or "auto.attt_quarterly" in user.permissions %}
-        <section class="app-view" id="view-attt-quarterly">
-          <section class="data-card">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">Auto</p>
-                <h2>Thi ATTT hàng quý</h2>
-                <p>Hỗ trợ mở đúng kỳ thi Elearning và ôn tập bộ câu hỏi đã được quản trị cấu hình. Hệ thống không lưu mật khẩu, OTP và không tự chọn đáp án trên bài thi thật.</p>
-              </div>
-            </div>
-            <div id="attt-current" class="grid gap-4"></div>
-            <div class="action-group mt-4">
-              <a class="btn-secondary" id="attt-login-link" href="#" target="_blank" rel="noopener noreferrer">Mở đăng nhập Elearning</a>
-              <a class="btn-primary" id="attt-exam-link" href="#" target="_blank" rel="noopener noreferrer">Mở link bài thi</a>
-            </div>
-          </section>
-          <section class="data-card mt-4">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">Ôn tập</p>
-                <h2>Bộ câu hỏi đã cấu hình</h2>
-                <p>Danh sách này dùng để ôn tập và kiểm tra nội bộ trước kỳ thi.</p>
-              </div>
-            </div>
-            <div id="attt-practice-list" class="practice-list"></div>
-          </section>
-        </section>
-        {% endif %}
-        {% if user.role == "admin" %}
-        <section class="app-view" id="view-attt-links">
-          <div class="page-header"><div><p class="eyebrow">Auto</p><h1>Quản trị link ATTT</h1><p class="subtitle">Cấu hình link bài thi Elearning và nạp bộ đáp án ôn tập theo từng kỳ.</p></div><button class="btn-primary" id="create-attt-link" type="button">Thêm kỳ thi</button></div>
-          <section class="data-card">
-            <div id="attt-links-message" class="result hidden mb-4"></div>
-            <div class="table-scroll"><table><thead><tr><th>Kỳ thi</th><th>URL bài thi</th><th>Tệp đáp án</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody id="attt-links-table"></tbody></table></div>
-          </section>
-        </section>
-        {% endif %}
+        
+
         <footer class="mt-auto pt-6">
           <div class="rounded-2xl border border-sky-500/25 bg-[#061d38] px-4 py-4 text-center text-sm font-semibold text-sky-100">
             Hỗ trợ quản trị viên: <a class="font-extrabold text-white hover:underline" href="tel:0949892585">094.989.2585</a> · gọi/Zalo/Telegram
@@ -334,12 +289,12 @@
     <dialog id="region-dialog"><form class="dialog-form" id="region-form"><div class="dialog-heading"><div><p class="eyebrow">Danh mục</p><h2>Phân vùng dữ liệu</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mã phân vùng<input class="form-control" name="code" required /></label><label>Tên phân vùng<input class="form-control" name="name" required /></label><label>Thứ tự<input class="form-control" name="sort_order" type="number" value="0" /></label><label class="checkbox-label"><input type="checkbox" name="is_active" checked /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu phân vùng</button></form></dialog>
     <dialog id="role-dialog"><form class="dialog-form" id="role-form"><div class="dialog-heading"><div><p class="eyebrow">Vai trò người dùng</p><h2>Cấu hình vai trò</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mã vai trò<input class="form-control" name="code" required placeholder="vi_du: region_manager" /></label><label>Tên vai trò<input class="form-control" name="name" required /></label><label>Mô tả<textarea class="form-control min-h-24" name="description" rows="3"></textarea></label><label>Thứ tự<input class="form-control" name="sort_order" type="number" value="0" /></label><label class="checkbox-label"><input type="checkbox" name="is_active" checked /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu vai trò</button></form></dialog>
     <dialog id="connection-dialog"><form class="dialog-form" id="connection-form"><div class="dialog-heading"><div><p class="eyebrow">Quản trị kết nối</p><h2>Cấu hình kết nối</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mã kết nối<input class="form-control" name="code" readonly /></label><label>Tên kết nối<input class="form-control" name="name" required /></label><label>Loại kết nối<select class="form-control" name="connection_type"><option value="oracle">Oracle Database</option><option value="supabase">Supabase REST</option><option value="ftp">FTP/SFTP</option><option value="drive">Drive/API</option><option value="telegram">Telegram Bot</option><option value="vpn_ssl">OpenVPN SSL/TLS</option></select></label><label>Mô tả<textarea class="form-control min-h-20" name="description" rows="2"></textarea></label><label>Cấu hình JSON<textarea class="form-control min-h-32 font-mono text-xs" name="config_json" rows="7" placeholder='{"host":"example.com"}'></textarea><small>Không nhập mật khẩu thật tại đây. Mật khẩu/secret nên để trong biến môi trường.</small></label><label class="checkbox-label"><input type="checkbox" name="is_active" /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu kết nối</button></form></dialog>
-    <dialog id="attt-link-dialog"><form class="dialog-form" id="attt-link-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Auto</p><h2>Cấu hình kỳ thi ATTT</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên kỳ thi<input class="form-control" name="period_name" required placeholder="Ví dụ: ATTT Quý 1/2026" /></label><label>URL bài thi Elearning<input class="form-control" name="exam_url" type="url" required placeholder="https://elearning.vnpt.vn/course/enjoin?id=..." /></label><label class="checkbox-label"><input type="checkbox" name="is_active" checked /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu kỳ thi</button></form></dialog>
+
     <dialog id="edit-user-dialog"><form class="dialog-form" id="edit-user-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Cập nhật</p><h2>Chỉnh sửa người dùng</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Họ và tên<input class="form-control" name="full_name" required /></label><label>Vai trò<select class="form-control" name="role"><option value="viewer">Người xem</option><option value="admin">Quản trị viên</option></select></label><label class="checkbox-label"><input type="checkbox" name="is_active" /> Tài khoản đang hoạt động</label><label>Mật khẩu đặt lại<input class="form-control" type="password" name="password" minlength="10" placeholder="Để trống nếu không đổi" /></label><fieldset><legend>Cây quyền chức năng</legend><div id="permission-tree" class="permission-tree"></div></fieldset><div class="result hidden" role="alert"></div><button class="btn-primary" type="submit">Lưu thay đổi</button></form></dialog>
     {% endif %}
     {% if user.role == "admin" or "vault.manage" in user.permissions %}
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
-    <script src="/static/app.js?v=24"></script>
+    <script src="/static/app.js?v=25"></script>
   </body>
 </html>

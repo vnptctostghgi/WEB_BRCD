@@ -65,6 +65,27 @@ def test_database_health_requires_login_and_uses_mock_mode() -> None:
         assert response.json()["details"]["mode"] == "mock"
 
 
+def test_system_status_requires_login_and_reports_pool_policy() -> None:
+    with TestClient(app) as client:
+        assert client.get("/api/system/status").status_code == 401
+        login(client)
+        response = client.get("/api/system/status")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["database_pool"]["state"] == "mock"
+        assert payload["query_policy"]["select_star_allowed"] is False
+        assert payload["query_policy"]["page_size_max"] == 50
+
+
+def test_auto_module_is_removed_from_dashboard() -> None:
+    with TestClient(app) as client:
+        login(client)
+        response = client.get("/")
+        assert response.status_code == 200
+        assert "data-feature-code=\"auto\"" not in response.text
+        assert "attt" not in response.text.lower()
+
+
 def test_admin_can_create_viewer_and_viewer_cannot_access_admin_api() -> None:
     with TestClient(app) as client:
         login(client)

@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from app.application.database_service import DatabaseService
+from app.application.openvpn_service import openvpn_service
 from app.application.telegram_notifier import TelegramNotifier
 from app.data_access.oracle_repository import OracleRepository
 from app.settings import Settings
@@ -172,9 +173,17 @@ class ConnectionService:
             "type": config.get("type", "OpenVPN SSL/TLS"),
         }
 
-        openvpn_result = self._test_openvpn_tunnel(config, base_details)
-        if openvpn_result is not None:
-            return openvpn_result
+        config_path = config.get("openvpn_config_path") or self.settings.openvpn_config_path
+        if config_path:
+            vpn_status = openvpn_service.status()
+            targets = config.get("test_targets") or self._parse_targets(self.settings.vpn_test_targets)
+            route_results = self._test_targets(targets) if vpn_status.get("connected") else []
+            all_routes_ok = all(item["ok"] for item in route_results) if route_results else bool(vpn_status.get("connected"))
+            return {
+                "ok": bool(vpn_status.get("connected") and all_routes_ok),
+                "message": "OpenVPN nen dang ket noi va tuyen noi bo san sang." if vpn_status.get("connected") and all_routes_ok else "OpenVPN nen chua san sang. Xem chi tiet log de kiem tra cau hinh, quyen TUN/TAP hoac route DB/FTP.",
+                "details": {**base_details, "stage": "persistent_openvpn_status", "vpn": vpn_status, "targets": route_results},
+            }
 
         try:
             with socket.create_connection((host, port), timeout=8) as tcp_socket:

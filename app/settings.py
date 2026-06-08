@@ -36,7 +36,15 @@ class Settings(BaseSettings):
     vpn_type: str = "ssl"
     openvpn_binary: str = "openvpn"
     openvpn_config_path: str = ""
+    openvpn_auth_file_path: str = ""
+    openvpn_restart_seconds: int = 10
     vpn_test_targets: str = ""
+
+    oracle_pool_min: int = 5
+    oracle_pool_max: int = 30
+    oracle_pool_increment: int = 1
+    oracle_connect_timeout_ms: int = 10000
+    oracle_query_timeout_ms: int = 5000
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
 

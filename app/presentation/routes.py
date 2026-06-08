@@ -1,6 +1,4 @@
 from pathlib import Path
-import json
-import re
 import sqlite3
 from io import BytesIO
 from typing import Literal
@@ -15,6 +13,8 @@ from app.application.auth_service import AuthService
 from app.application.database_service import DatabaseService
 from app.application.vault_service import VaultService
 from app.application.connection_service import ConnectionService
+from app.application.openvpn_service import openvpn_service
+from app.application.oracle_pool import oracle_pool_service
 from app.application.telegram_notifier import TelegramNotifier
 from app.data_access.app_repository import AppRepository
 from app.data_access.repository_factory import build_repository
@@ -59,13 +59,6 @@ class WebsitePayload(BaseModel):
     name: str
     url: str
     requires_otp: bool = False
-    is_active: bool = True
-
-
-class ATTTExamLinkPayload(BaseModel):
-    id: int | None = None
-    period_name: str
-    exam_url: str
     is_active: bool = True
 
 
@@ -223,68 +216,6 @@ def parse_employee_workbook(content: bytes) -> list[dict]:
     return employees
 
 
-def normalize_answer_key(value: str) -> str:
-    text = normalize_cell(value).lower()
-    text = text.replace("â", "a").replace("ă", "a").replace("á", "a").replace("à", "a").replace("ả", "a").replace("ã", "a").replace("ạ", "a")
-    text = text.replace("đ", "d").replace("ê", "e").replace("ô", "o").replace("ơ", "o").replace("ư", "u")
-    return re.sub(r"[^a-z0-9]+", "", text)
-
-
-def normalize_answer_record(record: dict) -> dict[str, str]:
-    normalized = {normalize_answer_key(key): normalize_cell(value) for key, value in record.items()}
-    question = normalized.get("ques") or normalized.get("question") or normalized.get("cauhoi") or normalized.get("noidung") or ""
-    item = {"ques": question}
-    for index in range(1, 6):
-        item[f"ans{index}"] = normalized.get(f"ans{index}") or normalized.get(f"dapan{index}") or normalized.get(f"answer{index}") or ""
-    return item
-
-
-def parse_answer_json_like(text: str) -> list[dict]:
-    try:
-        data = json.loads(text)
-        return data if isinstance(data, list) else []
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r"(?:dapan|answers?)\s*=\s*(\[[\s\S]*?\])\s*;?", text, flags=re.IGNORECASE)
-    candidate = match.group(1) if match else text
-    candidate = re.sub(r"([{,]\s*)(ques|ans[1-5])\s*:", r'\1"\2":', candidate)
-    candidate = candidate.replace("'", '"')
-    try:
-        data = json.loads(candidate)
-        return data if isinstance(data, list) else []
-    except json.JSONDecodeError:
-        return []
-
-
-def parse_answer_file(filename: str, content: bytes) -> list[dict[str, str]]:
-    suffix = Path(filename or "").suffix.lower()
-    rows: list[dict] = []
-    if suffix == ".xlsx":
-        workbook = openpyxl.load_workbook(BytesIO(content), data_only=True)
-        sheet = workbook[workbook.sheetnames[0]]
-        headers = [normalize_cell(cell.value) for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
-        for values in sheet.iter_rows(min_row=2, values_only=True):
-            row = {headers[index]: values[index] for index in range(min(len(headers), len(values)))}
-            rows.append(row)
-    else:
-        text = content.decode("utf-8-sig", errors="ignore")
-        rows = parse_answer_json_like(text)
-        if not rows:
-            for line in text.splitlines():
-                parts = [part.strip() for part in re.split(r"\t|\|", line) if part.strip()]
-                if len(parts) >= 2:
-                    rows.append({"ques": parts[0], **{f"ans{i}": value for i, value in enumerate(parts[1:6], start=1)}})
-    answers = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        item = normalize_answer_record(row)
-        if item["ques"] and any(item[f"ans{index}"] for index in range(1, 6)):
-            answers.append(item)
-    if not answers:
-        raise ValueError("File đáp án chưa đúng định dạng. Cần có cột ques/câu hỏi và ans1..ans5.")
-    return answers
-
 
 def current_user(request: Request) -> dict:
     session_user = request.session.get("user")
@@ -385,6 +316,24 @@ def database_health(request: Request) -> dict:
     result = build_database_service().get_connection_status()
     notify_if_failed("Lỗi kết nối Oracle", result)
     return result
+
+
+@router.get("/api/system/status")
+def system_status(request: Request) -> dict:
+    current_user(request)
+    settings = get_settings()
+    return {
+        "vpn": openvpn_service.status(),
+        "database_pool": oracle_pool_service.status(),
+        "query_policy": {
+            "select_star_allowed": False,
+            "pagination_required": True,
+            "page_size_min": 20,
+            "page_size_max": 50,
+            "connect_timeout_ms": settings.oracle_connect_timeout_ms,
+            "query_timeout_ms": settings.oracle_query_timeout_ms,
+        },
+    }
 
 
 @router.get("/api/admin/users")
@@ -665,73 +614,6 @@ def save_admin_website(request: Request, payload: WebsitePayload) -> dict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     return {"ok": True, "website": website}
 
-
-@router.get("/api/admin/attt-links")
-def admin_attt_links(request: Request) -> dict:
-    admin_user(request)
-    return {"links": build_app_repository().list_attt_exam_links()}
-
-
-@router.post("/api/admin/attt-links")
-def save_admin_attt_link(request: Request, payload: ATTTExamLinkPayload) -> dict:
-    actor = admin_user(request)
-    period_name = payload.period_name.strip()
-    exam_url = payload.exam_url.strip()
-    if not period_name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tên kỳ thi không được để trống.")
-    if not exam_url.startswith(("http://", "https://")):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL bài thi phải bắt đầu bằng http:// hoặc https://.")
-    repository = build_app_repository()
-    exam_id = repository.save_attt_exam_link(payload.id, period_name, exam_url, payload.is_active)
-    repository.add_audit_log(actor["username"], "attt_exam_link_saved", f"Luu link ATTT #{exam_id}: {period_name}")
-    return {"ok": True, "exam": repository.get_attt_exam_link(exam_id)}
-
-
-@router.delete("/api/admin/attt-links/{exam_id}")
-def delete_admin_attt_link(request: Request, exam_id: int) -> dict:
-    actor = admin_user(request)
-    repository = build_app_repository()
-    if not repository.get_attt_exam_link(exam_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy kỳ thi.")
-    repository.delete_attt_exam_link(exam_id)
-    repository.add_audit_log(actor["username"], "attt_exam_link_deleted", f"Xoa link ATTT #{exam_id}")
-    return {"ok": True}
-
-
-@router.post("/api/admin/attt-links/{exam_id}/answers")
-async def upload_admin_attt_answers(request: Request, exam_id: int, file: UploadFile = File(...)) -> dict:
-    actor = admin_user(request)
-    repository = build_app_repository()
-    if not repository.get_attt_exam_link(exam_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy kỳ thi.")
-    try:
-        answers = parse_answer_file(file.filename or "answers.txt", await file.read())
-    except ValueError as error:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-    repository.save_attt_answer_bank(exam_id, file.filename or "answers.txt", answers)
-    repository.add_audit_log(actor["username"], "attt_answers_uploaded", f"Nap {len(answers)} dap an cho ky thi #{exam_id}")
-    return {"ok": True, "answer_count": len(answers)}
-
-
-@router.get("/api/attt/current")
-def current_attt_exam(request: Request) -> dict:
-    require_feature(request, "auto.attt_quarterly")
-    exam = build_app_repository().get_active_attt_exam_link()
-    if not exam:
-        return {"exam": None}
-    return {
-        "exam": {
-            "id": exam["id"],
-            "period_name": exam["period_name"],
-            "exam_url": exam["exam_url"],
-            "answer_file_name": exam.get("answer_file_name", ""),
-            "answer_count": exam.get("answer_count", 0),
-            "answers": exam.get("answers", []),
-        },
-        "login_url": "https://id.vnpt.com.vn/cas/login?service=http%3A%2F%2Felearning.vnpt.vn%2Fsecurity%2FssoVnpt%3Fredirect_url%3D%252F",
-        "safe_mode": True,
-        "message": "Vì an toàn tài khoản và tính minh bạch kỳ thi, hệ thống chỉ mở link chính thức và hỗ trợ ôn tập, không tự nhập OTP hoặc tự chọn đáp án trên bài thi thật.",
-    }
 
 
 @router.get("/api/admin/features")

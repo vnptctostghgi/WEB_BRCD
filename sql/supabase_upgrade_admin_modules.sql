@@ -25,17 +25,15 @@ values
   ('vault.view', 'Xem danh sách tài khoản', 'vault', 41),
   ('vault.manage', 'Thêm và sửa tài khoản', 'vault', 42),
   ('vault.reveal', 'Xem mật khẩu đã lưu', 'vault', 43),
-  ('auto', 'Auto', null, 50),
-  ('auto.attt_quarterly', 'Thi ATTT hàng quý', 'auto', 51),
-  ('auto.attt_links', 'Quản trị link ATTT', 'auto', 52),
   ('admin.audit', 'Nhật ký hoạt động', 'admin.web', 90)
 on conflict (code) do update
 set name = excluded.name,
     parent_code = excluded.parent_code,
     sort_order = excluded.sort_order;
 
-delete from public.user_permissions where feature_code in ('admin', 'admin.connections.test');
-delete from public.features where code in ('admin', 'admin.connections.test');
+delete from public.user_permissions where feature_code in ('admin', 'admin.connections.test', 'auto', 'auto.attt_quarterly', 'auto.attt_links');
+delete from public.features where code in ('admin', 'admin.connections.test', 'auto', 'auto.attt_quarterly', 'auto.attt_links');
+drop table if exists public.attt_exam_links;
 
 create unique index if not exists users_employee_code_lower_idx
 on public.users (lower(employee_code))
@@ -60,16 +58,6 @@ create table if not exists public.user_data_permissions (
   primary key (user_id, region_code)
 );
 
-create table if not exists public.attt_exam_links (
-  id bigserial primary key,
-  period_name text not null,
-  exam_url text not null,
-  answer_file_name text not null default '',
-  answer_json jsonb not null default '[]'::jsonb,
-  is_active boolean not null default true,
-  created_at timestamptz not null,
-  updated_at timestamptz not null
-);
 
 create table if not exists public.system_roles (
   code text primary key,

@@ -22,9 +22,6 @@ FEATURE_ROWS = [
     {"code": "vault.view", "name": "Xem danh sách tài khoản", "parent_code": "vault", "sort_order": 41},
     {"code": "vault.manage", "name": "Thêm và sửa tài khoản", "parent_code": "vault", "sort_order": 42},
     {"code": "vault.reveal", "name": "Xem mật khẩu đã lưu", "parent_code": "vault", "sort_order": 43},
-    {"code": "auto", "name": "Auto", "parent_code": None, "sort_order": 50},
-    {"code": "auto.attt_quarterly", "name": "Thi ATTT hàng quý", "parent_code": "auto", "sort_order": 51},
-    {"code": "auto.attt_links", "name": "Quản trị link ATTT", "parent_code": "auto", "sort_order": 52},
     {"code": "admin.audit", "name": "Nhật ký hoạt động", "parent_code": "admin.web", "sort_order": 90},
 ]
 
@@ -88,7 +85,7 @@ class SupabaseRepository:
         self._insert("features", feature)
 
     def _delete_obsolete_features(self) -> None:
-        for code in ("admin", "admin.connections.test"):
+        for code in ("admin", "admin.connections.test", "auto", "auto.attt_quarterly", "auto.attt_links"):
             try:
                 self._delete("user_permissions", {"feature_code": f"eq.{code}"})
                 self._delete("features", {"code": f"eq.{code}"})
@@ -228,49 +225,6 @@ class SupabaseRepository:
 
     def delete_credential(self, credential_id: int, user_id: int) -> None:
         self._delete("web_credentials", {"id": f"eq.{credential_id}", "user_id": f"eq.{user_id}"})
-
-    def list_attt_exam_links(self, active_only: bool = False) -> list[dict[str, Any]]:
-        params = {"order": "is_active.desc,updated_at.desc,id.desc"}
-        if active_only:
-            params["is_active"] = "eq.true"
-        return [self._decode_attt_exam(row) for row in self._get("attt_exam_links", params)]
-
-    def get_attt_exam_link(self, exam_id: int) -> dict[str, Any] | None:
-        rows = self._get("attt_exam_links", {"id": f"eq.{exam_id}"})
-        return self._decode_attt_exam(rows[0]) if rows else None
-
-    def get_active_attt_exam_link(self) -> dict[str, Any] | None:
-        rows = self._get("attt_exam_links", {"is_active": "eq.true", "order": "updated_at.desc,id.desc", "limit": "1"})
-        return self._decode_attt_exam(rows[0]) if rows else None
-
-    def save_attt_exam_link(self, exam_id: int | None, period_name: str, exam_url: str, is_active: bool) -> int:
-        payload = {
-            "period_name": period_name,
-            "exam_url": exam_url,
-            "is_active": is_active,
-            "updated_at": self._now(),
-        }
-        if exam_id:
-            self._patch("attt_exam_links", {"id": f"eq.{exam_id}"}, payload)
-            return exam_id
-        payload.update({"created_at": self._now(), "answer_file_name": "", "answer_json": []})
-        return int(self._insert("attt_exam_links", payload)["id"])
-
-    def save_attt_answer_bank(self, exam_id: int, file_name: str, answers: list[dict[str, str]]) -> None:
-        self._patch("attt_exam_links", {"id": f"eq.{exam_id}"}, {
-            "answer_file_name": file_name,
-            "answer_json": answers,
-            "updated_at": self._now(),
-        })
-
-    def delete_attt_exam_link(self, exam_id: int) -> None:
-        self._delete("attt_exam_links", {"id": f"eq.{exam_id}"})
-
-    @staticmethod
-    def _decode_attt_exam(row: dict[str, Any]) -> dict[str, Any]:
-        row["answers"] = row.get("answer_json") or []
-        row["answer_count"] = len(row["answers"])
-        return row
 
     def list_features(self) -> list[dict[str, Any]]:
         return self._get("features", {"order": "sort_order.asc"})

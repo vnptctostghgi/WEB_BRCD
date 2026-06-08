@@ -146,16 +146,6 @@ class AppRepository:
                     FOREIGN KEY(region_code) REFERENCES data_regions(code)
                 );
 
-                CREATE TABLE IF NOT EXISTS attt_exam_links (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    period_name TEXT NOT NULL,
-                    exam_url TEXT NOT NULL,
-                    answer_file_name TEXT NOT NULL DEFAULT '',
-                    answer_json TEXT NOT NULL DEFAULT '[]',
-                    is_active INTEGER NOT NULL DEFAULT 1,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
                 """
             )
             for column, definition in {
@@ -205,9 +195,6 @@ class AppRepository:
                     ("vault.view", "Xem danh sách tài khoản", "vault", 41),
                     ("vault.manage", "Thêm và sửa tài khoản", "vault", 42),
                     ("vault.reveal", "Xem mật khẩu đã lưu", "vault", 43),
-                    ("auto", "Auto", None, 50),
-                    ("auto.attt_quarterly", "Thi ATTT hàng quý", "auto", 51),
-                    ("auto.attt_links", "Quản trị link ATTT", "auto", 52),
                     ("admin.audit", "Nhật ký hoạt động", "admin.web", 90),
                 ],
             )
@@ -228,14 +215,10 @@ class AppRepository:
                     ("Xem danh sách tài khoản", "vault.view"),
                     ("Thêm và sửa tài khoản", "vault.manage"),
                     ("Xem mật khẩu đã lưu", "vault.reveal"),
-                    ("Auto", "auto"),
-                    ("Thi ATTT hàng quý", "auto.attt_quarterly"),
-                    ("Quản trị link ATTT", "auto.attt_links"),
                     ("Nhật ký hoạt động", "admin.audit"),
                 ],
             )
-            connection.execute("DELETE FROM user_permissions WHERE feature_code IN ('admin', 'admin.connections.test')")
-            connection.execute("DELETE FROM features WHERE code IN ('admin', 'admin.connections.test')")
+            connection.execute("DROP TABLE IF EXISTS attt_exam_links")
             now = self._now()
             connection.executemany(
                 """
@@ -435,67 +418,6 @@ class AppRepository:
     def delete_credential(self, credential_id: int, user_id: int) -> None:
         with self.connect() as connection:
             connection.execute("DELETE FROM web_credentials WHERE id=? AND user_id=?", (credential_id, user_id))
-
-    def list_attt_exam_links(self, active_only: bool = False) -> list[dict[str, Any]]:
-        query = "SELECT * FROM attt_exam_links"
-        if active_only:
-            query += " WHERE is_active = 1"
-        query += " ORDER BY is_active DESC, updated_at DESC, id DESC"
-        with self.connect() as connection:
-            rows = connection.execute(query).fetchall()
-            return [self._decode_attt_exam(row) for row in rows]
-
-    def get_attt_exam_link(self, exam_id: int) -> dict[str, Any] | None:
-        with self.connect() as connection:
-            row = connection.execute("SELECT * FROM attt_exam_links WHERE id=?", (exam_id,)).fetchone()
-            return self._decode_attt_exam(row) if row else None
-
-    def get_active_attt_exam_link(self) -> dict[str, Any] | None:
-        with self.connect() as connection:
-            row = connection.execute(
-                "SELECT * FROM attt_exam_links WHERE is_active = 1 ORDER BY updated_at DESC, id DESC LIMIT 1"
-            ).fetchone()
-            return self._decode_attt_exam(row) if row else None
-
-    def save_attt_exam_link(self, exam_id: int | None, period_name: str, exam_url: str, is_active: bool) -> int:
-        now = self._now()
-        with self.connect() as connection:
-            if exam_id:
-                connection.execute(
-                    "UPDATE attt_exam_links SET period_name=?, exam_url=?, is_active=?, updated_at=? WHERE id=?",
-                    (period_name, exam_url, int(is_active), now, exam_id),
-                )
-                return exam_id
-            cursor = connection.execute(
-                """
-                INSERT INTO attt_exam_links
-                (period_name, exam_url, is_active, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (period_name, exam_url, int(is_active), now, now),
-            )
-            return int(cursor.lastrowid)
-
-    def save_attt_answer_bank(self, exam_id: int, file_name: str, answers: list[dict[str, str]]) -> None:
-        with self.connect() as connection:
-            connection.execute(
-                "UPDATE attt_exam_links SET answer_file_name=?, answer_json=?, updated_at=? WHERE id=?",
-                (file_name, json.dumps(answers, ensure_ascii=False), self._now(), exam_id),
-            )
-
-    def delete_attt_exam_link(self, exam_id: int) -> None:
-        with self.connect() as connection:
-            connection.execute("DELETE FROM attt_exam_links WHERE id=?", (exam_id,))
-
-    @staticmethod
-    def _decode_attt_exam(row) -> dict[str, Any]:
-        item = dict(row)
-        try:
-            item["answers"] = json.loads(item.get("answer_json") or "[]")
-        except json.JSONDecodeError:
-            item["answers"] = []
-        item["answer_count"] = len(item["answers"])
-        return item
 
     def list_features(self) -> list[dict[str, Any]]:
         with self.connect() as connection:
