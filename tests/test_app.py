@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 
 os.environ["DB_MOCK_MODE"] = "true"
+os.environ["INTERNAL_API_MOCK_MODE"] = "true"
+os.environ["INTERNAL_API_URL"] = "http://10.92.17.88:8000/api/du-lieu-web"
 os.environ["APP_DATABASE_BACKEND"] = "sqlite"
 os.environ["APP_DATABASE_PATH"] = "data/test_app.db"
 os.environ["INITIAL_ADMIN_USERNAME"] = "admin"
@@ -121,17 +123,48 @@ def test_database_health_requires_login_and_uses_mock_mode() -> None:
         assert response.json()["details"]["mode"] == "mock"
 
 
-def test_system_status_requires_login_and_reports_pool_policy() -> None:
+def test_system_status_requires_login_and_reports_internal_api_policy() -> None:
     with TestClient(app) as client:
         assert client.get("/api/system/status").status_code == 401
         login(client)
         response = client.get("/api/system/status")
         assert response.status_code == 200
         payload = response.json()
-        assert payload["database_pool"]["state"] == "mock"
-        assert payload["vpn"]["client"] == "openconnect"
-        assert payload["query_policy"]["select_star_allowed"] is False
+        assert payload["internal_api"]["mock_mode"] is True
+        assert payload["internal_api"]["url"] == "http://10.92.17.88:8000/api/du-lieu-web"
+        assert payload["query_policy"]["data_source"] == "internal_fastapi"
         assert payload["query_policy"]["page_size_max"] == 50
+
+
+def test_admin_can_manage_sql_reports_and_run_dynamic_report() -> None:
+    with TestClient(app) as client:
+        login(client)
+        payload = {
+            "ten_bao_cao": "Báo cáo thuê bao test",
+            "ma_bao_cao": "BC_TEST_THUE_BAO",
+            "cau_lenh_sql": "SELECT ma_tb, ten_tb FROM css_cto.db_thuebao WHERE trang_thai = :status",
+            "cac_tham_so": ["status"],
+        }
+        created = client.post("/api/admin/sql-reports", json=payload)
+        assert created.status_code == 200
+
+        reports = client.get("/api/admin/sql-reports")
+        assert reports.status_code == 200
+        assert any(report["ma_bao_cao"] == "BC_TEST_THUE_BAO" for report in reports.json()["reports"])
+
+        public_configs = client.get("/api/reports/configs")
+        assert public_configs.status_code == 200
+        first_config = next(report for report in public_configs.json()["reports"] if report["ma_bao_cao"] == "BC_TEST_THUE_BAO")
+        assert "cau_lenh_sql" not in first_config
+
+        result = client.post(
+            "/api/reports/run",
+            json={"ma_bao_cao": "BC_TEST_THUE_BAO", "filters": {"status": "1"}, "page": 1, "page_size": 20},
+        )
+        assert result.status_code == 200
+        body = result.json()
+        assert body["columns"] == ["STT", "MA_BAO_CAO", "TEN_BAO_CAO", "THAM_SO"]
+        assert body["pagination"]["page_size"] == 20
 
 
 def test_auto_module_is_removed_from_dashboard() -> None:

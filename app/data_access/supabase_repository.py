@@ -26,6 +26,9 @@ FEATURE_ROWS = [
     {"code": "admin.audit", "name": "Nhật ký hoạt động", "parent_code": "admin.web", "sort_order": 90},
 ]
 
+FEATURE_ROWS.append({"code": "admin.sql_reports", "name": "Quản trị SQL", "parent_code": "admin.connections", "sort_order": 23})
+
+
 REGION_ROWS = [
     {"code": "ALL", "name": "Tat ca", "is_active": True, "sort_order": 0},
     {"code": "13", "name": "Can Tho", "is_active": True, "sort_order": 10},
@@ -335,6 +338,42 @@ class SupabaseRepository:
         payload["created_at"] = self._now()
         return int(self._insert("system_connections", payload)["id"])
 
+    def list_sql_reports(self) -> list[dict[str, Any]]:
+        rows = self._get("sql_reports", {"order": "ten_bao_cao.asc"})
+        return [self._decode_sql_report(row) for row in rows]
+
+    def get_sql_report_by_id(self, report_id: int) -> dict[str, Any] | None:
+        rows = self._get("sql_reports", {"id": f"eq.{report_id}"})
+        return self._decode_sql_report(rows[0]) if rows else None
+
+    def get_sql_report_by_code(self, ma_bao_cao: str) -> dict[str, Any] | None:
+        rows = self._get("sql_reports", {"ma_bao_cao": f"eq.{ma_bao_cao}"})
+        return self._decode_sql_report(rows[0]) if rows else None
+
+    def save_sql_report(
+        self,
+        report_id: int | None,
+        ten_bao_cao: str,
+        ma_bao_cao: str,
+        cau_lenh_sql: str,
+        cac_tham_so: list[str],
+    ) -> int:
+        payload = {
+            "ten_bao_cao": ten_bao_cao,
+            "ma_bao_cao": ma_bao_cao,
+            "cau_lenh_sql": cau_lenh_sql,
+            "cac_tham_so": cac_tham_so,
+            "updated_at": self._now(),
+        }
+        if report_id:
+            self._patch("sql_reports", {"id": f"eq.{report_id}"}, payload)
+            return int(report_id)
+        payload["created_at"] = self._now()
+        return int(self._insert("sql_reports", payload)["id"])
+
+    def delete_sql_report(self, report_id: int) -> None:
+        self._delete("sql_reports", {"id": f"eq.{report_id}"})
+
     def list_work_tasks(self, include_completed: bool = False) -> list[dict[str, Any]]:
         params = {"order": "run_time.asc,task_id.asc"}
         if not include_completed:
@@ -398,6 +437,12 @@ class SupabaseRepository:
     @staticmethod
     def _decode_connection(row: dict[str, Any]) -> dict[str, Any]:
         row["config"] = row.get("config") or {}
+        return row
+
+    @staticmethod
+    def _decode_sql_report(row: dict[str, Any]) -> dict[str, Any]:
+        params = row.get("cac_tham_so") or []
+        row["cac_tham_so"] = params if isinstance(params, list) else []
         return row
 
     @staticmethod

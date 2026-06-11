@@ -72,7 +72,7 @@
               <button class="nav-item child" data-feature-code="admin.users" data-view="users" data-title="Quản trị người dùng" data-keywords="quan tri nguoi dung user"><svg class="nav-svg"><use href="#icon-users"></use></svg><span>Quản trị người dùng</span></button>
               <button class="nav-item child" data-feature-code="admin.menu" data-view="menu-admin" data-title="Quản trị menu" data-keywords="quan tri menu sap xep di chuyen module"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản trị menu</span></button>
               <button class="nav-item child" data-feature-code="admin.catalogs" data-view="catalogs" data-title="Quản trị danh mục" data-keywords="quan tri danh muc phan vung vai tro bien"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản trị danh mục</span></button>
-              <button class="nav-item child" data-feature-code="admin.connections" data-view="system" data-title="Quản trị kết nối" data-keywords="quan tri ket noi vpn db ftp drive telegram"><svg class="nav-svg"><use href="#icon-plug"></use></svg><span>Quản trị kết nối</span></button>
+              <button class="nav-item child" data-feature-code="admin.connections" data-view="system" data-title="Quản trị kết nối" data-keywords="quan tri ket noi api db ftp drive telegram"><svg class="nav-svg"><use href="#icon-plug"></use></svg><span>Quản trị kết nối</span></button>
               <details class="nav-group nav-subgroup">
                 <summary data-feature-code="admin.permissions.group"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-shield"></use></svg><strong>Phân quyền</strong></summary>
                 <button class="nav-item child subchild" data-feature-code="admin.permissions" data-view="permissions" data-title="Phân quyền người dùng" data-keywords="phan quyen nguoi dung chuc nang"><svg class="nav-svg"><use href="#icon-shield"></use></svg><span>Người dùng</span></button>
@@ -155,15 +155,15 @@
           <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="Chỉ số hệ thống">
             <article class="metric-card"><div class="metric-icon">DB</div><div><span>Trạng thái Database</span><strong id="database-summary">Chưa kiểm tra</strong></div></article>
             <article class="metric-card"><div class="metric-icon">ID</div><div><span>Tài khoản hiện tại</span><strong>{{ user.username }}</strong></div></article>
-            <article class="metric-card"><div class="metric-icon">RO</div><div><span>Quyền Oracle</span><strong>Chỉ đọc SELECT</strong></div></article>
+            <article class="metric-card"><div class="metric-icon">API</div><div><span>Dữ liệu nội bộ</span><strong>Qua FastAPI</strong></div></article>
             <article class="metric-card"><div class="metric-icon">SP</div><div><span>Hỗ trợ</span><strong>094.989.2585</strong></div></article>
           </section>
 
           <section class="panel mt-4">
             <div>
-              <p class="eyebrow">Oracle connection</p>
-              <h2>Kiểm tra kết nối Database</h2>
-              <p>Backend gửi lệnh kiểm tra an toàn. Nếu lỗi, hệ thống gửi cảnh báo Telegram ngắn gọn cho quản trị viên.</p>
+              <p class="eyebrow">Internal API</p>
+              <h2>Kiểm tra API dữ liệu nội bộ</h2>
+              <p>Backend gọi máy chủ FastAPI nội bộ. Nếu lỗi, hệ thống gửi cảnh báo Telegram ngắn gọn cho quản trị viên.</p>
             </div>
             <button class="btn-primary" id="test-button" type="button"><span class="button-label">Kiểm tra kết nối</span><span class="spinner"></span></button>
             <div id="result" class="result hidden" role="status"></div>
@@ -276,6 +276,34 @@
         </section>
 
         <section class="app-view" id="view-reports">
+          <div class="page-header"><div><p class="eyebrow">Báo cáo thống kê</p><h1>Báo cáo động</h1><p class="subtitle">Dữ liệu được lấy theo thời gian thực qua API nội bộ và hiển thị có phân trang.</p></div></div>
+          <section class="data-card">
+            <form id="dynamic-report-form" class="grid gap-3 xl:grid-cols-[1.2fr_2fr_auto]">
+              <label>Loại báo cáo<select class="form-control" id="dynamic-report-select" name="ma_bao_cao"></select></label>
+              <div id="dynamic-report-filters" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
+              <div class="flex flex-col gap-2 md:flex-row xl:flex-col xl:justify-end">
+                <label>Số dòng<select class="form-control" id="dynamic-report-page-size"><option value="20">20</option><option value="30">30</option><option value="50">50</option></select></label>
+                <button class="btn-primary" id="run-dynamic-report" type="submit"><span class="button-label">Xuất báo cáo</span><span class="spinner"></span></button>
+              </div>
+            </form>
+            <div id="dynamic-report-message" class="result hidden mt-4"></div>
+            <div class="table-scroll mt-4">
+              <table>
+                <thead id="dynamic-report-head"></thead>
+                <tbody id="dynamic-report-body"></tbody>
+              </table>
+            </div>
+            <div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-sky-100">
+              <span id="dynamic-report-page-info">Chưa có dữ liệu</span>
+              <div class="action-group">
+                <button class="btn-secondary" id="dynamic-report-prev" type="button">Trang trước</button>
+                <button class="btn-secondary" id="dynamic-report-next" type="button">Trang sau</button>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="app-view hidden" id="view-reports-old">
           <div class="page-header"><div><p class="eyebrow">Báo cáo thống kê</p><h1>Báo cáo thống kê</h1><p class="subtitle">Khu vực này sẽ hiển thị biểu đồ và báo cáo BRCĐ theo yêu cầu tiếp theo.</p></div></div>
           <section class="data-card"><div class="grid gap-4 md:grid-cols-3"><div class="chart-placeholder">Thuê bao</div><div class="chart-placeholder">Doanh thu</div><div class="chart-placeholder">Chất lượng</div></div></section>
         </section>
@@ -283,8 +311,21 @@
         <section class="app-view" id="view-system">
           <div class="page-header"><div><p class="eyebrow">Quản trị hệ thống</p><h1>Cấu hình và trạng thái</h1><p class="subtitle">Theo dõi DB cơ quan, DB web, FTP, Drive và Telegram.</p></div></div>
           <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" id="system-cards"></section>
+          <section class="data-card mt-4">
+            <div class="section-heading">
+              <div><p class="eyebrow">Quản trị SQL</p><h2>Cấu hình báo cáo động</h2><p>Lưu câu SQL và danh sách tham số. Web sẽ gửi cấu hình này sang API nội bộ khi xuất báo cáo.</p></div>
+              <button class="btn-primary" data-open-dialog="sql-report-dialog" type="button">Thêm SQL</button>
+            </div>
+            <div id="sql-reports-message" class="result hidden mb-4"></div>
+            <div class="table-scroll">
+              <table>
+                <thead><tr><th>Tên báo cáo</th><th>Mã báo cáo</th><th>Tham số</th><th>Câu SQL</th><th>Thao tác</th></tr></thead>
+                <tbody id="sql-reports-table"></tbody>
+              </table>
+            </div>
+          </section>
           <section class="data-card mt-4"><div class="section-heading"><div><p class="eyebrow">Kết nối hệ thống</p><h2>DB, FTP, Drive và Telegram</h2><p>Secret được lưu trong biến môi trường, không hiển thị trên trình duyệt.</p></div><button class="btn-secondary" id="telegram-test-message" type="button"><span class="button-label">Gửi thử Telegram</span><span class="spinner"></span></button></div><div id="telegram-test-result" class="result hidden mb-4"></div><div class="table-scroll"><table><thead><tr><th>Tên kết nối</th><th>Loại</th><th>Trạng thái</th><th>Cấu hình</th><th>Secret</th><th>Thao tác</th></tr></thead><tbody id="connections-table"></tbody></table></div></section>
-          <section class="data-card mt-4"><h2>Kiểm tra vận hành</h2><div class="mt-4 grid gap-3 md:grid-cols-2"><p class="check-item">Mật khẩu được băm, không lưu dạng rõ.</p><p class="check-item">Cookie phiên không đọc được bằng JavaScript.</p><p class="check-item">Oracle chỉ truy cập từ Data Access Layer.</p><p class="check-item">Route quản trị yêu cầu vai trò admin.</p></div></section>
+          <section class="data-card mt-4"><h2>Kiểm tra vận hành</h2><div class="mt-4 grid gap-3 md:grid-cols-2"><p class="check-item">Mật khẩu được băm, không lưu dạng rõ.</p><p class="check-item">Cookie phiên không đọc được bằng JavaScript.</p><p class="check-item">DB cơ quan chỉ được truy cập qua API nội bộ.</p><p class="check-item">Route quản trị yêu cầu vai trò admin.</p></div></section>
         </section>
 
         <section class="app-view" id="view-audit">
@@ -310,14 +351,29 @@
     <dialog id="region-dialog"><form class="dialog-form" id="region-form"><div class="dialog-heading"><div><p class="eyebrow">Danh mục</p><h2>Phân vùng dữ liệu</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mã phân vùng<input class="form-control" name="code" required /></label><label>Tên phân vùng<input class="form-control" name="name" required /></label><label>Thứ tự<input class="form-control" name="sort_order" type="number" value="0" /></label><label class="checkbox-label"><input type="checkbox" name="is_active" checked /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu phân vùng</button></form></dialog>
     <dialog id="role-dialog"><form class="dialog-form" id="role-form"><div class="dialog-heading"><div><p class="eyebrow">Vai trò người dùng</p><h2>Cấu hình vai trò</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mã vai trò<input class="form-control" name="code" required placeholder="vi_du: region_manager" /></label><label>Tên vai trò<input class="form-control" name="name" required /></label><label>Mô tả<textarea class="form-control min-h-24" name="description" rows="3"></textarea></label><label>Thứ tự<input class="form-control" name="sort_order" type="number" value="0" /></label><label class="checkbox-label"><input type="checkbox" name="is_active" checked /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu vai trò</button></form></dialog>
     <dialog id="work-task-dialog"><form class="dialog-form" id="work-task-form"><div class="dialog-heading"><div><p class="eyebrow">Nhắc việc Telegram</p><h2>Cấu hình công việc</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mã tác vụ<input class="form-control" name="task_id" readonly placeholder="Tự động tạo khi lưu" /><small>Hệ thống tự sinh mã dạng TASK0001, TASK0002...</small></label><label>Tên công việc<input class="form-control" name="ten_cong_viec" required placeholder="Ví dụ: Giá cước, cafe thông minh..." /></label><label>Loại lịch<select class="form-control" name="type"><option value="Daily" selected>Daily - Hàng ngày</option><option value="Weekly">Weekly - Hàng tuần</option><option value="Once">Once - Chạy một lần</option></select></label><label>Thời gian<input class="form-control" name="time" type="time" value="07:00" required /></label><label>Ngày trong tuần<input class="form-control" name="weekday" placeholder="Ví dụ: T2, T3, thứ 2, CN" /></label><label>Ngày chạy một lần<input class="form-control" name="once_date" type="date" /></label><label>Nhóm<input class="form-control" name="group" value="ME" /></label><label class="checkbox-label"><input type="checkbox" name="check" /> Đã hoàn thành</label><div class="result hidden"></div><button class="btn-primary" id="save-work-task-button" type="button">Lưu công việc</button></form></dialog>
-    <dialog id="connection-dialog"><form class="dialog-form" id="connection-form"><div class="dialog-heading"><div><p class="eyebrow">Quản trị kết nối</p><h2>Cấu hình kết nối</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mã kết nối<input class="form-control" name="code" readonly /></label><label>Tên kết nối<input class="form-control" name="name" required /></label><label>Loại kết nối<select class="form-control" name="connection_type"><option value="oracle">Oracle Database</option><option value="supabase">Supabase REST</option><option value="ftp">FTP/SFTP</option><option value="drive">Drive/API</option><option value="telegram">Telegram Bot</option><option value="vpn_ssl">SSL VPN HTTPS</option></select></label><label>Mô tả<textarea class="form-control min-h-20" name="description" rows="2"></textarea></label><label>Cấu hình JSON<textarea class="form-control min-h-32 font-mono text-xs" name="config_json" rows="7" placeholder='{"host":"example.com"}'></textarea><small>Không nhập mật khẩu thật tại đây. Mật khẩu/secret nên để trong biến môi trường.</small></label><label class="checkbox-label"><input type="checkbox" name="is_active" /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu kết nối</button></form></dialog>
+    <dialog id="connection-dialog"><form class="dialog-form" id="connection-form"><div class="dialog-heading"><div><p class="eyebrow">Quản trị kết nối</p><h2>Cấu hình kết nối</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mã kết nối<input class="form-control" name="code" readonly /></label><label>Tên kết nối<input class="form-control" name="name" required /></label><label>Loại kết nối<select class="form-control" name="connection_type"><option value="internal_api">API dữ liệu nội bộ</option><option value="supabase">Supabase REST</option><option value="ftp">FTP/SFTP</option><option value="drive">Drive/API</option><option value="telegram">Telegram Bot</option></select></label><label>Mô tả<textarea class="form-control min-h-20" name="description" rows="2"></textarea></label><label>Cấu hình JSON<textarea class="form-control min-h-32 font-mono text-xs" name="config_json" rows="7" placeholder='{"url":"http://10.92.17.88:8000/api/du-lieu-web"}'></textarea><small>Không nhập mật khẩu thật tại đây. Mật khẩu/secret nên để trong biến môi trường.</small></label><label class="checkbox-label"><input type="checkbox" name="is_active" /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu kết nối</button></form></dialog>
 
     <dialog id="edit-user-dialog"><form class="dialog-form" id="edit-user-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Cập nhật</p><h2>Chỉnh sửa người dùng</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Họ và tên<input class="form-control" name="full_name" required /></label><label>Vai trò<select class="form-control" name="role"><option value="viewer">Người xem</option><option value="admin">Quản trị viên</option></select></label><label class="checkbox-label"><input type="checkbox" name="is_active" /> Tài khoản đang hoạt động</label><label>Mật khẩu đặt lại<input class="form-control" type="password" name="password" minlength="10" placeholder="Để trống nếu không đổi" /></label><fieldset><legend>Cây quyền chức năng</legend><div id="permission-tree" class="permission-tree"></div></fieldset><div class="result hidden" role="alert"></div><button class="btn-primary" type="submit">Lưu thay đổi</button></form></dialog>
     {% endif %}
+    <dialog id="sql-report-dialog">
+      <form class="dialog-form" id="sql-report-form">
+        <input type="hidden" name="id" />
+        <div class="dialog-heading">
+          <div><p class="eyebrow">Quản trị SQL</p><h2>Cấu hình báo cáo</h2></div>
+          <button type="button" class="icon-button" data-close-dialog>×</button>
+        </div>
+        <label>Tên báo cáo<input class="form-control" name="ten_bao_cao" required placeholder="Ví dụ: Báo cáo Thuê bao" /></label>
+        <label>Mã báo cáo<input class="form-control" name="ma_bao_cao" required placeholder="Ví dụ: BC_THUE_BAO" /></label>
+        <label>Câu SQL<textarea class="form-control min-h-40 font-mono text-xs" name="cau_lenh_sql" rows="8" required placeholder="SELECT col1, col2 FROM schema.table WHERE trang_thai = :status"></textarea><small>Chỉ nhập SELECT, không nhập dấu chấm phẩy.</small></label>
+        <label>Tham số lọc<input class="form-control" name="cac_tham_so" placeholder="status, tu_ngay, den_ngay" /><small>Nhập cách nhau bằng dấu phẩy. Giao diện báo cáo sẽ tự tạo ô lọc từ danh sách này.</small></label>
+        <div class="result hidden"></div>
+        <button class="btn-primary" type="submit">Lưu cấu hình SQL</button>
+      </form>
+    </dialog>
     {% if user.role == "admin" or "vault.manage" in user.permissions %}
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script src="/static/app.js?v=27"></script>
+    <script src="/static/app.js?v=28"></script>
   </body>
 </html>

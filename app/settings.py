@@ -13,12 +13,10 @@ class Settings(BaseSettings):
     initial_admin_username: str = "admin"
     initial_admin_password: SecretStr = Field(default=SecretStr("ChangeMe123!"))
 
-    db_mock_mode: bool = True
-    db_host: str = ""
-    db_port: int = 1521
-    db_service: str = ""
-    db_user: str = ""
-    db_pass: SecretStr = Field(default=SecretStr(""))
+    internal_api_url: str = "http://10.92.17.88:8000/api/du-lieu-web"
+    internal_api_mock_mode: bool = True
+    internal_api_timeout_seconds: int = 20
+    internal_api_token: SecretStr = Field(default=SecretStr(""))
 
     supabase_rest_url: str = ""
     supabase_publishable_key: SecretStr = Field(default=SecretStr(""))
@@ -28,23 +26,6 @@ class Settings(BaseSettings):
     bot_token: SecretStr = Field(default=SecretStr(""))
     my_telegram_id: int = 0
     bot_username: str = ""
-
-    vpn_host: str = ""
-    vpn_port: int = 4443
-    vpn_username: str = ""
-    vpn_password: SecretStr = Field(default=SecretStr(""))
-    vpn_type: str = "ssl"
-    ssl_vpn_binary: str = "openconnect"
-    ssl_vpn_protocol: str = "fortinet"
-    ssl_vpn_restart_seconds: int = 10
-    vpn_tls_verify: bool = False
-    vpn_test_targets: str = ""
-
-    oracle_pool_min: int = 5
-    oracle_pool_max: int = 30
-    oracle_pool_increment: int = 1
-    oracle_connect_timeout_ms: int = 10000
-    oracle_query_timeout_ms: int = 5000
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
 

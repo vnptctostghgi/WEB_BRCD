@@ -1,7 +1,7 @@
 from pathlib import Path
 import sqlite3
 from io import BytesIO
-from typing import Literal
+from typing import Any, Literal
 
 import openpyxl
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
@@ -13,12 +13,10 @@ from app.application.auth_service import AuthService
 from app.application.database_service import DatabaseService
 from app.application.vault_service import VaultService
 from app.application.connection_service import ConnectionService
-from app.application.openvpn_service import openvpn_service
-from app.application.oracle_pool import oracle_pool_service
 from app.application.telegram_notifier import TelegramNotifier
 from app.data_access.app_repository import AppRepository
+from app.data_access.internal_api_client import InternalApiClient
 from app.data_access.repository_factory import build_repository
-from app.data_access.oracle_repository import OracleRepository
 from app.settings import get_settings
 
 
@@ -99,6 +97,21 @@ class SystemConnectionPayload(BaseModel):
     is_active: bool = False
 
 
+class SqlReportPayload(BaseModel):
+    id: int | None = None
+    ten_bao_cao: str
+    ma_bao_cao: str
+    cau_lenh_sql: str
+    cac_tham_so: list[str] = []
+
+
+class RunReportPayload(BaseModel):
+    ma_bao_cao: str
+    filters: dict[str, Any] = {}
+    page: int = 1
+    page_size: int = 20
+
+
 class SystemRolePayload(BaseModel):
     code: str
     name: str
@@ -139,7 +152,7 @@ def build_auth_service() -> AuthService:
 
 def build_database_service() -> DatabaseService:
     settings = get_settings()
-    return DatabaseService(OracleRepository(settings))
+    return DatabaseService(InternalApiClient(settings), build_app_repository())
 
 
 def build_vault_service() -> VaultService:
@@ -170,6 +183,29 @@ def raise_work_task_schema_error(error: RuntimeError) -> None:
             detail="Supabase chưa có bảng work_tasks. Hãy chạy lại file sql/supabase_upgrade_admin_modules.sql.",
         ) from error
     raise error
+
+
+def raise_sql_report_schema_error(error: RuntimeError) -> None:
+    if "sql_reports" in str(error):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Supabase chưa có bảng sql_reports. Hãy chạy lại file sql/supabase_upgrade_admin_modules.sql.",
+        ) from error
+    raise error
+
+
+def validate_report_sql(sql: str) -> str:
+    normalized = sql.strip()
+    lowered = normalized.lower()
+    if not lowered.startswith("select"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chỉ cho phép lưu câu lệnh SELECT.")
+    if ";" in normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Không nhập dấu chấm phẩy trong câu SQL.")
+    blocked_words = (" insert ", " update ", " delete ", " drop ", " alter ", " truncate ", " merge ")
+    padded = f" {lowered} "
+    if any(word in padded for word in blocked_words):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Câu SQL báo cáo không được chứa lệnh thay đổi dữ liệu.")
+    return normalized
 
 
 def notify_login_failed_threshold(request: Request, username: str) -> None:
@@ -348,7 +384,7 @@ def change_password(request: Request, payload: ChangePasswordPayload) -> dict:
 def database_health(request: Request) -> dict:
     current_user(request)
     result = build_database_service().get_connection_status()
-    notify_if_failed("Lỗi kết nối Oracle", result)
+    notify_if_failed("Lỗi kết nối API dữ liệu nội bộ", result)
     return result
 
 
@@ -357,15 +393,15 @@ def system_status(request: Request) -> dict:
     current_user(request)
     settings = get_settings()
     return {
-        "vpn": openvpn_service.status(),
-        "database_pool": oracle_pool_service.status(),
+        "internal_api": {
+            "url": settings.internal_api_url,
+            "mock_mode": settings.internal_api_mock_mode,
+        },
         "query_policy": {
-            "select_star_allowed": False,
             "pagination_required": True,
             "page_size_min": 20,
             "page_size_max": 50,
-            "connect_timeout_ms": settings.oracle_connect_timeout_ms,
-            "query_timeout_ms": settings.oracle_query_timeout_ms,
+            "data_source": "internal_fastapi",
         },
     }
 
@@ -491,8 +527,8 @@ def system_info(request: Request) -> dict:
     return {
         "app_name": settings.app_name,
         "environment": settings.app_env,
-        "oracle_host": settings.db_host,
-        "oracle_service": settings.db_service,
+        "internal_api_url": settings.internal_api_url,
+        "internal_api_mock_mode": settings.internal_api_mock_mode,
         "storage_backend": settings.app_database_backend,
         "supabase_rest_url": settings.supabase_rest_url,
         "user_count": len(users),
@@ -550,6 +586,82 @@ def save_system_connection(request: Request, code: str, payload: SystemConnectio
     )
     repository.add_audit_log(actor["username"], "system_connection_saved", f"Luu ket noi {code}")
     return {"ok": True}
+
+
+@router.get("/api/admin/sql-reports")
+def list_sql_reports(request: Request) -> dict:
+    admin_user(request)
+    try:
+        reports = build_app_repository().list_sql_reports()
+    except RuntimeError as error:
+        raise_sql_report_schema_error(error)
+    return {"reports": reports}
+
+
+@router.post("/api/admin/sql-reports")
+def save_sql_report(request: Request, payload: SqlReportPayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    ten_bao_cao = payload.ten_bao_cao.strip()
+    ma_bao_cao = payload.ma_bao_cao.strip().upper()
+    cau_lenh_sql = validate_report_sql(payload.cau_lenh_sql)
+    cac_tham_so = [item.strip() for item in payload.cac_tham_so if item.strip()]
+    if not ten_bao_cao or not ma_bao_cao:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tên báo cáo và mã báo cáo là bắt buộc.")
+    try:
+        report_id = repository.save_sql_report(payload.id, ten_bao_cao, ma_bao_cao, cau_lenh_sql, cac_tham_so)
+    except sqlite3.IntegrityError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mã báo cáo đã tồn tại.") from error
+    except RuntimeError as error:
+        raise_sql_report_schema_error(error)
+    repository.add_audit_log(actor["username"], "sql_report_saved", f"Lưu cấu hình SQL {ma_bao_cao}")
+    return {"ok": True, "id": report_id}
+
+
+@router.delete("/api/admin/sql-reports/{report_id}")
+def delete_sql_report(request: Request, report_id: int) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    try:
+        repository.delete_sql_report(report_id)
+    except RuntimeError as error:
+        raise_sql_report_schema_error(error)
+    repository.add_audit_log(actor["username"], "sql_report_deleted", f"Xóa cấu hình SQL {report_id}")
+    return {"ok": True}
+
+
+@router.get("/api/reports/configs")
+def list_report_configs(request: Request) -> dict:
+    current_user(request)
+    try:
+        reports = build_app_repository().list_sql_reports()
+    except RuntimeError as error:
+        raise_sql_report_schema_error(error)
+    return {
+        "reports": [
+            {
+                "id": report["id"],
+                "ten_bao_cao": report["ten_bao_cao"],
+                "ma_bao_cao": report["ma_bao_cao"],
+                "cac_tham_so": report.get("cac_tham_so") or [],
+            }
+            for report in reports
+        ]
+    }
+
+
+@router.post("/api/reports/run")
+def run_dynamic_report(request: Request, payload: RunReportPayload) -> dict:
+    current_user(request)
+    try:
+        return build_database_service().run_dynamic_report(
+            ma_bao_cao=payload.ma_bao_cao.strip().upper(),
+            filters=payload.filters,
+            page=payload.page,
+            page_size=payload.page_size,
+        )
+    except RuntimeError as error:
+        raise_sql_report_schema_error(error)
 
 
 @router.post("/api/admin/telegram/test-message")

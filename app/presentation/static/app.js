@@ -10,6 +10,9 @@ let regions = [];
 let connections = [];
 let systemRoles = [];
 let workTasks = [];
+let sqlReports = [];
+let dynamicReportPage = 1;
+let dynamicReportTotal = 0;
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -84,6 +87,7 @@ document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("
   if (item.dataset.view === "vault") await loadCredentials();
   if (item.dataset.view === "websites") await loadAdminWebsites();
   if (item.dataset.view === "system") await loadSystem();
+  if (item.dataset.view === "reports") await loadDynamicReports();
   if (item.dataset.view === "menu-admin") await loadMenuLayout();
   if (item.dataset.view === "work-tasks") await loadWorkTasks();
   if (item.dataset.view === "permissions") await loadPermissionManager();
@@ -103,6 +107,10 @@ document.querySelectorAll("[data-open-dialog]").forEach((button) => button.addEv
   }
   if (button.dataset.openDialog === "work-task-dialog") {
     openWorkTask("");
+    return;
+  }
+  if (button.dataset.openDialog === "sql-report-dialog") {
+    openSqlReport("");
     return;
   }
   $(`#${button.dataset.openDialog}`).showModal();
@@ -212,7 +220,7 @@ $("#test-button")?.addEventListener("click", async () => {
   try {
     const data = await api("/api/health/database");
     $("#database-summary").textContent = data.ok ? "Đã kết nối" : "Kết nối lỗi";
-    const detail = data.ok && data.details?.database_version ? ` Oracle ${data.details.database_version}.` : "";
+    const detail = data.ok && data.details?.api_url ? ` ${data.details.api_url}.` : "";
     showMessage($("#result"), data.ok ? `${data.message}${detail}` : data.message, data.ok ? "success" : "error");
   } catch (error) {
     showMessage($("#result"), error.message, "error");
@@ -337,6 +345,28 @@ if (role === "admin") {
   $("#work-task-form")?.addEventListener("submit", saveWorkTask);
   $("#save-work-task-button")?.addEventListener("click", () => $("#work-task-form")?.requestSubmit());
   $("#connection-form")?.addEventListener("submit", saveConnection);
+  $("#sql-report-form")?.addEventListener("submit", saveSqlReport);
+  $("#dynamic-report-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    dynamicReportPage = 1;
+    await runDynamicReport();
+  });
+  $("#dynamic-report-select")?.addEventListener("change", async () => {
+    dynamicReportPage = 1;
+    renderDynamicReportFilters();
+    await runDynamicReport();
+  });
+  $("#dynamic-report-prev")?.addEventListener("click", async () => {
+    if (dynamicReportPage <= 1) return;
+    dynamicReportPage -= 1;
+    await runDynamicReport();
+  });
+  $("#dynamic-report-next")?.addEventListener("click", async () => {
+    const pageSize = Number($("#dynamic-report-page-size")?.value || 20);
+    if (dynamicReportPage * pageSize >= dynamicReportTotal) return;
+    dynamicReportPage += 1;
+    await runDynamicReport();
+  });
   $("#user-search")?.addEventListener("input", renderUsersTable);
   $("#user-import-file")?.addEventListener("change", importUserFile);
   $("#save-bulk-permissions")?.addEventListener("click", saveBulkPermissions);
@@ -725,10 +755,11 @@ async function loadSystem() {
   $("#system-cards").innerHTML = loadingRow(1, "Đang tải thông tin hệ thống...");
   const data = await api("/api/admin/system");
   await loadConnections();
+  await loadSqlReports();
   $("#system-cards").innerHTML = [
     ["APP", "Môi trường", data.environment],
     ["STO", "Database chính", data.storage_backend],
-    ["DB", "Oracle Service", data.oracle_service || "Chưa cấu hình"],
+    ["API", "API dữ liệu", data.internal_api_mock_mode ? "Mock nội bộ" : data.internal_api_url],
     ["USR", "Người dùng hoạt động", `${data.active_user_count}/${data.user_count}`],
   ].map(([icon, label, value]) => `<article class="metric-card"><div class="metric-icon">${icon}</div><div><span>${label}</span><strong>${escapeHtml(value)}</strong></div></article>`).join("");
 }
@@ -808,6 +839,175 @@ async function testConnection(code, button) {
   } finally {
     setButtonLoading(button, false);
   }
+}
+
+async function loadSqlReports() {
+  setTableLoading("#sql-reports-table", 5, "Đang tải cấu hình SQL...");
+  try {
+    const data = await api("/api/admin/sql-reports");
+    sqlReports = data.reports || [];
+    renderSqlReports();
+    fillDynamicReportSelect();
+  } catch (error) {
+    showMessage($("#sql-reports-message"), error.message, "error");
+    $("#sql-reports-table").innerHTML = emptyRow(5, "Không tải được cấu hình SQL", error.message);
+  }
+}
+
+function renderSqlReports() {
+  const table = $("#sql-reports-table");
+  if (!table) return;
+  table.innerHTML = sqlReports.length ? sqlReports.map((report) => `
+    <tr>
+      <td><strong>${escapeHtml(report.ten_bao_cao)}</strong></td>
+      <td><code>${escapeHtml(report.ma_bao_cao)}</code></td>
+      <td>${(report.cac_tham_so || []).map((item) => `<span class="status viewer">${escapeHtml(item)}</span>`).join(" ") || "Không có"}</td>
+      <td><code>${escapeHtml(report.cau_lenh_sql)}</code></td>
+      <td><div class="action-group"><button class="table-action" data-edit-sql-report="${report.id}">Sửa</button><button class="table-action danger" data-delete-sql-report="${report.id}">Xóa</button></div></td>
+    </tr>
+  `).join("") : emptyRow(5, "Chưa có cấu hình SQL", "Bấm Thêm SQL để tạo báo cáo động đầu tiên.");
+  document.querySelectorAll("[data-edit-sql-report]").forEach((button) => button.addEventListener("click", () => openSqlReport(button.dataset.editSqlReport)));
+  document.querySelectorAll("[data-delete-sql-report]").forEach((button) => button.addEventListener("click", () => deleteSqlReport(button.dataset.deleteSqlReport)));
+}
+
+function openSqlReport(reportId) {
+  const report = sqlReports.find((item) => String(item.id) === String(reportId));
+  const form = $("#sql-report-form");
+  if (!form) return;
+  form.reset();
+  form.elements.namedItem("id").value = report?.id || "";
+  form.elements.namedItem("ten_bao_cao").value = report?.ten_bao_cao || "";
+  form.elements.namedItem("ma_bao_cao").value = report?.ma_bao_cao || "";
+  form.elements.namedItem("cau_lenh_sql").value = report?.cau_lenh_sql || "";
+  form.elements.namedItem("cac_tham_so").value = (report?.cac_tham_so || []).join(", ");
+  form.querySelector(".result").className = "result hidden";
+  $("#sql-report-dialog")?.showModal();
+}
+
+async function saveSqlReport(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  const params = String(data.cac_tham_so || "").split(",").map((item) => item.trim()).filter(Boolean);
+  try {
+    await api("/api/admin/sql-reports", { method: "POST", body: JSON.stringify({
+      id: data.id ? Number(data.id) : null,
+      ten_bao_cao: data.ten_bao_cao,
+      ma_bao_cao: data.ma_bao_cao,
+      cau_lenh_sql: data.cau_lenh_sql,
+      cac_tham_so: params,
+    })});
+    $("#sql-report-dialog")?.close();
+    showMessage($("#sql-reports-message"), "Đã lưu cấu hình SQL.");
+    showToast("Đã lưu cấu hình SQL.");
+    await loadSqlReports();
+  } catch (error) {
+    showMessage(form.querySelector(".result"), error.message, "error");
+  }
+}
+
+async function deleteSqlReport(reportId) {
+  if (!confirm("Xóa cấu hình SQL này?")) return;
+  try {
+    await api(`/api/admin/sql-reports/${reportId}`, { method: "DELETE" });
+    showMessage($("#sql-reports-message"), "Đã xóa cấu hình SQL.");
+    await loadSqlReports();
+  } catch (error) {
+    showMessage($("#sql-reports-message"), error.message, "error");
+  }
+}
+
+async function loadDynamicReports() {
+  if (!sqlReports.length) {
+    try {
+      const data = await api("/api/reports/configs");
+      sqlReports = data.reports || [];
+    } catch (error) {
+      showMessage($("#dynamic-report-message"), error.message, "error");
+      return;
+    }
+  }
+  fillDynamicReportSelect();
+  renderDynamicReportFilters();
+  if (sqlReports.length) await runDynamicReport();
+}
+
+function fillDynamicReportSelect() {
+  const select = $("#dynamic-report-select");
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = sqlReports.length
+    ? sqlReports.map((report) => `<option value="${escapeHtml(report.ma_bao_cao)}">${escapeHtml(report.ten_bao_cao)} (${escapeHtml(report.ma_bao_cao)})</option>`).join("")
+    : `<option value="">Chưa có báo cáo</option>`;
+  if (current && sqlReports.some((report) => report.ma_bao_cao === current)) select.value = current;
+}
+
+function renderDynamicReportFilters() {
+  const container = $("#dynamic-report-filters");
+  const select = $("#dynamic-report-select");
+  if (!container || !select) return;
+  const report = sqlReports.find((item) => item.ma_bao_cao === select.value);
+  if (!report) {
+    container.innerHTML = `<div class="empty-state"><strong>Chưa có tham số</strong><p>Hãy tạo cấu hình SQL trước.</p></div>`;
+    return;
+  }
+  const params = report.cac_tham_so || [];
+  container.innerHTML = params.length ? params.map((param) => {
+    const lower = param.toLowerCase();
+    if (lower.includes("ngay") || lower.includes("date")) {
+      return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter" name="${escapeHtml(param)}" type="date" /></label>`;
+    }
+    if (lower.includes("status") || lower.includes("trang_thai")) {
+      return `<label>${escapeHtml(param)}<select class="form-control dynamic-filter" name="${escapeHtml(param)}"><option value="">Tất cả</option><option value="1">Đang hoạt động</option><option value="0">Không hoạt động</option></select></label>`;
+    }
+    return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter" name="${escapeHtml(param)}" placeholder="Nhập ${escapeHtml(param)}" /></label>`;
+  }).join("") : `<div class="empty-state"><strong>Không có tham số lọc</strong><p>Báo cáo này sẽ chạy trực tiếp theo SQL đã cấu hình.</p></div>`;
+}
+
+async function runDynamicReport() {
+  const select = $("#dynamic-report-select");
+  const message = $("#dynamic-report-message");
+  const button = $("#run-dynamic-report");
+  if (!select || !select.value) {
+    $("#dynamic-report-head").innerHTML = "";
+    $("#dynamic-report-body").innerHTML = emptyRow(1, "Chưa có báo cáo", "Hãy thêm cấu hình SQL trong Quản trị kết nối.");
+    return;
+  }
+  const filters = {};
+  document.querySelectorAll(".dynamic-filter").forEach((input) => {
+    if (input.value) filters[input.name] = input.value;
+  });
+  setButtonLoading(button, true);
+  try {
+    const response = await api("/api/reports/run", { method: "POST", body: JSON.stringify({
+      ma_bao_cao: select.value,
+      filters,
+      page: dynamicReportPage,
+      page_size: Number($("#dynamic-report-page-size")?.value || 20),
+    })});
+    renderDynamicReportTable(response);
+    showMessage(message, response.message || "Đã tải dữ liệu báo cáo.");
+  } catch (error) {
+    showMessage(message, error.message, "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+function renderDynamicReportTable(response) {
+  const columns = response.columns || [];
+  const rows = response.rows || [];
+  dynamicReportTotal = response.pagination?.total || rows.length;
+  $("#dynamic-report-head").innerHTML = columns.length ? `<tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>` : "";
+  $("#dynamic-report-body").innerHTML = rows.length
+    ? rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(row[column])}</td>`).join("")}</tr>`).join("")
+    : emptyRow(Math.max(columns.length, 1), "Không có dữ liệu", "Thử thay đổi điều kiện lọc hoặc kiểm tra câu SQL.");
+  const page = response.pagination?.page || dynamicReportPage;
+  const pageSize = response.pagination?.page_size || Number($("#dynamic-report-page-size")?.value || 20);
+  dynamicReportPage = page;
+  $("#dynamic-report-page-info").textContent = `Trang ${page} · ${rows.length}/${dynamicReportTotal} dòng`;
+  $("#dynamic-report-prev").disabled = page <= 1;
+  $("#dynamic-report-next").disabled = page * pageSize >= dynamicReportTotal;
 }
 
 $("#telegram-test-message")?.addEventListener("click", async () => {

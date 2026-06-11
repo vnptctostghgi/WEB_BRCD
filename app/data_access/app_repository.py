@@ -129,6 +129,16 @@ class AppRepository:
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS sql_reports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ten_bao_cao TEXT NOT NULL,
+                    ma_bao_cao TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    cau_lenh_sql TEXT NOT NULL,
+                    cac_tham_so TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS data_regions (
                     code TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -244,6 +254,17 @@ class AppRepository:
                     ("Xem mật khẩu đã lưu", "vault.reveal"),
                     ("Nhật ký hoạt động", "admin.audit"),
                 ],
+            )
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO features (code, name, parent_code, sort_order)
+                VALUES (?, ?, ?, ?)
+                """,
+                ("admin.sql_reports", "Quản trị SQL", "admin.connections", 23),
+            )
+            connection.execute(
+                "UPDATE features SET name=?, parent_code=?, sort_order=? WHERE code=?",
+                ("Quản trị SQL", "admin.connections", 23, "admin.sql_reports"),
             )
             connection.execute("DROP TABLE IF EXISTS attt_exam_links")
             now = self._now()
@@ -610,6 +631,56 @@ class AppRepository:
             )
             return int(cursor.lastrowid)
 
+    def list_sql_reports(self) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute("SELECT * FROM sql_reports ORDER BY ten_bao_cao").fetchall()
+            return [self._decode_sql_report(dict(row)) for row in rows]
+
+    def get_sql_report_by_id(self, report_id: int) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM sql_reports WHERE id=?", (report_id,)).fetchone()
+            return self._decode_sql_report(dict(row)) if row else None
+
+    def get_sql_report_by_code(self, ma_bao_cao: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM sql_reports WHERE ma_bao_cao=?", (ma_bao_cao,)).fetchone()
+            return self._decode_sql_report(dict(row)) if row else None
+
+    def save_sql_report(
+        self,
+        report_id: int | None,
+        ten_bao_cao: str,
+        ma_bao_cao: str,
+        cau_lenh_sql: str,
+        cac_tham_so: list[str],
+    ) -> int:
+        now = self._now()
+        params_payload = json.dumps(cac_tham_so, ensure_ascii=False)
+        with self.connect() as connection:
+            if report_id:
+                connection.execute(
+                    """
+                    UPDATE sql_reports
+                    SET ten_bao_cao=?, ma_bao_cao=?, cau_lenh_sql=?, cac_tham_so=?, updated_at=?
+                    WHERE id=?
+                    """,
+                    (ten_bao_cao, ma_bao_cao, cau_lenh_sql, params_payload, now, report_id),
+                )
+                return int(report_id)
+            cursor = connection.execute(
+                """
+                INSERT INTO sql_reports
+                (ten_bao_cao, ma_bao_cao, cau_lenh_sql, cac_tham_so, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (ten_bao_cao, ma_bao_cao, cau_lenh_sql, params_payload, now, now),
+            )
+            return int(cursor.lastrowid)
+
+    def delete_sql_report(self, report_id: int) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM sql_reports WHERE id=?", (report_id,))
+
     def list_work_tasks(self, include_completed: bool = False) -> list[dict[str, Any]]:
         query = "SELECT * FROM work_tasks"
         if not include_completed:
@@ -703,6 +774,15 @@ class AppRepository:
     @staticmethod
     def _decode_connection(row: dict[str, Any]) -> dict[str, Any]:
         row["config"] = json.loads(row.pop("config_json") or "{}")
+        return row
+
+    @staticmethod
+    def _decode_sql_report(row: dict[str, Any]) -> dict[str, Any]:
+        try:
+            params = json.loads(row.get("cac_tham_so") or "[]")
+        except json.JSONDecodeError:
+            params = []
+        row["cac_tham_so"] = params if isinstance(params, list) else []
         return row
 
     @staticmethod
