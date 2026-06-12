@@ -123,6 +123,18 @@ def test_database_health_requires_login_and_uses_mock_mode() -> None:
         assert response.json()["details"]["mode"] == "mock"
 
 
+def test_dashboard_datcoc_table_uses_internal_api() -> None:
+    with TestClient(app) as client:
+        assert client.get("/api/dashboard/datcoc-test").status_code == 401
+        login(client)
+        response = client.get("/api/dashboard/datcoc-test")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["sql"] == "select * from css_cto.db_datcoc where ma_tb = 'thanhbinh-omon'"
+        assert payload["columns"]
+        assert payload["rows"]
+
+
 def test_system_status_requires_login_and_reports_internal_api_policy() -> None:
     with TestClient(app) as client:
         assert client.get("/api/system/status").status_code == 401

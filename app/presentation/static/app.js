@@ -83,6 +83,7 @@ document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("
   $("#module-title").textContent = item.dataset.title || item.textContent.trim();
   $("#sidebar").classList.remove("menu-open");
   $("#menu-button")?.setAttribute("aria-expanded", "false");
+  if (item.dataset.view === "dashboard") await loadDashboardDatcoc();
   if (item.dataset.view === "users") await loadUsers();
   if (item.dataset.view === "vault") await loadCredentials();
   if (item.dataset.view === "websites") await loadAdminWebsites();
@@ -228,6 +229,40 @@ $("#test-button")?.addEventListener("click", async () => {
     setButtonLoading(button, false);
   }
 });
+
+$("#refresh-dashboard-datcoc")?.addEventListener("click", () => loadDashboardDatcoc());
+
+loadDashboardDatcoc();
+
+async function loadDashboardDatcoc() {
+  const head = $("#dashboard-datcoc-head");
+  const body = $("#dashboard-datcoc-body");
+  const message = $("#dashboard-datcoc-message");
+  const button = $("#refresh-dashboard-datcoc");
+  if (!head || !body) return;
+  body.innerHTML = loadingRow(1, "Đang tải dữ liệu đặt cọc...");
+  if (button) setButtonLoading(button, true);
+  try {
+    const response = await api("/api/dashboard/datcoc-test");
+    renderDashboardDatcoc(response);
+    showMessage(message, response.message || "Đã tải dữ liệu đặt cọc.");
+  } catch (error) {
+    head.innerHTML = "";
+    body.innerHTML = emptyRow(1, "Không tải được dữ liệu", error.message);
+    showMessage(message, error.message, "error");
+  } finally {
+    if (button) setButtonLoading(button, false);
+  }
+}
+
+function renderDashboardDatcoc(response) {
+  const columns = response.columns || [];
+  const rows = response.rows || [];
+  $("#dashboard-datcoc-head").innerHTML = columns.length ? `<tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>` : "";
+  $("#dashboard-datcoc-body").innerHTML = rows.length
+    ? rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(row[column])}</td>`).join("")}</tr>`).join("")
+    : emptyRow(Math.max(columns.length, 1), "Không có dữ liệu", "API nội bộ không trả dòng nào cho thuê bao thanhbinh-omon.");
+}
 
 $("#password-form")?.addEventListener("submit", async (event) => {
   event.preventDefault();

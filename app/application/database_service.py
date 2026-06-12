@@ -117,6 +117,51 @@ class DatabaseService:
             },
         }
 
+    def run_dashboard_datcoc_test(self) -> dict[str, Any]:
+        page = 1
+        page_size = 20
+        try:
+            result = self.internal_api.run_sql_report(
+                ten_bao_cao="Kiểm tra đặt cọc",
+                ma_bao_cao="DASHBOARD_DATCOC_TEST",
+                cau_lenh_sql="select * from css_cto.db_datcoc where ma_tb = 'thanhbinh-omon'",
+                tham_so={},
+                page=page,
+                page_size=page_size,
+            )
+        except httpx.TimeoutException as error:
+            logger.exception("Dashboard datcoc timeout: %s", error)
+            return self._failed_report("API dữ liệu nội bộ phản hồi quá lâu.", page, page_size, str(error))
+        except httpx.HTTPStatusError as error:
+            logger.exception("Dashboard datcoc HTTP error: %s", error)
+            return self._failed_report(
+                f"API dữ liệu nội bộ trả lỗi HTTP {error.response.status_code}.",
+                page,
+                page_size,
+                error.response.text[:300],
+            )
+        except httpx.HTTPError as error:
+            logger.exception("Dashboard datcoc connection error: %s", error)
+            return self._failed_report("Không kết nối được API dữ liệu nội bộ.", page, page_size, str(error))
+
+        rows = result.get("rows") or result.get("data") or []
+        if not isinstance(rows, list):
+            rows = []
+        columns = result.get("columns") or self._infer_columns(rows)
+
+        return {
+            "ok": bool(result.get("ok", True)),
+            "message": result.get("message", "Đã tải dữ liệu đặt cọc."),
+            "sql": "select * from css_cto.db_datcoc where ma_tb = 'thanhbinh-omon'",
+            "columns": columns,
+            "rows": rows,
+            "pagination": {
+                "page": int(result.get("page") or page),
+                "page_size": int(result.get("page_size") or page_size),
+                "total": int(result.get("total") or len(rows)),
+            },
+        }
+
     @staticmethod
     def _infer_columns(rows: list[Any]) -> list[str]:
         if rows and isinstance(rows[0], dict):
