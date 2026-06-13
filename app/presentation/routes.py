@@ -208,6 +208,35 @@ def validate_report_sql(sql: str) -> str:
     return normalized
 
 
+def validate_feature_layout_payload(existing_features: list[dict], items: list[FeatureLayoutItem]) -> None:
+    valid_codes = {feature["code"] for feature in existing_features}
+    parent_by_code = {feature["code"]: feature.get("parent_code") for feature in existing_features}
+    seen_codes: set[str] = set()
+
+    for item in items:
+        if item.code in seen_codes:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Chức năng {item.code} bị lặp trong cấu trúc menu.")
+        seen_codes.add(item.code)
+        if item.code not in valid_codes:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Chức năng {item.code} không hợp lệ.")
+        if not item.name.strip():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Tên hiển thị của {item.code} không được để trống.")
+        if item.parent_code and item.parent_code not in valid_codes:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Chức năng cha {item.parent_code} không hợp lệ.")
+        if item.parent_code == item.code:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chức năng cha không được trùng chính nó.")
+        parent_by_code[item.code] = item.parent_code
+
+    for code in valid_codes:
+        visited: set[str] = set()
+        parent_code = parent_by_code.get(code)
+        while parent_code:
+            if parent_code == code or parent_code in visited:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cấu trúc menu không được tạo vòng lặp cha/con.")
+            visited.add(parent_code)
+            parent_code = parent_by_code.get(parent_code)
+
+
 def notify_login_failed_threshold(request: Request, username: str) -> None:
     display_username = username.strip() or "unknown"
     client_host = request.client.host if request.client else "unknown"
@@ -868,12 +897,9 @@ def features(request: Request) -> dict:
 def save_feature_layout(request: Request, payload: FeatureLayoutPayload) -> dict:
     actor = admin_user(request)
     repository = build_app_repository()
-    valid_codes = {feature["code"] for feature in repository.list_features()}
+    existing_features = repository.list_features()
+    validate_feature_layout_payload(existing_features, payload.features)
     for item in payload.features:
-        if item.code not in valid_codes:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Chức năng {item.code} không hợp lệ.")
-        if item.parent_code and item.parent_code not in valid_codes:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Chức năng cha {item.parent_code} không hợp lệ.")
         try:
             repository.update_feature_layout(item.code, item.name.strip(), item.parent_code, item.sort_order)
         except ValueError as error:

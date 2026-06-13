@@ -8,6 +8,29 @@ from pathlib import Path
 from typing import Any
 
 
+FEATURE_ROWS = [
+    ("dashboard", "Tổng quan", None, 10),
+    ("admin.web", "Quản trị web", None, 20),
+    ("admin.users", "Quản trị người dùng", "admin.web", 21),
+    ("admin.connections", "Quản trị kết nối", "admin.web", 22),
+    ("admin.permissions", "Phân quyền người dùng", "admin.web", 23),
+    ("admin.data_permissions", "Phân quyền dữ liệu người dùng", "admin.web", 24),
+    ("admin.catalogs", "Quản trị danh mục", "admin.web", 25),
+    ("admin.roles", "Quản trị vai trò", "admin.catalogs", 26),
+    ("admin.menu", "Quản trị menu", "admin.web", 27),
+    ("admin.work_tasks", "Quản lý công việc", None, 28),
+    ("reports", "Báo cáo thống kê", None, 30),
+    ("vault", "Tài khoản web", "admin.web", 40),
+    ("vault.view", "Xem danh sách tài khoản", "vault", 41),
+    ("vault.manage", "Thêm và sửa tài khoản", "vault", 42),
+    ("vault.reveal", "Xem mật khẩu đã lưu", "vault", 43),
+    ("admin.audit", "Nhật ký hoạt động", "admin.web", 90),
+    ("admin.sql_reports", "Quản trị SQL", "admin.connections", 23),
+]
+
+OBSOLETE_FEATURE_CODES = ("admin", "admin.connections.test", "auto", "auto.attt_quarterly", "auto.attt_links")
+
+
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
     digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=16384, r=8, p=1)
@@ -196,75 +219,25 @@ class AppRepository:
                     connection.execute(f"ALTER TABLE users ADD COLUMN {column} {definition}")
                 except sqlite3.OperationalError:
                     pass
+            legacy_menu = connection.execute(
+                "SELECT 1 FROM features WHERE code IN ('admin', 'admin.connections.test') LIMIT 1"
+            ).fetchone()
             connection.executemany(
                 "INSERT OR IGNORE INTO features (code, name, parent_code, sort_order) VALUES (?, ?, ?, ?)",
-                [
-                    ("dashboard", "Tổng quan", None, 10),
-                    ("vault", "Kho tài khoản web", None, 20),
-                    ("vault.view", "Xem danh sách tài khoản", "vault", 21),
-                    ("vault.manage", "Thêm và sửa tài khoản", "vault", 22),
-                    ("vault.reveal", "Xem mật khẩu đã lưu", "vault", 23),
-                    ("admin", "Quản trị", None, 30),
-                    ("admin.users", "Quản trị người dùng", "admin", 31),
-                    ("admin.catalogs", "Quản trị danh mục website", "admin", 32),
-                    ("admin.permissions", "Phân quyền chức năng", "admin", 33),
-                    ("admin.audit", "Xem nhật ký hoạt động", "admin", 34),
-                    ("admin.connections", "Quản trị kết nối hệ thống", "admin", 35),
-                    ("admin.connections.test", "Kiểm tra kết nối hệ thống", "admin.connections", 36),
-                ],
+                FEATURE_ROWS,
+            )
+            if legacy_menu:
+                connection.executemany(
+                    "UPDATE features SET name=?, parent_code=?, sort_order=? WHERE code=?",
+                    [(name, parent_code, sort_order, code) for code, name, parent_code, sort_order in FEATURE_ROWS],
+                )
+            connection.executemany(
+                "DELETE FROM user_permissions WHERE feature_code=?",
+                [(code,) for code in OBSOLETE_FEATURE_CODES],
             )
             connection.executemany(
-                "INSERT OR IGNORE INTO features (code, name, parent_code, sort_order) VALUES (?, ?, ?, ?)",
-                [
-                    ("dashboard", "Tổng quan", None, 10),
-                    ("admin.web", "Quản trị web", None, 20),
-                    ("admin.users", "Quản trị người dùng", "admin.web", 21),
-                    ("admin.connections", "Quản trị kết nối", "admin.web", 22),
-                    ("admin.permissions", "Phân quyền người dùng", "admin.web", 23),
-                    ("admin.data_permissions", "Phân quyền dữ liệu người dùng", "admin.web", 24),
-                    ("admin.catalogs", "Quản trị danh mục", "admin.web", 25),
-                    ("admin.roles", "Quản trị vai trò", "admin.catalogs", 26),
-                    ("admin.menu", "Quản trị menu", "admin.web", 27),
-                    ("admin.work_tasks", "Quản lý công việc", None, 28),
-                    ("reports", "Báo cáo thống kê", None, 30),
-                    ("vault", "Tài khoản web", None, 40),
-                    ("vault.view", "Xem danh sách tài khoản", "vault", 41),
-                    ("vault.manage", "Thêm và sửa tài khoản", "vault", 42),
-                    ("vault.reveal", "Xem mật khẩu đã lưu", "vault", 43),
-                    ("admin.audit", "Nhật ký hoạt động", "admin.web", 90),
-                ],
-            )
-            connection.executemany(
-                "UPDATE features SET name=? WHERE code=?",
-                [
-                    ("Tổng quan", "dashboard"),
-                    ("Quản trị web", "admin.web"),
-                    ("Quản trị người dùng", "admin.users"),
-                    ("Quản trị kết nối", "admin.connections"),
-                    ("Phân quyền người dùng", "admin.permissions"),
-                    ("Phân quyền dữ liệu người dùng", "admin.data_permissions"),
-                    ("Quản trị danh mục", "admin.catalogs"),
-                    ("Quản trị vai trò", "admin.roles"),
-                    ("Quản trị menu", "admin.menu"),
-                    ("Quản lý công việc", "admin.work_tasks"),
-                    ("Báo cáo thống kê", "reports"),
-                    ("Tài khoản web", "vault"),
-                    ("Xem danh sách tài khoản", "vault.view"),
-                    ("Thêm và sửa tài khoản", "vault.manage"),
-                    ("Xem mật khẩu đã lưu", "vault.reveal"),
-                    ("Nhật ký hoạt động", "admin.audit"),
-                ],
-            )
-            connection.execute(
-                """
-                INSERT OR IGNORE INTO features (code, name, parent_code, sort_order)
-                VALUES (?, ?, ?, ?)
-                """,
-                ("admin.sql_reports", "Quản trị SQL", "admin.connections", 23),
-            )
-            connection.execute(
-                "UPDATE features SET name=?, parent_code=?, sort_order=? WHERE code=?",
-                ("Quản trị SQL", "admin.connections", 23, "admin.sql_reports"),
+                "DELETE FROM features WHERE code=?",
+                [(code,) for code in OBSOLETE_FEATURE_CODES],
             )
             connection.execute("DROP TABLE IF EXISTS attt_exam_links")
             now = self._now()

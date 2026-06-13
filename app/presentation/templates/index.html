@@ -25,7 +25,7 @@
       };
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=29" />
+    <link rel="stylesheet" href="/static/styles.css?v=33" />
   </head>
   <body class="app-dark min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'vault.manage' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'vault.reveal' in user.permissions }}">
     <svg class="icon-sprite" aria-hidden="true">
@@ -43,12 +43,12 @@
     <div class="app-shell min-h-screen">
       <aside class="sidebar border-b border-sky-500/20 bg-[#04182f] px-4 py-3 text-white shadow-lg lg:border-b-0 lg:border-r lg:border-sky-500/20 lg:px-5 lg:py-6" id="sidebar">
         <div class="flex items-center justify-between gap-3 lg:block">
-          <div class="flex min-w-0 items-center gap-3 lg:mb-8">
+          <a class="brand-link flex min-w-0 items-center gap-3 lg:mb-8" href="/" aria-label="Về trang chủ">
             <img class="brand-logo" src="/static/images/system-logo.png" alt="Logo hệ thống" />
             <div class="min-w-0">
               <p class="brand-title">Hệ thống quản trị đặc biệt</p>
             </div>
-          </div>
+          </a>
           <button class="menu-button lg:hidden" id="menu-button" type="button" aria-label="Mở menu điều hướng" aria-controls="main-navigation" aria-expanded="false"><span></span><span></span><span></span></button>
         </div>
 
@@ -273,8 +273,8 @@
         </section>
 
         <section class="app-view" id="view-menu-admin">
-          <div class="page-header"><div><p class="eyebrow">Quản trị web</p><h1>Quản trị menu</h1><p class="subtitle">Sắp xếp thứ tự module hoặc di chuyển module sang nhóm chức năng khác.</p></div><button class="btn-primary" id="save-menu-layout">Lưu cấu trúc menu</button></div>
-          <section class="data-card"><div id="menu-layout-message" class="result hidden mb-4"></div><div class="table-scroll"><table><thead><tr><th>Mã chức năng</th><th>Tên hiển thị</th><th>Thuộc nhóm</th><th>Thứ tự</th></tr></thead><tbody id="menu-layout-table"></tbody></table></div></section>
+          <div class="page-header"><div><p class="eyebrow">Quản trị web</p><h1>Quản trị menu</h1><p class="subtitle">Sắp xếp thứ tự module hoặc di chuyển module sang nhóm chức năng khác.</p></div><button class="btn-primary" id="save-menu-layout" type="button">Lưu cấu trúc menu</button></div>
+          <section class="data-card"><div id="menu-layout-message" class="result hidden mb-4"></div><div class="table-scroll"><table><thead><tr><th>Mã chức năng</th><th>Tên hiển thị</th><th>Thuộc nhóm</th><th>Di chuyển</th></tr></thead><tbody id="menu-layout-table"></tbody></table></div></section>
         </section>
 
         <section class="app-view" id="view-work-tasks">
@@ -392,6 +392,6 @@
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script src="/static/app.js?v=29"></script>
+    <script src="/static/app.js?v=33"></script>
   </body>
 </html>

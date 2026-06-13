@@ -13,6 +13,29 @@ let workTasks = [];
 let sqlReports = [];
 let dynamicReportPage = 1;
 let dynamicReportTotal = 0;
+let menuLayoutState = [];
+
+const navFeatureConfig = {
+  dashboard: { view: "dashboard", icon: "dashboard", keywords: "tong quan dashboard" },
+  "admin.work_tasks": { view: "work-tasks", icon: "list", keywords: "quan ly cong viec task lich telegram nhac viec" },
+  vault: { view: "vault", icon: "vault", keywords: "tai khoan web mat khau" },
+  "admin.users": { view: "users", icon: "users", keywords: "quan tri nguoi dung user" },
+  "admin.menu": { view: "menu-admin", icon: "list", keywords: "quan tri menu sap xep di chuyen module" },
+  "admin.catalogs": { view: "catalogs", icon: "list", keywords: "quan tri danh muc phan vung vai tro bien" },
+  "admin.connections": { view: "system", icon: "plug", keywords: "quan tri ket noi api db ftp drive telegram" },
+  "admin.permissions": { view: "permissions", icon: "shield", keywords: "phan quyen nguoi dung chuc nang" },
+  "admin.data_permissions": { view: "data-permissions", icon: "database", keywords: "phan quyen du lieu phan vung" },
+  "admin.audit": { view: "audit", icon: "audit", keywords: "nhat ky audit log" },
+  reports: { view: "reports", icon: "chart", keywords: "bao cao thong ke bieu do" },
+};
+
+const navGroupIcons = {
+  "admin.web": "shield",
+  "admin.catalogs": "list",
+  "admin.connections": "plug",
+  vault: "vault",
+  reports: "chart",
+};
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -76,7 +99,7 @@ document.querySelectorAll(".nav-group").forEach((group) => {
   group.open = false;
 });
 
-document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("click", async () => {
+async function activateNavItem(item) {
   document.querySelectorAll(".nav-item, .app-view").forEach((element) => element.classList.remove("active"));
   item.classList.add("active");
   $(`#view-${item.dataset.view}`)?.classList.add("active");
@@ -95,9 +118,19 @@ document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("
   if (item.dataset.view === "data-permissions") await loadDataPermissionManager();
   if (item.dataset.view === "catalogs") await loadCatalogs();
   if (item.dataset.view === "audit") await loadAudit();
-}));
+}
+
+$("#nav-tree")?.addEventListener("click", async (event) => {
+  const item = event.target.closest(".nav-item[data-view]");
+  if (!item || !$("#nav-tree")?.contains(item)) return;
+  await activateNavItem(item);
+});
 
 document.querySelectorAll("[data-open-dialog]").forEach((button) => button.addEventListener("click", () => {
+  if (button.dataset.openDialog === "website-dialog") {
+    openWebsite("");
+    return;
+  }
   if (button.dataset.openDialog === "region-dialog") {
     openRegion("");
     return;
@@ -119,6 +152,19 @@ document.querySelectorAll("[data-open-dialog]").forEach((button) => button.addEv
 document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
 
 $("#menu-search")?.addEventListener("input", (event) => filterNavigation(event.currentTarget.value));
+
+$("#menu-layout-table")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-menu-move]");
+  if (!button || !$("#menu-layout-table")?.contains(button)) return;
+  moveMenuItem(button.dataset.menuCode, button.dataset.menuMove);
+});
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("#save-menu-layout");
+  if (!button) return;
+  event.preventDefault();
+  await saveMenuLayout(button);
+});
 
 function filterNavigation(keyword) {
   const query = keyword.trim().toLowerCase();
@@ -327,7 +373,8 @@ async function openEditUser(id) {
   form.querySelector(".result").className = "result hidden";
   if (!features.length) features = (await api("/api/admin/features")).features;
   const granted = new Set((await api(`/api/admin/users/${id}/permissions`)).feature_codes);
-  $("#permission-tree").innerHTML = features.map((feature) => `
+  const orderedFeatures = flattenFeatureTree(buildFeatureTree(features)).map((row) => row.feature);
+  $("#permission-tree").innerHTML = orderedFeatures.map((feature) => `
     <label class="permission-item ${feature.parent_code ? "child" : "parent"}">
       <input type="checkbox" value="${escapeHtml(feature.code)}" ${granted.has(feature.code) ? "checked" : ""} />
       <span>${escapeHtml(feature.name)}</span>
@@ -406,7 +453,6 @@ if (role === "admin") {
   $("#user-import-file")?.addEventListener("change", importUserFile);
   $("#save-bulk-permissions")?.addEventListener("click", saveBulkPermissions);
   $("#save-data-permissions")?.addEventListener("click", saveDataPermissions);
-  $("#save-menu-layout")?.addEventListener("click", saveMenuLayout);
 }
 
 async function importUserFile(event) {
@@ -443,11 +489,69 @@ function renderUserSelection(selector) {
   `).join("");
 }
 
+async function loadAdminWebsites() {
+  setTableLoading("#websites-table", 5, "Đang tải danh mục website...");
+  websites = (await api("/api/admin/websites")).websites;
+  renderWebsitesTable();
+}
+
+function renderWebsitesTable() {
+  const table = $("#websites-table");
+  if (!table) return;
+  table.innerHTML = websites.length ? websites.map((website) => `
+    <tr>
+      <td><strong>${escapeHtml(website.name)}</strong></td>
+      <td><a class="text-sky-200 hover:underline" href="${escapeHtml(website.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(website.url)}</a></td>
+      <td><span class="status ${website.requires_otp ? "pending" : "viewer"}">${website.requires_otp ? "Có OTP" : "Không"}</span></td>
+      <td><span class="status ${website.is_active ? "active" : "inactive"}">${website.is_active ? "Đang dùng" : "Ngừng dùng"}</span></td>
+      <td><button class="table-action" data-edit-website="${website.id}" type="button">Sửa</button></td>
+    </tr>
+  `).join("") : emptyRow(5, "Chưa có website", "Bấm Thêm website để tạo danh mục dùng chung.");
+  document.querySelectorAll("[data-edit-website]").forEach((button) => {
+    button.addEventListener("click", () => openWebsite(Number(button.dataset.editWebsite)));
+  });
+}
+
+function openWebsite(id = "") {
+  const website = websites.find((item) => Number(item.id) === Number(id));
+  const form = $("#website-form");
+  if (!form) return;
+  form.reset();
+  form.elements.namedItem("id").value = website?.id || "";
+  form.elements.namedItem("name").value = website?.name || "";
+  form.elements.namedItem("url").value = website?.url || "";
+  form.elements.namedItem("requires_otp").checked = website ? Boolean(website.requires_otp) : false;
+  form.elements.namedItem("is_active").checked = website ? Boolean(website.is_active) : true;
+  form.querySelector(".result").className = "result hidden";
+  $("#website-dialog")?.showModal();
+}
+
+async function saveWebsite(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  try {
+    await api("/api/admin/websites", { method: "POST", body: JSON.stringify({
+      id: data.id ? Number(data.id) : null,
+      name: data.name,
+      url: data.url,
+      requires_otp: form.requires_otp.checked,
+      is_active: form.is_active.checked,
+    })});
+    $("#website-dialog")?.close();
+    showToast("Đã lưu danh mục website.");
+    await loadAdminWebsites();
+  } catch (error) {
+    showMessage(form.querySelector(".result"), error.message, "error");
+  }
+}
+
 async function loadPermissionManager() {
   if (!users.length) users = (await api("/api/admin/users")).users;
   if (!features.length) features = (await api("/api/admin/features")).features;
   renderUserSelection("#permission-users");
-  $("#permission-features").innerHTML = features.map((feature) => `
+  const orderedFeatures = flattenFeatureTree(buildFeatureTree(features)).map((row) => row.feature);
+  $("#permission-features").innerHTML = orderedFeatures.map((feature) => `
     <label class="permission-item ${feature.parent_code ? "child" : "parent"}">
       <input type="checkbox" value="${escapeHtml(feature.code)}" />
       <span>${escapeHtml(feature.name)}</span>
@@ -547,81 +651,277 @@ async function deleteRole(code) {
   }
 }
 
+function featureSortValue(feature) {
+  return Number(feature.sort_order ?? 0);
+}
+
+function sortFeaturesForTree(items) {
+  return [...items].sort((left, right) => (
+    featureSortValue(left) - featureSortValue(right)
+    || String(left.name || "").localeCompare(String(right.name || ""), "vi")
+    || String(left.code).localeCompare(String(right.code))
+  ));
+}
+
+function buildFeatureTree(sourceFeatures) {
+  const nodes = new Map(sourceFeatures.map((feature) => [feature.code, { feature, children: [] }]));
+  const roots = [];
+  nodes.forEach((node) => {
+    const parent = node.feature.parent_code ? nodes.get(node.feature.parent_code) : null;
+    if (parent && parent !== node) parent.children.push(node);
+    else roots.push(node);
+  });
+  const sortNodes = (items) => {
+    items.sort((left, right) => (
+      featureSortValue(left.feature) - featureSortValue(right.feature)
+      || String(left.feature.name || "").localeCompare(String(right.feature.name || ""), "vi")
+      || String(left.feature.code).localeCompare(String(right.feature.code))
+    ));
+    items.forEach((item) => sortNodes(item.children));
+    return items;
+  };
+  return sortNodes(roots);
+}
+
+function flattenFeatureTree(nodes, level = 0, rows = []) {
+  nodes.forEach((node) => {
+    rows.push({ feature: node.feature, level });
+    flattenFeatureTree(node.children, level + 1, rows);
+  });
+  return rows;
+}
+
+function featureIcon(feature) {
+  return navFeatureConfig[feature.code]?.icon || navGroupIcons[feature.code] || "list";
+}
+
+function iconMarkup(icon) {
+  return `<svg class="nav-svg"><use href="#icon-${escapeHtml(icon)}"></use></svg>`;
+}
+
+function navNodeHasVisibleItem(node) {
+  if (navFeatureConfig[node.feature.code]?.view) return true;
+  return node.children.some((child) => navNodeHasVisibleItem(child));
+}
+
+function renderNavigationButton(feature, level) {
+  const config = navFeatureConfig[feature.code];
+  if (!config?.view) return "";
+  const classes = ["nav-item"];
+  if (level > 0) classes.push("child");
+  if (level > 1) classes.push("subchild");
+  const title = feature.name || feature.code;
+  const keywords = `${config.keywords || ""} ${feature.name || ""} ${feature.code}`;
+  return `
+    <button class="${classes.join(" ")}" data-feature-code="${escapeHtml(feature.code)}" data-view="${escapeHtml(config.view)}" data-title="${escapeHtml(title)}" data-keywords="${escapeHtml(keywords)}">
+      ${iconMarkup(config.icon || "list")}<span>${escapeHtml(title)}</span>
+    </button>
+  `;
+}
+
+function renderNavigationNode(node, level = 0) {
+  const visibleChildren = node.children.filter((child) => navNodeHasVisibleItem(child));
+  const canOpenView = Boolean(navFeatureConfig[node.feature.code]?.view);
+  if (!visibleChildren.length) return renderNavigationButton(node.feature, level);
+  const groupClass = `nav-group${level > 0 ? " nav-subgroup" : ""}`;
+  const children = [
+    canOpenView ? renderNavigationButton(node.feature, level + 1) : "",
+    ...visibleChildren.map((child) => renderNavigationNode(child, level + 1)),
+  ].join("");
+  return `
+    <details class="${groupClass}">
+      <summary data-feature-code="${escapeHtml(node.feature.code)}">
+        <span class="chevron">›</span>${iconMarkup(featureIcon(node.feature))}<strong>${escapeHtml(node.feature.name || node.feature.code)}</strong>
+      </summary>
+      ${children}
+    </details>
+  `;
+}
+
+function findNavItemByFeatureCode(code) {
+  return [...document.querySelectorAll("#nav-tree .nav-item[data-feature-code]")].find((item) => item.dataset.featureCode === code);
+}
+
+function openNavParents(item) {
+  let parent = item.parentElement;
+  while (parent) {
+    if (parent.matches?.(".nav-group")) parent.open = true;
+    parent = parent.parentElement;
+  }
+}
+
 async function syncNavigationFromFeatures() {
   try {
     features = (await api("/api/admin/features")).features;
-    const featureByCode = new Map(features.map((feature) => [feature.code, feature]));
-    document.querySelectorAll(".nav-item[data-feature-code]").forEach((item) => {
-      const feature = featureByCode.get(item.dataset.featureCode);
-      if (!feature) return;
-      item.style.order = String(feature.sort_order ?? 0);
-      item.dataset.title = feature.name || item.dataset.title;
-      const label = item.querySelector("span:last-child");
-      if (label && feature.name) {
-        if (feature.code === "admin.permissions") label.textContent = "Người dùng";
-        else if (feature.code === "admin.data_permissions") label.textContent = "Dữ liệu";
-        else label.textContent = feature.name;
-      }
-      const adminGroup = document.querySelector('summary[data-feature-code="admin.web"]')?.closest(".nav-group");
-      const permissionGroup = document.querySelector('summary[data-feature-code="admin.permissions.group"]')?.closest(".nav-group");
-      const reportsGroup = document.querySelector('summary[data-feature-code="reports"]')?.closest(".nav-group");
-      if (["admin.permissions", "admin.data_permissions"].includes(feature.code) && permissionGroup && item.parentElement !== permissionGroup) {
-        item.classList.add("child", "subchild");
-        permissionGroup.appendChild(item);
-        return;
-      }
-      if (["admin.permissions", "admin.data_permissions", "admin.work_tasks"].includes(feature.code)) return;
-      if (feature.parent_code === "admin.web" && adminGroup && item.parentElement !== adminGroup) {
-        item.classList.add("child");
-        adminGroup.appendChild(item);
-      }
-      if (feature.parent_code === "reports" && reportsGroup && item.parentElement !== reportsGroup) {
-        item.classList.add("child");
-        reportsGroup.appendChild(item);
-      }
-    });
+    const tree = $("#nav-tree");
+    if (!tree) return;
+    const activeCode = tree.querySelector(".nav-item.active")?.dataset.featureCode || "dashboard";
+    const html = buildFeatureTree(features)
+      .filter((node) => navNodeHasVisibleItem(node))
+      .map((node) => renderNavigationNode(node))
+      .join("");
+    if (html.trim()) tree.innerHTML = html;
+    const activeItem = findNavItemByFeatureCode(activeCode) || findNavItemByFeatureCode("dashboard") || tree.querySelector(".nav-item[data-view]");
+    if (activeItem) {
+      activeItem.classList.add("active");
+      openNavParents(activeItem);
+    }
+    filterNavigation($("#menu-search")?.value || "");
   } catch {
     // Nếu API layout chưa sẵn sàng, sidebar vẫn dùng cấu trúc tĩnh đã render từ server.
   }
 }
 
-async function loadMenuLayout() {
-  features = (await api("/api/admin/features")).features;
-  const options = [`<option value="">Không thuộc nhóm</option>`]
-    .concat(features.map((feature) => `<option value="${escapeHtml(feature.code)}">${escapeHtml(feature.name)} (${escapeHtml(feature.code)})</option>`))
-    .join("");
-  $("#menu-layout-table").innerHTML = features.map((feature) => `
-    <tr data-feature-row="${escapeHtml(feature.code)}">
-      <td><strong>${escapeHtml(feature.code)}</strong></td>
-      <td><input class="form-control" name="name" value="${escapeHtml(feature.name)}" /></td>
-      <td><select class="form-control" name="parent_code" data-current-parent="${escapeHtml(feature.parent_code || "")}">${options}</select></td>
-      <td><input class="form-control" name="sort_order" type="number" value="${escapeHtml(feature.sort_order ?? 0)}" /></td>
-    </tr>
-  `).join("");
-  document.querySelectorAll("#menu-layout-table select[name='parent_code']").forEach((select) => {
-    const rowCode = select.closest("tr").dataset.featureRow;
-    [...select.options].forEach((option) => {
-      if (option.value === rowCode) option.disabled = true;
-    });
-    select.value = select.dataset.currentParent || "";
+function collectMenuLayoutStateFromDom() {
+  const rows = [...document.querySelectorAll("#menu-layout-table tr[data-feature-row]")];
+  if (!rows.length) return;
+  const currentByCode = new Map(menuLayoutState.map((feature) => [feature.code, feature]));
+  menuLayoutState = rows.map((row) => {
+    const code = row.dataset.featureRow;
+    const existing = currentByCode.get(code) || {};
+    return {
+      ...existing,
+      code,
+      name: row.querySelector("[name='name']")?.value.trim() || code,
+      parent_code: row.querySelector("[name='parent_code']")?.value || null,
+      sort_order: Number(existing.sort_order || 0),
+    };
   });
 }
 
-async function saveMenuLayout() {
-  const payload = [...document.querySelectorAll("#menu-layout-table tr[data-feature-row]")].map((row) => ({
-    code: row.dataset.featureRow,
-    name: row.querySelector("[name='name']").value,
-    parent_code: row.querySelector("[name='parent_code']").value || null,
-    sort_order: Number(row.querySelector("[name='sort_order']").value || 0),
-  }));
+function normalizeMenuSiblingOrders(parentCode = null) {
+  sortFeaturesForTree(menuLayoutState.filter((feature) => (feature.parent_code || null) === (parentCode || null)))
+    .forEach((feature, index) => {
+      feature.sort_order = (index + 1) * 10;
+    });
+}
+
+function normalizeAllMenuOrders() {
+  const parents = new Set(menuLayoutState.map((feature) => feature.parent_code || null));
+  parents.add(null);
+  parents.forEach((parentCode) => normalizeMenuSiblingOrders(parentCode));
+}
+
+function descendantCodesForFeature(code) {
+  const childrenByParent = new Map();
+  menuLayoutState.forEach((feature) => {
+    if (!feature.parent_code) return;
+    if (!childrenByParent.has(feature.parent_code)) childrenByParent.set(feature.parent_code, []);
+    childrenByParent.get(feature.parent_code).push(feature.code);
+  });
+  const descendants = new Set();
+  const stack = [...(childrenByParent.get(code) || [])];
+  while (stack.length) {
+    const childCode = stack.pop();
+    if (descendants.has(childCode)) continue;
+    descendants.add(childCode);
+    stack.push(...(childrenByParent.get(childCode) || []));
+  }
+  return descendants;
+}
+
+function renderParentOptions(feature) {
+  const descendants = descendantCodesForFeature(feature.code);
+  return [`<option value="">Không thuộc nhóm</option>`]
+    .concat(sortFeaturesForTree(menuLayoutState).filter((item) => item.code !== feature.code).map((item) => {
+      const selected = (feature.parent_code || "") === item.code ? " selected" : "";
+      const disabled = descendants.has(item.code) ? " disabled" : "";
+      return `<option value="${escapeHtml(item.code)}"${selected}${disabled}>${escapeHtml(item.name)} (${escapeHtml(item.code)})</option>`;
+    }))
+    .join("");
+}
+
+function renderMenuLayout() {
+  const table = $("#menu-layout-table");
+  if (!table) return;
+  const rows = flattenFeatureTree(buildFeatureTree(menuLayoutState));
+  table.innerHTML = rows.length ? rows.map(({ feature, level }) => {
+    const siblings = sortFeaturesForTree(menuLayoutState.filter((item) => (item.parent_code || null) === (feature.parent_code || null)));
+    const siblingIndex = siblings.findIndex((item) => item.code === feature.code);
+    return `
+      <tr data-feature-row="${escapeHtml(feature.code)}">
+        <td><div class="menu-feature-cell" style="--menu-level:${level}"><strong>${escapeHtml(feature.code)}</strong><small>Cấp ${level + 1}</small></div></td>
+        <td><input class="form-control" name="name" value="${escapeHtml(feature.name)}" /></td>
+        <td><select class="form-control" name="parent_code">${renderParentOptions(feature)}</select></td>
+        <td>
+          <div class="action-group menu-move-actions">
+            <button class="table-action" data-menu-move="up" data-menu-code="${escapeHtml(feature.code)}" type="button" ${siblingIndex <= 0 ? "disabled" : ""}>Lên</button>
+            <button class="table-action" data-menu-move="down" data-menu-code="${escapeHtml(feature.code)}" type="button" ${siblingIndex >= siblings.length - 1 ? "disabled" : ""}>Xuống</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join("") : emptyRow(4, "Chưa có chức năng", "Danh mục chức năng chưa có dữ liệu.");
+
+  document.querySelectorAll("#menu-layout-table select[name='parent_code']").forEach((select) => {
+    select.addEventListener("change", () => changeMenuParent(select.closest("tr").dataset.featureRow, select.value));
+  });
+}
+
+function changeMenuParent(code, parentCode) {
+  collectMenuLayoutStateFromDom();
+  const item = menuLayoutState.find((feature) => feature.code === code);
+  if (!item) return;
+  item.parent_code = parentCode || null;
+  const siblingOrders = menuLayoutState
+    .filter((feature) => feature.code !== code && (feature.parent_code || null) === (item.parent_code || null))
+    .map((feature) => featureSortValue(feature));
+  item.sort_order = (Math.max(0, ...siblingOrders) || 0) + 10;
+  normalizeMenuSiblingOrders(item.parent_code);
+  renderMenuLayout();
+}
+
+function moveMenuItem(code, direction) {
+  collectMenuLayoutStateFromDom();
+  const item = menuLayoutState.find((feature) => feature.code === code);
+  if (!item) return;
+  const siblings = sortFeaturesForTree(menuLayoutState.filter((feature) => (feature.parent_code || null) === (item.parent_code || null)));
+  const index = siblings.findIndex((feature) => feature.code === code);
+  const targetIndex = direction === "up" ? index - 1 : index + 1;
+  if (index < 0 || targetIndex < 0 || targetIndex >= siblings.length) return;
+  const [moved] = siblings.splice(index, 1);
+  siblings.splice(targetIndex, 0, moved);
+  siblings.forEach((feature, siblingIndex) => {
+    feature.sort_order = (siblingIndex + 1) * 10;
+  });
+  renderMenuLayout();
+}
+
+async function loadMenuLayout() {
+  features = (await api("/api/admin/features")).features;
+  menuLayoutState = features.map((feature) => ({ ...feature }));
+  renderMenuLayout();
+}
+
+async function saveMenuLayout(button = null) {
+  const saveButton = button || $("#save-menu-layout");
+  const originalLabel = saveButton?.textContent;
+  if (saveButton) {
+    saveButton.disabled = true;
+    saveButton.textContent = "Đang lưu...";
+  }
   try {
+    collectMenuLayoutStateFromDom();
+    if (!menuLayoutState.length) {
+      await loadMenuLayout();
+      collectMenuLayoutStateFromDom();
+    }
+    normalizeAllMenuOrders();
+    const payload = menuLayoutState.map((feature) => ({
+      code: feature.code,
+      name: feature.name,
+      parent_code: feature.parent_code || null,
+      sort_order: Number(feature.sort_order || 0),
+    }));
     await api("/api/admin/features/layout", { method: "PUT", body: JSON.stringify({ features: payload }) });
-    showMessage($("#menu-layout-message"), "Đã lưu cấu trúc menu. Sidebar sẽ cập nhật ngay.");
-    features = [];
-    await syncNavigationFromFeatures();
-    await loadMenuLayout();
+    showMessage($("#menu-layout-message"), "Đã lưu cấu trúc menu. Trang sẽ tải lại để hiển thị cây menu mới.");
+    window.setTimeout(() => window.location.reload(), 600);
   } catch (error) {
     showMessage($("#menu-layout-message"), error.message, "error");
+    if (saveButton) {
+      saveButton.disabled = false;
+      saveButton.textContent = originalLabel || "Lưu cấu trúc menu";
+    }
   }
 }
 

@@ -19,7 +19,7 @@ FEATURE_ROWS = [
     {"code": "admin.menu", "name": "Quản trị menu", "parent_code": "admin.web", "sort_order": 27},
     {"code": "admin.work_tasks", "name": "Quản lý công việc", "parent_code": None, "sort_order": 28},
     {"code": "reports", "name": "Báo cáo thống kê", "parent_code": None, "sort_order": 30},
-    {"code": "vault", "name": "Tài khoản web", "parent_code": None, "sort_order": 40},
+    {"code": "vault", "name": "Tài khoản web", "parent_code": "admin.web", "sort_order": 40},
     {"code": "vault.view", "name": "Xem danh sách tài khoản", "parent_code": "vault", "sort_order": 41},
     {"code": "vault.manage", "name": "Thêm và sửa tài khoản", "parent_code": "vault", "sort_order": 42},
     {"code": "vault.reveal", "name": "Xem mật khẩu đã lưu", "parent_code": "vault", "sort_order": 43},
@@ -27,6 +27,7 @@ FEATURE_ROWS = [
 ]
 
 FEATURE_ROWS.append({"code": "admin.sql_reports", "name": "Quản trị SQL", "parent_code": "admin.connections", "sort_order": 23})
+OBSOLETE_FEATURE_CODES = ("admin", "admin.connections.test", "auto", "auto.attt_quarterly", "auto.attt_links")
 
 
 REGION_ROWS = [
@@ -68,6 +69,7 @@ class SupabaseRepository:
                 self._upsert("system_roles", {**role, "created_at": now, "updated_at": now}, "code")
             except RuntimeError:
                 pass
+        self._migrate_legacy_feature_layout()
         self._delete_obsolete_features()
         admin = self.get_user_by_username(admin_username)
         if not admin:
@@ -83,13 +85,31 @@ class SupabaseRepository:
     def _seed_feature(self, feature: dict[str, Any]) -> None:
         rows = self._get("features", {"code": f"eq.{feature['code']}", "select": "code", "limit": "1"})
         if rows:
-            # Giữ nguyên parent_code/sort_order vì admin có thể đã sắp xếp menu trong giao diện.
-            self._patch("features", {"code": f"eq.{feature['code']}"}, {"name": feature["name"]})
+            # Giữ nguyên name/parent_code/sort_order vì admin có thể đã sắp xếp menu trong giao diện.
             return
         self._insert("features", feature)
 
+    def _migrate_legacy_feature_layout(self) -> None:
+        has_legacy = False
+        for code in ("admin", "admin.connections.test"):
+            try:
+                has_legacy = bool(self._get("features", {"code": f"eq.{code}", "select": "code", "limit": "1"})) or has_legacy
+            except RuntimeError:
+                return
+        if not has_legacy:
+            return
+        for feature in FEATURE_ROWS:
+            try:
+                self._patch("features", {"code": f"eq.{feature['code']}"}, {
+                    "name": feature["name"],
+                    "parent_code": feature["parent_code"],
+                    "sort_order": feature["sort_order"],
+                })
+            except RuntimeError:
+                pass
+
     def _delete_obsolete_features(self) -> None:
-        for code in ("admin", "admin.connections.test", "auto", "auto.attt_quarterly", "auto.attt_links"):
+        for code in OBSOLETE_FEATURE_CODES:
             try:
                 self._delete("user_permissions", {"feature_code": f"eq.{code}"})
                 self._delete("features", {"code": f"eq.{code}"})
