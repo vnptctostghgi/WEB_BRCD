@@ -14,6 +14,7 @@ let sqlReports = [];
 let dynamicReportPage = 1;
 let dynamicReportTotal = 0;
 let menuLayoutState = [];
+let dashboardFiberLoaded = false;
 
 const navFeatureConfig = {
   dashboard: { view: "dashboard", icon: "dashboard", keywords: "tong quan dashboard" },
@@ -106,7 +107,7 @@ async function activateNavItem(item) {
   $("#module-title").textContent = item.dataset.title || item.textContent.trim();
   $("#sidebar").classList.remove("menu-open");
   $("#menu-button")?.setAttribute("aria-expanded", "false");
-  if (item.dataset.view === "dashboard") await loadDashboardDatcoc();
+  if (item.dataset.view === "dashboard") await initDashboard();
   if (item.dataset.view === "users") await loadUsers();
   if (item.dataset.view === "vault") await loadCredentials();
   if (item.dataset.view === "websites") await loadAdminWebsites();
@@ -261,53 +262,126 @@ async function loadNotifications() {
   }
 }
 
-$("#test-button")?.addEventListener("click", async () => {
-  const button = $("#test-button");
-  setButtonLoading(button, true);
-  try {
-    const data = await api("/api/health/database");
-    $("#database-summary").textContent = data.ok ? "Đã kết nối" : "Kết nối lỗi";
-    const detail = data.ok && data.details?.api_url ? ` ${data.details.api_url}.` : "";
-    showMessage($("#result"), data.ok ? `${data.message}${detail}` : data.message, data.ok ? "success" : "error");
-  } catch (error) {
-    showMessage($("#result"), error.message, "error");
-  } finally {
-    setButtonLoading(button, false);
-  }
+document.querySelectorAll("[data-dashboard-tab]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    await switchDashboardTab(button.dataset.dashboardTab);
+  });
 });
 
-$("#refresh-dashboard-datcoc")?.addEventListener("click", () => loadDashboardDatcoc());
+$("#refresh-dashboard-fiber")?.addEventListener("click", () => loadDashboardFiber({ force: true }));
 
-loadDashboardDatcoc();
+initDashboard();
 
-async function loadDashboardDatcoc() {
-  const head = $("#dashboard-datcoc-head");
-  const body = $("#dashboard-datcoc-body");
-  const message = $("#dashboard-datcoc-message");
-  const button = $("#refresh-dashboard-datcoc");
-  if (!head || !body) return;
-  body.innerHTML = loadingRow(1, "Đang tải dữ liệu đặt cọc...");
+async function initDashboard() {
+  if (!$("#view-dashboard")) return;
+  await loadDashboardFiber();
+}
+
+async function switchDashboardTab(tabName) {
+  document.querySelectorAll("[data-dashboard-tab]").forEach((button) => {
+    const active = button.dataset.dashboardTab === tabName;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  document.querySelectorAll(".dashboard-tab-panel").forEach((panel) => {
+    const active = panel.id === `dashboard-tab-${tabName}`;
+    panel.classList.toggle("active", active);
+    panel.hidden = !active;
+  });
+  if (tabName === "fiber") await loadDashboardFiber();
+}
+
+async function loadDashboardFiber({ force = false } = {}) {
+  if (dashboardFiberLoaded && !force) return;
+  const button = $("#refresh-dashboard-fiber");
+  const message = $("#dashboard-fiber-message");
+  setDashboardFiberLoading();
   if (button) setButtonLoading(button, true);
   try {
-    const response = await api("/api/dashboard/datcoc-test");
-    renderDashboardDatcoc(response);
-    showMessage(message, response.message || "Đã tải dữ liệu đặt cọc.");
+    const response = await api("/api/dashboard/fiber");
+    dashboardFiberLoaded = true;
+    renderDashboardFiber(response);
+    if (message) showMessage(message, response.message || "Đã tải dữ liệu Fiber.", response.ok ? "success" : "error");
   } catch (error) {
-    head.innerHTML = "";
-    body.innerHTML = emptyRow(1, "Không tải được dữ liệu", error.message);
-    showMessage(message, error.message, "error");
+    renderDashboardFiberError(error.message);
+    if (message) showMessage(message, error.message, "error");
   } finally {
     if (button) setButtonLoading(button, false);
   }
 }
 
-function renderDashboardDatcoc(response) {
-  const columns = response.columns || [];
-  const rows = response.rows || [];
-  $("#dashboard-datcoc-head").innerHTML = columns.length ? `<tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>` : "";
-  $("#dashboard-datcoc-body").innerHTML = rows.length
-    ? rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(row[column])}</td>`).join("")}</tr>`).join("")
-    : emptyRow(Math.max(columns.length, 1), "Không có dữ liệu", "API nội bộ không trả dòng nào cho thuê bao thanhbinh-omon.");
+function setDashboardFiberLoading() {
+  ["vnpt", "ttvt"].forEach((group) => {
+    const body = $(`#dashboard-fiber-${group}-body`);
+    const chart = $(`#dashboard-fiber-${group}-chart`);
+    if (body) body.innerHTML = loadingRow(3, "Đang tải sản lượng Fiber...");
+    if (chart) chart.innerHTML = `<div class="dashboard-chart-empty">Đang tải dữ liệu...</div>`;
+  });
+}
+
+function renderDashboardFiber(response) {
+  const vnptRows = response.groups?.vnpt?.rows || [];
+  const ttvtRows = response.groups?.ttvt?.rows || [];
+  const period = response.period_label ? `Tháng ${response.period_label}` : "Tháng hiện tại";
+  const fiberTotal = response.summary?.production?.fiber ?? response.groups?.vnpt?.total ?? 0;
+
+  $("#dashboard-summary-period").textContent = period;
+  $("#dashboard-fiber-period").textContent = `${period}, lọc loại hình 58 và thuê bao chưa cắt.`;
+  $("#dashboard-production-fiber").textContent = formatDashboardNumber(fiberTotal);
+
+  renderDashboardFiberTable("vnpt", vnptRows);
+  renderDashboardFiberTable("ttvt", ttvtRows);
+  renderDashboardFiberChart("#dashboard-fiber-vnpt-chart", vnptRows);
+  renderDashboardFiberChart("#dashboard-fiber-ttvt-chart", ttvtRows);
+}
+
+function renderDashboardFiberError(message) {
+  $("#dashboard-production-fiber").textContent = "--";
+  ["vnpt", "ttvt"].forEach((group) => {
+    const body = $(`#dashboard-fiber-${group}-body`);
+    const chart = $(`#dashboard-fiber-${group}-chart`);
+    if (body) body.innerHTML = emptyRow(3, "Không tải được dữ liệu Fiber", message);
+    if (chart) chart.innerHTML = `<div class="dashboard-chart-empty error">${escapeHtml(message)}</div>`;
+  });
+}
+
+function renderDashboardFiberTable(group, rows) {
+  const body = $(`#dashboard-fiber-${group}-body`);
+  if (!body) return;
+  body.innerHTML = rows.length ? rows.map((row) => `
+    <tr>
+      <td><span class="rank-cell">${escapeHtml(row.rank)}</span></td>
+      <td><strong>${escapeHtml(row.unit_name)}</strong></td>
+      <td>${formatDashboardNumber(row.fiber_quantity)}</td>
+    </tr>
+  `).join("") : emptyRow(3, "Chưa có dữ liệu", "API nội bộ chưa trả dữ liệu cho nhóm này.");
+}
+
+function renderDashboardFiberChart(selector, rows) {
+  const chart = $(selector);
+  if (!chart) return;
+  if (!rows.length) {
+    chart.innerHTML = `<div class="dashboard-chart-empty">Chưa có dữ liệu để vẽ biểu đồ.</div>`;
+    return;
+  }
+  const maxValue = Math.max(...rows.map((row) => Number(row.fiber_quantity) || 0), 1);
+  chart.innerHTML = rows.map((row) => {
+    const value = Number(row.fiber_quantity) || 0;
+    const width = value > 0 ? Math.max(4, Math.round((value / maxValue) * 100)) : 0;
+    return `
+      <div class="bar-row">
+        <div class="bar-label"><strong>#${escapeHtml(row.rank)}</strong><span>${escapeHtml(row.unit_name)}</span></div>
+        <div class="bar-track"><span style="width: ${width}%"></span></div>
+        <div class="bar-value">${formatDashboardNumber(value)}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+function formatDashboardNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "--";
+  return new Intl.NumberFormat("vi-VN").format(number);
 }
 
 $("#password-form")?.addEventListener("submit", async (event) => {

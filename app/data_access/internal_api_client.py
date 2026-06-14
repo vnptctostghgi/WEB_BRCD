@@ -42,6 +42,18 @@ class InternalApiClient:
         page_size: int,
     ) -> dict[str, Any]:
         if self.settings.internal_api_mock_mode:
+            if ma_bao_cao in {"DASHBOARD_FIBER_VNPT", "DASHBOARD_FIBER_TTVT"}:
+                rows = self._mock_fiber_rows(ma_bao_cao)
+                return {
+                    "ok": True,
+                    "mode": "mock",
+                    "columns": ["ten_donvi_cha", "so_luong_thuebao"],
+                    "rows": rows,
+                    "total": len(rows),
+                    "page": page,
+                    "page_size": page_size,
+                    "message": "Dữ liệu mẫu Fiber. Tắt INTERNAL_API_MOCK_MODE để gọi API nội bộ thật.",
+                }
             rows = [
                 {
                     "STT": ((page - 1) * page_size) + index + 1,
@@ -75,6 +87,14 @@ class InternalApiClient:
                 },
             }
         )
+
+    @staticmethod
+    def _mock_fiber_rows(ma_bao_cao: str) -> list[dict[str, Any]]:
+        prefix = "VNPT" if ma_bao_cao == "DASHBOARD_FIBER_VNPT" else "TTVT"
+        return [
+            {"ten_donvi_cha": f"{prefix} Khu vực {index:02d}", "so_luong_thuebao": 140 - (index * 7)}
+            for index in range(1, 14)
+        ]
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}

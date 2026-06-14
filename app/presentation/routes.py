@@ -441,6 +441,12 @@ def dashboard_datcoc_test(request: Request) -> dict:
     return build_database_service().run_dashboard_datcoc_test()
 
 
+@router.get("/api/dashboard/fiber")
+def dashboard_fiber(request: Request) -> dict:
+    current_user(request)
+    return build_database_service().run_dashboard_fiber()
+
+
 @router.get("/api/admin/users")
 def list_users(request: Request) -> dict:
     admin_user(request)

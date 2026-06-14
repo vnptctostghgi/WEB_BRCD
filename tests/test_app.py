@@ -135,6 +135,19 @@ def test_dashboard_datcoc_table_uses_internal_api() -> None:
         assert payload["rows"]
 
 
+def test_dashboard_fiber_uses_internal_api() -> None:
+    with TestClient(app) as client:
+        assert client.get("/api/dashboard/fiber").status_code == 401
+        login(client)
+        response = client.get("/api/dashboard/fiber")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["groups"]["vnpt"]["rows"][0]["rank"] == 1
+        assert len(payload["groups"]["vnpt"]["rows"]) == 13
+        assert len(payload["groups"]["ttvt"]["rows"]) == 13
+        assert payload["summary"]["production"]["fiber"] == payload["groups"]["vnpt"]["total"]
+
+
 def test_system_status_requires_login_and_reports_internal_api_policy() -> None:
     with TestClient(app) as client:
         assert client.get("/api/system/status").status_code == 401

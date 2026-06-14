@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -11,6 +12,12 @@ logger = logging.getLogger(__name__)
 
 class DatabaseService:
     """Xử lý nghiệp vụ lấy dữ liệu qua máy chủ FastAPI nội bộ."""
+
+    FIBER_LOAIHINH_ID = "58"
+    FIBER_KIEULD_IDS = (
+        51, 321, 13121, 11000, 11001, 685, 194, 196, 570, 614,
+        14015, 26, 643, 644, 722, 733,
+    )
 
     def __init__(self, internal_api: InternalApiClient, app_repository: Any) -> None:
         self.internal_api = internal_api
@@ -177,4 +184,172 @@ class DatabaseService:
             "columns": [],
             "rows": [],
             "pagination": {"page": page, "page_size": page_size, "total": 0},
+        }
+
+    def run_dashboard_fiber(self) -> dict[str, Any]:
+        period_label = datetime.now().strftime("%m/%Y")
+        vnpt = self._run_dashboard_fiber_group(
+            unit_prefix="VNPT",
+            ma_bao_cao="DASHBOARD_FIBER_VNPT",
+            ten_bao_cao="Sản lượng Fiber VNPT Khu vực",
+        )
+        ttvt = self._run_dashboard_fiber_group(
+            unit_prefix="TTVT",
+            ma_bao_cao="DASHBOARD_FIBER_TTVT",
+            ten_bao_cao="Sản lượng Fiber TTVT Khu vực",
+        )
+        ok = bool(vnpt["ok"] and ttvt["ok"])
+        return {
+            "ok": ok,
+            "message": "Đã tải dữ liệu Fiber." if ok else "Một phần dữ liệu Fiber chưa tải được.",
+            "period_label": period_label,
+            "summary": {
+                "production": {
+                    "fiber": vnpt["total"],
+                    "mytv": None,
+                    "mesh": None,
+                    "cam": None,
+                },
+                "revenue": {
+                    "total": None,
+                    "fiber": None,
+                    "mytv": None,
+                    "mesh": None,
+                    "cam": None,
+                },
+            },
+            "groups": {
+                "vnpt": vnpt,
+                "ttvt": ttvt,
+            },
+        }
+
+    def _run_dashboard_fiber_group(self, *, unit_prefix: str, ma_bao_cao: str, ten_bao_cao: str) -> dict[str, Any]:
+        page = 1
+        page_size = 50
+        sql = self._dashboard_fiber_sql(unit_prefix)
+        try:
+            result = self.internal_api.run_sql_report(
+                ten_bao_cao=ten_bao_cao,
+                ma_bao_cao=ma_bao_cao,
+                cau_lenh_sql=sql,
+                tham_so={},
+                page=page,
+                page_size=page_size,
+            )
+        except httpx.TimeoutException as error:
+            logger.exception("Dashboard fiber timeout: %s", error)
+            return self._failed_fiber_group("API dữ liệu nội bộ phản hồi quá lâu.", str(error))
+        except httpx.HTTPStatusError as error:
+            logger.exception("Dashboard fiber HTTP error: %s", error)
+            return self._failed_fiber_group(
+                f"API dữ liệu nội bộ trả lỗi HTTP {error.response.status_code}.",
+                error.response.text[:300],
+            )
+        except httpx.HTTPError as error:
+            logger.exception("Dashboard fiber connection error: %s", error)
+            return self._failed_fiber_group("Không kết nối được API dữ liệu nội bộ.", str(error))
+
+        rows = result.get("rows") or result.get("data") or []
+        if not isinstance(rows, list):
+            rows = []
+        normalized_rows = self._normalize_fiber_rows(rows)
+        return {
+            "ok": bool(result.get("ok", True)),
+            "message": result.get("message", "Đã tải dữ liệu Fiber."),
+            "rows": normalized_rows,
+            "total": sum(row["fiber_quantity"] for row in normalized_rows),
+        }
+
+    def _dashboard_fiber_sql(self, unit_prefix: str) -> str:
+        safe_prefix = unit_prefix.replace("'", "''")
+        kieuld_ids = ", ".join(str(item) for item in self.FIBER_KIEULD_IDS)
+        return f"""
+SELECT
+    nv.ten_donvi_cha,
+    COUNT(dbtb.ma_tb) AS so_luong_thuebao
+FROM
+    css_cto.db_thuebao dbtb,
+    css_cto.hd_thuebao hdtb,
+    css_cto.hd_khachhang hdkh,
+    v_nhanvien nv,
+    css_cto.kieu_ld ld,
+    css_cto.dbtb_kv dbkv
+WHERE
+    dbtb.loaitb_id = '{self.FIBER_LOAIHINH_ID}'
+    AND dbtb.ngay_sd >= TRUNC(SYSDATE, 'MM')
+    AND dbtb.ngay_sd <= LAST_DAY(SYSDATE)
+    AND dbtb.ngay_cat IS NULL
+    AND dbtb.phanvung_id = hdtb.phanvung_id
+    AND dbtb.thuebao_id = hdtb.thuebao_id
+    AND hdtb.ngay_ht >= TRUNC(SYSDATE, 'MM')
+    AND hdtb.ngay_ht <= LAST_DAY(SYSDATE)
+    AND hdtb.tthd_id = 6
+    AND hdtb.phanvung_id = hdkh.phanvung_id
+    AND hdtb.hdkh_id = hdkh.hdkh_id
+    AND hdkh.phanvung_id = nv.phanvung_id
+    AND NVL(hdkh.ctv_id, NVL(hdkh.nhanviengt_id, hdkh.nhanvien_id)) = nv.nhanvien_id
+    AND hdtb.phanvung_id = dbkv.phanvung_id
+    AND hdtb.thuebao_id = dbkv.thuebao_id
+    AND dbkv.khuvuc_id = nv.khuvuc_id
+    AND hdtb.kieuld_id = ld.kieuld_id
+    AND ld.kieuld_id IN ({kieuld_ids})
+    AND nv.ten_donvi_cha LIKE '{safe_prefix}%'
+GROUP BY
+    nv.ten_donvi_cha
+ORDER BY
+    so_luong_thuebao DESC
+""".strip()
+
+    @classmethod
+    def _normalize_fiber_rows(cls, rows: list[Any]) -> list[dict[str, Any]]:
+        normalized_rows = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            unit_name = str(cls._row_value(row, "unit_name", "ten_donvi_cha", "TEN_DONVI_CHA") or "").strip()
+            quantity = cls._to_int(cls._row_value(row, "fiber_quantity", "so_luong_thuebao", "SO_LUONG_THUEBAO"))
+            if not unit_name:
+                continue
+            normalized_rows.append({"unit_name": unit_name, "fiber_quantity": quantity})
+        normalized_rows.sort(key=lambda item: item["fiber_quantity"], reverse=True)
+        return [
+            {"rank": index + 1, **row}
+            for index, row in enumerate(normalized_rows[:13])
+        ]
+
+    @staticmethod
+    def _row_value(row: dict[str, Any], *keys: str) -> Any:
+        for key in keys:
+            if key in row:
+                return row[key]
+        lower_key_map = {str(key).lower(): key for key in row}
+        for key in keys:
+            actual_key = lower_key_map.get(key.lower())
+            if actual_key is not None:
+                return row[actual_key]
+        return None
+
+    @staticmethod
+    def _to_int(value: Any) -> int:
+        if value is None:
+            return 0
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        cleaned = str(value).strip().replace(".", "").replace(",", "")
+        try:
+            return int(cleaned)
+        except ValueError:
+            return 0
+
+    @staticmethod
+    def _failed_fiber_group(message: str, detail: str) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "message": message,
+            "details": {"error": detail},
+            "rows": [],
+            "total": 0,
         }

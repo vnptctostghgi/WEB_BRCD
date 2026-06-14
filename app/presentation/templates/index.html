@@ -152,69 +152,135 @@
           {% if user.must_change_password %}
           <div class="notice warning"><strong>Cần đổi mật khẩu.</strong> Đây là mật khẩu khởi tạo hoặc vừa được đặt lại. Hãy đổi mật khẩu trước khi sử dụng lâu dài.</div>
           {% endif %}
-          <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="Chỉ số hệ thống">
-            <article class="metric-card"><div class="metric-icon">DB</div><div><span>Trạng thái Database</span><strong id="database-summary">Chưa kiểm tra</strong></div></article>
-            <article class="metric-card"><div class="metric-icon">ID</div><div><span>Tài khoản hiện tại</span><strong>{{ user.username }}</strong></div></article>
-            <article class="metric-card"><div class="metric-icon">API</div><div><span>Dữ liệu nội bộ</span><strong>Qua FastAPI</strong></div></article>
-            <article class="metric-card"><div class="metric-icon">SP</div><div><span>Hỗ trợ</span><strong>094.989.2585</strong></div></article>
+          <div class="dashboard-tabs" role="tablist" aria-label="Nhóm tổng quan">
+            <button class="dashboard-tab active" id="dashboard-tab-summary-button" data-dashboard-tab="summary" type="button" role="tab" aria-selected="true" aria-controls="dashboard-tab-summary">Tổng</button>
+            <button class="dashboard-tab" id="dashboard-tab-fiber-button" data-dashboard-tab="fiber" type="button" role="tab" aria-selected="false" aria-controls="dashboard-tab-fiber">Fiber</button>
+            <button class="dashboard-tab" id="dashboard-tab-mytv-button" data-dashboard-tab="mytv" type="button" role="tab" aria-selected="false" aria-controls="dashboard-tab-mytv">MyTV</button>
+            <button class="dashboard-tab" id="dashboard-tab-mesh-button" data-dashboard-tab="mesh" type="button" role="tab" aria-selected="false" aria-controls="dashboard-tab-mesh">Mesh</button>
+            <button class="dashboard-tab" id="dashboard-tab-cam-button" data-dashboard-tab="cam" type="button" role="tab" aria-selected="false" aria-controls="dashboard-tab-cam">CAM</button>
+          </div>
+
+          <section class="dashboard-tab-panel active" id="dashboard-tab-summary" role="tabpanel" aria-labelledby="dashboard-tab-summary-button">
+            <div class="dashboard-section-label">
+              <span>Sản lượng dịch vụ</span>
+              <small id="dashboard-summary-period">Tháng hiện tại</small>
+            </div>
+            <section class="dashboard-card-grid dashboard-production-grid" aria-label="Sản lượng dịch vụ">
+              <article class="metric-card dashboard-metric-card">
+                <div class="metric-icon">FIB</div>
+                <div>
+                  <span>Fiber</span>
+                  <strong id="dashboard-production-fiber">--</strong>
+                  <small class="metric-note">Tổng theo VNPT Khu vực</small>
+                </div>
+              </article>
+              <article class="metric-card dashboard-metric-card">
+                <div class="metric-icon">TV</div>
+                <div>
+                  <span>MyTV</span>
+                  <strong id="dashboard-production-mytv">--</strong>
+                  <small class="metric-note">Chờ công thức</small>
+                </div>
+              </article>
+              <article class="metric-card dashboard-metric-card">
+                <div class="metric-icon">MSH</div>
+                <div>
+                  <span>Mesh</span>
+                  <strong id="dashboard-production-mesh">--</strong>
+                  <small class="metric-note">Chờ công thức</small>
+                </div>
+              </article>
+              <article class="metric-card dashboard-metric-card">
+                <div class="metric-icon">CAM</div>
+                <div>
+                  <span>CAM</span>
+                  <strong id="dashboard-production-cam">--</strong>
+                  <small class="metric-note">Chờ công thức</small>
+                </div>
+              </article>
+            </section>
+
+            <div class="dashboard-section-label mt-4">
+              <span>Doanh thu</span>
+              <small>Chờ bổ sung công thức</small>
+            </div>
+            <section class="dashboard-card-grid dashboard-revenue-grid" aria-label="Doanh thu dịch vụ">
+              <article class="metric-card dashboard-metric-card revenue-total"><div class="metric-icon">T</div><div><span>Tổng doanh thu</span><strong>--</strong><small class="metric-note">Chưa có dữ liệu</small></div></article>
+              <article class="metric-card dashboard-metric-card"><div class="metric-icon">FIB</div><div><span>Doanh thu Fiber</span><strong>--</strong><small class="metric-note">Chưa có dữ liệu</small></div></article>
+              <article class="metric-card dashboard-metric-card"><div class="metric-icon">TV</div><div><span>Doanh thu MyTV</span><strong>--</strong><small class="metric-note">Chưa có dữ liệu</small></div></article>
+              <article class="metric-card dashboard-metric-card"><div class="metric-icon">MSH</div><div><span>Doanh thu Mesh</span><strong>--</strong><small class="metric-note">Chưa có dữ liệu</small></div></article>
+              <article class="metric-card dashboard-metric-card"><div class="metric-icon">CAM</div><div><span>Doanh thu CAM</span><strong>--</strong><small class="metric-note">Chưa có dữ liệu</small></div></article>
+            </section>
+
+            <section class="dashboard-empty mt-4">
+              <p class="eyebrow">Thiết kế sau</p>
+              <h2>Khu vực còn lại đang để trống</h2>
+              <p>Phần này đã được dọn sạch để mình tiếp tục bố trí biểu đồ hoặc bảng theo ý tưởng tiếp theo của anh.</p>
+            </section>
           </section>
 
-          <section class="panel mt-4">
-            <div>
-              <p class="eyebrow">Internal API</p>
-              <h2>Kiểm tra API dữ liệu nội bộ</h2>
-              <p>Backend gọi máy chủ FastAPI nội bộ. Nếu lỗi, hệ thống gửi cảnh báo Telegram ngắn gọn cho quản trị viên.</p>
+          <section class="dashboard-tab-panel" id="dashboard-tab-fiber" role="tabpanel" aria-labelledby="dashboard-tab-fiber-button" hidden>
+            <section class="data-card dashboard-toolbar">
+              <div>
+                <p class="eyebrow">Fiber</p>
+                <h2>Sản lượng Fiber theo khu vực</h2>
+                <p id="dashboard-fiber-period">Dữ liệu tháng hiện tại, lọc loại hình 58.</p>
+              </div>
+              <button class="btn-secondary" id="refresh-dashboard-fiber" type="button"><span class="button-label">Tải lại</span><span class="spinner"></span></button>
+              <div id="dashboard-fiber-message" class="result hidden" role="status"></div>
+            </section>
+
+            <div class="dashboard-chart-grid mt-4">
+              <section class="data-card dashboard-chart-card">
+                <div class="section-heading">
+                  <div><p class="eyebrow">Biểu đồ</p><h2>VNPT Khu vực</h2></div>
+                </div>
+                <div class="horizontal-bar-chart" id="dashboard-fiber-vnpt-chart"></div>
+              </section>
+              <section class="data-card dashboard-chart-card">
+                <div class="section-heading">
+                  <div><p class="eyebrow">Biểu đồ</p><h2>TTVT Khu vực</h2></div>
+                </div>
+                <div class="horizontal-bar-chart" id="dashboard-fiber-ttvt-chart"></div>
+              </section>
             </div>
-            <button class="btn-primary" id="test-button" type="button"><span class="button-label">Kiểm tra kết nối</span><span class="spinner"></span></button>
-            <div id="result" class="result hidden" role="status"></div>
+
+            <div class="dashboard-table-grid mt-4">
+              <section class="data-card">
+                <div class="section-heading">
+                  <div><p class="eyebrow">Bảng xếp hạng</p><h2>VNPT Khu vực</h2></div>
+                </div>
+                <div class="table-scroll dashboard-rank-table">
+                  <table>
+                    <thead><tr><th>Xếp hạng</th><th>Tên đơn vị</th><th>Sản lượng Fiber</th></tr></thead>
+                    <tbody id="dashboard-fiber-vnpt-body"></tbody>
+                  </table>
+                </div>
+              </section>
+              <section class="data-card">
+                <div class="section-heading">
+                  <div><p class="eyebrow">Bảng xếp hạng</p><h2>TTVT Khu vực</h2></div>
+                </div>
+                <div class="table-scroll dashboard-rank-table">
+                  <table>
+                    <thead><tr><th>Xếp hạng</th><th>Tên đơn vị</th><th>Sản lượng Fiber</th></tr></thead>
+                    <tbody id="dashboard-fiber-ttvt-body"></tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
           </section>
 
-          <section class="data-card mt-4">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">Test dữ liệu</p>
-                <h2>Bảng đặt cọc thuê bao thanhbinh-omon</h2>
-                <p><code>select * from css_cto.db_datcoc where ma_tb = 'thanhbinh-omon'</code></p>
-              </div>
-              <button class="btn-secondary" id="refresh-dashboard-datcoc" type="button"><span class="button-label">Tải lại</span><span class="spinner"></span></button>
-            </div>
-            <div id="dashboard-datcoc-message" class="result hidden mb-4"></div>
-            <div class="table-scroll">
-              <table>
-                <thead id="dashboard-datcoc-head"></thead>
-                <tbody id="dashboard-datcoc-body"></tbody>
-              </table>
-            </div>
+          <section class="dashboard-tab-panel" id="dashboard-tab-mytv" role="tabpanel" aria-labelledby="dashboard-tab-mytv-button" hidden>
+            <section class="dashboard-empty"><p class="eyebrow">MyTV</p><h2>Chờ thiết kế chi tiết</h2><p>Tab đã sẵn khung sạch để bổ sung sản lượng, doanh thu và biểu đồ MyTV.</p></section>
           </section>
 
-          <section class="data-card mt-4">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">Sẵn sàng cho báo cáo</p>
-                <h2>Các phân hệ nền tảng</h2>
-                <p>Đã tách riêng xác thực, phân quyền, danh mục, kết nối hệ thống và kho tài khoản web.</p>
-              </div>
-            </div>
-            <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <article class="feature-card"><strong>Đăng nhập an toàn</strong><p>Cookie HttpOnly, phiên hết hạn sau 8 giờ.</p></article>
-              <article class="feature-card"><strong>Phân quyền theo cây</strong><p>Admin cấp quyền theo từng chức năng.</p></article>
-              <article class="feature-card"><strong>Nhật ký hoạt động</strong><p>Theo dõi đăng nhập và thao tác quản trị.</p></article>
-              <article class="feature-card"><strong>Cảnh báo Telegram</strong><p>Chỉ gửi cảnh báo khi có lỗi kết nối hoặc lỗi web.</p></article>
-            </div>
+          <section class="dashboard-tab-panel" id="dashboard-tab-mesh" role="tabpanel" aria-labelledby="dashboard-tab-mesh-button" hidden>
+            <section class="dashboard-empty"><p class="eyebrow">Mesh</p><h2>Chờ thiết kế chi tiết</h2><p>Tab đã sẵn khung sạch để bổ sung sản lượng, doanh thu và biểu đồ Mesh.</p></section>
           </section>
-          <section class="data-card mt-4">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">Dashboard báo cáo</p>
-                <h2>Khu vực biểu đồ phân tích</h2>
-                <p>Các biểu đồ số liệu BRCĐ sẽ được bổ sung theo yêu cầu báo cáo ở bước sau.</p>
-              </div>
-            </div>
-            <div class="grid gap-4 md:grid-cols-3">
-              <div class="chart-placeholder">Biểu đồ thuê bao</div>
-              <div class="chart-placeholder">Biểu đồ doanh thu</div>
-              <div class="chart-placeholder">Biểu đồ chất lượng</div>
-            </div>
+
+          <section class="dashboard-tab-panel" id="dashboard-tab-cam" role="tabpanel" aria-labelledby="dashboard-tab-cam-button" hidden>
+            <section class="dashboard-empty"><p class="eyebrow">CAM</p><h2>Chờ thiết kế chi tiết</h2><p>Tab đã sẵn khung sạch để bổ sung sản lượng, doanh thu và biểu đồ CAM.</p></section>
           </section>
         </section>
 

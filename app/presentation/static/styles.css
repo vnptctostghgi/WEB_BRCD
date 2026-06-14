@@ -1127,6 +1127,252 @@ p {
   text-align: center;
 }
 
+.dashboard-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-bottom: 1rem;
+  border: 1px solid rgba(14, 165, 233, .28);
+  border-radius: 20px;
+  background: rgba(2, 6, 23, .24);
+  padding: .45rem;
+}
+
+.dashboard-tab {
+  min-height: 42px;
+  flex: 1 1 96px;
+  border: 0;
+  border-radius: 15px;
+  background: transparent;
+  color: #bae6fd;
+  font-weight: 900;
+  transition: background .18s ease, color .18s ease, transform .18s ease;
+}
+
+.dashboard-tab:hover,
+.dashboard-tab.active {
+  background: rgba(14, 165, 233, .2);
+  color: #fff;
+}
+
+.dashboard-tab.active {
+  box-shadow: inset 0 0 0 1px rgba(125, 211, 252, .34);
+}
+
+.dashboard-tab-panel {
+  display: none;
+}
+
+.dashboard-tab-panel.active {
+  display: block;
+  animation: reveal .18s ease-out;
+}
+
+.dashboard-section-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  color: #e0f2fe;
+  font-weight: 900;
+}
+
+.dashboard-section-label span {
+  font-size: .86rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.dashboard-section-label small,
+.metric-note {
+  color: #7dd3fc;
+  font-size: .72rem;
+  font-weight: 800;
+}
+
+.dashboard-card-grid {
+  display: grid;
+  gap: .85rem;
+}
+
+.dashboard-production-grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.dashboard-revenue-grid {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.dashboard-metric-card {
+  min-height: 106px;
+}
+
+.dashboard-metric-card .metric-icon {
+  width: 52px;
+  height: 52px;
+  flex-basis: 52px;
+  border-radius: 17px;
+}
+
+.dashboard-metric-card strong {
+  font-size: 1.35rem;
+  line-height: 1.15;
+}
+
+.dashboard-metric-card.revenue-total {
+  border-color: rgba(125, 211, 252, .48);
+}
+
+.metric-note {
+  display: block;
+  margin-top: .25rem;
+}
+
+.dashboard-empty {
+  border: 1px dashed rgba(125, 211, 252, .42);
+  border-radius: 24px;
+  background: rgba(14, 165, 233, .08);
+  padding: 1.2rem;
+}
+
+.dashboard-empty h2 {
+  margin: 0;
+  color: #fff;
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.dashboard-empty p:last-child {
+  margin: .45rem 0 0;
+  color: #bae6fd;
+}
+
+.dashboard-toolbar {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (min-width: 768px) {
+  .dashboard-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .dashboard-toolbar .result {
+    grid-column: 1 / -1;
+  }
+}
+
+.dashboard-chart-grid,
+.dashboard-table-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (min-width: 1280px) {
+  .dashboard-chart-grid,
+  .dashboard-table-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.dashboard-chart-card {
+  min-width: 0;
+}
+
+.horizontal-bar-chart {
+  display: grid;
+  gap: .7rem;
+  margin-top: 1rem;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.4fr) minmax(100px, 2fr) minmax(58px, auto);
+  align-items: center;
+  gap: .65rem;
+}
+
+.bar-label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: .5rem;
+}
+
+.bar-label strong,
+.rank-cell {
+  display: inline-grid;
+  min-width: 2.15rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 11px;
+  background: rgba(14, 165, 233, .18);
+  color: #e0f2fe;
+  font-size: .74rem;
+  font-weight: 900;
+}
+
+.bar-label span {
+  min-width: 0;
+  overflow: hidden;
+  color: #e0f2fe;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bar-track {
+  height: .75rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(125, 211, 252, .14);
+}
+
+.bar-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #38bdf8, #0ea5e9);
+}
+
+.bar-value {
+  color: #fff;
+  font-weight: 900;
+  text-align: right;
+}
+
+.dashboard-chart-empty {
+  display: grid;
+  min-height: 220px;
+  place-items: center;
+  border: 1px dashed rgba(125, 211, 252, .4);
+  border-radius: 18px;
+  color: #bae6fd;
+  font-weight: 900;
+  text-align: center;
+}
+
+.dashboard-chart-empty.error {
+  border-color: rgba(248, 113, 113, .5);
+  color: #fecaca;
+}
+
+.dashboard-rank-table table {
+  min-width: 520px;
+}
+
+@media (max-width: 640px) {
+  .bar-row {
+    grid-template-columns: 1fr;
+    gap: .35rem;
+  }
+
+  .bar-value {
+    text-align: left;
+  }
+}
+
 .result {
   border-radius: 16px;
   padding: .85rem 1rem;
