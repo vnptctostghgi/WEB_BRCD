@@ -1,4 +1,4 @@
-const $ = (selector) => document.querySelector(selector);
+﻿const $ = (selector) => document.querySelector(selector);
 const role = document.body.dataset.role;
 let mustChangePassword = ["1", "True", "true"].includes(document.body.dataset.mustChange);
 const canManageVault = document.body.dataset.canManageVault === "True";
@@ -27,6 +27,8 @@ let draggedDashboardTabId = "";
 let draggedDashboardRowId = "";
 const dashboardChartInstances = new Map();
 let pendingDashboardCharts = [];
+const dashboardLayoutColumns = { "1_column": 1, "2_columns": 2, "3_columns": 3, "4_columns": 4 };
+const dashboardDataWidgetTypes = new Set(["bar_chart", "pie_chart", "line_chart", "combo_chart", "data_table", "metric", "data_card"]);
 
 const navFeatureConfig = {
   dashboard: { view: "dashboard", icon: "dashboard", keywords: "tong quan dashboard" },
@@ -64,15 +66,15 @@ async function api(url, options = {}) {
   });
   if (response.status === 401) {
     window.location.href = "/login";
-    throw new Error("Phiên đăng nhập đã hết hạn.");
+    throw new Error("PhiÃªn Ä‘Äƒng nháº­p Ä‘Ã£ háº¿t háº¡n.");
   }
   const body = await response.json();
   if (response.status === 403) {
-    const message = body.detail || "Bạn không có quyền truy cập chức năng này";
+    const message = body.detail || "Báº¡n khÃ´ng cÃ³ quyá»n truy cáº­p chá»©c nÄƒng nÃ y";
     showToast(message, "error");
     throw new Error(message);
   }
-  if (!response.ok) throw new Error(body.detail || "Có lỗi xảy ra.");
+  if (!response.ok) throw new Error(body.detail || "CÃ³ lá»—i xáº£y ra.");
   return body;
 }
 
@@ -91,11 +93,11 @@ function showToast(text, type = "success") {
   toastTimer = window.setTimeout(() => toast.classList.add("hidden"), 3200);
 }
 
-function loadingRow(colspan, text = "Đang tải dữ liệu...") {
+function loadingRow(colspan, text = "Äang táº£i dá»¯ liá»‡u...") {
   return `<tr><td colspan="${colspan}" class="loading-row">${escapeHtml(text)}</td></tr>`;
 }
 
-function emptyRow(colspan, title, description = "Chưa có dữ liệu để hiển thị.") {
+function emptyRow(colspan, title, description = "ChÆ°a cÃ³ dá»¯ liá»‡u Ä‘á»ƒ hiá»ƒn thá»‹.") {
   return `<tr><td colspan="${colspan}"><div class="empty-state"><div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(description)}</p></div></div></td></tr>`;
 }
 
@@ -119,6 +121,14 @@ document.querySelectorAll(".nav-group").forEach((group) => {
 });
 
 async function activateNavItem(item) {
+  const nextView = item.dataset.view || "";
+  if (nextView !== "dashboard") {
+    dashboardFiberLoaded = false;
+    dashboardViewerLoadedTabs = {};
+  }
+  if (nextView !== "dashboard-builder") {
+    dashboardBuilderLoadedTabs = {};
+  }
   document.querySelectorAll(".nav-item, .app-view").forEach((element) => element.classList.remove("active"));
   item.classList.add("active");
   $(`#view-${item.dataset.view}`)?.classList.add("active");
@@ -126,19 +136,19 @@ async function activateNavItem(item) {
   if (moduleTitle) moduleTitle.textContent = item.dataset.title || item.textContent.trim();
   $("#sidebar").classList.remove("menu-open");
   $("#menu-button")?.setAttribute("aria-expanded", "false");
-  if (item.dataset.view === "dashboard") await initDashboard();
-  if (item.dataset.view === "users") await loadUsers();
-  if (item.dataset.view === "vault") await loadCredentials();
-  if (item.dataset.view === "websites") await loadAdminWebsites();
-  if (item.dataset.view === "system") await loadSystem();
-  if (item.dataset.view === "reports") await loadDynamicReports();
-  if (item.dataset.view === "dashboard-builder") await loadDashboardBuilder();
-  if (item.dataset.view === "menu-admin") await loadMenuLayout();
-  if (item.dataset.view === "work-tasks") await loadWorkTasks();
-  if (item.dataset.view === "permissions") await loadPermissionManager();
-  if (item.dataset.view === "data-permissions") await loadDataPermissionManager();
-  if (item.dataset.view === "catalogs") await loadCatalogs();
-  if (item.dataset.view === "audit") await loadAudit();
+  if (nextView === "dashboard") await initDashboard();
+  if (nextView === "users") await loadUsers();
+  if (nextView === "vault") await loadCredentials();
+  if (nextView === "websites") await loadAdminWebsites();
+  if (nextView === "system") await loadSystem();
+  if (nextView === "reports") await loadDynamicReports();
+  if (nextView === "dashboard-builder") await loadDashboardBuilder();
+  if (nextView === "menu-admin") await loadMenuLayout();
+  if (nextView === "work-tasks") await loadWorkTasks();
+  if (nextView === "permissions") await loadPermissionManager();
+  if (nextView === "data-permissions") await loadDataPermissionManager();
+  if (nextView === "catalogs") await loadCatalogs();
+  if (nextView === "audit") await loadAudit();
 }
 
 $("#nav-tree")?.addEventListener("click", async (event) => {
@@ -267,7 +277,7 @@ document.querySelectorAll("[data-logout]").forEach((button) => button.addEventLi
 async function loadNotifications() {
   const list = $("#notification-list");
   if (!list) return;
-  list.innerHTML = `<div class="dropdown-empty">Đang tải thông báo...</div>`;
+  list.innerHTML = `<div class="dropdown-empty">Äang táº£i thÃ´ng bÃ¡o...</div>`;
   try {
     const data = await api("/api/notifications");
     list.innerHTML = data.notifications.length ? data.notifications.map((item) => `
@@ -276,7 +286,7 @@ async function loadNotifications() {
         <p>${escapeHtml(item.message)}</p>
         <small>${new Date(item.created_at).toLocaleString("vi-VN")}</small>
       </article>
-    `).join("") : `<div class="dropdown-empty">Chưa có thông báo mới.</div>`;
+    `).join("") : `<div class="dropdown-empty">ChÆ°a cÃ³ thÃ´ng bÃ¡o má»›i.</div>`;
   } catch (error) {
     list.innerHTML = `<div class="dropdown-empty error">${escapeHtml(error.message)}</div>`;
   }
@@ -294,8 +304,9 @@ initDashboard();
 
 async function initDashboard() {
   if (!$("#view-dashboard")) return;
-  await loadDashboardFiber();
-  if (role === "admin") await loadDashboardViewer();
+  const activeTab = document.querySelector("[data-dashboard-tab].active")?.dataset.dashboardTab || "summary";
+  if (activeTab === "fiber") await loadDashboardFiber();
+  if (activeTab === "summary" && role === "admin") await ensureDashboardViewerLoaded();
 }
 
 async function switchDashboardTab(tabName) {
@@ -310,6 +321,16 @@ async function switchDashboardTab(tabName) {
     panel.hidden = !active;
   });
   if (tabName === "fiber") await loadDashboardFiber();
+  if (tabName === "summary" && role === "admin") await ensureDashboardViewerLoaded();
+}
+
+async function ensureDashboardViewerLoaded() {
+  if (dashboardViewerLayout) {
+    renderDashboardViewer();
+    await loadDashboardViewerTab(dashboardViewerActiveTabId);
+    return;
+  }
+  await loadDashboardViewer();
 }
 
 async function loadDashboardFiber({ force = false } = {}) {
@@ -322,7 +343,7 @@ async function loadDashboardFiber({ force = false } = {}) {
     const response = await api("/api/dashboard/fiber");
     dashboardFiberLoaded = true;
     renderDashboardFiber(response);
-    if (message) showMessage(message, response.message || "Đã tải dữ liệu Fiber.", response.ok ? "success" : "error");
+    if (message) showMessage(message, response.message || "ÄÃ£ táº£i dá»¯ liá»‡u Fiber.", response.ok ? "success" : "error");
   } catch (error) {
     renderDashboardFiberError(error.message);
     if (message) showMessage(message, error.message, "error");
@@ -335,20 +356,23 @@ function setDashboardFiberLoading() {
   ["vnpt", "ttvt"].forEach((group) => {
     const body = $(`#dashboard-fiber-${group}-body`);
     const chart = $(`#dashboard-fiber-${group}-chart`);
-    if (body) body.innerHTML = loadingRow(3, "Đang tải sản lượng Fiber...");
-    if (chart) chart.innerHTML = `<div class="dashboard-chart-empty">Đang tải dữ liệu...</div>`;
+    if (body) body.innerHTML = loadingRow(3, "Äang táº£i sáº£n lÆ°á»£ng Fiber...");
+    if (chart) chart.innerHTML = `<div class="dashboard-chart-empty">Äang táº£i dá»¯ liá»‡u...</div>`;
   });
 }
 
 function renderDashboardFiber(response) {
   const vnptRows = response.groups?.vnpt?.rows || [];
   const ttvtRows = response.groups?.ttvt?.rows || [];
-  const period = response.period_label ? `Tháng ${response.period_label}` : "Tháng hiện tại";
+  const period = response.period_label ? `ThÃ¡ng ${response.period_label}` : "ThÃ¡ng hiá»‡n táº¡i";
   const fiberTotal = response.summary?.production?.fiber ?? response.groups?.vnpt?.total ?? 0;
 
-  $("#dashboard-summary-period").textContent = period;
-  $("#dashboard-fiber-period").textContent = `${period}, lọc loại hình 58 và thuê bao chưa cắt.`;
-  $("#dashboard-production-fiber").textContent = formatDashboardNumber(fiberTotal);
+  const summaryPeriod = $("#dashboard-summary-period");
+  const fiberPeriod = $("#dashboard-fiber-period");
+  const productionFiber = $("#dashboard-production-fiber");
+  if (summaryPeriod) summaryPeriod.textContent = period;
+  if (fiberPeriod) fiberPeriod.textContent = `${period}, lá»c loáº¡i hÃ¬nh 58 vÃ  thuÃª bao chÆ°a cáº¯t.`;
+  if (productionFiber) productionFiber.textContent = formatDashboardNumber(fiberTotal);
 
   renderDashboardFiberTable("vnpt", vnptRows);
   renderDashboardFiberTable("ttvt", ttvtRows);
@@ -357,11 +381,12 @@ function renderDashboardFiber(response) {
 }
 
 function renderDashboardFiberError(message) {
-  $("#dashboard-production-fiber").textContent = "--";
+  const productionFiber = $("#dashboard-production-fiber");
+  if (productionFiber) productionFiber.textContent = "--";
   ["vnpt", "ttvt"].forEach((group) => {
     const body = $(`#dashboard-fiber-${group}-body`);
     const chart = $(`#dashboard-fiber-${group}-chart`);
-    if (body) body.innerHTML = emptyRow(3, "Không tải được dữ liệu Fiber", message);
+    if (body) body.innerHTML = emptyRow(3, "KhÃ´ng táº£i Ä‘Æ°á»£c dá»¯ liá»‡u Fiber", message);
     if (chart) chart.innerHTML = `<div class="dashboard-chart-empty error">${escapeHtml(message)}</div>`;
   });
 }
@@ -375,14 +400,14 @@ function renderDashboardFiberTable(group, rows) {
       <td><strong>${escapeHtml(row.unit_name)}</strong></td>
       <td>${formatDashboardNumber(row.fiber_quantity)}</td>
     </tr>
-  `).join("") : emptyRow(3, "Chưa có dữ liệu", "API nội bộ chưa trả dữ liệu cho nhóm này.");
+  `).join("") : emptyRow(3, "ChÆ°a cÃ³ dá»¯ liá»‡u", "API ná»™i bá»™ chÆ°a tráº£ dá»¯ liá»‡u cho nhÃ³m nÃ y.");
 }
 
 function renderDashboardFiberChart(selector, rows) {
   const chart = $(selector);
   if (!chart) return;
   if (!rows.length) {
-    chart.innerHTML = `<div class="dashboard-chart-empty">Chưa có dữ liệu để vẽ biểu đồ.</div>`;
+    chart.innerHTML = `<div class="dashboard-chart-empty">ChÆ°a cÃ³ dá»¯ liá»‡u Ä‘á»ƒ váº½ biá»ƒu Ä‘á»“.</div>`;
     return;
   }
   const maxValue = Math.max(...rows.map((row) => Number(row.fiber_quantity) || 0), 1);
@@ -406,14 +431,14 @@ async function loadDashboardViewer() {
     dashboardViewerLayouts = data.layouts || [];
     if (!dashboardViewerLayouts.length) {
       dashboardViewerLayout = null;
-      renderDashboardViewerEmpty("Chưa có trang Dashboard", "Hãy tạo Layout trong chức năng Thiết kế Layout báo cáo.");
+      renderDashboardViewerEmpty("ChÆ°a cÃ³ trang Dashboard", "HÃ£y táº¡o Layout trong chá»©c nÄƒng Thiáº¿t káº¿ Layout bÃ¡o cÃ¡o.");
       return;
     }
     const pageId = dashboardViewerLayout?.page_id || dashboardViewerLayouts[0].page_id;
     await openDashboardViewerLayout(pageId);
   } catch (error) {
     showMessage($("#dashboard-viewer-message"), error.message, "error");
-    renderDashboardViewerEmpty("Không tải được Dashboard đã thiết kế", error.message);
+    renderDashboardViewerEmpty("KhÃ´ng táº£i Ä‘Æ°á»£c Dashboard Ä‘Ã£ thiáº¿t káº¿", error.message);
   }
 }
 
@@ -432,7 +457,7 @@ function renderDashboardViewerPageOptions() {
   if (!select) return;
   select.innerHTML = dashboardViewerLayouts.length
     ? dashboardViewerLayouts.map((page) => `<option value="${escapeHtml(page.page_id)}">${escapeHtml(page.page_name || page.page_id)} (${escapeHtml(page.page_id)})</option>`).join("")
-    : `<option value="">Chưa có Dashboard</option>`;
+    : `<option value="">ChÆ°a cÃ³ Dashboard</option>`;
   if (dashboardViewerLayout?.page_id) select.value = dashboardViewerLayout.page_id;
 }
 
@@ -475,7 +500,7 @@ async function loadDashboardViewerTab(tabId, { force = false } = {}) {
     const response = await api(`/api/admin/dashboard-layouts/${encodeURIComponent(dashboardViewerLayout.page_id)}/tabs/${encodeURIComponent(tabId)}/data`);
     dashboardViewerLoadedTabs[key] = response;
     renderDashboardViewer();
-    showMessage($("#dashboard-viewer-message"), response.message || "Đã tải dữ liệu Tab dashboard.", response.ok ? "success" : "error");
+    showMessage($("#dashboard-viewer-message"), response.message || "ÄÃ£ táº£i dá»¯ liá»‡u Tab dashboard.", response.ok ? "success" : "error");
   } catch (error) {
     showMessage($("#dashboard-viewer-message"), error.message, "error");
   } finally {
@@ -498,7 +523,7 @@ function renderDashboardViewer() {
   `).join("");
   const dataByWidget = new Map(((dashboardViewerLoadedTabs[dashboardViewerTabCacheKey(tab.tab_id)] || {}).widgets || []).map((item) => [`${item.row_id}:${item.position}`, item]));
   workspace.innerHTML = (tab.grid_layout || []).length ? tab.grid_layout.map((row, rowIndex) => {
-    const columns = row.layout_type === "4_columns" ? 4 : 2;
+    const columns = dashboardLayoutColumnCount(row.layout_type);
     const widgetsByPosition = new Map((row.widgets || []).map((widget) => [Number(widget.position), widget]));
     const cells = Array.from({ length: columns }, (_, cellIndex) => {
       const position = cellIndex + 1;
@@ -510,8 +535,8 @@ function renderDashboardViewer() {
   }).join("") : `
     <div class="dashboard-empty">
       <p class="eyebrow">Dashboard Builder</p>
-      <h2>Tab chưa có Layout</h2>
-      <p>Mở chức năng Thiết kế Layout báo cáo để thêm biểu đồ cho Tab này.</p>
+      <h2>Tab chÆ°a cÃ³ Layout</h2>
+      <p>Má»Ÿ chá»©c nÄƒng Thiáº¿t káº¿ Layout bÃ¡o cÃ¡o Ä‘á»ƒ thÃªm biá»ƒu Ä‘á»“ cho Tab nÃ y.</p>
     </div>
   `;
   window.requestAnimationFrame(renderPendingDashboardCharts);
@@ -539,7 +564,7 @@ $("#password-form")?.addEventListener("submit", async (event) => {
 });
 
 async function loadUsers() {
-  setTableLoading("#users-table", 5, "Đang tải danh sách người dùng...");
+  setTableLoading("#users-table", 5, "Äang táº£i danh sÃ¡ch ngÆ°á»i dÃ¹ng...");
   users = (await api("/api/admin/users")).users;
   renderUsersTable();
 }
@@ -556,21 +581,21 @@ function renderUsersTable() {
     user.phone,
   ].some((value) => String(value || "").toLowerCase().includes(keyword))) : users;
   const count = $("#user-count");
-  if (count) count.textContent = `${filteredUsers.length}/${users.length} người dùng`;
+  if (count) count.textContent = `${filteredUsers.length}/${users.length} ngÆ°á»i dÃ¹ng`;
   $("#users-table").innerHTML = filteredUsers.length ? filteredUsers.map((user) => `
     <tr>
-      <td><strong>${escapeHtml(user.username)}</strong><small class='cell-note'>${escapeHtml(user.email || user.employee_code || "")}</small>${user.must_change_password ? "<small class='cell-note'>Cần đổi mật khẩu</small>" : ""}</td>
+      <td><strong>${escapeHtml(user.username)}</strong><small class='cell-note'>${escapeHtml(user.email || user.employee_code || "")}</small>${user.must_change_password ? "<small class='cell-note'>Cáº§n Ä‘á»•i máº­t kháº©u</small>" : ""}</td>
       <td>${escapeHtml(user.full_name)}<small class='cell-note'>${escapeHtml(user.department || "")}</small></td>
-      <td><span class="status ${user.role === "admin" ? "admin" : "viewer"}">${user.role === "admin" ? "Quản trị viên" : "Người xem"}</span></td>
-      <td><span class="status ${user.is_active ? "active" : "inactive"}">${user.is_active ? "Hoạt động" : "Đã khóa"}</span></td>
-      <td><button class="table-action" data-edit-user="${user.id}">Chỉnh sửa</button> <button class="table-action danger" data-delete-user="${user.id}">Xóa</button></td>
-    </tr>`).join("") : emptyRow(5, keyword ? "Không tìm thấy người dùng" : "Chưa có người dùng", keyword ? "Hãy thử nhập từ khóa khác." : "Hãy tạo hoặc import người dùng từ Excel.");
+      <td><span class="status ${user.role === "admin" ? "admin" : "viewer"}">${user.role === "admin" ? "Quáº£n trá»‹ viÃªn" : "NgÆ°á»i xem"}</span></td>
+      <td><span class="status ${user.is_active ? "active" : "inactive"}">${user.is_active ? "Hoáº¡t Ä‘á»™ng" : "ÄÃ£ khÃ³a"}</span></td>
+      <td><button class="table-action" data-edit-user="${user.id}">Chá»‰nh sá»­a</button> <button class="table-action danger" data-delete-user="${user.id}">XÃ³a</button></td>
+    </tr>`).join("") : emptyRow(5, keyword ? "KhÃ´ng tÃ¬m tháº¥y ngÆ°á»i dÃ¹ng" : "ChÆ°a cÃ³ ngÆ°á»i dÃ¹ng", keyword ? "HÃ£y thá»­ nháº­p tá»« khÃ³a khÃ¡c." : "HÃ£y táº¡o hoáº·c import ngÆ°á»i dÃ¹ng tá»« Excel.");
   document.querySelectorAll("[data-edit-user]").forEach((button) => button.addEventListener("click", () => openEditUser(Number(button.dataset.editUser))));
   document.querySelectorAll("[data-delete-user]").forEach((button) => button.addEventListener("click", () => deleteUser(Number(button.dataset.deleteUser))));
 }
 
 async function deleteUser(id) {
-  if (!confirm("Xóa người dùng này?")) return;
+  if (!confirm("XÃ³a ngÆ°á»i dÃ¹ng nÃ y?")) return;
   await api(`/api/admin/users/${id}`, { method: "DELETE" });
   await loadUsers();
 }
@@ -645,7 +670,9 @@ if (role === "admin") {
   $("#save-dashboard-layout")?.addEventListener("click", (event) => saveDashboardLayout(event.currentTarget));
   $("#refresh-dashboard-sql-reports")?.addEventListener("click", (event) => refreshDashboardSqlReports(event.currentTarget));
   $("#add-dashboard-tab")?.addEventListener("click", addDashboardTab);
+  $("#add-dashboard-row-1")?.addEventListener("click", () => addDashboardRow("1_column"));
   $("#add-dashboard-row-2")?.addEventListener("click", () => addDashboardRow("2_columns"));
+  $("#add-dashboard-row-3")?.addEventListener("click", () => addDashboardRow("3_columns"));
   $("#add-dashboard-row-4")?.addEventListener("click", () => addDashboardRow("4_columns"));
   $("#refresh-dashboard-preview")?.addEventListener("click", () => loadDashboardPreviewTab(dashboardBuilderActiveTabId, { force: true }));
   $("#dashboard-viewer-page")?.addEventListener("change", (event) => {
@@ -705,7 +732,7 @@ async function importUserFile(event) {
   data.append("file", file);
   try {
     const result = await api("/api/admin/users/import", { method: "POST", body: data });
-    showMessage($("#users-message"), `Đã thêm ${result.created_count} người dùng, bỏ qua ${result.skipped_count} dòng.`);
+    showMessage($("#users-message"), `ÄÃ£ thÃªm ${result.created_count} ngÆ°á»i dÃ¹ng, bá» qua ${result.skipped_count} dÃ²ng.`);
     await loadUsers();
   } catch (error) {
     showMessage($("#users-message"), error.message, "error");
@@ -733,7 +760,7 @@ function renderUserSelection(selector) {
 }
 
 async function loadAdminWebsites() {
-  setTableLoading("#websites-table", 5, "Đang tải danh mục website...");
+  setTableLoading("#websites-table", 5, "Äang táº£i danh má»¥c website...");
   websites = (await api("/api/admin/websites")).websites;
   renderWebsitesTable();
 }
@@ -745,11 +772,11 @@ function renderWebsitesTable() {
     <tr>
       <td><strong>${escapeHtml(website.name)}</strong></td>
       <td><a class="text-sky-200 hover:underline" href="${escapeHtml(website.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(website.url)}</a></td>
-      <td><span class="status ${website.requires_otp ? "pending" : "viewer"}">${website.requires_otp ? "Có OTP" : "Không"}</span></td>
-      <td><span class="status ${website.is_active ? "active" : "inactive"}">${website.is_active ? "Đang dùng" : "Ngừng dùng"}</span></td>
-      <td><button class="table-action" data-edit-website="${website.id}" type="button">Sửa</button></td>
+      <td><span class="status ${website.requires_otp ? "pending" : "viewer"}">${website.requires_otp ? "CÃ³ OTP" : "KhÃ´ng"}</span></td>
+      <td><span class="status ${website.is_active ? "active" : "inactive"}">${website.is_active ? "Äang dÃ¹ng" : "Ngá»«ng dÃ¹ng"}</span></td>
+      <td><button class="table-action" data-edit-website="${website.id}" type="button">Sá»­a</button></td>
     </tr>
-  `).join("") : emptyRow(5, "Chưa có website", "Bấm Thêm website để tạo danh mục dùng chung.");
+  `).join("") : emptyRow(5, "ChÆ°a cÃ³ website", "Báº¥m ThÃªm website Ä‘á»ƒ táº¡o danh má»¥c dÃ¹ng chung.");
   document.querySelectorAll("[data-edit-website]").forEach((button) => {
     button.addEventListener("click", () => openWebsite(Number(button.dataset.editWebsite)));
   });
@@ -782,7 +809,7 @@ async function saveWebsite(event) {
       is_active: form.is_active.checked,
     })});
     $("#website-dialog")?.close();
-    showToast("Đã lưu danh mục website.");
+    showToast("ÄÃ£ lÆ°u danh má»¥c website.");
     await loadAdminWebsites();
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
@@ -805,7 +832,7 @@ async function saveBulkPermissions() {
   const user_ids = selectedNumbers("#permission-users");
   const feature_codes = selectedValues("#permission-features");
   await api("/api/admin/permissions/bulk", { method: "PUT", body: JSON.stringify({ user_ids, feature_codes }) });
-  alert("Đã lưu phân quyền người dùng.");
+  alert("ÄÃ£ lÆ°u phÃ¢n quyá»n ngÆ°á»i dÃ¹ng.");
 }
 
 async function loadDataPermissionManager() {
@@ -823,22 +850,22 @@ async function saveDataPermissions() {
   const user_ids = selectedNumbers("#data-permission-users");
   const region_codes = selectedValues("#data-region-options");
   await api("/api/admin/data-permissions/bulk", { method: "PUT", body: JSON.stringify({ user_ids, region_codes }) });
-  alert("Đã lưu phân quyền dữ liệu.");
+  alert("ÄÃ£ lÆ°u phÃ¢n quyá»n dá»¯ liá»‡u.");
 }
 
 async function loadRoles() {
-  setTableLoading("#roles-table", 6, "Đang tải vai trò người dùng...");
+  setTableLoading("#roles-table", 6, "Äang táº£i vai trÃ² ngÆ°á»i dÃ¹ng...");
   systemRoles = (await api("/api/admin/roles")).roles;
   $("#roles-table").innerHTML = systemRoles.length ? systemRoles.map((roleItem) => `
     <tr>
       <td><strong>${escapeHtml(roleItem.code)}</strong></td>
       <td>${escapeHtml(roleItem.name)}</td>
       <td>${escapeHtml(roleItem.description || "")}</td>
-      <td><span class="status ${roleItem.is_active ? "active" : "inactive"}">${roleItem.is_active ? "Đang dùng" : "Ngừng dùng"}</span></td>
+      <td><span class="status ${roleItem.is_active ? "active" : "inactive"}">${roleItem.is_active ? "Äang dÃ¹ng" : "Ngá»«ng dÃ¹ng"}</span></td>
       <td>${escapeHtml(roleItem.sort_order)}</td>
-      <td><button class="table-action" data-edit-role="${escapeHtml(roleItem.code)}">Sửa</button> <button class="table-action danger" data-delete-role="${escapeHtml(roleItem.code)}">Xóa</button></td>
+      <td><button class="table-action" data-edit-role="${escapeHtml(roleItem.code)}">Sá»­a</button> <button class="table-action danger" data-delete-role="${escapeHtml(roleItem.code)}">XÃ³a</button></td>
     </tr>
-  `).join("") : emptyRow(6, "Chưa có vai trò", "Thêm vai trò để chuẩn hóa nhóm người dùng.");
+  `).join("") : emptyRow(6, "ChÆ°a cÃ³ vai trÃ²", "ThÃªm vai trÃ² Ä‘á»ƒ chuáº©n hÃ³a nhÃ³m ngÆ°á»i dÃ¹ng.");
   document.querySelectorAll("[data-edit-role]").forEach((button) => button.addEventListener("click", () => openRole(button.dataset.editRole)));
   document.querySelectorAll("[data-delete-role]").forEach((button) => button.addEventListener("click", () => deleteRole(button.dataset.deleteRole)));
 }
@@ -876,7 +903,7 @@ async function saveRole(event) {
     form.elements.namedItem("code").readOnly = false;
     form.is_active.checked = true;
     $("#role-dialog").close();
-    showMessage($("#roles-message"), "Đã lưu vai trò.");
+    showMessage($("#roles-message"), "ÄÃ£ lÆ°u vai trÃ².");
     await loadRoles();
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
@@ -884,10 +911,10 @@ async function saveRole(event) {
 }
 
 async function deleteRole(code) {
-  if (!confirm(`Xóa vai trò ${code}?`)) return;
+  if (!confirm(`XÃ³a vai trÃ² ${code}?`)) return;
   try {
     await api(`/api/admin/roles/${encodeURIComponent(code)}`, { method: "DELETE" });
-    showMessage($("#roles-message"), `Đã xóa vai trò ${code}.`);
+    showMessage($("#roles-message"), `ÄÃ£ xÃ³a vai trÃ² ${code}.`);
     await loadRoles();
   } catch (error) {
     showMessage($("#roles-message"), error.message, "error");
@@ -974,7 +1001,7 @@ function renderNavigationNode(node, level = 0) {
   return `
     <details class="${groupClass}">
       <summary data-feature-code="${escapeHtml(node.feature.code)}">
-        <span class="chevron">›</span>${iconMarkup(featureIcon(node.feature))}<strong>${escapeHtml(node.feature.name || node.feature.code)}</strong>
+        <span class="chevron">â€º</span>${iconMarkup(featureIcon(node.feature))}<strong>${escapeHtml(node.feature.name || node.feature.code)}</strong>
       </summary>
       ${children}
     </details>
@@ -1011,7 +1038,7 @@ async function syncNavigationFromFeatures() {
     }
     filterNavigation($("#menu-search")?.value || "");
   } catch {
-    // Nếu API layout chưa sẵn sàng, sidebar vẫn dùng cấu trúc tĩnh đã render từ server.
+    // Náº¿u API layout chÆ°a sáºµn sÃ ng, sidebar váº«n dÃ¹ng cáº¥u trÃºc tÄ©nh Ä‘Ã£ render tá»« server.
   }
 }
 
@@ -1065,7 +1092,7 @@ function descendantCodesForFeature(code) {
 
 function renderParentOptions(feature) {
   const descendants = descendantCodesForFeature(feature.code);
-  return [`<option value="">Không thuộc nhóm</option>`]
+  return [`<option value="">KhÃ´ng thuá»™c nhÃ³m</option>`]
     .concat(sortFeaturesForTree(menuLayoutState).filter((item) => item.code !== feature.code).map((item) => {
       const selected = (feature.parent_code || "") === item.code ? " selected" : "";
       const disabled = descendants.has(item.code) ? " disabled" : "";
@@ -1083,18 +1110,18 @@ function renderMenuLayout() {
     const siblingIndex = siblings.findIndex((item) => item.code === feature.code);
     return `
       <tr data-feature-row="${escapeHtml(feature.code)}">
-        <td><div class="menu-feature-cell" style="--menu-level:${level}"><strong>${escapeHtml(feature.code)}</strong><small>Cấp ${level + 1}</small></div></td>
+        <td><div class="menu-feature-cell" style="--menu-level:${level}"><strong>${escapeHtml(feature.code)}</strong><small>Cáº¥p ${level + 1}</small></div></td>
         <td><input class="form-control" name="name" value="${escapeHtml(feature.name)}" /></td>
         <td><select class="form-control" name="parent_code">${renderParentOptions(feature)}</select></td>
         <td>
           <div class="action-group menu-move-actions">
-            <button class="table-action" data-menu-move="up" data-menu-code="${escapeHtml(feature.code)}" type="button" ${siblingIndex <= 0 ? "disabled" : ""}>Lên</button>
-            <button class="table-action" data-menu-move="down" data-menu-code="${escapeHtml(feature.code)}" type="button" ${siblingIndex >= siblings.length - 1 ? "disabled" : ""}>Xuống</button>
+            <button class="table-action" data-menu-move="up" data-menu-code="${escapeHtml(feature.code)}" type="button" ${siblingIndex <= 0 ? "disabled" : ""}>LÃªn</button>
+            <button class="table-action" data-menu-move="down" data-menu-code="${escapeHtml(feature.code)}" type="button" ${siblingIndex >= siblings.length - 1 ? "disabled" : ""}>Xuá»‘ng</button>
           </div>
         </td>
       </tr>
     `;
-  }).join("") : emptyRow(4, "Chưa có chức năng", "Danh mục chức năng chưa có dữ liệu.");
+  }).join("") : emptyRow(4, "ChÆ°a cÃ³ chá»©c nÄƒng", "Danh má»¥c chá»©c nÄƒng chÆ°a cÃ³ dá»¯ liá»‡u.");
 
   document.querySelectorAll("#menu-layout-table select[name='parent_code']").forEach((select) => {
     select.addEventListener("change", () => changeMenuParent(select.closest("tr").dataset.featureRow, select.value));
@@ -1141,7 +1168,7 @@ async function saveMenuLayout(button = null) {
   const originalLabel = saveButton?.textContent;
   if (saveButton) {
     saveButton.disabled = true;
-    saveButton.textContent = "Đang lưu...";
+    saveButton.textContent = "Äang lÆ°u...";
   }
   try {
     collectMenuLayoutStateFromDom();
@@ -1157,13 +1184,13 @@ async function saveMenuLayout(button = null) {
       sort_order: Number(feature.sort_order || 0),
     }));
     await api("/api/admin/features/layout", { method: "PUT", body: JSON.stringify({ features: payload }) });
-    showMessage($("#menu-layout-message"), "Đã lưu cấu trúc menu. Trang sẽ tải lại để hiển thị cây menu mới.");
+    showMessage($("#menu-layout-message"), "ÄÃ£ lÆ°u cáº¥u trÃºc menu. Trang sáº½ táº£i láº¡i Ä‘á»ƒ hiá»ƒn thá»‹ cÃ¢y menu má»›i.");
     window.setTimeout(() => window.location.reload(), 600);
   } catch (error) {
     showMessage($("#menu-layout-message"), error.message, "error");
     if (saveButton) {
       saveButton.disabled = false;
-      saveButton.textContent = originalLabel || "Lưu cấu trúc menu";
+      saveButton.textContent = originalLabel || "LÆ°u cáº¥u trÃºc menu";
     }
   }
 }
@@ -1175,7 +1202,7 @@ function dashboardLayoutTemplate(pageName = "Dashboard Kinh doanh", pageId = "DA
     tabs: [
       {
         tab_id: `tab_${Date.now()}`,
-        tab_name: "Tab mới",
+        tab_name: "Tab má»›i",
         order: 1,
         grid_layout: [
           { row_id: 1, layout_type: "2_columns", widgets: [] },
@@ -1195,14 +1222,17 @@ function normalizeDashboardLayoutData(layout, pageName = "") {
       order: index + 1,
       grid_layout: Array.isArray(tab.grid_layout) ? tab.grid_layout.map((row, rowIndex) => ({
         row_id: Number(row.row_id || rowIndex + 1),
-        layout_type: row.layout_type === "4_columns" ? "4_columns" : "2_columns",
+        layout_type: dashboardLayoutColumns[row.layout_type] ? row.layout_type : "2_columns",
         widgets: Array.isArray(row.widgets) ? row.widgets.map((widget) => ({
           position: Number(widget.position || 1),
           type: String(widget.type || "bar_chart"),
           title: String(widget.title || ""),
           sql_code: String(widget.sql_code || "").trim().toUpperCase(),
           filters: widget.filters && typeof widget.filters === "object" && !Array.isArray(widget.filters) ? widget.filters : {},
-        })).filter((widget) => widget.sql_code) : [],
+          chart_config: widget.chart_config && typeof widget.chart_config === "object" && !Array.isArray(widget.chart_config) ? widget.chart_config : {},
+          text_content: String(widget.text_content || ""),
+          icon_url: String(widget.icon_url || ""),
+        })).filter((widget) => widget.sql_code || widget.type === "text_title") : [],
       })) : [],
     })) : [],
   };
@@ -1231,9 +1261,17 @@ function currentDashboardTab() {
 }
 
 function dashboardGridClass(layoutType) {
-  return layoutType === "4_columns"
-    ? "grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4"
-    : "grid grid-cols-1 gap-4 md:grid-cols-2";
+  const classes = {
+    "1_column": "grid grid-cols-1 gap-4",
+    "2_columns": "grid grid-cols-1 gap-4 md:grid-cols-2",
+    "3_columns": "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3",
+    "4_columns": "grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4",
+  };
+  return classes[layoutType] || classes["2_columns"];
+}
+
+function dashboardLayoutColumnCount(layoutType) {
+  return dashboardLayoutColumns[layoutType] || 2;
 }
 
 function dashboardWidgetTypeLabel(type) {
@@ -1241,13 +1279,16 @@ function dashboardWidgetTypeLabel(type) {
     bar_chart: "Biểu đồ cột",
     pie_chart: "Biểu đồ tròn",
     line_chart: "Biểu đồ đường",
+    combo_chart: "Biểu đồ kết hợp",
     data_table: "Bảng số liệu",
     metric: "Thẻ số liệu",
+    data_card: "Thẻ dữ liệu",
+    text_title: "Tiêu đề text",
   }[type] || type;
 }
 
 function dashboardWidgetTypeOptions(selectedType) {
-  return ["bar_chart", "pie_chart", "line_chart", "data_table", "metric"].map((type) => (
+  return ["bar_chart", "pie_chart", "line_chart", "combo_chart", "data_table", "metric", "data_card", "text_title"].map((type) => (
     `<option value="${type}" ${selectedType === type ? "selected" : ""}>${dashboardWidgetTypeLabel(type)}</option>`
   )).join("");
 }
@@ -1257,23 +1298,23 @@ function dashboardReportByCode(code) {
 }
 
 function dashboardSqlOptions(selectedCode) {
-  const options = [`<option value="">Chọn mã SQL</option>`].concat(sqlReports.map((report) => {
+  const options = [`<option value="">Chá»n mÃ£ SQL</option>`].concat(sqlReports.map((report) => {
     const code = report.ma_bao_cao || "";
     const selected = code === selectedCode ? " selected" : "";
     return `<option value="${escapeHtml(code)}"${selected}>${escapeHtml(report.ten_bao_cao)} (${escapeHtml(code)})</option>`;
   }));
   if (selectedCode && !dashboardReportByCode(selectedCode)) {
-    options.push(`<option value="${escapeHtml(selectedCode)}" selected>${escapeHtml(selectedCode)} (chưa có trong cấu hình SQL)</option>`);
+    options.push(`<option value="${escapeHtml(selectedCode)}" selected>${escapeHtml(selectedCode)} (chÆ°a cÃ³ trong cáº¥u hÃ¬nh SQL)</option>`);
   }
   return options.join("");
 }
 
 function dashboardWidgetParamHint(sqlCode) {
-  if (!sqlCode) return "Chọn mã SQL từ danh mục Cấu hình báo cáo động.";
+  if (!sqlCode) return "Chá»n mÃ£ SQL tá»« danh má»¥c Cáº¥u hÃ¬nh bÃ¡o cÃ¡o Ä‘á»™ng.";
   const report = dashboardReportByCode(sqlCode);
-  if (!report) return "Mã này chưa có trong Cấu hình báo cáo động. Hãy thêm SQL hoặc đổi sang mã khác.";
+  if (!report) return "MÃ£ nÃ y chÆ°a cÃ³ trong Cáº¥u hÃ¬nh bÃ¡o cÃ¡o Ä‘á»™ng. HÃ£y thÃªm SQL hoáº·c Ä‘á»•i sang mÃ£ khÃ¡c.";
   const params = report.cac_tham_so || [];
-  return params.length ? `Tham số hỗ trợ: ${params.join(", ")}` : "Báo cáo này không có tham số lọc.";
+  return params.length ? `Tham sá»‘ há»— trá»£: ${params.join(", ")}` : "BÃ¡o cÃ¡o nÃ y khÃ´ng cÃ³ tham sá»‘ lá»c.";
 }
 
 function dashboardFiltersToText(filters) {
@@ -1290,7 +1331,7 @@ function parseDashboardFilters(value, strict = false) {
   } catch {
     // Handled below when saving.
   }
-  if (strict) throw new Error("Bộ lọc mặc định phải là JSON object hợp lệ, ví dụ: {\"status\":\"1\"}.");
+  if (strict) throw new Error("Bá»™ lá»c máº·c Ä‘á»‹nh pháº£i lÃ  JSON object há»£p lá»‡, vÃ­ dá»¥: {\"status\":\"1\"}.");
   return {};
 }
 
@@ -1310,7 +1351,7 @@ async function loadDashboardLayoutPages() {
 
 async function loadDashboardBuilder() {
   const message = $("#dashboard-builder-message");
-  setTableLoading("#dashboard-layout-pages", 3, "Đang tải danh sách trang báo cáo...");
+  setTableLoading("#dashboard-layout-pages", 3, "Äang táº£i danh sÃ¡ch trang bÃ¡o cÃ¡o...");
   try {
     const [pagesData, reportsData] = await Promise.all([
       api("/api/admin/dashboard-layout-pages"),
@@ -1328,7 +1369,7 @@ async function loadDashboardBuilder() {
     if (message) message.className = "result hidden";
   } catch (error) {
     if (message) showMessage(message, error.message, "error");
-    $("#dashboard-layout-pages").innerHTML = emptyRow(3, "Không tải được Dashboard Builder", error.message);
+    $("#dashboard-layout-pages").innerHTML = emptyRow(3, "KhÃ´ng táº£i Ä‘Æ°á»£c Dashboard Builder", error.message);
   }
 }
 
@@ -1344,7 +1385,7 @@ async function refreshDashboardSqlReports(button = null) {
       renderDashboardBuilder();
     }
     if (dashboardViewerLayout) renderDashboardViewer();
-    if (message) showMessage(message, "Đã làm mới danh mục báo cáo SQL.");
+    if (message) showMessage(message, "ÄÃ£ lÃ m má»›i danh má»¥c bÃ¡o cÃ¡o SQL.");
   } catch (error) {
     if (message) showMessage(message, error.message, "error");
   } finally {
@@ -1377,9 +1418,9 @@ async function openDashboardLayout(pageId) {
 }
 
 function createDashboardPage() {
-  const pageName = prompt("Nhập tên trang báo cáo mới:", "Dashboard mới");
+  const pageName = prompt("Nháº­p tÃªn trang bÃ¡o cÃ¡o má»›i:", "Dashboard má»›i");
   if (pageName === null) return;
-  const cleanedName = pageName.trim() || "Dashboard mới";
+  const cleanedName = pageName.trim() || "Dashboard má»›i";
   const generatedId = cleanedName
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -1413,16 +1454,16 @@ function renderDashboardPages() {
   }
   table.innerHTML = rows.length ? rows.map((page) => `
     <tr class="${page.page_id === currentPageId ? "active-row" : ""}">
-      <td><strong>${escapeHtml(page.page_id)}</strong>${page.unsaved ? "<small class='cell-note'>Chưa lưu</small>" : ""}</td>
+      <td><strong>${escapeHtml(page.page_id)}</strong>${page.unsaved ? "<small class='cell-note'>ChÆ°a lÆ°u</small>" : ""}</td>
       <td>${escapeHtml(page.page_name || page.page_id)}</td>
       <td>
         <div class="action-group">
-          <button class="table-action" data-dashboard-open="${escapeHtml(page.page_id)}" type="button">Mở</button>
-          <button class="table-action danger" data-dashboard-delete="${escapeHtml(page.page_id)}" type="button" ${page.unsaved ? "disabled" : ""}>Xóa</button>
+          <button class="table-action" data-dashboard-open="${escapeHtml(page.page_id)}" type="button">Má»Ÿ</button>
+          <button class="table-action danger" data-dashboard-delete="${escapeHtml(page.page_id)}" type="button" ${page.unsaved ? "disabled" : ""}>XÃ³a</button>
         </div>
       </td>
     </tr>
-  `).join("") : emptyRow(3, "Chưa có trang báo cáo", "Bấm Tạo trang báo cáo để bắt đầu thiết kế.");
+  `).join("") : emptyRow(3, "ChÆ°a cÃ³ trang bÃ¡o cÃ¡o", "Báº¥m Táº¡o trang bÃ¡o cÃ¡o Ä‘á»ƒ báº¯t Ä‘áº§u thiáº¿t káº¿.");
 }
 
 function renderDashboardBuilderTabs() {
@@ -1431,7 +1472,8 @@ function renderDashboardBuilderTabs() {
   container.innerHTML = dashboardBuilderLayout.tabs.map((tab) => `
     <button class="builder-tab ${tab.tab_id === dashboardBuilderActiveTabId ? "active" : ""}" draggable="true" data-tab-id="${escapeHtml(tab.tab_id)}" type="button" role="tab" aria-selected="${tab.tab_id === dashboardBuilderActiveTabId}">
       <span>${escapeHtml(tab.tab_name)}</span>
-      <span class="builder-tab-delete" data-delete-tab="${escapeHtml(tab.tab_id)}" title="Xóa Tab">×</span>
+      <span class="builder-tab-edit" data-rename-tab="${escapeHtml(tab.tab_id)}" title="Đổi tên Tab">✎</span>
+      <span class="builder-tab-delete" data-delete-tab="${escapeHtml(tab.tab_id)}" title="XÃ³a Tab">Ã—</span>
     </button>
   `).join("");
 }
@@ -1449,10 +1491,10 @@ function handleDashboardPageAction(event) {
 }
 
 async function deleteDashboardPage(pageId) {
-  if (!confirm(`Xóa trang báo cáo ${pageId}?`)) return;
+  if (!confirm(`XÃ³a trang bÃ¡o cÃ¡o ${pageId}?`)) return;
   try {
     await api(`/api/admin/dashboard-layouts/${encodeURIComponent(pageId)}`, { method: "DELETE" });
-    showMessage($("#dashboard-builder-message"), "Đã xóa trang báo cáo.");
+    showMessage($("#dashboard-builder-message"), "ÄÃ£ xÃ³a trang bÃ¡o cÃ¡o.");
     await loadDashboardLayoutPages();
     if (dashboardLayouts.length) {
       await openDashboardPage(dashboardLayouts[0].page_id);
@@ -1473,16 +1515,26 @@ function handleDashboardBuilderTabClick(event) {
     deleteDashboardTab(deleteButton.dataset.deleteTab);
     return;
   }
+  const renameButton = event.target.closest("[data-rename-tab]");
+  if (renameButton) {
+    event.stopPropagation();
+    renameDashboardTab(renameButton.dataset.renameTab);
+    return;
+  }
   const tabButton = event.target.closest("[data-tab-id]");
   if (tabButton) switchDashboardBuilderTab(tabButton.dataset.tabId);
 }
 
 function handleDashboardBuilderTabRename(event) {
   const tabButton = event.target.closest("[data-tab-id]");
-  if (!tabButton || event.target.closest("[data-delete-tab]")) return;
-  const tab = dashboardBuilderLayout.tabs.find((item) => item.tab_id === tabButton.dataset.tabId);
+  if (!tabButton || event.target.closest("[data-delete-tab]") || event.target.closest("[data-rename-tab]")) return;
+  renameDashboardTab(tabButton.dataset.tabId);
+}
+
+function renameDashboardTab(tabId) {
+  const tab = dashboardBuilderLayout.tabs.find((item) => item.tab_id === tabId);
   if (!tab) return;
-  const newName = prompt("Đổi tên Tab:", tab.tab_name);
+  const newName = prompt("Äá»•i tÃªn Tab:", tab.tab_name);
   if (newName === null) return;
   tab.tab_name = newName.trim() || tab.tab_name;
   renderDashboardBuilder();
@@ -1547,10 +1599,10 @@ function addDashboardTab() {
 
 function deleteDashboardTab(tabId) {
   if (!dashboardBuilderLayout || dashboardBuilderLayout.tabs.length <= 1) {
-    showToast("Dashboard cần có ít nhất một Tab.", "error");
+    showToast("Dashboard cáº§n cÃ³ Ã­t nháº¥t má»™t Tab.", "error");
     return;
   }
-  if (!confirm("Xóa Tab này?")) return;
+  if (!confirm("XÃ³a Tab nÃ y?")) return;
   dashboardBuilderLayout.tabs = dashboardBuilderLayout.tabs.filter((tab) => tab.tab_id !== tabId);
   dashboardBuilderLayout.tabs.forEach((tab, index) => { tab.order = index + 1; });
   dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0]?.tab_id || "";
@@ -1567,18 +1619,36 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
   if (!tab) return;
   const rows = [...document.querySelectorAll("#dashboard-builder-workspace .builder-row")];
   tab.grid_layout = rows.map((row, index) => {
-    const layoutType = row.querySelector("[name='layout_type']")?.value === "4_columns" ? "4_columns" : "2_columns";
+    const layoutValue = row.querySelector("[name='layout_type']")?.value || "2_columns";
+    const layoutType = dashboardLayoutColumns[layoutValue] ? layoutValue : "2_columns";
     const widgets = [...row.querySelectorAll(".builder-widget-card")].map((card) => {
+      const type = card.querySelector("[name='type']")?.value || "bar_chart";
       const sqlCode = card.querySelector("[name='sql_code']")?.value.trim().toUpperCase() || "";
       const title = card.querySelector("[name='title']")?.value.trim() || "";
+      const textContent = card.querySelector("[name='text_content']")?.value.trim() || "";
+      const iconUrl = card.querySelector("[name='icon_url']")?.value.trim() || "";
       const filters = parseDashboardFilters(card.querySelector("[name='filters']")?.value || "", strictFilters);
-      if (!sqlCode && !title) return null;
+      const activeConfig = card.querySelector(".dashboard-widget-config.active");
+      const chartConfig = {
+        orientation: activeConfig?.querySelector("[name='chart_orientation']")?.value || "vertical",
+        label_column: activeConfig?.querySelector("[name='label_column']")?.value.trim() || "",
+        value_column: activeConfig?.querySelector("[name='value_column']")?.value.trim() || "",
+        bar_column: activeConfig?.querySelector("[name='bar_column']")?.value.trim() || "",
+        line_column: activeConfig?.querySelector("[name='line_column']")?.value.trim() || "",
+        bar_label: activeConfig?.querySelector("[name='bar_label']")?.value.trim() || "",
+        line_label: activeConfig?.querySelector("[name='line_label']")?.value.trim() || "",
+      };
+      const hasDisplayConfig = title || textContent || iconUrl || sqlCode;
+      if (!hasDisplayConfig) return null;
       return {
         position: Number(card.dataset.position || 1),
-        type: card.querySelector("[name='type']")?.value || "bar_chart",
+        type,
         title,
         sql_code: sqlCode,
         filters,
+        chart_config: chartConfig,
+        text_content: textContent,
+        icon_url: iconUrl,
       };
     }).filter(Boolean);
     return {
@@ -1597,24 +1667,65 @@ function renderDashboardWorkspace() {
     <div class="dashboard-empty">
       <p class="eyebrow">Workspace Grid</p>
       <h2>Tab này chưa có Layout</h2>
-      <p>Bấm Thêm Layout 2 cột hoặc Thêm Layout 4 cột để bắt đầu bố trí biểu đồ.</p>
+      <p>Bấm Thêm Layout 1, 2, 3 hoặc 4 cột để bắt đầu bố trí tiêu đề, thẻ dữ liệu và biểu đồ.</p>
+    </div>
+  `;
+}
+
+function dashboardLayoutTypeOptions(selectedType) {
+  const labels = { "1_column": "1 cột", "2_columns": "2 cột", "3_columns": "3 cột", "4_columns": "4 cột" };
+  return Object.keys(dashboardLayoutColumns).map((type) => `<option value="${type}" ${selectedType === type ? "selected" : ""}>${labels[type]}</option>`).join("");
+}
+
+function dashboardConfigValue(widget, key, fallback = "") {
+  return escapeHtml(widget?.chart_config?.[key] ?? fallback);
+}
+
+function renderDashboardWidgetAdvancedConfig(widget) {
+  const type = widget.type || "bar_chart";
+  const orientation = widget.chart_config?.orientation || "vertical";
+  return `
+    <div class="dashboard-widget-config ${type === "bar_chart" ? "active" : ""}" data-config-for="bar_chart">
+      <label>Hướng biểu đồ cột<select class="form-control" name="chart_orientation"><option value="vertical" ${orientation !== "horizontal" ? "selected" : ""}>Cột đứng</option><option value="horizontal" ${orientation === "horizontal" ? "selected" : ""}>Cột ngang</option></select></label>
+      <div class="grid gap-2 md:grid-cols-2">
+        <label>Cột nhãn<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="Tự nhận diện nếu để trống" /></label>
+        <label>Cột giá trị<input class="form-control" name="value_column" value="${dashboardConfigValue(widget, "value_column")}" placeholder="Tự nhận diện nếu để trống" /></label>
+      </div>
+    </div>
+    <div class="dashboard-widget-config ${type === "combo_chart" ? "active" : ""}" data-config-for="combo_chart">
+      <div class="grid gap-2 md:grid-cols-2">
+        <label>Cột nhãn<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="Ví dụ: ten_don_vi" /></label>
+        <label>Nhãn cột<input class="form-control" name="bar_label" value="${dashboardConfigValue(widget, "bar_label", "Cột")}" /></label>
+        <label>Cột dữ liệu dạng cột<input class="form-control" name="bar_column" value="${dashboardConfigValue(widget, "bar_column")}" placeholder="Ví dụ: san_luong" /></label>
+        <label>Nhãn đường<input class="form-control" name="line_label" value="${dashboardConfigValue(widget, "line_label", "Đường")}" /></label>
+        <label>Cột dữ liệu dạng đường<input class="form-control" name="line_column" value="${dashboardConfigValue(widget, "line_column")}" placeholder="Ví dụ: ty_le" /></label>
+      </div>
+    </div>
+    <div class="dashboard-widget-config ${type === "data_card" ? "active" : ""}" data-config-for="data_card">
+      <label>Ảnh biểu tượng<input class="form-control" name="icon_url" value="${escapeHtml(widget.icon_url || "")}" placeholder="https://.../icon.png" /></label>
+      <label>Ghi chú thẻ<textarea class="form-control" name="text_content" rows="2" placeholder="Dòng ghi chú dưới số liệu">${escapeHtml(widget.text_content || "")}</textarea></label>
+    </div>
+    <div class="dashboard-widget-config ${type === "text_title" ? "active" : ""}" data-config-for="text_title">
+      <label>Nội dung text<textarea class="form-control" name="text_content" rows="3" placeholder="Nhập mô tả hoặc tiêu đề phụ">${escapeHtml(widget.text_content || "")}</textarea></label>
     </div>
   `;
 }
 
 function renderDashboardBuilderRow(row, index) {
-  const columns = row.layout_type === "4_columns" ? 4 : 2;
+  const columns = dashboardLayoutColumnCount(row.layout_type);
   const widgetsByPosition = new Map((row.widgets || []).map((widget) => [Number(widget.position), widget]));
   const cells = Array.from({ length: columns }, (_, cellIndex) => {
     const position = cellIndex + 1;
-    const widget = widgetsByPosition.get(position) || { position, type: "bar_chart", title: "", sql_code: "" };
+    const widget = widgetsByPosition.get(position) || { position, type: "bar_chart", title: "", sql_code: "", chart_config: {}, filters: {} };
+    const isTextWidget = widget.type === "text_title";
     return `
       <div class="builder-widget-card" data-position="${position}">
         <small>Ô ${position}</small>
-        <label>Tiêu đề<input class="form-control" name="title" value="${escapeHtml(widget.title || "")}" placeholder="Tên biểu đồ" /></label>
+        <label>Tiêu đề<input class="form-control" name="title" value="${escapeHtml(widget.title || "")}" placeholder="Tên biểu đồ, thẻ hoặc tiêu đề" /></label>
         <label>Loại hiển thị<select class="form-control" name="type">${dashboardWidgetTypeOptions(widget.type)}</select></label>
-        <label>Mã SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "")}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
-        <label>Bộ lọc mặc định<textarea class="form-control dashboard-filter-json" name="filters" rows="2" placeholder='{"status":"1"}'>${escapeHtml(dashboardFiltersToText(widget.filters))}</textarea></label>
+        <label class="dashboard-sql-field ${isTextWidget ? "hidden" : ""}">Mã SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "")}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
+        <label class="dashboard-filter-field ${isTextWidget ? "hidden" : ""}">Bộ lọc mặc định<textarea class="form-control dashboard-filter-json" name="filters" rows="2" placeholder='{"status":"1"}'>${escapeHtml(dashboardFiltersToText(widget.filters))}</textarea></label>
+        ${renderDashboardWidgetAdvancedConfig(widget)}
       </div>
     `;
   }).join("");
@@ -1622,7 +1733,7 @@ function renderDashboardBuilderRow(row, index) {
     <section class="builder-row" draggable="true" data-row-id="${escapeHtml(row.row_id || index + 1)}">
       <div class="builder-row-header">
         <div><p class="eyebrow">Dòng Layout ${index + 1}</p><div class="builder-row-title">Kéo dòng này để đổi thứ tự trong Tab</div></div>
-        <label>Loại Layout<select class="form-control" name="layout_type"><option value="2_columns" ${row.layout_type === "2_columns" ? "selected" : ""}>2 cột</option><option value="4_columns" ${row.layout_type === "4_columns" ? "selected" : ""}>4 cột</option></select></label>
+        <label>Loại Layout<select class="form-control" name="layout_type">${dashboardLayoutTypeOptions(row.layout_type)}</select></label>
         <button class="table-action danger" data-delete-dashboard-row="${escapeHtml(row.row_id || index + 1)}" type="button">Xóa dòng</button>
       </div>
       <div class="${dashboardGridClass(row.layout_type)}">${cells}</div>
@@ -1663,21 +1774,23 @@ function applyDashboardSqlSelection(select) {
 function handleDashboardWorkspaceChange(event) {
   const rowType = event.target.closest("[name='layout_type']");
   const sqlSelect = event.target.closest("[name='sql_code']");
+  const widgetType = event.target.closest("[name='type']");
   if (sqlSelect) applyDashboardSqlSelection(sqlSelect);
   collectDashboardBuilderStateFromDom();
   delete dashboardBuilderLoadedTabs[dashboardTabCacheKey(dashboardBuilderActiveTabId)];
-  if (rowType) renderDashboardBuilder();
+  if (rowType || widgetType) renderDashboardBuilder();
   else renderDashboardPreview();
 }
 
 function handleDashboardWorkspaceInput() {
   collectDashboardBuilderStateFromDom();
+  delete dashboardBuilderLoadedTabs[dashboardTabCacheKey(dashboardBuilderActiveTabId)];
   renderDashboardPreview();
 }
 
 function deleteDashboardRow(rowId) {
   const tab = currentDashboardTab();
-  if (!tab || !confirm("Xóa dòng Layout này?")) return;
+  if (!tab || !confirm("XÃ³a dÃ²ng Layout nÃ y?")) return;
   tab.grid_layout = (tab.grid_layout || []).filter((row) => String(row.row_id) !== String(rowId));
   renderDashboardBuilder();
 }
@@ -1733,9 +1846,9 @@ async function saveDashboardLayout(button = null) {
     await loadDashboardLayoutPages();
     dashboardBuilderLoadedTabs = {};
     renderDashboardBuilder();
-    showMessage($("#dashboard-builder-message"), "Đã lưu Layout báo cáo.");
-    showToast("Đã lưu Layout báo cáo.");
-    await loadDashboardPreviewTab(dashboardBuilderActiveTabId, { force: true });
+    showMessage($("#dashboard-builder-message"), "ÄÃ£ lÆ°u Layout bÃ¡o cÃ¡o.");
+    showToast("ÄÃ£ lÆ°u Layout bÃ¡o cÃ¡o.");
+    renderDashboardPreview();
   } catch (error) {
     showMessage($("#dashboard-builder-message"), error.message, "error");
   } finally {
@@ -1765,7 +1878,7 @@ async function loadDashboardPreviewTab(tabId, { force = false } = {}) {
     return;
   }
   if (!dashboardPageIsSaved()) {
-    showMessage($("#dashboard-preview-message"), "Hãy lưu Layout trước khi tải dữ liệu preview.", "error");
+    showMessage($("#dashboard-preview-message"), "HÃ£y lÆ°u Layout trÆ°á»›c khi táº£i dá»¯ liá»‡u preview.", "error");
     return;
   }
   const button = $("#refresh-dashboard-preview");
@@ -1774,7 +1887,7 @@ async function loadDashboardPreviewTab(tabId, { force = false } = {}) {
     const response = await api(`/api/admin/dashboard-layouts/${encodeURIComponent(dashboardBuilderLayout.page_id)}/tabs/${encodeURIComponent(tabId)}/data`);
     dashboardBuilderLoadedTabs[key] = response;
     renderDashboardPreview();
-    showMessage($("#dashboard-preview-message"), response.message || "Đã tải dữ liệu Tab dashboard.", response.ok ? "success" : "error");
+    showMessage($("#dashboard-preview-message"), response.message || "ÄÃ£ táº£i dá»¯ liá»‡u Tab dashboard.", response.ok ? "success" : "error");
   } catch (error) {
     showMessage($("#dashboard-preview-message"), error.message, "error");
   } finally {
@@ -1795,7 +1908,7 @@ function renderDashboardPreview() {
   `).join("");
   const dataByWidget = new Map(((dashboardBuilderLoadedTabs[dashboardTabCacheKey(tab.tab_id)] || {}).widgets || []).map((item) => [`${item.row_id}:${item.position}`, item]));
   workspace.innerHTML = (tab.grid_layout || []).length ? tab.grid_layout.map((row, rowIndex) => {
-    const columns = row.layout_type === "4_columns" ? 4 : 2;
+    const columns = dashboardLayoutColumnCount(row.layout_type);
     const widgetsByPosition = new Map((row.widgets || []).map((widget) => [Number(widget.position), widget]));
     const cells = Array.from({ length: columns }, (_, cellIndex) => {
       const position = cellIndex + 1;
@@ -1807,18 +1920,22 @@ function renderDashboardPreview() {
   }).join("") : `
     <div class="dashboard-empty">
       <p class="eyebrow">Preview</p>
-      <h2>Tab chưa có Layout</h2>
-      <p>Thêm Layout và chọn mã SQL để xem dữ liệu dashboard tại đây.</p>
+      <h2>Tab chÆ°a cÃ³ Layout</h2>
+      <p>ThÃªm Layout vÃ  chá»n mÃ£ SQL Ä‘á»ƒ xem dá»¯ liá»‡u dashboard táº¡i Ä‘Ã¢y.</p>
     </div>
   `;
   window.requestAnimationFrame(renderPendingDashboardCharts);
 }
 
 function renderRuntimeWidget(widget, widgetData, elementId) {
-  if (!widget?.sql_code) {
+  if (!widget) {
     return `<article class="runtime-widget-card"><div class="runtime-widget-empty">Ô trống</div></article>`;
   }
-  const title = widget.title || widget.sql_code;
+  const title = widget.title || widget.sql_code || "Tiêu đề";
+  if (widget.type === "text_title") return renderRuntimeTextTitleWidget(widget);
+  if (!widget.sql_code) {
+    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Chưa chọn mã SQL cho ô này.</div></article>`;
+  }
   const result = widgetData?.data;
   if (!result) {
     return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Chưa tải dữ liệu. Mở Tab này để hệ thống gọi API.</div></article>`;
@@ -1828,7 +1945,17 @@ function renderRuntimeWidget(widget, widgetData, elementId) {
   }
   if (widget.type === "data_table") return renderRuntimeTableWidget(title, result);
   if (widget.type === "metric") return renderRuntimeMetricWidget(title, result, widget.sql_code);
-  return renderRuntimeChartWidget(title, result, widget.type, elementId);
+  if (widget.type === "data_card") return renderRuntimeDataCardWidget(widget, result);
+  return renderRuntimeChartWidget(title, result, widget, elementId);
+}
+
+function renderRuntimeTextTitleWidget(widget) {
+  return `
+    <article class="runtime-widget-card runtime-text-widget">
+      ${widget.title ? `<h2>${escapeHtml(widget.title)}</h2>` : ""}
+      ${widget.text_content ? `<p>${escapeHtml(widget.text_content)}</p>` : ""}
+    </article>
+  `;
 }
 
 function renderRuntimeTableWidget(title, result) {
@@ -1847,11 +1974,21 @@ function renderRuntimeTableWidget(title, result) {
   `;
 }
 
+function pickDashboardNumericColumn(rows, columns, preferred = "", excluded = new Set()) {
+  if (preferred && columns.includes(preferred) && rows.some((row) => Number.isFinite(parseDashboardNumber(row[preferred])))) return preferred;
+  return columns.find((column) => !excluded.has(column) && rows.some((row) => Number.isFinite(parseDashboardNumber(row[column])))) || "";
+}
+
+function pickDashboardLabelColumn(rows, columns, preferred = "", excluded = new Set()) {
+  if (preferred && columns.includes(preferred)) return preferred;
+  return columns.find((column) => !excluded.has(column) && rows.some((row) => String(row[column] ?? "").trim())) || columns[0] || "";
+}
+
 function renderRuntimeMetricWidget(title, result, sqlCode) {
   const rows = result.rows || [];
   const columns = result.columns || [];
   const firstRow = rows[0] || {};
-  const numericColumn = columns.find((column) => Number.isFinite(parseDashboardNumber(firstRow[column])));
+  const numericColumn = pickDashboardNumericColumn(rows, columns);
   const value = numericColumn ? parseDashboardNumber(firstRow[numericColumn]) : rows.length;
   return `
     <article class="runtime-widget-card">
@@ -1864,12 +2001,33 @@ function renderRuntimeMetricWidget(title, result, sqlCode) {
   `;
 }
 
-function renderRuntimeChartWidget(title, result, widgetType, elementId) {
-  const chartData = extractDashboardChartData(result);
+function renderRuntimeDataCardWidget(widget, result) {
+  const rows = result.rows || [];
+  const columns = result.columns || [];
+  const firstRow = rows[0] || {};
+  const valueColumn = pickDashboardNumericColumn(rows, columns, widget.chart_config?.value_column || "");
+  const value = valueColumn ? parseDashboardNumber(firstRow[valueColumn]) : rows.length;
+  const icon = widget.icon_url
+    ? `<img class="runtime-data-card-icon" src="${escapeHtml(widget.icon_url)}" alt="" loading="lazy" />`
+    : `<div class="metric-icon">${escapeHtml((widget.title || widget.sql_code || "D").slice(0, 3).toUpperCase())}</div>`;
+  return `
+    <article class="runtime-widget-card runtime-data-card">
+      ${icon}
+      <div>
+        <span>${escapeHtml(widget.title || widget.sql_code)}</span>
+        <strong>${formatDashboardNumber(value)}</strong>
+        <small>${escapeHtml(widget.text_content || valueColumn || widget.sql_code)}</small>
+      </div>
+    </article>
+  `;
+}
+
+function renderRuntimeChartWidget(title, result, widget, elementId) {
+  const chartData = widget.type === "combo_chart" ? extractDashboardComboChartData(result, widget.chart_config || {}) : extractDashboardChartData(result, widget.chart_config || {});
   if (!chartData.labels.length) {
     return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Không có dữ liệu để vẽ biểu đồ.</div></article>`;
   }
-  pendingDashboardCharts.push({ elementId, widgetType, chartData });
+  pendingDashboardCharts.push({ elementId, widgetType: widget.type, chartData, chartConfig: widget.chart_config || {} });
   return `
     <article class="runtime-widget-card">
       <h3>${escapeHtml(title)}</h3>
@@ -1878,15 +2036,32 @@ function renderRuntimeChartWidget(title, result, widgetType, elementId) {
   `;
 }
 
-function extractDashboardChartData(result) {
+function extractDashboardChartData(result, chartConfig = {}) {
   const rows = result.rows || [];
   const columns = result.columns || [];
-  if (!rows.length || !columns.length) return { labels: [], values: [] };
-  const valueColumn = columns.find((column) => rows.some((row) => Number.isFinite(parseDashboardNumber(row[column]))));
-  const labelColumn = columns.find((column) => column !== valueColumn && rows.some((row) => String(row[column] ?? "").trim())) || columns[0];
+  if (!rows.length || !columns.length) return { labels: [], values: [], orientation: chartConfig.orientation || "vertical" };
+  const valueColumn = pickDashboardNumericColumn(rows, columns, chartConfig.value_column || "");
+  const labelColumn = pickDashboardLabelColumn(rows, columns, chartConfig.label_column || "", new Set([valueColumn]));
   return {
     labels: rows.slice(0, 12).map((row, index) => String(row[labelColumn] ?? `Dòng ${index + 1}`)),
     values: rows.slice(0, 12).map((row) => parseDashboardNumber(row[valueColumn]) || 0),
+    orientation: chartConfig.orientation || "vertical",
+  };
+}
+
+function extractDashboardComboChartData(result, chartConfig = {}) {
+  const rows = result.rows || [];
+  const columns = result.columns || [];
+  if (!rows.length || !columns.length) return { labels: [], barValues: [], lineValues: [] };
+  const barColumn = pickDashboardNumericColumn(rows, columns, chartConfig.bar_column || "");
+  const lineColumn = pickDashboardNumericColumn(rows, columns, chartConfig.line_column || "", new Set([barColumn]));
+  const labelColumn = pickDashboardLabelColumn(rows, columns, chartConfig.label_column || "", new Set([barColumn, lineColumn]));
+  return {
+    labels: rows.slice(0, 12).map((row, index) => String(row[labelColumn] ?? `Dòng ${index + 1}`)),
+    barValues: rows.slice(0, 12).map((row) => parseDashboardNumber(row[barColumn]) || 0),
+    lineValues: rows.slice(0, 12).map((row) => parseDashboardNumber(row[lineColumn]) || 0),
+    barLabel: chartConfig.bar_label || barColumn || "Cột",
+    lineLabel: chartConfig.line_label || lineColumn || "Đường",
   };
 }
 
@@ -1904,30 +2079,59 @@ function renderPendingDashboardCharts() {
   jobs.forEach(({ elementId, widgetType, chartData }) => {
     const canvas = document.getElementById(elementId);
     if (!canvas || !window.Chart) return;
-    const chartType = widgetType === "pie_chart" ? "pie" : widgetType === "line_chart" ? "line" : "bar";
     const palette = ["#38bdf8", "#0ea5e9", "#22c55e", "#f59e0b", "#ef4444", "#a78bfa", "#14b8a6", "#f97316"];
-    const dataset = {
+    const isPie = widgetType === "pie_chart";
+    const isLine = widgetType === "line_chart";
+    const isCombo = widgetType === "combo_chart";
+    const chartType = isCombo ? "bar" : isPie ? "pie" : isLine ? "line" : "bar";
+    const datasets = isCombo ? [
+      {
+        type: "bar",
+        label: chartData.barLabel,
+        data: chartData.barValues,
+        backgroundColor: "rgba(56, 189, 248, .72)",
+        borderColor: "#7dd3fc",
+        borderWidth: 1,
+        yAxisID: "y",
+      },
+      {
+        type: "line",
+        label: chartData.lineLabel,
+        data: chartData.lineValues,
+        borderColor: "#fbbf24",
+        backgroundColor: "rgba(251, 191, 36, .16)",
+        borderWidth: 3,
+        tension: .35,
+        yAxisID: "y1",
+      },
+    ] : [{
       label: "Giá trị",
       data: chartData.values,
-      backgroundColor: chartType === "pie" ? chartData.labels.map((_, index) => palette[index % palette.length]) : "rgba(56, 189, 248, .72)",
-      borderColor: chartType === "pie" ? "#061d38" : "#7dd3fc",
-      borderWidth: chartType === "line" ? 3 : 1,
+      backgroundColor: isPie ? chartData.labels.map((_, index) => palette[index % palette.length]) : "rgba(56, 189, 248, .72)",
+      borderColor: isPie ? "#061d38" : "#7dd3fc",
+      borderWidth: isLine ? 3 : 1,
       tension: .35,
-      fill: chartType === "line",
+      fill: isLine,
+    }];
+    const scales = isPie ? {} : isCombo ? {
+      x: { ticks: { color: "#bae6fd" }, grid: { color: "rgba(125, 211, 252, .1)" } },
+      y: { beginAtZero: true, ticks: { color: "#bae6fd" }, grid: { color: "rgba(125, 211, 252, .12)" } },
+      y1: { beginAtZero: true, position: "right", ticks: { color: "#fde68a" }, grid: { drawOnChartArea: false } },
+    } : {
+      x: { ticks: { color: "#bae6fd" }, grid: { color: "rgba(125, 211, 252, .1)" } },
+      y: { beginAtZero: true, ticks: { color: "#bae6fd" }, grid: { color: "rgba(125, 211, 252, .12)" } },
     };
     dashboardChartInstances.set(elementId, new Chart(canvas, {
       type: chartType,
-      data: { labels: chartData.labels, datasets: [dataset] },
+      data: { labels: chartData.labels, datasets },
       options: {
+        indexAxis: widgetType === "bar_chart" && chartData.orientation === "horizontal" ? "y" : "x",
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { display: chartType === "pie", labels: { color: "#e0f2fe" } },
+          legend: { display: isPie || isCombo, labels: { color: "#e0f2fe" } },
         },
-        scales: chartType === "pie" ? {} : {
-          x: { ticks: { color: "#bae6fd" }, grid: { color: "rgba(125, 211, 252, .1)" } },
-          y: { beginAtZero: true, ticks: { color: "#bae6fd" }, grid: { color: "rgba(125, 211, 252, .12)" } },
-        },
+        scales,
       },
     }));
   });
@@ -1945,11 +2149,11 @@ async function loadRegions() {
     <tr>
       <td><strong>${escapeHtml(region.code)}</strong></td>
       <td>${escapeHtml(region.name)}</td>
-      <td><span class="status ${region.is_active ? "active" : "inactive"}">${region.is_active ? "Đang dùng" : "Ngừng dùng"}</span></td>
+      <td><span class="status ${region.is_active ? "active" : "inactive"}">${region.is_active ? "Äang dÃ¹ng" : "Ngá»«ng dÃ¹ng"}</span></td>
       <td>${escapeHtml(region.sort_order)}</td>
-      <td><button class="table-action" data-edit-region="${escapeHtml(region.code)}">Sửa</button> <button class="table-action danger" data-delete-region="${escapeHtml(region.code)}">Xóa</button></td>
+      <td><button class="table-action" data-edit-region="${escapeHtml(region.code)}">Sá»­a</button> <button class="table-action danger" data-delete-region="${escapeHtml(region.code)}">XÃ³a</button></td>
     </tr>
-  `).join("") : emptyRow(5, "Chưa có phân vùng", "Thêm phân vùng để phân quyền dữ liệu.");
+  `).join("") : emptyRow(5, "ChÆ°a cÃ³ phÃ¢n vÃ¹ng", "ThÃªm phÃ¢n vÃ¹ng Ä‘á»ƒ phÃ¢n quyá»n dá»¯ liá»‡u.");
   document.querySelectorAll("[data-edit-region]").forEach((button) => button.addEventListener("click", () => openRegion(button.dataset.editRegion)));
   document.querySelectorAll("[data-delete-region]").forEach((button) => button.addEventListener("click", () => deleteRegion(button.dataset.deleteRegion)));
 }
@@ -1981,7 +2185,7 @@ async function saveRegion(event) {
     form.elements.namedItem("code").readOnly = false;
     form.is_active.checked = true;
     $("#region-dialog").close();
-    showMessage($("#regions-message"), "Đã lưu phân vùng.");
+    showMessage($("#regions-message"), "ÄÃ£ lÆ°u phÃ¢n vÃ¹ng.");
     await loadRegions();
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
@@ -1989,10 +2193,10 @@ async function saveRegion(event) {
 }
 
 async function deleteRegion(code) {
-  if (!confirm(`Xóa phân vùng ${code}? Các phân quyền dữ liệu liên quan cũng sẽ được xóa.`)) return;
+  if (!confirm(`XÃ³a phÃ¢n vÃ¹ng ${code}? CÃ¡c phÃ¢n quyá»n dá»¯ liá»‡u liÃªn quan cÅ©ng sáº½ Ä‘Æ°á»£c xÃ³a.`)) return;
   try {
     await api(`/api/admin/regions/${encodeURIComponent(code)}`, { method: "DELETE" });
-    showMessage($("#regions-message"), `Đã xóa phân vùng ${code}.`);
+    showMessage($("#regions-message"), `ÄÃ£ xÃ³a phÃ¢n vÃ¹ng ${code}.`);
     await loadRegions();
   } catch (error) {
     showMessage($("#regions-message"), error.message, "error");
@@ -2000,7 +2204,7 @@ async function deleteRegion(code) {
 }
 
 async function loadWorkTasks() {
-  setTableLoading("#work-tasks-table", 9, "Đang tải lịch công việc...");
+  setTableLoading("#work-tasks-table", 9, "Äang táº£i lá»‹ch cÃ´ng viá»‡c...");
   workTasks = (await api("/api/admin/work-tasks")).tasks;
   renderWorkTasks();
 }
@@ -2011,22 +2215,22 @@ function renderWorkTasks() {
   table.innerHTML = workTasks.length ? workTasks.map((task) => `
     <tr>
       <td><strong>${escapeHtml(task.task_id)}</strong></td>
-      <td>${escapeHtml(task.ten_cong_viec)}${task.last_notified_at ? `<small class="cell-note">Đã nhắc: ${escapeHtml(new Date(task.last_notified_at).toLocaleString("vi-VN"))}</small>` : ""}</td>
+      <td>${escapeHtml(task.ten_cong_viec)}${task.last_notified_at ? `<small class="cell-note">ÄÃ£ nháº¯c: ${escapeHtml(new Date(task.last_notified_at).toLocaleString("vi-VN"))}</small>` : ""}</td>
       <td><span class="status viewer">${escapeHtml(task.type)}</span></td>
       <td><strong>${escapeHtml(task.time)}</strong></td>
       <td>${escapeHtml(task.weekday || "-")}</td>
       <td>${escapeHtml(task.once_date || "-")}</td>
       <td>${escapeHtml(task.group || "-")}</td>
-      <td><span class="status ${task.check ? "active" : "inactive"}">${task.check ? "Đã xong" : "Đang chờ"}</span></td>
+      <td><span class="status ${task.check ? "active" : "inactive"}">${task.check ? "ÄÃ£ xong" : "Äang chá»"}</span></td>
       <td>
         <div class="action-group">
-          <button class="table-action" data-edit-work-task="${escapeHtml(task.task_id)}">Sửa</button>
-          <button class="table-action" data-complete-work-task="${escapeHtml(task.task_id)}">Hoàn thành</button>
-          <button class="table-action danger" data-delete-work-task="${escapeHtml(task.task_id)}">Xóa</button>
+          <button class="table-action" data-edit-work-task="${escapeHtml(task.task_id)}">Sá»­a</button>
+          <button class="table-action" data-complete-work-task="${escapeHtml(task.task_id)}">HoÃ n thÃ nh</button>
+          <button class="table-action danger" data-delete-work-task="${escapeHtml(task.task_id)}">XÃ³a</button>
         </div>
       </td>
     </tr>
-  `).join("") : emptyRow(9, "Chưa có lịch công việc", "Hãy thêm công việc để hệ thống nhắc qua Telegram đúng giờ.");
+  `).join("") : emptyRow(9, "ChÆ°a cÃ³ lá»‹ch cÃ´ng viá»‡c", "HÃ£y thÃªm cÃ´ng viá»‡c Ä‘á»ƒ há»‡ thá»‘ng nháº¯c qua Telegram Ä‘Ãºng giá».");
   document.querySelectorAll("[data-edit-work-task]").forEach((button) => button.addEventListener("click", () => openWorkTask(button.dataset.editWorkTask)));
   document.querySelectorAll("[data-complete-work-task]").forEach((button) => button.addEventListener("click", () => completeWorkTask(button.dataset.completeWorkTask)));
   document.querySelectorAll("[data-delete-work-task]").forEach((button) => button.addEventListener("click", () => deleteWorkTask(button.dataset.deleteWorkTask)));
@@ -2069,8 +2273,8 @@ async function saveWorkTask(event) {
     form.elements.namedItem("time").value = "07:00";
     form.elements.namedItem("group").value = "ME";
     $("#work-task-dialog").close();
-    showMessage($("#work-tasks-message"), "Đã lưu công việc.");
-    showToast("Đã lưu lịch công việc.");
+    showMessage($("#work-tasks-message"), "ÄÃ£ lÆ°u cÃ´ng viá»‡c.");
+    showToast("ÄÃ£ lÆ°u lá»‹ch cÃ´ng viá»‡c.");
     await loadWorkTasks();
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
@@ -2079,10 +2283,10 @@ async function saveWorkTask(event) {
 }
 
 async function completeWorkTask(taskId) {
-  if (!confirm(`Xác nhận đã hoàn thành ${taskId}? Lịch này sẽ được tắt và ẩn khỏi danh sách.`)) return;
+  if (!confirm(`XÃ¡c nháº­n Ä‘Ã£ hoÃ n thÃ nh ${taskId}? Lá»‹ch nÃ y sáº½ Ä‘Æ°á»£c táº¯t vÃ  áº©n khá»i danh sÃ¡ch.`)) return;
   try {
     const result = await api(`/api/admin/work-tasks/${encodeURIComponent(taskId)}/complete`, { method: "POST" });
-    showMessage($("#work-tasks-message"), result.message || "Đã hoàn thành công việc.");
+    showMessage($("#work-tasks-message"), result.message || "ÄÃ£ hoÃ n thÃ nh cÃ´ng viá»‡c.");
     await loadWorkTasks();
   } catch (error) {
     showMessage($("#work-tasks-message"), error.message, "error");
@@ -2090,10 +2294,10 @@ async function completeWorkTask(taskId) {
 }
 
 async function deleteWorkTask(taskId) {
-  if (!confirm(`Xóa lịch công việc ${taskId}?`)) return;
+  if (!confirm(`XÃ³a lá»‹ch cÃ´ng viá»‡c ${taskId}?`)) return;
   try {
     await api(`/api/admin/work-tasks/${encodeURIComponent(taskId)}`, { method: "DELETE" });
-    showMessage($("#work-tasks-message"), `Đã xóa lịch ${taskId}.`);
+    showMessage($("#work-tasks-message"), `ÄÃ£ xÃ³a lá»‹ch ${taskId}.`);
     await loadWorkTasks();
   } catch (error) {
     showMessage($("#work-tasks-message"), error.message, "error");
@@ -2101,31 +2305,31 @@ async function deleteWorkTask(taskId) {
 }
 
 async function loadSystem() {
-  $("#system-cards").innerHTML = loadingRow(1, "Đang tải thông tin hệ thống...");
+  $("#system-cards").innerHTML = loadingRow(1, "Äang táº£i thÃ´ng tin há»‡ thá»‘ng...");
   const data = await api("/api/admin/system");
   await loadConnections();
   await loadSqlReports();
   $("#system-cards").innerHTML = [
-    ["APP", "Môi trường", data.environment],
-    ["STO", "Database chính", data.storage_backend],
-    ["API", "API dữ liệu", data.internal_api_mock_mode ? "Mock nội bộ" : data.internal_api_url],
-    ["USR", "Người dùng hoạt động", `${data.active_user_count}/${data.user_count}`],
+    ["APP", "MÃ´i trÆ°á»ng", data.environment],
+    ["STO", "Database chÃ­nh", data.storage_backend],
+    ["API", "API dá»¯ liá»‡u", data.internal_api_mock_mode ? "Mock ná»™i bá»™" : data.internal_api_url],
+    ["USR", "NgÆ°á»i dÃ¹ng hoáº¡t Ä‘á»™ng", `${data.active_user_count}/${data.user_count}`],
   ].map(([icon, label, value]) => `<article class="metric-card"><div class="metric-icon">${icon}</div><div><span>${label}</span><strong>${escapeHtml(value)}</strong></div></article>`).join("");
 }
 
 async function loadConnections() {
-  setTableLoading("#connections-table", 6, "Đang tải kết nối hệ thống...");
+  setTableLoading("#connections-table", 6, "Äang táº£i káº¿t ná»‘i há»‡ thá»‘ng...");
   const data = await api("/api/admin/connections");
   connections = data.connections;
   $("#connections-table").innerHTML = connections.length ? connections.map((connection) => `
     <tr>
       <td><strong>${escapeHtml(connection.name)}</strong><small class="cell-note">${escapeHtml(connection.description)}</small></td>
       <td><span class="status viewer">${escapeHtml(connection.connection_type)}</span></td>
-      <td><span class="status ${connection.is_active ? "active" : "inactive"}">${connection.is_active ? "Đang dùng" : "Chưa cấu hình"}</span></td>
+      <td><span class="status ${connection.is_active ? "active" : "inactive"}">${connection.is_active ? "Äang dÃ¹ng" : "ChÆ°a cáº¥u hÃ¬nh"}</span></td>
       <td><code>${escapeHtml(JSON.stringify(connection.config))}</code></td>
-      <td>${escapeHtml(connection.secret_ref || "Không có")}</td>
-      <td><div class="action-group"><button class="table-action" data-edit-connection="${escapeHtml(connection.code)}">Cấu hình</button><button class="table-action" data-test-connection="${escapeHtml(connection.code)}"><span class="button-label">Kiểm tra</span><span class="spinner"></span></button></div><div class="cell-note" id="connection-result-${escapeHtml(connection.code)}"></div></td>
-    </tr>`).join("") : emptyRow(6, "Chưa có kết nối", "Hãy cấu hình kết nối trong phần quản trị hệ thống.");
+      <td>${escapeHtml(connection.secret_ref || "KhÃ´ng cÃ³")}</td>
+      <td><div class="action-group"><button class="table-action" data-edit-connection="${escapeHtml(connection.code)}">Cáº¥u hÃ¬nh</button><button class="table-action" data-test-connection="${escapeHtml(connection.code)}"><span class="button-label">Kiá»ƒm tra</span><span class="spinner"></span></button></div><div class="cell-note" id="connection-result-${escapeHtml(connection.code)}"></div></td>
+    </tr>`).join("") : emptyRow(6, "ChÆ°a cÃ³ káº¿t ná»‘i", "HÃ£y cáº¥u hÃ¬nh káº¿t ná»‘i trong pháº§n quáº£n trá»‹ há»‡ thá»‘ng.");
   document.querySelectorAll("[data-edit-connection]").forEach((button) => {
     button.addEventListener("click", () => openConnection(button.dataset.editConnection));
   });
@@ -2155,7 +2359,7 @@ async function saveConnection(event) {
   try {
     config = data.config_json ? JSON.parse(data.config_json) : {};
   } catch {
-    showMessage(form.querySelector(".result"), "Cấu hình JSON chưa đúng định dạng.", "error");
+    showMessage(form.querySelector(".result"), "Cáº¥u hÃ¬nh JSON chÆ°a Ä‘Ãºng Ä‘á»‹nh dáº¡ng.", "error");
     return;
   }
   try {
@@ -2175,11 +2379,11 @@ async function saveConnection(event) {
 
 async function testConnection(code, button) {
   const resultBox = $(`#connection-result-${CSS.escape(code)}`);
-  resultBox.textContent = "Đang kiểm tra...";
+  resultBox.textContent = "Äang kiá»ƒm tra...";
   setButtonLoading(button, true);
   try {
     const result = await api(`/api/admin/connections/${code}/test`, { method: "POST" });
-    const details = result.details ? ` Chi tiết: ${JSON.stringify(result.details)}` : "";
+    const details = result.details ? ` Chi tiáº¿t: ${JSON.stringify(result.details)}` : "";
     resultBox.textContent = `${result.message}${details}`;
     resultBox.style.color = result.ok ? "#166534" : "#991b1b";
   } catch (error) {
@@ -2191,7 +2395,7 @@ async function testConnection(code, button) {
 }
 
 async function loadSqlReports() {
-  setTableLoading("#sql-reports-table", 5, "Đang tải cấu hình SQL...");
+  setTableLoading("#sql-reports-table", 5, "Äang táº£i cáº¥u hÃ¬nh SQL...");
   try {
     const data = await api("/api/admin/sql-reports");
     sqlReports = data.reports || [];
@@ -2204,7 +2408,7 @@ async function loadSqlReports() {
     if (dashboardViewerLayout) renderDashboardViewer();
   } catch (error) {
     showMessage($("#sql-reports-message"), error.message, "error");
-    $("#sql-reports-table").innerHTML = emptyRow(5, "Không tải được cấu hình SQL", error.message);
+    $("#sql-reports-table").innerHTML = emptyRow(5, "KhÃ´ng táº£i Ä‘Æ°á»£c cáº¥u hÃ¬nh SQL", error.message);
   }
 }
 
@@ -2215,11 +2419,11 @@ function renderSqlReports() {
     <tr>
       <td><strong>${escapeHtml(report.ten_bao_cao)}</strong></td>
       <td><code>${escapeHtml(report.ma_bao_cao)}</code></td>
-      <td>${(report.cac_tham_so || []).map((item) => `<span class="status viewer">${escapeHtml(item)}</span>`).join(" ") || "Không có"}</td>
+      <td>${(report.cac_tham_so || []).map((item) => `<span class="status viewer">${escapeHtml(item)}</span>`).join(" ") || "KhÃ´ng cÃ³"}</td>
       <td><code>${escapeHtml(report.cau_lenh_sql)}</code></td>
-      <td><div class="action-group"><button class="table-action" data-edit-sql-report="${report.id}">Sửa</button><button class="table-action danger" data-delete-sql-report="${report.id}">Xóa</button></div></td>
+      <td><div class="action-group"><button class="table-action" data-edit-sql-report="${report.id}">Sá»­a</button><button class="table-action danger" data-delete-sql-report="${report.id}">XÃ³a</button></div></td>
     </tr>
-  `).join("") : emptyRow(5, "Chưa có cấu hình SQL", "Bấm Thêm SQL để tạo báo cáo động đầu tiên.");
+  `).join("") : emptyRow(5, "ChÆ°a cÃ³ cáº¥u hÃ¬nh SQL", "Báº¥m ThÃªm SQL Ä‘á»ƒ táº¡o bÃ¡o cÃ¡o Ä‘á»™ng Ä‘áº§u tiÃªn.");
   document.querySelectorAll("[data-edit-sql-report]").forEach((button) => button.addEventListener("click", () => openSqlReport(button.dataset.editSqlReport)));
   document.querySelectorAll("[data-delete-sql-report]").forEach((button) => button.addEventListener("click", () => deleteSqlReport(button.dataset.deleteSqlReport)));
 }
@@ -2252,8 +2456,8 @@ async function saveSqlReport(event) {
       cac_tham_so: params,
     })});
     $("#sql-report-dialog")?.close();
-    showMessage($("#sql-reports-message"), "Đã lưu cấu hình SQL.");
-    showToast("Đã lưu cấu hình SQL.");
+    showMessage($("#sql-reports-message"), "ÄÃ£ lÆ°u cáº¥u hÃ¬nh SQL.");
+    showToast("ÄÃ£ lÆ°u cáº¥u hÃ¬nh SQL.");
     await loadSqlReports();
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
@@ -2261,10 +2465,10 @@ async function saveSqlReport(event) {
 }
 
 async function deleteSqlReport(reportId) {
-  if (!confirm("Xóa cấu hình SQL này?")) return;
+  if (!confirm("XÃ³a cáº¥u hÃ¬nh SQL nÃ y?")) return;
   try {
     await api(`/api/admin/sql-reports/${reportId}`, { method: "DELETE" });
-    showMessage($("#sql-reports-message"), "Đã xóa cấu hình SQL.");
+    showMessage($("#sql-reports-message"), "ÄÃ£ xÃ³a cáº¥u hÃ¬nh SQL.");
     await loadSqlReports();
   } catch (error) {
     showMessage($("#sql-reports-message"), error.message, "error");
@@ -2292,7 +2496,7 @@ function fillDynamicReportSelect() {
   const current = select.value;
   select.innerHTML = sqlReports.length
     ? sqlReports.map((report) => `<option value="${escapeHtml(report.ma_bao_cao)}">${escapeHtml(report.ten_bao_cao)} (${escapeHtml(report.ma_bao_cao)})</option>`).join("")
-    : `<option value="">Chưa có báo cáo</option>`;
+    : `<option value="">ChÆ°a cÃ³ bÃ¡o cÃ¡o</option>`;
   if (current && sqlReports.some((report) => report.ma_bao_cao === current)) select.value = current;
 }
 
@@ -2302,7 +2506,7 @@ function renderDynamicReportFilters() {
   if (!container || !select) return;
   const report = sqlReports.find((item) => item.ma_bao_cao === select.value);
   if (!report) {
-    container.innerHTML = `<div class="empty-state"><strong>Chưa có tham số</strong><p>Hãy tạo cấu hình SQL trước.</p></div>`;
+    container.innerHTML = `<div class="empty-state"><strong>ChÆ°a cÃ³ tham sá»‘</strong><p>HÃ£y táº¡o cáº¥u hÃ¬nh SQL trÆ°á»›c.</p></div>`;
     return;
   }
   const params = report.cac_tham_so || [];
@@ -2312,10 +2516,10 @@ function renderDynamicReportFilters() {
       return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter" name="${escapeHtml(param)}" type="date" /></label>`;
     }
     if (lower.includes("status") || lower.includes("trang_thai")) {
-      return `<label>${escapeHtml(param)}<select class="form-control dynamic-filter" name="${escapeHtml(param)}"><option value="">Tất cả</option><option value="1">Đang hoạt động</option><option value="0">Không hoạt động</option></select></label>`;
+      return `<label>${escapeHtml(param)}<select class="form-control dynamic-filter" name="${escapeHtml(param)}"><option value="">Táº¥t cáº£</option><option value="1">Äang hoáº¡t Ä‘á»™ng</option><option value="0">KhÃ´ng hoáº¡t Ä‘á»™ng</option></select></label>`;
     }
-    return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter" name="${escapeHtml(param)}" placeholder="Nhập ${escapeHtml(param)}" /></label>`;
-  }).join("") : `<div class="empty-state"><strong>Không có tham số lọc</strong><p>Báo cáo này sẽ chạy trực tiếp theo SQL đã cấu hình.</p></div>`;
+    return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter" name="${escapeHtml(param)}" placeholder="Nháº­p ${escapeHtml(param)}" /></label>`;
+  }).join("") : `<div class="empty-state"><strong>KhÃ´ng cÃ³ tham sá»‘ lá»c</strong><p>BÃ¡o cÃ¡o nÃ y sáº½ cháº¡y trá»±c tiáº¿p theo SQL Ä‘Ã£ cáº¥u hÃ¬nh.</p></div>`;
 }
 
 async function runDynamicReport() {
@@ -2324,7 +2528,7 @@ async function runDynamicReport() {
   const button = $("#run-dynamic-report");
   if (!select || !select.value) {
     $("#dynamic-report-head").innerHTML = "";
-    $("#dynamic-report-body").innerHTML = emptyRow(1, "Chưa có báo cáo", "Hãy thêm cấu hình SQL trong Quản trị kết nối.");
+    $("#dynamic-report-body").innerHTML = emptyRow(1, "ChÆ°a cÃ³ bÃ¡o cÃ¡o", "HÃ£y thÃªm cáº¥u hÃ¬nh SQL trong Quáº£n trá»‹ káº¿t ná»‘i.");
     return;
   }
   const filters = {};
@@ -2340,7 +2544,7 @@ async function runDynamicReport() {
       page_size: Number($("#dynamic-report-page-size")?.value || 20),
     })});
     renderDynamicReportTable(response);
-    showMessage(message, response.message || "Đã tải dữ liệu báo cáo.");
+    showMessage(message, response.message || "ÄÃ£ táº£i dá»¯ liá»‡u bÃ¡o cÃ¡o.");
   } catch (error) {
     showMessage(message, error.message, "error");
   } finally {
@@ -2355,11 +2559,11 @@ function renderDynamicReportTable(response) {
   $("#dynamic-report-head").innerHTML = columns.length ? `<tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>` : "";
   $("#dynamic-report-body").innerHTML = rows.length
     ? rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(row[column])}</td>`).join("")}</tr>`).join("")
-    : emptyRow(Math.max(columns.length, 1), "Không có dữ liệu", "Thử thay đổi điều kiện lọc hoặc kiểm tra câu SQL.");
+    : emptyRow(Math.max(columns.length, 1), "KhÃ´ng cÃ³ dá»¯ liá»‡u", "Thá»­ thay Ä‘á»•i Ä‘iá»u kiá»‡n lá»c hoáº·c kiá»ƒm tra cÃ¢u SQL.");
   const page = response.pagination?.page || dynamicReportPage;
   const pageSize = response.pagination?.page_size || Number($("#dynamic-report-page-size")?.value || 20);
   dynamicReportPage = page;
-  $("#dynamic-report-page-info").textContent = `Trang ${page} · ${rows.length}/${dynamicReportTotal} dòng`;
+  $("#dynamic-report-page-info").textContent = `Trang ${page} Â· ${rows.length}/${dynamicReportTotal} dÃ²ng`;
   $("#dynamic-report-prev").disabled = page <= 1;
   $("#dynamic-report-next").disabled = page * pageSize >= dynamicReportTotal;
 }
@@ -2379,7 +2583,7 @@ $("#telegram-test-message")?.addEventListener("click", async () => {
 });
 
 async function loadAudit() {
-  setTableLoading("#audit-table", 4, "Đang tải nhật ký hoạt động...");
+  setTableLoading("#audit-table", 4, "Äang táº£i nháº­t kÃ½ hoáº¡t Ä‘á»™ng...");
   const logs = (await api("/api/admin/audit-logs")).logs;
-  $("#audit-table").innerHTML = logs.length ? logs.map((log) => `<tr><td>${new Date(log.created_at).toLocaleString("vi-VN")}</td><td><strong>${escapeHtml(log.actor)}</strong></td><td>${escapeHtml(log.action)}</td><td>${escapeHtml(log.details)}</td></tr>`).join("") : emptyRow(4, "Chưa có nhật ký", "Các thao tác quan trọng sẽ xuất hiện tại đây.");
+  $("#audit-table").innerHTML = logs.length ? logs.map((log) => `<tr><td>${new Date(log.created_at).toLocaleString("vi-VN")}</td><td><strong>${escapeHtml(log.actor)}</strong></td><td>${escapeHtml(log.action)}</td><td>${escapeHtml(log.details)}</td></tr>`).join("") : emptyRow(4, "ChÆ°a cÃ³ nháº­t kÃ½", "CÃ¡c thao tÃ¡c quan trá»ng sáº½ xuáº¥t hiá»‡n táº¡i Ä‘Ã¢y.");
 }

@@ -149,65 +149,8 @@
           </div>
 
           <section class="dashboard-tab-panel active" id="dashboard-tab-summary" role="tabpanel" aria-labelledby="dashboard-tab-summary-button">
-            <div class="dashboard-section-label">
-              <span>Sản lượng dịch vụ</span>
-              <small id="dashboard-summary-period">Tháng hiện tại</small>
-            </div>
-            <section class="dashboard-card-grid dashboard-production-grid" aria-label="Sản lượng dịch vụ">
-              <article class="metric-card dashboard-metric-card">
-                <div class="metric-icon">FIB</div>
-                <div>
-                  <span>Fiber</span>
-                  <strong id="dashboard-production-fiber">--</strong>
-                  <small class="metric-note">Tổng theo VNPT Khu vực</small>
-                </div>
-              </article>
-              <article class="metric-card dashboard-metric-card">
-                <div class="metric-icon">TV</div>
-                <div>
-                  <span>MyTV</span>
-                  <strong id="dashboard-production-mytv">--</strong>
-                  <small class="metric-note">Chờ công thức</small>
-                </div>
-              </article>
-              <article class="metric-card dashboard-metric-card">
-                <div class="metric-icon">MSH</div>
-                <div>
-                  <span>Mesh</span>
-                  <strong id="dashboard-production-mesh">--</strong>
-                  <small class="metric-note">Chờ công thức</small>
-                </div>
-              </article>
-              <article class="metric-card dashboard-metric-card">
-                <div class="metric-icon">CAM</div>
-                <div>
-                  <span>CAM</span>
-                  <strong id="dashboard-production-cam">--</strong>
-                  <small class="metric-note">Chờ công thức</small>
-                </div>
-              </article>
-            </section>
-
-            <div class="dashboard-section-label mt-4">
-              <span>Doanh thu</span>
-              <small>Chờ bổ sung công thức</small>
-            </div>
-            <section class="dashboard-card-grid dashboard-revenue-grid" aria-label="Doanh thu dịch vụ">
-              <article class="metric-card dashboard-metric-card revenue-total"><div class="metric-icon">T</div><div><span>Tổng doanh thu</span><strong>--</strong><small class="metric-note">Chưa có dữ liệu</small></div></article>
-              <article class="metric-card dashboard-metric-card"><div class="metric-icon">FIB</div><div><span>Doanh thu Fiber</span><strong>--</strong><small class="metric-note">Chưa có dữ liệu</small></div></article>
-              <article class="metric-card dashboard-metric-card"><div class="metric-icon">TV</div><div><span>Doanh thu MyTV</span><strong>--</strong><small class="metric-note">Chưa có dữ liệu</small></div></article>
-              <article class="metric-card dashboard-metric-card"><div class="metric-icon">MSH</div><div><span>Doanh thu Mesh</span><strong>--</strong><small class="metric-note">Chưa có dữ liệu</small></div></article>
-              <article class="metric-card dashboard-metric-card"><div class="metric-icon">CAM</div><div><span>Doanh thu CAM</span><strong>--</strong><small class="metric-note">Chưa có dữ liệu</small></div></article>
-            </section>
-
-            <section class="dashboard-empty mt-4">
-              <p class="eyebrow">Thiết kế sau</p>
-              <h2>Khu vực còn lại đang để trống</h2>
-              <p>Phần này đã được dọn sạch để mình tiếp tục bố trí biểu đồ hoặc bảng theo ý tưởng tiếp theo của anh.</p>
-            </section>
-
             {% if user.role == "admin" %}
-            <section class="data-card mt-4" id="dashboard-designed-section">
+            <section class="data-card" id="dashboard-designed-section">
               <div class="section-heading">
                 <div>
                   <p class="eyebrow">Dashboard Builder</p>
@@ -224,16 +167,17 @@
               <div class="dashboard-runtime-tabs" id="dashboard-viewer-tabs" role="tablist" aria-label="Tab dashboard đã thiết kế"></div>
               <div class="dashboard-runtime-view" id="dashboard-viewer-workspace"></div>
             </section>
+            {% else %}
+            <section class="dashboard-empty">
+              <p class="eyebrow">Tổng quan</p>
+              <h2>Trang tổng quan đang được thiết kế lại</h2>
+              <p>Quản trị viên sẽ cấu hình nội dung hiển thị từ chức năng Thiết kế Layout báo cáo.</p>
+            </section>
             {% endif %}
           </section>
 
           <section class="dashboard-tab-panel" id="dashboard-tab-fiber" role="tabpanel" aria-labelledby="dashboard-tab-fiber-button" hidden>
-            <section class="data-card dashboard-toolbar">
-              <div>
-                <p class="eyebrow">Fiber</p>
-                <h2>Sản lượng Fiber theo khu vực</h2>
-                <p id="dashboard-fiber-period">Dữ liệu tháng hiện tại, lọc loại hình 58.</p>
-              </div>
+            <section class="data-card dashboard-toolbar dashboard-toolbar-compact">
               <button class="btn-secondary" id="refresh-dashboard-fiber" type="button"><span class="button-label">Tải lại</span><span class="spinner"></span></button>
               <div id="dashboard-fiber-message" class="result hidden" role="status"></div>
             </section>
@@ -411,7 +355,9 @@
                   <button class="builder-add-tab" id="add-dashboard-tab" type="button">+ Thêm Tab mới</button>
                 </div>
                 <div class="builder-toolbar">
+                  <button class="btn-secondary" id="add-dashboard-row-1" type="button">Thêm Layout 1 cột</button>
                   <button class="btn-secondary" id="add-dashboard-row-2" type="button">Thêm Layout 2 cột</button>
+                  <button class="btn-secondary" id="add-dashboard-row-3" type="button">Thêm Layout 3 cột</button>
                   <button class="btn-secondary" id="add-dashboard-row-4" type="button">Thêm Layout 4 cột</button>
                 </div>
                 <div class="dashboard-workspace-grid" id="dashboard-builder-workspace"></div>

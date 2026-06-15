@@ -25,8 +25,8 @@ router = APIRouter()
 templates = Jinja2Templates(directory=Path("app/presentation/templates"))
 FAILED_LOGIN_COUNTS: dict[str, int] = {}
 ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
-DASHBOARD_LAYOUT_TYPES = {"2_columns": 2, "4_columns": 4}
-DASHBOARD_WIDGET_TYPES = {"bar_chart", "pie_chart", "line_chart", "data_table", "metric"}
+DASHBOARD_LAYOUT_TYPES = {"1_column": 1, "2_columns": 2, "3_columns": 3, "4_columns": 4}
+DASHBOARD_WIDGET_TYPES = {"bar_chart", "pie_chart", "line_chart", "combo_chart", "data_table", "metric", "data_card", "text_title"}
 DASHBOARD_LAYOUT_EXCLUDED_FEATURE_CODES = {"admin.dashboard_builder"}
 
 
@@ -251,30 +251,40 @@ def normalize_dashboard_layout(payload: DashboardLayoutPayload) -> tuple[str, st
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cấu trúc dòng Layout không hợp lệ.")
             layout_type = str(row.get("layout_type") or "").strip()
             if layout_type not in DASHBOARD_LAYOUT_TYPES:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Loại Layout chỉ hỗ trợ 2_columns hoặc 4_columns.")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Loại Layout chỉ hỗ trợ 1_column, 2_columns, 3_columns hoặc 4_columns.")
             max_position = DASHBOARD_LAYOUT_TYPES[layout_type]
             row_id = int(row.get("row_id") or row_index)
             normalized_widgets = []
             for widget in row.get("widgets") or []:
                 if not isinstance(widget, dict):
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cấu trúc biểu đồ không hợp lệ.")
-                sql_code = str(widget.get("sql_code") or "").strip()
-                if not sql_code:
-                    continue
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cấu trúc hiển thị không hợp lệ.")
                 widget_type = str(widget.get("type") or "").strip()
+                sql_code = str(widget.get("sql_code") or "").strip()
+                title = str(widget.get("title") or "").strip()
+                text_content = str(widget.get("text_content") or "").strip()
+                if widget_type == "text_title":
+                    if not title and not text_content:
+                        continue
+                elif not sql_code:
+                    continue
                 if widget_type not in DASHBOARD_WIDGET_TYPES:
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Loại biểu đồ không hợp lệ.")
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Loại hiển thị không hợp lệ.")
                 position = int(widget.get("position") or 0)
                 if position < 1 or position > max_position:
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Vị trí biểu đồ không khớp số cột Layout.")
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Vị trí hiển thị không khớp số cột Layout.")
                 raw_filters = widget.get("filters") if isinstance(widget.get("filters"), dict) else {}
                 filters = {str(key).strip(): value for key, value in raw_filters.items() if str(key).strip()}
+                raw_chart_config = widget.get("chart_config") if isinstance(widget.get("chart_config"), dict) else {}
+                chart_config = {str(key).strip(): value for key, value in raw_chart_config.items() if str(key).strip()}
                 normalized_widgets.append({
                     "position": position,
                     "type": widget_type,
-                    "title": str(widget.get("title") or "").strip(),
-                    "sql_code": normalize_dashboard_code(sql_code, "Mã SQL"),
+                    "title": title,
+                    "sql_code": normalize_dashboard_code(sql_code, "Mã SQL") if sql_code else "",
                     "filters": filters,
+                    "chart_config": chart_config,
+                    "text_content": text_content,
+                    "icon_url": str(widget.get("icon_url") or "").strip(),
                 })
             normalized_rows.append({
                 "row_id": row_id,

@@ -224,6 +224,7 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data() -> None:
                                         "title": "Widget A",
                                         "sql_code": "BC_BUILDER_TEST",
                                         "filters": {"status": "1"},
+                                        "chart_config": {"orientation": "horizontal", "label_column": "don_vi", "value_column": "so_luong"},
                                     }
                                 ],
                             }
@@ -236,8 +237,40 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data() -> None:
                         "grid_layout": [
                             {
                                 "row_id": 1,
-                                "layout_type": "4_columns",
-                                "widgets": [],
+                                "layout_type": "1_column",
+                                "widgets": [
+                                    {
+                                        "position": 1,
+                                        "type": "text_title",
+                                        "title": "Tiêu đề thiết kế",
+                                        "text_content": "Nội dung giới thiệu tab",
+                                    }
+                                ],
+                            },
+                            {
+                                "row_id": 2,
+                                "layout_type": "3_columns",
+                                "widgets": [
+                                    {
+                                        "position": 1,
+                                        "type": "combo_chart",
+                                        "title": "Biểu đồ kết hợp",
+                                        "sql_code": "BC_BUILDER_TEST",
+                                        "chart_config": {
+                                            "label_column": "don_vi",
+                                            "bar_column": "so_luong",
+                                            "line_column": "ty_le",
+                                        },
+                                    },
+                                    {
+                                        "position": 2,
+                                        "type": "data_card",
+                                        "title": "Thẻ dữ liệu",
+                                        "sql_code": "BC_BUILDER_TEST",
+                                        "icon_url": "https://example.vn/icon.png",
+                                        "text_content": "Ghi chú thẻ",
+                                    },
+                                ],
                             }
                         ],
                     },
@@ -246,7 +279,13 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data() -> None:
         }
         saved = client.post("/api/admin/dashboard-layouts", json=layout_payload)
         assert saved.status_code == 200
-        assert saved.json()["layout"]["tabs"][0]["tab_id"] == "tab_a"
+        saved_layout = saved.json()["layout"]
+        assert saved_layout["tabs"][0]["tab_id"] == "tab_a"
+        assert saved_layout["tabs"][0]["grid_layout"][0]["widgets"][0]["chart_config"]["orientation"] == "horizontal"
+        assert saved_layout["tabs"][1]["grid_layout"][0]["layout_type"] == "1_column"
+        assert saved_layout["tabs"][1]["grid_layout"][0]["widgets"][0]["type"] == "text_title"
+        assert saved_layout["tabs"][1]["grid_layout"][1]["layout_type"] == "3_columns"
+        assert saved_layout["tabs"][1]["grid_layout"][1]["widgets"][1]["icon_url"] == "https://example.vn/icon.png"
 
         layouts = client.get("/api/admin/dashboard-layouts")
         assert layouts.status_code == 200
@@ -262,7 +301,7 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data() -> None:
 
         tab_b = client.get("/api/admin/dashboard-layouts/DASHBOARD_TEST_BUILDER/tabs/tab_b/data")
         assert tab_b.status_code == 200
-        assert tab_b.json()["widgets"] == []
+        assert [widget["type"] for widget in tab_b.json()["widgets"]] == ["combo_chart", "data_card"]
 
 
 def test_dashboard_layout_pages_include_overview_and_reports_not_web_admin() -> None:

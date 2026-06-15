@@ -1574,7 +1574,8 @@ p {
 
 .builder-tab,
 .runtime-tab {
-  cursor: grab;
+  flex: 1 1 96px;
+  cursor: pointer;
 }
 
 .builder-tab.active,
@@ -1591,15 +1592,28 @@ p {
   opacity: .55;
 }
 
+.builder-tab-edit,
 .builder-tab-delete {
   display: inline-grid;
   width: 22px;
   height: 22px;
   place-items: center;
   border-radius: 999px;
+  line-height: 1;
+}
+
+.builder-tab-edit {
+  color: #bfdbfe;
+  font-size: .9rem;
+}
+
+.builder-tab-edit:hover {
+  background: rgba(125, 211, 252, .18);
+}
+
+.builder-tab-delete {
   color: #fecaca;
   font-size: 1rem;
-  line-height: 1;
 }
 
 .builder-tab-delete:hover {
@@ -1679,6 +1693,30 @@ p {
   font-size: .78rem;
 }
 
+.dashboard-widget-config {
+  display: none;
+  gap: .65rem;
+  padding: .75rem;
+  border: 1px solid rgba(125, 211, 252, .18);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, .36);
+}
+
+.dashboard-widget-config.active {
+  display: grid;
+}
+
+.dashboard-toolbar-compact {
+  justify-items: start;
+}
+
+@media (min-width: 768px) {
+  .dashboard-toolbar-compact {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+  }
+}
+
 .runtime-widget-card {
   min-height: 260px;
 }
@@ -1688,6 +1726,66 @@ p {
   color: #fff;
   font-size: .98rem;
   font-weight: 900;
+}
+
+.runtime-text-widget {
+  min-height: auto;
+  padding: .35rem .1rem;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.runtime-text-widget h2 {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(1.1rem, 2vw, 1.65rem);
+  font-weight: 900;
+}
+
+.runtime-text-widget p {
+  margin: .35rem 0 0;
+  color: #cbd5e1;
+  line-height: 1.55;
+}
+
+.runtime-data-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: .9rem;
+}
+
+.runtime-data-card-icon {
+  width: 56px;
+  height: 56px;
+  overflow: hidden;
+  border-radius: 16px;
+  background: rgba(14, 165, 233, .16);
+  display: inline-grid;
+  place-items: center;
+  color: #bae6fd;
+  font-size: 1.45rem;
+  font-weight: 900;
+}
+
+.runtime-data-card-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.runtime-data-card-value {
+  color: #fff;
+  font-size: clamp(1.4rem, 2.8vw, 2.15rem);
+  font-weight: 950;
+  line-height: 1;
+}
+
+.runtime-data-card-note {
+  margin-top: .3rem;
+  color: #cbd5e1;
+  font-size: .88rem;
 }
 
 .runtime-chart-box {
