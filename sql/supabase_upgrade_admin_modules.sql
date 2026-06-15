@@ -22,6 +22,7 @@ values
   ('admin.data_permissions', 'Phân quyền dữ liệu người dùng', 'admin.web', 24),
   ('admin.catalogs', 'Quản trị danh mục', 'admin.web', 25),
   ('reports', 'Báo cáo thống kê', null, 30),
+  ('admin.dashboard_builder', 'Thiết kế Layout báo cáo', 'reports', 31),
   ('vault', 'Tài khoản web', 'admin.web', 40),
   ('vault.view', 'Xem danh sách tài khoản', 'vault', 41),
   ('vault.manage', 'Thêm và sửa tài khoản', 'vault', 42),
@@ -65,6 +66,15 @@ create table if not exists public.user_data_permissions (
   region_code text not null references public.data_regions(code) on delete cascade,
   primary key (user_id, region_code)
 );
+
+create index if not exists user_data_permissions_region_code_idx
+on public.user_data_permissions (region_code);
+
+create index if not exists user_permissions_feature_code_idx
+on public.user_permissions (feature_code);
+
+create index if not exists web_credentials_website_id_idx
+on public.web_credentials (website_id);
 
 
 create table if not exists public.system_roles (
@@ -115,6 +125,60 @@ create table if not exists public.sql_reports (
 create unique index if not exists sql_reports_ma_bao_cao_lower_idx
 on public.sql_reports (lower(ma_bao_cao));
 
+create table if not exists public.dashboard_layouts (
+  page_id text primary key,
+  page_name text not null,
+  layout_json jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+insert into public.dashboard_layouts (page_id, page_name, layout_json, created_at, updated_at)
+values (
+  'DASHBOARD_KINH_DOANH',
+  'Dashboard Kinh doanh',
+  '{
+    "page_id": "DASHBOARD_KINH_DOANH",
+    "tabs": [
+      {
+        "tab_id": "tab_doanh_thu",
+        "tab_name": "Doanh Thu Lõi",
+        "order": 1,
+        "grid_layout": [
+          {
+            "row_id": 1,
+            "layout_type": "2_columns",
+            "widgets": [
+              {"position": 1, "type": "bar_chart", "title": "Di động", "sql_code": "BC_DI_DONG"},
+              {"position": 2, "type": "pie_chart", "title": "Băng rộng", "sql_code": "BC_BANG_RONG"}
+            ]
+          }
+        ]
+      },
+      {
+        "tab_id": "tab_san_luong",
+        "tab_name": "Sản lượng",
+        "order": 2,
+        "grid_layout": [
+          {
+            "row_id": 1,
+            "layout_type": "4_columns",
+            "widgets": [
+              {"position": 1, "type": "metric", "title": "Fiber", "sql_code": "DASHBOARD_FIBER_VNPT"},
+              {"position": 2, "type": "metric", "title": "MyTV", "sql_code": "BC_MYTV"},
+              {"position": 3, "type": "metric", "title": "Mesh", "sql_code": "BC_MESH"},
+              {"position": 4, "type": "metric", "title": "CAM", "sql_code": "BC_CAM"}
+            ]
+          }
+        ]
+      }
+    ]
+  }'::jsonb,
+  now(),
+  now()
+)
+on conflict (page_id) do nothing;
+
 insert into public.system_roles (code, name, description, is_active, sort_order, created_at, updated_at)
 values
   ('admin', 'Quan tri he thong', 'Toan quyen quan tri va cau hinh he thong.', true, 10, now(), now()),
@@ -146,8 +210,10 @@ alter table public.system_roles enable row level security;
 alter table public.work_tasks enable row level security;
 alter table public.login_attempts enable row level security;
 alter table public.sql_reports enable row level security;
+alter table public.dashboard_layouts enable row level security;
 
 grant select, insert, update, delete on public.work_tasks to anon, authenticated, service_role;
 grant select, insert, update, delete on public.login_attempts to anon, authenticated, service_role;
 grant select, insert, update, delete on public.sql_reports to anon, authenticated, service_role;
 grant usage, select on sequence public.sql_reports_id_seq to anon, authenticated, service_role;
+grant select, insert, update, delete on public.dashboard_layouts to service_role;

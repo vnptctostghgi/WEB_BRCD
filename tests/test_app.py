@@ -192,6 +192,118 @@ def test_admin_can_manage_sql_reports_and_run_dynamic_report() -> None:
         assert body["pagination"]["page_size"] == 20
 
 
+def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data() -> None:
+    with TestClient(app) as client:
+        login(client)
+        report_payload = {
+            "ten_bao_cao": "Báo cáo Builder test",
+            "ma_bao_cao": "BC_BUILDER_TEST",
+            "cau_lenh_sql": "SELECT don_vi, so_luong FROM css_cto.builder_test WHERE trang_thai = :status",
+            "cac_tham_so": ["status"],
+        }
+        assert client.post("/api/admin/sql-reports", json=report_payload).status_code == 200
+
+        layout_payload = {
+            "page_id": "DASHBOARD_TEST_BUILDER",
+            "page_name": "Dashboard Test Builder",
+            "layout": {
+                "page_id": "DASHBOARD_TEST_BUILDER",
+                "tabs": [
+                    {
+                        "tab_id": "tab_a",
+                        "tab_name": "Tab A",
+                        "order": 1,
+                        "grid_layout": [
+                            {
+                                "row_id": 1,
+                                "layout_type": "2_columns",
+                                "widgets": [
+                                    {
+                                        "position": 1,
+                                        "type": "bar_chart",
+                                        "title": "Widget A",
+                                        "sql_code": "BC_BUILDER_TEST",
+                                        "filters": {"status": "1"},
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "tab_id": "tab_b",
+                        "tab_name": "Tab B",
+                        "order": 2,
+                        "grid_layout": [
+                            {
+                                "row_id": 1,
+                                "layout_type": "4_columns",
+                                "widgets": [],
+                            }
+                        ],
+                    },
+                ],
+            },
+        }
+        saved = client.post("/api/admin/dashboard-layouts", json=layout_payload)
+        assert saved.status_code == 200
+        assert saved.json()["layout"]["tabs"][0]["tab_id"] == "tab_a"
+
+        layouts = client.get("/api/admin/dashboard-layouts")
+        assert layouts.status_code == 200
+        assert any(item["page_id"] == "DASHBOARD_TEST_BUILDER" for item in layouts.json()["layouts"])
+
+        tab_a = client.get("/api/admin/dashboard-layouts/DASHBOARD_TEST_BUILDER/tabs/tab_a/data")
+        assert tab_a.status_code == 200
+        tab_payload = tab_a.json()
+        assert len(tab_payload["widgets"]) == 1
+        assert tab_payload["widgets"][0]["sql_code"] == "BC_BUILDER_TEST"
+        assert tab_payload["widgets"][0]["data"]["columns"] == ["STT", "MA_BAO_CAO", "TEN_BAO_CAO", "THAM_SO"]
+        assert tab_payload["widgets"][0]["data"]["rows"][0]["THAM_SO"] == "status=1"
+
+        tab_b = client.get("/api/admin/dashboard-layouts/DASHBOARD_TEST_BUILDER/tabs/tab_b/data")
+        assert tab_b.status_code == 200
+        assert tab_b.json()["widgets"] == []
+
+
+def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
+    with TestClient(app) as client:
+        login(client)
+        created = client.post(
+            "/api/admin/users",
+            json={
+                "username": "viewer_builder",
+                "full_name": "Viewer Builder",
+                "password": "Viewer@Builder123",
+                "role": "viewer",
+            },
+        )
+        assert created.status_code == 200
+        client.post("/api/auth/logout")
+        login(client, "viewer_builder", "Viewer@Builder123")
+        home = client.get("/")
+        assert home.status_code == 200
+        assert "view-dashboard-builder" not in home.text
+        assert "dashboard-designed-section" not in home.text
+
+        forbidden_urls = [
+            "/api/admin/dashboard-layouts",
+            "/api/admin/dashboard-layouts/DASHBOARD_TEST_BUILDER",
+            "/api/admin/dashboard-layouts/DASHBOARD_TEST_BUILDER/tabs/tab_a/data",
+            "/api/reports/configs",
+        ]
+        for url in forbidden_urls:
+            response = client.get(url)
+            assert response.status_code == 403
+            assert response.json()["detail"] == "Bạn không có quyền truy cập chức năng này"
+
+        run_response = client.post(
+            "/api/reports/run",
+            json={"ma_bao_cao": "BC_BUILDER_TEST", "filters": {}, "page": 1, "page_size": 20},
+        )
+        assert run_response.status_code == 403
+        assert run_response.json()["detail"] == "Bạn không có quyền truy cập chức năng này"
+
+
 def test_auto_module_is_removed_from_dashboard() -> None:
     with TestClient(app) as client:
         login(client)

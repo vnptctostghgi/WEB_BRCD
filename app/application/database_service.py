@@ -124,6 +124,62 @@ class DatabaseService:
             },
         }
 
+    def run_dashboard_layout_tab(self, *, page_id: str, tab_id: str) -> dict[str, Any]:
+        layout_row = self.app_repository.get_dashboard_layout(page_id)
+        if not layout_row:
+            return {
+                "ok": False,
+                "message": "Không tìm thấy trang dashboard.",
+                "page_id": page_id,
+                "tab_id": tab_id,
+                "widgets": [],
+            }
+
+        layout = layout_row.get("layout") or {}
+        tabs = layout.get("tabs") if isinstance(layout.get("tabs"), list) else []
+        tab = next((item for item in tabs if str(item.get("tab_id")) == tab_id), None)
+        if not tab:
+            return {
+                "ok": False,
+                "message": "Không tìm thấy Tab dashboard.",
+                "page_id": page_id,
+                "tab_id": tab_id,
+                "widgets": [],
+            }
+
+        widget_results = []
+        all_ok = True
+        for row in tab.get("grid_layout") or []:
+            row_id = row.get("row_id")
+            for widget in row.get("widgets") or []:
+                sql_code = str(widget.get("sql_code") or "").strip().upper()
+                if not sql_code:
+                    continue
+                filters = widget.get("filters") if isinstance(widget.get("filters"), dict) else {}
+                result = self.run_dynamic_report(
+                    ma_bao_cao=sql_code,
+                    filters=filters,
+                    page=1,
+                    page_size=50,
+                )
+                all_ok = all_ok and bool(result.get("ok"))
+                widget_results.append({
+                    "row_id": row_id,
+                    "position": widget.get("position"),
+                    "type": widget.get("type"),
+                    "title": widget.get("title") or sql_code,
+                    "sql_code": sql_code,
+                    "data": result,
+                })
+
+        return {
+            "ok": all_ok,
+            "message": "Đã tải dữ liệu Tab dashboard." if all_ok else "Một số biểu đồ chưa tải được dữ liệu.",
+            "page_id": page_id,
+            "tab_id": tab_id,
+            "widgets": widget_results,
+        }
+
     def run_dashboard_datcoc_test(self) -> dict[str, Any]:
         page = 1
         page_size = 20

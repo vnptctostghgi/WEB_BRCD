@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import sqlite3
 from io import BytesIO
 from typing import Any, Literal
@@ -7,7 +8,7 @@ import openpyxl
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.application.auth_service import AuthService
 from app.application.database_service import DatabaseService
@@ -23,6 +24,9 @@ from app.settings import get_settings
 router = APIRouter()
 templates = Jinja2Templates(directory=Path("app/presentation/templates"))
 FAILED_LOGIN_COUNTS: dict[str, int] = {}
+ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
+DASHBOARD_LAYOUT_TYPES = {"2_columns": 2, "4_columns": 4}
+DASHBOARD_WIDGET_TYPES = {"bar_chart", "pie_chart", "line_chart", "data_table", "metric"}
 
 
 class LoginPayload(BaseModel):
@@ -112,6 +116,12 @@ class RunReportPayload(BaseModel):
     page_size: int = 20
 
 
+class DashboardLayoutPayload(BaseModel):
+    page_id: str
+    page_name: str = ""
+    layout: dict[str, Any] = Field(default_factory=dict)
+
+
 class SystemRolePayload(BaseModel):
     code: str
     name: str
@@ -192,6 +202,93 @@ def raise_sql_report_schema_error(error: RuntimeError) -> None:
             detail="Supabase chưa có bảng sql_reports. Hãy chạy lại file sql/supabase_upgrade_admin_modules.sql.",
         ) from error
     raise error
+
+
+def raise_dashboard_layout_schema_error(error: RuntimeError) -> None:
+    if "dashboard_layouts" in str(error):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Supabase chưa có bảng dashboard_layouts. Hãy chạy lại file sql/supabase_upgrade_admin_modules.sql.",
+        ) from error
+    raise error
+
+
+def normalize_dashboard_code(value: Any, label: str, *, uppercase: bool = True) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{label} không được để trống.")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", normalized):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{label} chỉ được chứa chữ, số, dấu gạch dưới hoặc gạch ngang.")
+    return normalized.upper() if uppercase else normalized
+
+
+def normalize_dashboard_layout(payload: DashboardLayoutPayload) -> tuple[str, str, dict[str, Any]]:
+    page_id = normalize_dashboard_code(payload.page_id, "Mã trang")
+    page_name = payload.page_name.strip() or page_id
+    raw_layout = payload.layout if isinstance(payload.layout, dict) else {}
+    tabs = raw_layout.get("tabs")
+    if not isinstance(tabs, list) or not tabs:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dashboard cần có ít nhất một Tab.")
+
+    normalized_tabs = []
+    seen_tabs: set[str] = set()
+    for tab_index, tab in enumerate(tabs, start=1):
+        if not isinstance(tab, dict):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cấu trúc Tab không hợp lệ.")
+        tab_id = normalize_dashboard_code(tab.get("tab_id") or f"tab_{tab_index}", "Mã Tab", uppercase=False)
+        if tab_id in seen_tabs:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Mã Tab {tab_id} bị trùng.")
+        seen_tabs.add(tab_id)
+        tab_name = str(tab.get("tab_name") or f"Tab {tab_index}").strip()
+        if not tab_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tên Tab không được để trống.")
+
+        normalized_rows = []
+        grid_layout = tab.get("grid_layout") if isinstance(tab.get("grid_layout"), list) else []
+        for row_index, row in enumerate(grid_layout, start=1):
+            if not isinstance(row, dict):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cấu trúc dòng Layout không hợp lệ.")
+            layout_type = str(row.get("layout_type") or "").strip()
+            if layout_type not in DASHBOARD_LAYOUT_TYPES:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Loại Layout chỉ hỗ trợ 2_columns hoặc 4_columns.")
+            max_position = DASHBOARD_LAYOUT_TYPES[layout_type]
+            row_id = int(row.get("row_id") or row_index)
+            normalized_widgets = []
+            for widget in row.get("widgets") or []:
+                if not isinstance(widget, dict):
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cấu trúc biểu đồ không hợp lệ.")
+                sql_code = str(widget.get("sql_code") or "").strip()
+                if not sql_code:
+                    continue
+                widget_type = str(widget.get("type") or "").strip()
+                if widget_type not in DASHBOARD_WIDGET_TYPES:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Loại biểu đồ không hợp lệ.")
+                position = int(widget.get("position") or 0)
+                if position < 1 or position > max_position:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Vị trí biểu đồ không khớp số cột Layout.")
+                raw_filters = widget.get("filters") if isinstance(widget.get("filters"), dict) else {}
+                filters = {str(key).strip(): value for key, value in raw_filters.items() if str(key).strip()}
+                normalized_widgets.append({
+                    "position": position,
+                    "type": widget_type,
+                    "title": str(widget.get("title") or "").strip(),
+                    "sql_code": normalize_dashboard_code(sql_code, "Mã SQL"),
+                    "filters": filters,
+                })
+            normalized_rows.append({
+                "row_id": row_id,
+                "layout_type": layout_type,
+                "widgets": sorted(normalized_widgets, key=lambda item: item["position"]),
+            })
+
+        normalized_tabs.append({
+            "tab_id": tab_id,
+            "tab_name": tab_name,
+            "order": tab_index,
+            "grid_layout": normalized_rows,
+        })
+
+    return page_id, page_name, {"page_id": page_id, "tabs": normalized_tabs}
 
 
 def validate_report_sql(sql: str) -> str:
@@ -327,7 +424,7 @@ def current_user(request: Request) -> dict:
 def admin_user(request: Request) -> dict:
     user = current_user(request)
     if user["role"] != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bạn không có quyền quản trị.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ONLY_MESSAGE)
     return user
 
 
@@ -671,9 +768,68 @@ def delete_sql_report(request: Request, report_id: int) -> dict:
     return {"ok": True}
 
 
+@router.get("/api/admin/dashboard-layouts")
+def list_dashboard_layouts(request: Request) -> dict:
+    admin_user(request)
+    try:
+        layouts = build_app_repository().list_dashboard_layouts()
+    except RuntimeError as error:
+        raise_dashboard_layout_schema_error(error)
+    return {"layouts": layouts}
+
+
+@router.get("/api/admin/dashboard-layouts/{page_id}")
+def get_dashboard_layout(request: Request, page_id: str) -> dict:
+    admin_user(request)
+    safe_page_id = normalize_dashboard_code(page_id, "Mã trang")
+    try:
+        layout = build_app_repository().get_dashboard_layout(safe_page_id)
+    except RuntimeError as error:
+        raise_dashboard_layout_schema_error(error)
+    if not layout:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy trang dashboard.")
+    return layout
+
+
+@router.post("/api/admin/dashboard-layouts")
+def save_dashboard_layout(request: Request, payload: DashboardLayoutPayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    page_id, page_name, layout = normalize_dashboard_layout(payload)
+    try:
+        repository.save_dashboard_layout(page_id, page_name, layout)
+    except RuntimeError as error:
+        raise_dashboard_layout_schema_error(error)
+    repository.add_audit_log(actor["username"], "dashboard_layout_saved", f"Lưu layout dashboard {page_id}")
+    return {"ok": True, "page_id": page_id, "layout": layout}
+
+
+@router.delete("/api/admin/dashboard-layouts/{page_id}")
+def delete_dashboard_layout(request: Request, page_id: str) -> dict:
+    actor = admin_user(request)
+    safe_page_id = normalize_dashboard_code(page_id, "Mã trang")
+    try:
+        build_app_repository().delete_dashboard_layout(safe_page_id)
+    except RuntimeError as error:
+        raise_dashboard_layout_schema_error(error)
+    build_app_repository().add_audit_log(actor["username"], "dashboard_layout_deleted", f"Xóa layout dashboard {safe_page_id}")
+    return {"ok": True}
+
+
+@router.get("/api/admin/dashboard-layouts/{page_id}/tabs/{tab_id}/data")
+def load_dashboard_layout_tab_data(request: Request, page_id: str, tab_id: str) -> dict:
+    admin_user(request)
+    safe_page_id = normalize_dashboard_code(page_id, "Mã trang")
+    safe_tab_id = normalize_dashboard_code(tab_id, "Mã Tab", uppercase=False)
+    try:
+        return build_database_service().run_dashboard_layout_tab(page_id=safe_page_id, tab_id=safe_tab_id)
+    except RuntimeError as error:
+        raise_dashboard_layout_schema_error(error)
+
+
 @router.get("/api/reports/configs")
 def list_report_configs(request: Request) -> dict:
-    current_user(request)
+    admin_user(request)
     try:
         reports = build_app_repository().list_sql_reports()
     except RuntimeError as error:
@@ -693,7 +849,7 @@ def list_report_configs(request: Request) -> dict:
 
 @router.post("/api/reports/run")
 def run_dynamic_report(request: Request, payload: RunReportPayload) -> dict:
-    current_user(request)
+    admin_user(request)
     try:
         return build_database_service().run_dynamic_report(
             ma_bao_cao=payload.ma_bao_cao.strip().upper(),

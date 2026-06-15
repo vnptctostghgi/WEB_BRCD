@@ -1,10 +1,16 @@
 import sqlite3
+import json
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 
-from app.data_access.app_repository import hash_password
+from app.data_access.app_repository import (
+    DEFAULT_DASHBOARD_LAYOUT,
+    DEFAULT_DASHBOARD_PAGE_ID,
+    DEFAULT_DASHBOARD_PAGE_NAME,
+    hash_password,
+)
 
 
 FEATURE_ROWS = [
@@ -19,6 +25,7 @@ FEATURE_ROWS = [
     {"code": "admin.menu", "name": "Quản trị menu", "parent_code": "admin.web", "sort_order": 27},
     {"code": "admin.work_tasks", "name": "Quản lý công việc", "parent_code": None, "sort_order": 28},
     {"code": "reports", "name": "Báo cáo thống kê", "parent_code": None, "sort_order": 30},
+    {"code": "admin.dashboard_builder", "name": "Thiết kế Layout báo cáo", "parent_code": "reports", "sort_order": 31},
     {"code": "vault", "name": "Tài khoản web", "parent_code": "admin.web", "sort_order": 40},
     {"code": "vault.view", "name": "Xem danh sách tài khoản", "parent_code": "vault", "sort_order": 41},
     {"code": "vault.manage", "name": "Thêm và sửa tài khoản", "parent_code": "vault", "sort_order": 42},
@@ -77,6 +84,11 @@ class SupabaseRepository:
             admin = self.get_user_by_id(user_id)
         if admin:
             self.set_user_permissions(admin["id"], [feature["code"] for feature in FEATURE_ROWS])
+        try:
+            self._ensure_default_dashboard_layout()
+        except RuntimeError:
+            # Operator may deploy code before running the SQL patch for dashboard_layouts.
+            pass
 
     def get_user_by_username(self, username: str) -> dict[str, Any] | None:
         rows = self._get("users", {"username": f"eq.{username}"})
@@ -394,6 +406,48 @@ class SupabaseRepository:
     def delete_sql_report(self, report_id: int) -> None:
         self._delete("sql_reports", {"id": f"eq.{report_id}"})
 
+    def list_dashboard_layouts(self) -> list[dict[str, Any]]:
+        return self._get("dashboard_layouts", {
+            "select": "page_id,page_name,created_at,updated_at",
+            "order": "updated_at.desc,page_name.asc",
+        })
+
+    def get_dashboard_layout(self, page_id: str) -> dict[str, Any] | None:
+        rows = self._get("dashboard_layouts", {"page_id": f"eq.{page_id}", "limit": "1"})
+        return self._decode_dashboard_layout(rows[0]) if rows else None
+
+    def save_dashboard_layout(self, page_id: str, page_name: str, layout: dict[str, Any]) -> str:
+        now = self._now()
+        existing = self.get_dashboard_layout(page_id)
+        payload = {
+            "page_id": page_id,
+            "page_name": page_name,
+            "layout_json": layout,
+            "updated_at": now,
+        }
+        if existing:
+            self._patch("dashboard_layouts", {"page_id": f"eq.{page_id}"}, payload)
+            return page_id
+        payload["created_at"] = now
+        self._insert("dashboard_layouts", payload)
+        return page_id
+
+    def delete_dashboard_layout(self, page_id: str) -> None:
+        self._delete("dashboard_layouts", {"page_id": f"eq.{page_id}"})
+
+    def _ensure_default_dashboard_layout(self) -> None:
+        rows = self._get("dashboard_layouts", {"page_id": f"eq.{DEFAULT_DASHBOARD_PAGE_ID}", "select": "page_id", "limit": "1"})
+        if rows:
+            return
+        now = self._now()
+        self._insert("dashboard_layouts", {
+            "page_id": DEFAULT_DASHBOARD_PAGE_ID,
+            "page_name": DEFAULT_DASHBOARD_PAGE_NAME,
+            "layout_json": DEFAULT_DASHBOARD_LAYOUT,
+            "created_at": now,
+            "updated_at": now,
+        })
+
     def list_work_tasks(self, include_completed: bool = False) -> list[dict[str, Any]]:
         params = {"order": "run_time.asc,task_id.asc"}
         if not include_completed:
@@ -463,6 +517,18 @@ class SupabaseRepository:
     def _decode_sql_report(row: dict[str, Any]) -> dict[str, Any]:
         params = row.get("cac_tham_so") or []
         row["cac_tham_so"] = params if isinstance(params, list) else []
+        return row
+
+    @staticmethod
+    def _decode_dashboard_layout(row: dict[str, Any]) -> dict[str, Any]:
+        layout = row.get("layout_json") or {}
+        if isinstance(layout, str):
+            try:
+                layout = json.loads(layout)
+            except json.JSONDecodeError:
+                layout = {}
+        row.pop("layout_json", None)
+        row["layout"] = layout if isinstance(layout, dict) else {}
         return row
 
     @staticmethod

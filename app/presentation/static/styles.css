@@ -1362,6 +1362,298 @@ p {
   min-width: 520px;
 }
 
+.dashboard-builder-shell {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (min-width: 1280px) {
+  .dashboard-builder-shell {
+    grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.dashboard-page-list,
+.dashboard-builder-main {
+  min-width: 0;
+}
+
+@media (min-width: 1280px) {
+  .dashboard-page-list {
+    position: sticky;
+    top: 1rem;
+  }
+}
+
+.dashboard-page-table {
+  min-width: 520px;
+}
+
+.dashboard-page-form {
+  display: grid;
+  gap: .85rem;
+}
+
+@media (min-width: 768px) {
+  .dashboard-page-form {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  }
+}
+
+.dashboard-linked-tools,
+.dashboard-viewer-actions {
+  display: grid;
+  gap: .75rem;
+  margin-top: 1rem;
+  min-width: 0;
+}
+
+.dashboard-linked-tools {
+  border: 1px solid rgba(125, 211, 252, .22);
+  border-radius: 18px;
+  background: rgba(14, 165, 233, .1);
+  padding: .85rem;
+}
+
+.dashboard-linked-tools strong {
+  display: block;
+  color: #fff;
+  font-weight: 900;
+}
+
+.dashboard-linked-tools small {
+  display: block;
+  color: #bae6fd;
+  font-weight: 700;
+  line-height: 1.55;
+  margin-top: .15rem;
+}
+
+@media (min-width: 768px) {
+  .dashboard-linked-tools {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .dashboard-viewer-actions {
+    grid-template-columns: minmax(14rem, 22rem) auto;
+    align-items: end;
+    margin-top: 0;
+  }
+}
+
+.builder-tabs-wrap,
+.dashboard-runtime-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .55rem;
+  margin-top: 1rem;
+  border: 1px solid rgba(14, 165, 233, .28);
+  border-radius: 20px;
+  background: rgba(2, 6, 23, .24);
+  padding: .5rem;
+}
+
+.builder-tabs {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: .5rem;
+  min-width: 0;
+}
+
+.builder-tab,
+.runtime-tab,
+.builder-add-tab {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: .45rem;
+  border: 1px solid transparent;
+  border-radius: 15px;
+  background: transparent;
+  color: #bae6fd;
+  font-weight: 900;
+  padding: .55rem .8rem;
+  transition: background .18s ease, border-color .18s ease, color .18s ease, transform .18s ease;
+}
+
+.builder-tab,
+.runtime-tab {
+  cursor: grab;
+}
+
+.builder-tab.active,
+.runtime-tab.active,
+.builder-tab:hover,
+.runtime-tab:hover,
+.builder-add-tab:hover {
+  border-color: rgba(125, 211, 252, .34);
+  background: rgba(14, 165, 233, .2);
+  color: #fff;
+}
+
+.builder-tab.dragging {
+  opacity: .55;
+}
+
+.builder-tab-delete {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 999px;
+  color: #fecaca;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.builder-tab-delete:hover {
+  background: rgba(248, 113, 113, .18);
+}
+
+.builder-add-tab {
+  border-color: rgba(125, 211, 252, .24);
+  cursor: pointer;
+}
+
+.builder-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .6rem;
+  margin-top: 1rem;
+}
+
+.dashboard-workspace-grid,
+.dashboard-runtime-view {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.builder-row {
+  border: 1px solid rgba(125, 211, 252, .26);
+  border-radius: 22px;
+  background: rgba(2, 6, 23, .18);
+  padding: 1rem;
+}
+
+.builder-row.dragging {
+  opacity: .55;
+}
+
+.builder-row-header {
+  display: grid;
+  gap: .7rem;
+  margin-bottom: .9rem;
+}
+
+@media (min-width: 768px) {
+  .builder-row-header {
+    grid-template-columns: minmax(0, 1fr) minmax(12rem, 16rem) auto;
+    align-items: end;
+  }
+}
+
+.builder-row-title {
+  color: #fff;
+  font-weight: 900;
+}
+
+.builder-widget-card,
+.runtime-widget-card {
+  min-width: 0;
+  border: 1px solid rgba(125, 211, 252, .24);
+  border-radius: 18px;
+  background: rgba(6, 29, 56, .78);
+  padding: .9rem;
+}
+
+.builder-widget-card {
+  display: grid;
+  gap: .75rem;
+}
+
+.builder-widget-card small {
+  color: #7dd3fc;
+  font-weight: 800;
+}
+
+.dashboard-filter-json {
+  min-height: 4.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .78rem;
+}
+
+.runtime-widget-card {
+  min-height: 260px;
+}
+
+.runtime-widget-card h3 {
+  margin: 0 0 .7rem;
+  color: #fff;
+  font-size: .98rem;
+  font-weight: 900;
+}
+
+.runtime-chart-box {
+  position: relative;
+  width: 100%;
+  min-height: 230px;
+}
+
+.runtime-chart-box canvas {
+  width: 100% !important;
+  height: 230px !important;
+}
+
+.runtime-widget-empty,
+.runtime-widget-error {
+  display: grid;
+  min-height: 210px;
+  place-items: center;
+  border: 1px dashed rgba(125, 211, 252, .4);
+  border-radius: 16px;
+  color: #bae6fd;
+  font-weight: 900;
+  text-align: center;
+  padding: 1rem;
+}
+
+.runtime-widget-error {
+  border-color: rgba(248, 113, 113, .45);
+  color: #fecaca;
+}
+
+.metric-preview {
+  display: grid;
+  min-height: 190px;
+  align-content: center;
+  gap: .4rem;
+}
+
+.metric-preview span {
+  color: #7dd3fc;
+  font-size: .78rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.metric-preview strong {
+  color: #fff;
+  font-size: 2rem;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.metric-preview small {
+  color: #bae6fd;
+  font-weight: 800;
+}
+
 @media (max-width: 640px) {
   .bar-row {
     grid-template-columns: 1fr;

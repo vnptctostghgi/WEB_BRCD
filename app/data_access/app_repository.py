@@ -20,6 +20,7 @@ FEATURE_ROWS = [
     ("admin.menu", "Quản trị menu", "admin.web", 27),
     ("admin.work_tasks", "Quản lý công việc", None, 28),
     ("reports", "Báo cáo thống kê", None, 30),
+    ("admin.dashboard_builder", "Thiết kế Layout báo cáo", "reports", 31),
     ("vault", "Tài khoản web", "admin.web", 40),
     ("vault.view", "Xem danh sách tài khoản", "vault", 41),
     ("vault.manage", "Thêm và sửa tài khoản", "vault", 42),
@@ -29,6 +30,46 @@ FEATURE_ROWS = [
 ]
 
 OBSOLETE_FEATURE_CODES = ("admin", "admin.connections.test", "auto", "auto.attt_quarterly", "auto.attt_links")
+
+DEFAULT_DASHBOARD_PAGE_ID = "DASHBOARD_KINH_DOANH"
+DEFAULT_DASHBOARD_PAGE_NAME = "Dashboard Kinh doanh"
+DEFAULT_DASHBOARD_LAYOUT = {
+    "page_id": DEFAULT_DASHBOARD_PAGE_ID,
+    "tabs": [
+        {
+            "tab_id": "tab_doanh_thu",
+            "tab_name": "Doanh Thu Lõi",
+            "order": 1,
+            "grid_layout": [
+                {
+                    "row_id": 1,
+                    "layout_type": "2_columns",
+                    "widgets": [
+                        {"position": 1, "type": "bar_chart", "title": "Di động", "sql_code": "BC_DI_DONG"},
+                        {"position": 2, "type": "pie_chart", "title": "Băng rộng", "sql_code": "BC_BANG_RONG"},
+                    ],
+                }
+            ],
+        },
+        {
+            "tab_id": "tab_san_luong",
+            "tab_name": "Sản lượng",
+            "order": 2,
+            "grid_layout": [
+                {
+                    "row_id": 1,
+                    "layout_type": "4_columns",
+                    "widgets": [
+                        {"position": 1, "type": "metric", "title": "Fiber", "sql_code": "DASHBOARD_FIBER_VNPT"},
+                        {"position": 2, "type": "metric", "title": "MyTV", "sql_code": "BC_MYTV"},
+                        {"position": 3, "type": "metric", "title": "Mesh", "sql_code": "BC_MESH"},
+                        {"position": 4, "type": "metric", "title": "CAM", "sql_code": "BC_CAM"},
+                    ],
+                }
+            ],
+        },
+    ],
+}
 
 
 def hash_password(password: str) -> str:
@@ -162,6 +203,14 @@ class AppRepository:
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS dashboard_layouts (
+                    page_id TEXT PRIMARY KEY,
+                    page_name TEXT NOT NULL,
+                    layout_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS data_regions (
                     code TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -277,6 +326,20 @@ class AppRepository:
             connection.execute(
                 "INSERT OR IGNORE INTO user_permissions (user_id, feature_code) SELECT ?, code FROM features",
                 (admin["id"],),
+            )
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO dashboard_layouts
+                (page_id, page_name, layout_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    DEFAULT_DASHBOARD_PAGE_ID,
+                    DEFAULT_DASHBOARD_PAGE_NAME,
+                    json.dumps(DEFAULT_DASHBOARD_LAYOUT, ensure_ascii=False),
+                    now,
+                    now,
+                ),
             )
 
     def get_user_by_username(self, username: str) -> dict[str, Any] | None:
@@ -654,6 +717,46 @@ class AppRepository:
         with self.connect() as connection:
             connection.execute("DELETE FROM sql_reports WHERE id=?", (report_id,))
 
+    def list_dashboard_layouts(self) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT page_id, page_name, created_at, updated_at
+                FROM dashboard_layouts
+                ORDER BY updated_at DESC, page_name
+                """
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_dashboard_layout(self, page_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM dashboard_layouts WHERE page_id=?",
+                (page_id,),
+            ).fetchone()
+            return self._decode_dashboard_layout(dict(row)) if row else None
+
+    def save_dashboard_layout(self, page_id: str, page_name: str, layout: dict[str, Any]) -> str:
+        now = self._now()
+        payload = json.dumps(layout, ensure_ascii=False)
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO dashboard_layouts (page_id, page_name, layout_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(page_id) DO UPDATE SET
+                  page_name=excluded.page_name,
+                  layout_json=excluded.layout_json,
+                  updated_at=excluded.updated_at
+                """,
+                (page_id, page_name, payload, now, now),
+            )
+        return page_id
+
+    def delete_dashboard_layout(self, page_id: str) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM dashboard_layouts WHERE page_id=?", (page_id,))
+
     def list_work_tasks(self, include_completed: bool = False) -> list[dict[str, Any]]:
         query = "SELECT * FROM work_tasks"
         if not include_completed:
@@ -756,6 +859,15 @@ class AppRepository:
         except json.JSONDecodeError:
             params = []
         row["cac_tham_so"] = params if isinstance(params, list) else []
+        return row
+
+    @staticmethod
+    def _decode_dashboard_layout(row: dict[str, Any]) -> dict[str, Any]:
+        try:
+            layout = json.loads(row.pop("layout_json") or "{}")
+        except json.JSONDecodeError:
+            layout = {}
+        row["layout"] = layout if isinstance(layout, dict) else {}
         return row
 
     @staticmethod
