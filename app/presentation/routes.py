@@ -15,7 +15,7 @@ from app.application.database_service import DatabaseService
 from app.application.vault_service import VaultService
 from app.application.connection_service import ConnectionService
 from app.application.telegram_notifier import TelegramNotifier
-from app.data_access.app_repository import AppRepository
+from app.data_access.app_repository import AppRepository, DEFAULT_DASHBOARD_PAGE_ID
 from app.data_access.internal_api_client import InternalApiClient
 from app.data_access.repository_factory import build_repository
 from app.settings import get_settings
@@ -27,6 +27,7 @@ FAILED_LOGIN_COUNTS: dict[str, int] = {}
 ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
 DASHBOARD_LAYOUT_TYPES = {"2_columns": 2, "4_columns": 4}
 DASHBOARD_WIDGET_TYPES = {"bar_chart", "pie_chart", "line_chart", "data_table", "metric"}
+DASHBOARD_LAYOUT_EXCLUDED_FEATURE_CODES = {"admin.dashboard_builder"}
 
 
 class LoginPayload(BaseModel):
@@ -289,6 +290,90 @@ def normalize_dashboard_layout(payload: DashboardLayoutPayload) -> tuple[str, st
         })
 
     return page_id, page_name, {"page_id": page_id, "tabs": normalized_tabs}
+
+
+def dashboard_feature_has_ancestor(code: str, parent_by_code: dict[str, str | None], ancestor_code: str) -> bool:
+    current_code: str | None = code
+    visited: set[str] = set()
+    while current_code and current_code not in visited:
+        if current_code == ancestor_code:
+            return True
+        visited.add(current_code)
+        current_code = parent_by_code.get(current_code)
+    return False
+
+
+def dashboard_page_id_from_feature_code(code: str) -> str:
+    if code == "dashboard":
+        return DEFAULT_DASHBOARD_PAGE_ID
+    page_id = re.sub(r"[^A-Za-z0-9]+", "_", code).strip("_").upper()
+    return page_id or DEFAULT_DASHBOARD_PAGE_ID
+
+
+def is_dashboard_layout_feature(code: str, parent_by_code: dict[str, str | None]) -> bool:
+    if code in DASHBOARD_LAYOUT_EXCLUDED_FEATURE_CODES:
+        return False
+    return code == "dashboard" or dashboard_feature_has_ancestor(code, parent_by_code, "reports")
+
+
+def build_dashboard_layout_pages(features: list[dict], layouts: list[dict]) -> list[dict]:
+    parent_by_code = {str(feature.get("code") or ""): feature.get("parent_code") for feature in features}
+    layout_by_id = {str(layout.get("page_id") or ""): layout for layout in layouts if layout.get("page_id")}
+    designable_codes = {
+        code for code in parent_by_code if code and is_dashboard_layout_feature(code, parent_by_code)
+    }
+    non_designable_page_ids = {
+        dashboard_page_id_from_feature_code(code)
+        for code in parent_by_code
+        if code and code not in designable_codes
+    }
+
+    pages: list[dict] = []
+    included_page_ids: set[str] = set()
+    ordered_features = sorted(
+        features,
+        key=lambda feature: (
+            int(feature.get("sort_order") or 0),
+            str(feature.get("name") or ""),
+            str(feature.get("code") or ""),
+        ),
+    )
+    for feature in ordered_features:
+        code = str(feature.get("code") or "")
+        if code not in designable_codes:
+            continue
+        page_id = dashboard_page_id_from_feature_code(code)
+        layout = layout_by_id.get(page_id)
+        pages.append({
+            "page_id": page_id,
+            "page_name": str(feature.get("name") or (layout.get("page_name") if layout else page_id)),
+            "layout_page_name": layout.get("page_name") if layout else "",
+            "feature_code": code,
+            "feature_name": str(feature.get("name") or ""),
+            "saved": bool(layout),
+            "unsaved": not bool(layout),
+            "created_at": layout.get("created_at") if layout else None,
+            "updated_at": layout.get("updated_at") if layout else None,
+        })
+        included_page_ids.add(page_id)
+
+    for layout in layouts:
+        page_id = str(layout.get("page_id") or "")
+        if not page_id or page_id in included_page_ids or page_id in non_designable_page_ids:
+            continue
+        pages.append({
+            "page_id": page_id,
+            "page_name": layout.get("page_name") or page_id,
+            "layout_page_name": layout.get("page_name") or page_id,
+            "feature_code": "",
+            "feature_name": "",
+            "saved": True,
+            "unsaved": False,
+            "created_at": layout.get("created_at"),
+            "updated_at": layout.get("updated_at"),
+        })
+        included_page_ids.add(page_id)
+    return pages
 
 
 def validate_report_sql(sql: str) -> str:
@@ -776,6 +861,18 @@ def list_dashboard_layouts(request: Request) -> dict:
     except RuntimeError as error:
         raise_dashboard_layout_schema_error(error)
     return {"layouts": layouts}
+
+
+@router.get("/api/admin/dashboard-layout-pages")
+def list_dashboard_layout_pages(request: Request) -> dict:
+    admin_user(request)
+    repository = build_app_repository()
+    try:
+        layouts = repository.list_dashboard_layouts()
+    except RuntimeError as error:
+        raise_dashboard_layout_schema_error(error)
+    features = repository.list_features()
+    return {"pages": build_dashboard_layout_pages(features, layouts)}
 
 
 @router.get("/api/admin/dashboard-layouts/{page_id}")

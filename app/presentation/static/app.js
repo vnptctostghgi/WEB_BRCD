@@ -1294,18 +1294,32 @@ function parseDashboardFilters(value, strict = false) {
   return {};
 }
 
+function dashboardBuilderPageById(pageId) {
+  return dashboardLayouts.find((page) => page.page_id === pageId);
+}
+
+function dashboardBuilderPageIsSaved(page) {
+  return Boolean(page && page.saved !== false && !page.unsaved);
+}
+
+async function loadDashboardLayoutPages() {
+  const pagesData = await api("/api/admin/dashboard-layout-pages");
+  dashboardLayouts = pagesData.pages || [];
+  return dashboardLayouts;
+}
+
 async function loadDashboardBuilder() {
   const message = $("#dashboard-builder-message");
   setTableLoading("#dashboard-layout-pages", 3, "Đang tải danh sách trang báo cáo...");
   try {
-    const [layoutsData, reportsData] = await Promise.all([
-      api("/api/admin/dashboard-layouts"),
+    const [pagesData, reportsData] = await Promise.all([
+      api("/api/admin/dashboard-layout-pages"),
       api("/api/admin/sql-reports"),
     ]);
-    dashboardLayouts = layoutsData.layouts || [];
+    dashboardLayouts = pagesData.pages || [];
     sqlReports = reportsData.reports || [];
     if (dashboardLayouts.length) {
-      await openDashboardLayout(dashboardLayouts[0].page_id);
+      await openDashboardPage(dashboardLayouts[0].page_id);
     } else {
       dashboardBuilderLayout = dashboardLayoutTemplate();
       dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0].tab_id;
@@ -1338,10 +1352,24 @@ async function refreshDashboardSqlReports(button = null) {
   }
 }
 
+async function openDashboardPage(pageId) {
+  const page = dashboardBuilderPageById(pageId);
+  if (page && !dashboardBuilderPageIsSaved(page)) {
+    dashboardBuilderLayout = dashboardLayoutTemplate(page.page_name || page.feature_name || page.page_id, page.page_id);
+    dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0]?.tab_id || "";
+    dashboardBuilderLoadedTabs = {};
+    renderDashboardBuilder();
+    renderDashboardPreview();
+    return;
+  }
+  await openDashboardLayout(pageId);
+}
+
 async function openDashboardLayout(pageId) {
   const data = await api(`/api/admin/dashboard-layouts/${encodeURIComponent(pageId)}`);
+  const page = dashboardBuilderPageById(pageId);
   dashboardBuilderLayout = normalizeDashboardBuilderLayout(data.layout || {}, data.page_name || "");
-  dashboardBuilderLayout.page_name = data.page_name || dashboardBuilderLayout.page_name;
+  dashboardBuilderLayout.page_name = page?.page_name || data.page_name || dashboardBuilderLayout.page_name;
   dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0]?.tab_id || "";
   dashboardBuilderLoadedTabs = {};
   renderDashboardBuilder();
@@ -1412,7 +1440,7 @@ function handleDashboardPageAction(event) {
   const openButton = event.target.closest("[data-dashboard-open]");
   const deleteButton = event.target.closest("[data-dashboard-delete]");
   if (openButton) {
-    openDashboardLayout(openButton.dataset.dashboardOpen).catch((error) => showMessage($("#dashboard-builder-message"), error.message, "error"));
+    openDashboardPage(openButton.dataset.dashboardOpen).catch((error) => showMessage($("#dashboard-builder-message"), error.message, "error"));
     return;
   }
   if (deleteButton) {
@@ -1425,9 +1453,9 @@ async function deleteDashboardPage(pageId) {
   try {
     await api(`/api/admin/dashboard-layouts/${encodeURIComponent(pageId)}`, { method: "DELETE" });
     showMessage($("#dashboard-builder-message"), "Đã xóa trang báo cáo.");
-    dashboardLayouts = dashboardLayouts.filter((page) => page.page_id !== pageId);
+    await loadDashboardLayoutPages();
     if (dashboardLayouts.length) {
-      await openDashboardLayout(dashboardLayouts[0].page_id);
+      await openDashboardPage(dashboardLayouts[0].page_id);
     } else {
       dashboardBuilderLayout = dashboardLayoutTemplate();
       dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0].tab_id;
@@ -1702,8 +1730,7 @@ async function saveDashboardLayout(button = null) {
     };
     const response = await api("/api/admin/dashboard-layouts", { method: "POST", body: JSON.stringify(payload) });
     dashboardBuilderLayout = normalizeDashboardBuilderLayout(response.layout || payload.layout, payload.page_name);
-    const layoutsData = await api("/api/admin/dashboard-layouts");
-    dashboardLayouts = layoutsData.layouts || [];
+    await loadDashboardLayoutPages();
     dashboardBuilderLoadedTabs = {};
     renderDashboardBuilder();
     showMessage($("#dashboard-builder-message"), "Đã lưu Layout báo cáo.");
@@ -1727,7 +1754,7 @@ function dashboardTabCacheKey(tabId) {
 }
 
 function dashboardPageIsSaved() {
-  return dashboardLayouts.some((page) => page.page_id === dashboardBuilderLayout?.page_id);
+  return dashboardBuilderPageIsSaved(dashboardBuilderPageById(dashboardBuilderLayout?.page_id));
 }
 
 async function loadDashboardPreviewTab(tabId, { force = false } = {}) {

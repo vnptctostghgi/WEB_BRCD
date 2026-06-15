@@ -265,6 +265,46 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data() -> None:
         assert tab_b.json()["widgets"] == []
 
 
+def test_dashboard_layout_pages_include_overview_and_reports_not_web_admin() -> None:
+    with TestClient(app) as client:
+        login(client)
+        web_layout = {
+            "page_id": "ADMIN_USERS",
+            "page_name": "Quan tri nguoi dung",
+            "layout": {
+                "page_id": "ADMIN_USERS",
+                "tabs": [
+                    {
+                        "tab_id": "tab_admin_users",
+                        "tab_name": "Admin users",
+                        "order": 1,
+                        "grid_layout": [
+                            {"row_id": 1, "layout_type": "2_columns", "widgets": []}
+                        ],
+                    }
+                ],
+            },
+        }
+        assert client.post("/api/admin/dashboard-layouts", json=web_layout).status_code == 200
+
+        response = client.get("/api/admin/dashboard-layout-pages")
+        assert response.status_code == 200
+        pages = response.json()["pages"]
+        page_ids = [page["page_id"] for page in pages]
+
+        assert "DASHBOARD_KINH_DOANH" in page_ids
+        assert "REPORTS" in page_ids
+        assert "ADMIN_USERS" not in page_ids
+
+        overview = next(page for page in pages if page["page_id"] == "DASHBOARD_KINH_DOANH")
+        reports = next(page for page in pages if page["page_id"] == "REPORTS")
+        assert overview["feature_code"] == "dashboard"
+        assert overview["saved"] is True
+        assert reports["feature_code"] == "reports"
+        assert reports["saved"] is False
+        assert reports["unsaved"] is True
+
+
 def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
     with TestClient(app) as client:
         login(client)
@@ -287,6 +327,7 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
 
         forbidden_urls = [
             "/api/admin/dashboard-layouts",
+            "/api/admin/dashboard-layout-pages",
             "/api/admin/dashboard-layouts/DASHBOARD_TEST_BUILDER",
             "/api/admin/dashboard-layouts/DASHBOARD_TEST_BUILDER/tabs/tab_a/data",
             "/api/reports/configs",
