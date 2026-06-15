@@ -25,7 +25,7 @@
       };
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=35" />
+    <link rel="stylesheet" href="/static/styles.css?v=36" />
   </head>
   <body class="app-dark min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'vault.manage' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'vault.reveal' in user.permissions }}">
     <svg class="icon-sprite" aria-hidden="true">
@@ -93,28 +93,8 @@
           <div class="nav-empty hidden" id="nav-empty">Không tìm thấy chức năng phù hợp.</div>
         </nav>
 
-        <div class="mt-4 hidden rounded-3xl border border-white/10 bg-white/10 p-4 text-sm leading-6 backdrop-blur lg:block">
-          <p class="font-bold text-white">Hỗ trợ quản trị viên</p>
-          <a class="mt-1 block text-lg font-extrabold text-sky-50 hover:text-white" href="tel:0949892585">094.989.2585</a>
-          <p class="text-sky-100">Nghe gọi · Zalo · Telegram</p>
-        </div>
-
-        <div class="mt-4 hidden items-center gap-3 rounded-3xl border border-white/10 bg-white/10 p-3 lg:flex">
-          <div class="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white font-extrabold text-vnpt-700">{{ user.full_name[0] }}</div>
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-bold">{{ user.full_name }}</p>
-            <p class="truncate text-xs text-sky-100">{{ "Quản trị viên" if user.role == "admin" else "Người xem" }}</p>
-          </div>
-          <button data-logout class="rounded-2xl border border-white/15 px-3 py-2 text-xs font-bold text-white hover:bg-white/10" type="button">Thoát</button>
-        </div>
-      </aside>
-
-      <main class="app-main flex min-h-screen min-w-0 flex-col px-4 pb-6 pt-4 sm:px-6 lg:px-8 lg:pt-8 xl:px-10">
-        <header class="mb-6 flex flex-col gap-4 rounded-[1.5rem] border border-sky-500/30 bg-[#061d38] p-4 shadow-[0_18px_45px_rgba(0,0,0,.28)] sm:flex-row sm:items-center sm:justify-between sm:p-5">
-          <div class="min-w-0">
-            <h1 class="dynamic-module-title" id="module-title">Tổng quan</h1>
-          </div>
-          <div class="top-actions">
+        <div class="sidebar-bottom">
+          <div class="top-actions sidebar-quick-actions" aria-label="Thông báo và tài khoản">
             <div class="dropdown-wrap">
               <button class="top-icon-button" id="notification-toggle" type="button" aria-label="Thông báo" aria-expanded="false">
                 <span class="top-icon-symbol">!</span>
@@ -147,8 +127,15 @@
               </div>
             </div>
           </div>
-        </header>
+          <div class="sidebar-support">
+            <p>Hỗ trợ quản trị viên</p>
+            <a href="tel:0949892585">094.989.2585</a>
+            <span>gọi/Zalo/Telegram</span>
+          </div>
+        </div>
+      </aside>
 
+      <main class="app-main flex min-h-screen min-w-0 flex-col px-4 pb-6 pt-4 sm:px-6 lg:px-8 lg:pt-6 xl:px-10">
         <section class="app-view active" id="view-dashboard">
           {% if user.must_change_password %}
           <div class="notice warning"><strong>Cần đổi mật khẩu.</strong> Đây là mật khẩu khởi tạo hoặc vừa được đặt lại. Hãy đổi mật khẩu trước khi sử dụng lâu dài.</div>
@@ -503,11 +490,6 @@
         {% endif %}
         
 
-        <footer class="mt-auto pt-6">
-          <div class="rounded-2xl border border-sky-500/25 bg-[#061d38] px-4 py-4 text-center text-sm font-semibold text-sky-100">
-            Hỗ trợ quản trị viên: <a class="font-extrabold text-white hover:underline" href="tel:0949892585">094.989.2585</a> · gọi/Zalo/Telegram
-          </div>
-        </footer>
       </main>
     </div>
 

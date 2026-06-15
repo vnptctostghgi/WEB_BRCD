@@ -122,7 +122,8 @@ async function activateNavItem(item) {
   document.querySelectorAll(".nav-item, .app-view").forEach((element) => element.classList.remove("active"));
   item.classList.add("active");
   $(`#view-${item.dataset.view}`)?.classList.add("active");
-  $("#module-title").textContent = item.dataset.title || item.textContent.trim();
+  const moduleTitle = $("#module-title");
+  if (moduleTitle) moduleTitle.textContent = item.dataset.title || item.textContent.trim();
   $("#sidebar").classList.remove("menu-open");
   $("#menu-button")?.setAttribute("aria-expanded", "false");
   if (item.dataset.view === "dashboard") await initDashboard();
