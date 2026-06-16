@@ -53,7 +53,7 @@ const navGroupIcons = {
   reports: "chart",
 };
 
-const mojibakePattern = /(?:Ã|Ä|Â|Æ|áº|á»|â€)/;
+const mojibakePattern = new RegExp("(?:\\u00c3|\\u00c4|\\u00c2|\\u00c6|\\u00e1\\u00ba|\\u00e1\\u00bb|\\u00e2\\u20ac)");
 const windows1252ByteMap = new Map([
   ["€", 0x80], ["‚", 0x82], ["ƒ", 0x83], ["„", 0x84], ["…", 0x85], ["†", 0x86], ["‡", 0x87],
   ["ˆ", 0x88], ["‰", 0x89], ["Š", 0x8a], ["‹", 0x8b], ["Œ", 0x8c], ["Ž", 0x8e],
