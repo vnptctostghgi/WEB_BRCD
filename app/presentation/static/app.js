@@ -2155,16 +2155,31 @@ function dashboardChartPrimaryValues(chartData) {
 }
 
 function dashboardValueColors(values) {
-  const finiteValues = values.filter((value) => Number.isFinite(Number(value)));
-  const min = finiteValues.length ? Math.min(...finiteValues) : 0;
-  const max = finiteValues.length ? Math.max(...finiteValues) : 0;
-  const span = Math.max(max - min, 1);
-  return values.map((value) => {
-    const ratio = (Number(value || 0) - min) / span;
-    if (ratio >= .67) return "rgba(37, 99, 235, .82)";
-    if (ratio >= .34) return "rgba(245, 158, 11, .82)";
-    return "rgba(239, 68, 68, .82)";
+  const ranked = values
+    .map((value, index) => ({ value: Number(value || 0), index }))
+    .filter((item) => Number.isFinite(item.value))
+    .sort((left, right) => left.value - right.value);
+  if (!ranked.length) return values.map(() => "rgba(148, 163, 184, .72)");
+  const groupSize = Math.min(5, Math.max(1, Math.ceil(ranked.length / 3)));
+  const colors = values.map(() => "rgba(245, 158, 11, .82)");
+  const redRamp = ["rgba(127, 29, 29, .9)", "rgba(185, 28, 28, .88)", "rgba(220, 38, 38, .86)", "rgba(239, 68, 68, .84)", "rgba(248, 113, 113, .82)"];
+  const amberRamp = ["rgba(180, 83, 9, .84)", "rgba(217, 119, 6, .84)", "rgba(245, 158, 11, .84)", "rgba(251, 191, 36, .82)", "rgba(252, 211, 77, .8)"];
+  const blueRamp = ["rgba(96, 165, 250, .82)", "rgba(59, 130, 246, .84)", "rgba(37, 99, 235, .86)", "rgba(29, 78, 216, .88)", "rgba(30, 64, 175, .9)"];
+
+  ranked.forEach((item, rank) => {
+    if (rank < groupSize) {
+      colors[item.index] = redRamp[Math.min(rank, redRamp.length - 1)];
+      return;
+    }
+    if (rank >= ranked.length - groupSize) {
+      const blueIndex = Math.min(rank - (ranked.length - groupSize), blueRamp.length - 1);
+      colors[item.index] = blueRamp[blueIndex];
+      return;
+    }
+    const middleRank = rank - groupSize;
+    colors[item.index] = amberRamp[middleRank % amberRamp.length];
   });
+  return colors;
 }
 
 function parseDashboardNumber(value) {
