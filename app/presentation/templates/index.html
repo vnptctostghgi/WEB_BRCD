@@ -460,7 +460,7 @@
         </div>
         <label>Tên báo cáo<input class="form-control" name="ten_bao_cao" required placeholder="Ví dụ: Báo cáo Thuê bao" /></label>
         <label>Mã báo cáo<input class="form-control" name="ma_bao_cao" required placeholder="Ví dụ: BC_THUE_BAO" /></label>
-        <label>Câu SQL<textarea class="form-control min-h-40 font-mono text-xs" name="cau_lenh_sql" rows="8" required placeholder="SELECT col1, col2 FROM schema.table WHERE trang_thai = :status"></textarea><small>Chỉ nhập SELECT, không nhập dấu chấm phẩy.</small></label>
+        <label>Câu SQL<textarea class="form-control min-h-40 font-mono text-xs" name="cau_lenh_sql" rows="8" required placeholder="DEFINE p_loaihinh = :LOAIHINH&#10;SELECT col1, col2 FROM schema.table WHERE loaitb_id = '&amp;p_loaihinh';"></textarea><small>Cho phép bắt đầu bằng DEFINE hoặc SELECT và phải kết thúc bằng dấu chấm phẩy (;). Bộ lọc chỉ nhập giá trị thô, ví dụ DONVI = VNPT%.</small></label>
         <label>Tham số lọc<input class="form-control" name="cac_tham_so" placeholder="status, tu_ngay, den_ngay" /><small>Nhập cách nhau bằng dấu phẩy. Giao diện báo cáo sẽ tự tạo ô lọc từ danh sách này.</small></label>
         <div class="result hidden"></div>
         <button class="btn-primary" type="submit">Lưu cấu hình SQL</button>
@@ -471,6 +471,6 @@
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="/static/app.js?v=40"></script>
+    <script src="/static/app.js?v=41"></script>
   </body>
 </html>

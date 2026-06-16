@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime
 from typing import Any
 
@@ -8,6 +9,9 @@ from app.data_access.internal_api_client import InternalApiClient
 
 
 logger = logging.getLogger(__name__)
+
+
+DEFINE_PATTERN = re.compile(r"^\s*define\s+([A-Za-z][A-Za-z0-9_$#]*)\s*=\s*(.+?)\s*$", re.IGNORECASE)
 
 
 class DatabaseService:
@@ -89,12 +93,13 @@ class DatabaseService:
                 safe_filters[target_key] = value
             else:
                 safe_filters[str(key).strip().lstrip(":")] = value
+        compiled_sql, define_details = self._compile_define_sql(report["cau_lenh_sql"], safe_filters)
 
         try:
             result = self.internal_api.run_sql_report(
                 ten_bao_cao=report["ten_bao_cao"],
                 ma_bao_cao=report["ma_bao_cao"],
-                cau_lenh_sql=report["cau_lenh_sql"],
+                cau_lenh_sql=compiled_sql,
                 tham_so=safe_filters,
                 page=safe_page,
                 page_size=safe_page_size,
@@ -123,6 +128,8 @@ class DatabaseService:
         details = result.get("details") if isinstance(result.get("details"), dict) else {}
         if ignored_filters:
             details = {**details, "ignored_filters": ignored_filters, "allowed_params": allowed_params}
+        if define_details:
+            details = {**details, **define_details}
 
         return {
             "ok": bool(result.get("ok", True)),
@@ -141,6 +148,43 @@ class DatabaseService:
                 "total": total,
             },
         }
+
+    @classmethod
+    def _compile_define_sql(cls, sql: str, filters: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        normalized = sql.strip()
+        body = normalized[:-1].strip() if normalized.endswith(";") else normalized
+        lines = body.splitlines()
+        definitions: dict[str, str] = {}
+        select_lines: list[str] = []
+        in_select = False
+        for line in lines:
+            match = DEFINE_PATTERN.match(line)
+            if match and not in_select:
+                name, expression = match.groups()
+                definitions[name] = cls._define_value(expression, filters)
+                continue
+            if line.strip():
+                in_select = True
+            if in_select:
+                select_lines.append(line)
+        compiled = "\n".join(select_lines).strip()
+        for name, value in definitions.items():
+            compiled = re.sub(rf"&{re.escape(name)}\b", cls._escape_define_value(value), compiled, flags=re.IGNORECASE)
+        details = {"define_params": list(definitions)} if definitions else {}
+        return compiled, details
+
+    @staticmethod
+    def _define_value(expression: str, filters: dict[str, Any]) -> str:
+        value = expression.strip()
+        if value.startswith(":"):
+            filter_name = value[1:].strip().upper()
+            filters_by_upper = {str(key).strip().lstrip(":").upper(): item for key, item in filters.items()}
+            value = str(filters_by_upper.get(filter_name, ""))
+        return value.strip().strip("'\"")
+
+    @staticmethod
+    def _escape_define_value(value: str) -> str:
+        return str(value).replace("'", "''")
 
     def run_dashboard_layout_tab(self, *, page_id: str, tab_id: str) -> dict[str, Any]:
         layout_row = self.app_repository.get_dashboard_layout(page_id)

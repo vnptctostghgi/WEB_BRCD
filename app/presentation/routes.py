@@ -389,12 +389,19 @@ def build_dashboard_layout_pages(features: list[dict], layouts: list[dict]) -> l
 def validate_report_sql(sql: str) -> str:
     normalized = sql.strip()
     lowered = normalized.lower()
-    if not lowered.startswith("select"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chỉ cho phép lưu câu lệnh SELECT.")
-    if ";" in normalized:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Không nhập dấu chấm phẩy trong câu SQL.")
+    if not (lowered.startswith("select") or lowered.startswith("define ")):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Câu SQL phải bắt đầu bằng DEFINE hoặc SELECT.")
+    if not normalized.endswith(";"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Câu SQL báo cáo phải kết thúc bằng dấu chấm phẩy (;).")
+    executable_part = normalized[:-1].strip()
+    statements = [part.strip() for part in executable_part.split(";") if part.strip()]
+    if len(statements) != 1:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chỉ cho phép một câu SQL báo cáo và dấu chấm phẩy ở cuối.")
+    non_define_lines = [line.strip() for line in executable_part.splitlines() if line.strip() and not line.strip().lower().startswith("define ")]
+    if not non_define_lines or not non_define_lines[0].lower().startswith("select"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sau các dòng DEFINE phải là câu lệnh SELECT.")
     blocked_words = (" insert ", " update ", " delete ", " drop ", " alter ", " truncate ", " merge ")
-    padded = f" {lowered} "
+    padded = f" {executable_part.lower()} "
     if any(word in padded for word in blocked_words):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Câu SQL báo cáo không được chứa lệnh thay đổi dữ liệu.")
     return normalized

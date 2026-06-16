@@ -1795,7 +1795,7 @@ function renderDashboardBuilderRow(row, index) {
         <label>Tiêu đề<input class="form-control" name="title" value="${escapeHtml(widget.title || "")}" placeholder="Tên biểu đồ, thẻ hoặc tiêu đề" /></label>
         <label>Loại hiển thị<select class="form-control" name="type">${dashboardWidgetTypeOptions(widget.type)}</select></label>
         <label class="dashboard-sql-field ${isTextWidget ? "hidden" : ""}">Mã SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "")}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
-        <label class="dashboard-filter-field ${isTextWidget ? "hidden" : ""}">Bộ lọc mặc định<textarea class="form-control dashboard-filter-json" name="filters" rows="3" placeholder='{"LOAIHINH":"58"}&#10;{"SYSDATE":"SYSDATE"}&#10;{"DONVI":"&#39;VNPT%&#39;"}'>${escapeHtml(dashboardFiltersToText(widget.filters))}</textarea></label>
+        <label class="dashboard-filter-field ${isTextWidget ? "hidden" : ""}">Bộ lọc mặc định<textarea class="form-control dashboard-filter-json" name="filters" rows="3" placeholder='{"LOAIHINH":"58"}&#10;{"MONTH":""}&#10;{"DONVI":"VNPT%"}'>${escapeHtml(dashboardFiltersToText(widget.filters))}</textarea></label>
         ${renderDashboardWidgetAdvancedConfig(widget)}
       </div>
     `;

@@ -14,6 +14,7 @@ test_database.unlink(missing_ok=True)
 
 from fastapi.testclient import TestClient
 
+from app.application.database_service import DatabaseService
 from app.main import app
 from app.presentation import routes
 
@@ -167,7 +168,7 @@ def test_admin_can_manage_sql_reports_and_run_dynamic_report() -> None:
         payload = {
             "ten_bao_cao": "Báo cáo thuê bao test",
             "ma_bao_cao": "BC_TEST_THUE_BAO",
-            "cau_lenh_sql": "SELECT ma_tb, ten_tb FROM css_cto.db_thuebao WHERE trang_thai = :status",
+            "cau_lenh_sql": "SELECT ma_tb, ten_tb FROM css_cto.db_thuebao WHERE trang_thai = :status;",
             "cac_tham_so": ["status"],
         }
         created = client.post("/api/admin/sql-reports", json=payload)
@@ -192,13 +193,37 @@ def test_admin_can_manage_sql_reports_and_run_dynamic_report() -> None:
         assert body["pagination"]["page_size"] == 20
 
 
+def test_define_sql_is_compiled_with_raw_filter_values() -> None:
+    sql = """
+DEFINE p_loaihinh = :LOAIHINH
+DEFINE p_thang = :MONTH
+DEFINE p_donvi = :DONVI
+SELECT *
+FROM css_cto.db_thuebao
+WHERE loaitb_id = '&p_loaihinh'
+  AND ('&p_thang' IS NULL OR '&p_thang' = '')
+  AND ten_donvi_cha LIKE '&p_donvi';
+"""
+    compiled, details = DatabaseService._compile_define_sql(
+        sql,
+        {"LOAIHINH": "58", "MONTH ": "", "DONVI": "VNPT%"},
+    )
+
+    assert "DEFINE" not in compiled.upper()
+    assert "loaitb_id = '58'" in compiled
+    assert "LIKE 'VNPT%'" in compiled
+    assert "'' IS NULL OR '' = ''" in compiled
+    assert not compiled.endswith(";")
+    assert details["define_params"] == ["p_loaihinh", "p_thang", "p_donvi"]
+
+
 def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data() -> None:
     with TestClient(app) as client:
         login(client)
         report_payload = {
             "ten_bao_cao": "Báo cáo Builder test",
             "ma_bao_cao": "BC_BUILDER_TEST",
-            "cau_lenh_sql": "SELECT don_vi, so_luong FROM css_cto.builder_test WHERE trang_thai = :status",
+            "cau_lenh_sql": "SELECT don_vi, so_luong FROM css_cto.builder_test WHERE trang_thai = :status;",
             "cac_tham_so": ["status"],
         }
         assert client.post("/api/admin/sql-reports", json=report_payload).status_code == 200
@@ -317,7 +342,7 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data() -> None:
         fiber_report = {
             "ten_bao_cao": "Fiber PTM",
             "ma_bao_cao": "FIBER_PTM",
-            "cau_lenh_sql": "SELECT * FROM css_cto.fiber WHERE loaihinh = :LOAIHINH AND ngay = :SYSDATE AND donvi LIKE :DONVI",
+            "cau_lenh_sql": "SELECT * FROM css_cto.fiber WHERE loaihinh = :LOAIHINH AND ngay = :SYSDATE AND donvi LIKE :DONVI;",
             "cac_tham_so": ["LOAIHINH", "SYSDATE", "DONVI"],
         }
         assert client.post("/api/admin/sql-reports", json=fiber_report).status_code == 200
@@ -325,13 +350,13 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data() -> None:
             "/api/reports/run",
             json={
                 "ma_bao_cao": "FIBER_PTM",
-                "filters": {"loaihinh": "58", "sysdate": "SYSDATE", "donvi": "'VNPT%'"},
+                "filters": {"loaihinh": "58", "sysdate": "SYSDATE", "donvi": "VNPT%"},
                 "page": 1,
                 "page_size": 20,
             },
         )
         assert result.status_code == 200
-        assert result.json()["rows"][0]["THAM_SO"] == "LOAIHINH=58, SYSDATE=SYSDATE, DONVI='VNPT%'"
+        assert result.json()["rows"][0]["THAM_SO"] == "LOAIHINH=58, SYSDATE=SYSDATE, DONVI=VNPT%"
 
 
 def test_dashboard_layout_pages_include_overview_and_reports_not_web_admin() -> None:
