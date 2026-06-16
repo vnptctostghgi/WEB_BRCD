@@ -15,7 +15,7 @@ from app.application.database_service import DatabaseService
 from app.application.vault_service import VaultService
 from app.application.connection_service import ConnectionService
 from app.application.telegram_notifier import TelegramNotifier
-from app.data_access.app_repository import AppRepository, DEFAULT_DASHBOARD_PAGE_ID
+from app.data_access.app_repository import AppRepository, DEFAULT_DASHBOARD_PAGE_ID, dashboard_feature_code_for_page
 from app.data_access.internal_api_client import InternalApiClient
 from app.data_access.repository_factory import build_repository
 from app.settings import get_settings
@@ -329,8 +329,11 @@ def is_dashboard_layout_feature(code: str, parent_by_code: dict[str, str | None]
 def build_dashboard_layout_pages(features: list[dict], layouts: list[dict]) -> list[dict]:
     parent_by_code = {str(feature.get("code") or ""): feature.get("parent_code") for feature in features}
     layout_by_id = {str(layout.get("page_id") or ""): layout for layout in layouts if layout.get("page_id")}
+    layout_feature_codes = {dashboard_feature_code_for_page(page_id) for page_id in layout_by_id}
     designable_codes = {
-        code for code in parent_by_code if code and is_dashboard_layout_feature(code, parent_by_code)
+        code for code in parent_by_code
+        if code
+        and (is_dashboard_layout_feature(code, parent_by_code) or code in layout_feature_codes)
     }
     non_designable_page_ids = {
         dashboard_page_id_from_feature_code(code)

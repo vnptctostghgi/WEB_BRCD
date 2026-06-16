@@ -1541,8 +1541,9 @@ p {
   }
 
   .dashboard-viewer-actions {
-    grid-template-columns: minmax(14rem, 22rem) auto;
+    grid-template-columns: auto;
     align-items: end;
+    justify-content: end;
     margin-top: 0;
   }
 }

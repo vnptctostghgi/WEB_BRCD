@@ -563,7 +563,7 @@ class AppRepository:
             if existing and code in {"dashboard", "reports"}:
                 connection.execute("UPDATE features SET name=? WHERE code=?", (page_name, code))
             elif existing:
-                connection.execute("UPDATE features SET name=?, parent_code='reports' WHERE code=?", (page_name, code))
+                connection.execute("UPDATE features SET name=? WHERE code=?", (page_name, code))
             else:
                 max_order = connection.execute(
                     "SELECT COALESCE(MAX(sort_order), 30) AS max_order FROM features WHERE parent_code='reports'"

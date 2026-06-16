@@ -19,6 +19,7 @@ let dashboardViewerLayouts = [];
 let dashboardViewerLayout = null;
 let dashboardViewerActiveTabId = "";
 let dashboardViewerLoadedTabs = {};
+let dashboardFeatureCodes = new Set();
 let dashboardLayouts = [];
 let dashboardBuilderLayout = null;
 let dashboardBuilderActiveTabId = "";
@@ -1016,15 +1017,25 @@ function dashboardPageIdFromFeatureCode(code) {
     .toUpperCase() || "DASHBOARD_KINH_DOANH";
 }
 
+function dashboardFeatureCodeForPageId(pageId) {
+  const normalized = String(pageId || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized || "dashboard";
+}
+
 function featureNavigationConfig(feature) {
   const staticConfig = navFeatureConfig[feature.code];
   if (staticConfig) return staticConfig;
-  if (feature.parent_code === "reports") {
+  const dashboardPageId = dashboardPageIdFromFeatureCode(feature.code);
+  if (feature.parent_code === "reports" || dashboardFeatureCodes.has(feature.code)) {
     return {
       view: "dashboard",
       icon: "chart",
       keywords: `dashboard bao cao thong ke ${feature.name || ""} ${feature.code || ""}`,
-      dashboardPageId: dashboardPageIdFromFeatureCode(feature.code),
+      dashboardPageId,
     };
   }
   return null;
@@ -1085,6 +1096,12 @@ function openNavParents(item) {
 async function syncNavigationFromFeatures() {
   try {
     features = (await api("/api/admin/features")).features;
+    try {
+      const layoutsData = await api("/api/admin/dashboard-layouts");
+      dashboardFeatureCodes = new Set((layoutsData.layouts || []).map((layout) => dashboardFeatureCodeForPageId(layout.page_id)).filter(Boolean));
+    } catch {
+      dashboardFeatureCodes = new Set();
+    }
     const tree = $("#nav-tree");
     if (!tree) return;
     const activeCode = tree.querySelector(".nav-item.active")?.dataset.featureCode || "dashboard";

@@ -299,10 +299,7 @@ class SupabaseRepository:
         if existing and code in {"dashboard", "reports"}:
             self._patch("features", {"code": f"eq.{code}"}, {"name": page_name})
         elif existing:
-            self._patch("features", {"code": f"eq.{code}"}, {
-                "name": page_name,
-                "parent_code": "reports",
-            })
+            self._patch("features", {"code": f"eq.{code}"}, {"name": page_name})
         else:
             siblings = self._get("features", {"parent_code": "eq.reports", "select": "sort_order"})
             max_order = max([int(row.get("sort_order") or 0) for row in siblings] or [30])

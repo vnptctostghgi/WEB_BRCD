@@ -411,6 +411,31 @@ def test_dashboard_layout_pages_include_overview_and_reports_not_web_admin() -> 
         assert generated_admin_page["saved"] is True
         assert not any(page["feature_code"] == "admin.users" for page in pages)
 
+        features = client.get("/api/admin/features").json()["features"]
+        moved_features = []
+        for feature in features:
+            item = {
+                "code": feature["code"],
+                "name": feature["name"],
+                "parent_code": feature.get("parent_code"),
+                "sort_order": feature.get("sort_order") or 0,
+            }
+            if item["code"] == "admin_users":
+                item["parent_code"] = "admin.web"
+                item["sort_order"] = 999
+            moved_features.append(item)
+        assert client.put("/api/admin/features/layout", json={"features": moved_features}).status_code == 200
+
+        moved_pages = client.get("/api/admin/dashboard-layout-pages").json()["pages"]
+        moved_admin_page = next(page for page in moved_pages if page["page_id"] == "ADMIN_USERS")
+        assert moved_admin_page["feature_code"] == "admin_users"
+        assert moved_admin_page["saved"] is True
+
+        assert client.post("/api/admin/dashboard-layouts", json=web_layout).status_code == 200
+        refreshed_features = client.get("/api/admin/features").json()["features"]
+        refreshed_admin_feature = next(feature for feature in refreshed_features if feature["code"] == "admin_users")
+        assert refreshed_admin_feature["parent_code"] == "admin.web"
+
 
 def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
     with TestClient(app) as client:
