@@ -146,6 +146,7 @@ document.querySelectorAll(".nav-group").forEach((group) => {
 async function activateNavItem(item) {
   const nextView = item.dataset.view || "";
   const dashboardPageId = item.dataset.dashboardPageId || "";
+  $("#view-dashboard")?.classList.toggle("dashboard-dynamic-mode", Boolean(dashboardPageId));
   if (nextView !== "dashboard") {
     dashboardFiberLoaded = false;
     dashboardViewerLoadedTabs = {};
@@ -1380,8 +1381,27 @@ function parseDashboardFilters(value, strict = false) {
     const parsed = JSON.parse(text);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
   } catch {
-    // Handled below when saving.
+    // Try the admin-friendly format where each line is its own JSON object.
   }
+  const merged = {};
+  let parsedLineCount = 0;
+  for (const line of text.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)) {
+    try {
+      const parsedLine = JSON.parse(line);
+      if (parsedLine && typeof parsedLine === "object" && !Array.isArray(parsedLine)) {
+        Object.assign(merged, parsedLine);
+        parsedLineCount += 1;
+        continue;
+      }
+    } catch {
+      // Report a single clear validation error below.
+    }
+    if (strict) {
+      throw new Error("Bộ lọc mặc định phải là một JSON object hoặc nhiều dòng JSON object, ví dụ: {\"LOAIHINH\":\"58\"}");
+    }
+    return {};
+  }
+  if (parsedLineCount > 0) return merged;
   if (strict) throw new Error("Bộ lọc mặc định phải là JSON object hợp lệ, ví dụ: {\"status\":\"1\"}.");
   return {};
 }
@@ -1775,7 +1795,7 @@ function renderDashboardBuilderRow(row, index) {
         <label>Tiêu đề<input class="form-control" name="title" value="${escapeHtml(widget.title || "")}" placeholder="Tên biểu đồ, thẻ hoặc tiêu đề" /></label>
         <label>Loại hiển thị<select class="form-control" name="type">${dashboardWidgetTypeOptions(widget.type)}</select></label>
         <label class="dashboard-sql-field ${isTextWidget ? "hidden" : ""}">Mã SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "")}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
-        <label class="dashboard-filter-field ${isTextWidget ? "hidden" : ""}">Bộ lọc mặc định<textarea class="form-control dashboard-filter-json" name="filters" rows="2" placeholder='{"status":"1"}'>${escapeHtml(dashboardFiltersToText(widget.filters))}</textarea></label>
+        <label class="dashboard-filter-field ${isTextWidget ? "hidden" : ""}">Bộ lọc mặc định<textarea class="form-control dashboard-filter-json" name="filters" rows="3" placeholder='{"LOAIHINH":"58"}&#10;{"SYSDATE":"SYSDATE"}&#10;{"DONVI":"&#39;VNPT%&#39;"}'>${escapeHtml(dashboardFiltersToText(widget.filters))}</textarea></label>
         ${renderDashboardWidgetAdvancedConfig(widget)}
       </div>
     `;
@@ -1994,7 +2014,8 @@ function renderRuntimeWidget(widget, widgetData, elementId) {
     return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Chưa tải dữ liệu. Mở Tab này để hệ thống gọi API.</div></article>`;
   }
   if (!result.ok) {
-    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-error">${escapeHtml(result.message || "Không tải được dữ liệu.")}</div></article>`;
+    const details = result.details ? `<small>${escapeHtml(JSON.stringify(result.details))}</small>` : "";
+    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-error">${escapeHtml(result.message || "Không tải được dữ liệu.")}${details}</div></article>`;
   }
   if (widget.type === "data_table") return renderRuntimeTableWidget(title, result);
   if (widget.type === "metric") return renderRuntimeMetricWidget(title, result, widget.sql_code);

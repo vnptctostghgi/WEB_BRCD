@@ -73,8 +73,22 @@ class DatabaseService:
 
         safe_page = max(1, page)
         safe_page_size = max(20, min(page_size, 50))
-        allowed_params = set(report.get("cac_tham_so") or [])
-        safe_filters = {key: value for key, value in filters.items() if key in allowed_params}
+        allowed_params = [str(param).strip().lstrip(":") for param in (report.get("cac_tham_so") or []) if str(param).strip()]
+        allowed_param_by_upper = {param.upper(): param for param in allowed_params}
+        safe_filters: dict[str, Any] = {}
+        ignored_filters: list[str] = []
+        for key, value in (filters or {}).items():
+            normalized_key = str(key).strip().lstrip(":").upper()
+            if not normalized_key:
+                continue
+            if allowed_param_by_upper:
+                target_key = allowed_param_by_upper.get(normalized_key)
+                if not target_key:
+                    ignored_filters.append(str(key))
+                    continue
+                safe_filters[target_key] = value
+            else:
+                safe_filters[str(key).strip().lstrip(":")] = value
 
         try:
             result = self.internal_api.run_sql_report(
@@ -106,10 +120,14 @@ class DatabaseService:
 
         columns = result.get("columns") or self._infer_columns(rows)
         total = int(result.get("total") or len(rows))
+        details = result.get("details") if isinstance(result.get("details"), dict) else {}
+        if ignored_filters:
+            details = {**details, "ignored_filters": ignored_filters, "allowed_params": allowed_params}
 
         return {
             "ok": bool(result.get("ok", True)),
             "message": result.get("message", "Đã tải dữ liệu báo cáo."),
+            "details": details,
             "report": {
                 "ten_bao_cao": report["ten_bao_cao"],
                 "ma_bao_cao": report["ma_bao_cao"],

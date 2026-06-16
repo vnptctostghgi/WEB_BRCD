@@ -314,6 +314,25 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data() -> None:
         assert tab_b.status_code == 200
         assert [widget["type"] for widget in tab_b.json()["widgets"]] == ["combo_chart", "data_card"]
 
+        fiber_report = {
+            "ten_bao_cao": "Fiber PTM",
+            "ma_bao_cao": "FIBER_PTM",
+            "cau_lenh_sql": "SELECT * FROM css_cto.fiber WHERE loaihinh = :LOAIHINH AND ngay = :SYSDATE AND donvi LIKE :DONVI",
+            "cac_tham_so": ["LOAIHINH", "SYSDATE", "DONVI"],
+        }
+        assert client.post("/api/admin/sql-reports", json=fiber_report).status_code == 200
+        result = client.post(
+            "/api/reports/run",
+            json={
+                "ma_bao_cao": "FIBER_PTM",
+                "filters": {"loaihinh": "58", "sysdate": "SYSDATE", "donvi": "'VNPT%'"},
+                "page": 1,
+                "page_size": 20,
+            },
+        )
+        assert result.status_code == 200
+        assert result.json()["rows"][0]["THAM_SO"] == "LOAIHINH=58, SYSDATE=SYSDATE, DONVI='VNPT%'"
+
 
 def test_dashboard_layout_pages_include_overview_and_reports_not_web_admin() -> None:
     with TestClient(app) as client:

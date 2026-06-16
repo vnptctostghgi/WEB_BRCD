@@ -1260,6 +1260,10 @@ p {
   animation: reveal .18s ease-out;
 }
 
+.dashboard-dynamic-mode .dashboard-tabs {
+  display: none;
+}
+
 .dashboard-section-label {
   display: flex;
   align-items: center;
@@ -1815,6 +1819,17 @@ p {
 .runtime-widget-error {
   border-color: rgba(248, 113, 113, .45);
   color: #fecaca;
+}
+
+.runtime-widget-error small {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: #fee2e2;
+  font-size: .75rem;
+  font-weight: 700;
+  line-height: 1.45;
+  margin-top: .5rem;
 }
 
 .metric-preview {
