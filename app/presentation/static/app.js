@@ -2102,12 +2102,10 @@ function renderRuntimeChartWidget(title, result, widget, elementId) {
     return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Không có dữ liệu để vẽ biểu đồ.</div></article>`;
   }
   const chartHeight = dashboardChartHeight(widget.type, chartData);
-  const details = dashboardChartDetails(chartData);
   pendingDashboardCharts.push({ elementId, widgetType: widget.type, chartData, chartConfig: widget.chart_config || {} });
   return `
     <article class="runtime-widget-card">
       <h3>${escapeHtml(title)}</h3>
-      <div class="runtime-chart-details">${details}</div>
       <div class="runtime-chart-box" style="--chart-height:${chartHeight}px"><canvas id="${escapeHtml(elementId)}"></canvas></div>
     </article>
   `;
@@ -2167,15 +2165,6 @@ function dashboardValueColors(values) {
     if (ratio >= .34) return "rgba(245, 158, 11, .82)";
     return "rgba(239, 68, 68, .82)";
   });
-}
-
-function dashboardChartDetails(chartData) {
-  const values = dashboardChartPrimaryValues(chartData);
-  return chartData.labels.map((label, index) => `
-    <span class="runtime-chart-detail" style="--detail-color:${dashboardValueColors(values)[index] || "rgba(56,189,248,.82)"}">
-      <b>${escapeHtml(label)}</b>${formatDashboardNumber(values[index] || 0)}
-    </span>
-  `).join("");
 }
 
 function parseDashboardNumber(value) {

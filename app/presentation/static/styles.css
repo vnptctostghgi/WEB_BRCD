@@ -1811,35 +1811,6 @@ p {
   height: var(--chart-height, 260px) !important;
 }
 
-.runtime-chart-details {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
-  gap: .45rem;
-  margin-bottom: .85rem;
-}
-
-.runtime-chart-detail {
-  border: 1px solid rgba(125, 211, 252, .2);
-  border-left: 4px solid var(--detail-color, rgba(56, 189, 248, .82));
-  border-radius: 10px;
-  background: rgba(15, 23, 42, .48);
-  color: #e0f2fe;
-  font-size: .78rem;
-  font-weight: 900;
-  line-height: 1.25;
-  padding: .45rem .55rem;
-}
-
-.runtime-chart-detail b {
-  display: block;
-  overflow: hidden;
-  color: #bae6fd;
-  font-size: .7rem;
-  font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .runtime-widget-empty,
 .runtime-widget-error {
   display: grid;
