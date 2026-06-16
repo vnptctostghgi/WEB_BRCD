@@ -30,6 +30,11 @@ const dashboardChartInstances = new Map();
 let pendingDashboardCharts = [];
 const dashboardLayoutColumns = { "1_column": 1, "2_columns": 2, "3_columns": 3, "4_columns": 4 };
 const dashboardDataWidgetTypes = new Set(["bar_chart", "pie_chart", "line_chart", "combo_chart", "data_table", "metric", "data_card"]);
+const dashboardColorScaleStops = [
+  { ratio: 0, rgb: [239, 68, 68] },
+  { ratio: .5, rgb: [245, 158, 11] },
+  { ratio: 1, rgb: [59, 130, 246] },
+];
 
 const navFeatureConfig = {
   dashboard: { view: "dashboard", icon: "dashboard", keywords: "tong quan dashboard" },
@@ -2206,32 +2211,31 @@ function dashboardChartPrimaryValues(chartData) {
   return chartData.values || chartData.barValues || chartData.lineValues || [];
 }
 
-function dashboardValueColors(values) {
-  const ranked = values
-    .map((value, index) => ({ value: Number(value || 0), index }))
-    .filter((item) => Number.isFinite(item.value))
-    .sort((left, right) => left.value - right.value);
-  if (!ranked.length) return values.map(() => "rgba(148, 163, 184, .72)");
-  const groupSize = Math.min(5, Math.max(1, Math.ceil(ranked.length / 3)));
-  const colors = values.map(() => "rgba(245, 158, 11, .82)");
-  const redRamp = ["rgba(127, 29, 29, .9)", "rgba(185, 28, 28, .88)", "rgba(220, 38, 38, .86)", "rgba(239, 68, 68, .84)", "rgba(248, 113, 113, .82)"];
-  const amberRamp = ["rgba(180, 83, 9, .84)", "rgba(217, 119, 6, .84)", "rgba(245, 158, 11, .84)", "rgba(251, 191, 36, .82)", "rgba(252, 211, 77, .8)"];
-  const blueRamp = ["rgba(96, 165, 250, .82)", "rgba(59, 130, 246, .84)", "rgba(37, 99, 235, .86)", "rgba(29, 78, 216, .88)", "rgba(30, 64, 175, .9)"];
+function dashboardInterpolateRgb(start, end, ratio) {
+  return start.map((channel, index) => Math.round(channel + (end[index] - channel) * ratio));
+}
 
-  ranked.forEach((item, rank) => {
-    if (rank < groupSize) {
-      colors[item.index] = redRamp[Math.min(rank, redRamp.length - 1)];
-      return;
-    }
-    if (rank >= ranked.length - groupSize) {
-      const blueIndex = Math.min(rank - (ranked.length - groupSize), blueRamp.length - 1);
-      colors[item.index] = blueRamp[blueIndex];
-      return;
-    }
-    const middleRank = rank - groupSize;
-    colors[item.index] = amberRamp[middleRank % amberRamp.length];
+function dashboardColorFromScaleRatio(ratio, alpha = .86) {
+  const safeRatio = Math.min(1, Math.max(0, Number.isFinite(ratio) ? ratio : .5));
+  const lowerStop = safeRatio <= .5 ? dashboardColorScaleStops[0] : dashboardColorScaleStops[1];
+  const upperStop = safeRatio <= .5 ? dashboardColorScaleStops[1] : dashboardColorScaleStops[2];
+  const localRatio = (safeRatio - lowerStop.ratio) / (upperStop.ratio - lowerStop.ratio || 1);
+  const [red, green, blue] = dashboardInterpolateRgb(lowerStop.rgb, upperStop.rgb, localRatio);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function dashboardValueColors(values, alpha = .86) {
+  const numericValues = values.map((value) => Number(value));
+  const finiteValues = numericValues.filter(Number.isFinite);
+  if (!finiteValues.length) return values.map(() => "rgba(148, 163, 184, .72)");
+  const min = Math.min(...finiteValues);
+  const max = Math.max(...finiteValues);
+  const range = max - min;
+  return numericValues.map((value) => {
+    if (!Number.isFinite(value)) return "rgba(148, 163, 184, .72)";
+    const ratio = range === 0 ? .5 : (value - min) / range;
+    return dashboardColorFromScaleRatio(ratio, alpha);
   });
-  return colors;
 }
 
 function dashboardLineGradient(context, alpha = 1) {
@@ -2239,9 +2243,10 @@ function dashboardLineGradient(context, alpha = 1) {
   const area = chart.chartArea;
   if (!area) return `rgba(59, 130, 246, ${alpha})`;
   const gradient = chart.ctx.createLinearGradient(0, area.bottom, 0, area.top);
-  gradient.addColorStop(0, `rgba(239, 68, 68, ${alpha})`);
-  gradient.addColorStop(.5, `rgba(245, 158, 11, ${alpha})`);
-  gradient.addColorStop(1, `rgba(59, 130, 246, ${alpha})`);
+  dashboardColorScaleStops.forEach((stop) => {
+    const [red, green, blue] = stop.rgb;
+    gradient.addColorStop(stop.ratio, `rgba(${red}, ${green}, ${blue}, ${alpha})`);
+  });
   return gradient;
 }
 
