@@ -485,7 +485,7 @@ function renderDashboardViewerPageOptions() {
   const select = $("#dashboard-viewer-page");
   if (!select) return;
   select.innerHTML = dashboardViewerLayouts.length
-    ? dashboardViewerLayouts.map((page) => `<option value="${escapeHtml(page.page_id)}">${escapeHtml(page.page_name || page.page_id)} (${escapeHtml(page.page_id)})</option>`).join("")
+    ? dashboardViewerLayouts.map((page) => `<option value="${escapeHtml(page.page_id)}">${escapeHtml(page.page_name || page.page_id)}</option>`).join("")
     : `<option value="">Chưa có Dashboard</option>`;
   if (dashboardViewerLayout?.page_id) select.value = dashboardViewerLayout.page_id;
 }
@@ -527,9 +527,10 @@ async function loadDashboardViewerTab(tabId, { force = false } = {}) {
   if (button) setButtonLoading(button, true);
   try {
     const response = await api(`/api/admin/dashboard-layouts/${encodeURIComponent(dashboardViewerLayout.page_id)}/tabs/${encodeURIComponent(tabId)}/data`);
-    dashboardViewerLoadedTabs[key] = response;
+    dashboardViewerLoadedTabs[key] = { ...response, loaded_at: new Date().toISOString() };
     renderDashboardViewer();
-    showMessage($("#dashboard-viewer-message"), response.message || "Đã tải dữ liệu Tab dashboard.", response.ok ? "success" : "error");
+    if (!response.ok) showMessage($("#dashboard-viewer-message"), response.message || "Một số biểu đồ chưa tải được dữ liệu.", "error");
+    else $("#dashboard-viewer-message")?.classList.add("hidden");
   } catch (error) {
     showMessage($("#dashboard-viewer-message"), error.message, "error");
   } finally {
@@ -540,11 +541,20 @@ async function loadDashboardViewerTab(tabId, { force = false } = {}) {
 function renderDashboardViewer() {
   if (!dashboardViewerLayout) return;
   renderDashboardViewerPageOptions();
+  const title = $("#dashboard-viewer-title");
+  const loadedAt = $("#dashboard-viewer-loaded-at");
   const tabs = $("#dashboard-viewer-tabs");
   const workspace = $("#dashboard-viewer-workspace");
   const tab = dashboardViewerLayout.tabs.find((item) => item.tab_id === dashboardViewerActiveTabId) || dashboardViewerLayout.tabs[0];
   if (!tabs || !workspace || !tab) return;
   destroyDashboardCharts();
+  if (title) title.textContent = dashboardViewerLayout.page_name || "Dashboard";
+  const loadedPayload = dashboardViewerLoadedTabs[dashboardViewerTabCacheKey(tab.tab_id)];
+  if (loadedAt) {
+    loadedAt.textContent = loadedPayload?.loaded_at
+      ? `Dữ liệu được lấy vào lúc: ${new Date(loadedPayload.loaded_at).toLocaleString("vi-VN")}`
+      : "Dữ liệu được lấy vào lúc: Chưa tải";
+  }
   tabs.innerHTML = dashboardViewerLayout.tabs.map((item) => `
     <button class="runtime-tab ${item.tab_id === tab.tab_id ? "active" : ""}" data-viewer-tab="${escapeHtml(item.tab_id)}" type="button" role="tab" aria-selected="${item.tab_id === tab.tab_id}">
       ${escapeHtml(item.tab_name)}
@@ -1708,6 +1718,7 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
         line_column: activeConfig?.querySelector("[name='line_column']")?.value.trim() || "",
         bar_label: activeConfig?.querySelector("[name='bar_label']")?.value.trim() || "",
         line_label: activeConfig?.querySelector("[name='line_label']")?.value.trim() || "",
+        color_scale: Boolean(activeConfig?.querySelector("[name='color_scale']")?.checked),
       };
       const hasDisplayConfig = title || textContent || iconUrl || sqlCode;
       if (!hasDisplayConfig) return null;
@@ -1752,6 +1763,19 @@ function dashboardConfigValue(widget, key, fallback = "") {
   return escapeHtml(widget?.chart_config?.[key] ?? fallback);
 }
 
+function dashboardConfigChecked(widget, key) {
+  return widget?.chart_config?.[key] ? "checked" : "";
+}
+
+function dashboardColorScaleOption(widget) {
+  return `
+    <label class="checkbox-label dashboard-color-scale-option">
+      <input type="checkbox" name="color_scale" ${dashboardConfigChecked(widget, "color_scale")} />
+      <span>Bật thang màu Đỏ - Xanh dương</span>
+    </label>
+  `;
+}
+
 function renderDashboardWidgetAdvancedConfig(widget) {
   const type = widget.type || "bar_chart";
   const orientation = widget.chart_config?.orientation || "vertical";
@@ -1762,6 +1786,14 @@ function renderDashboardWidgetAdvancedConfig(widget) {
         <label>Cột nhãn<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="Tự nhận diện nếu để trống" /></label>
         <label>Cột giá trị<input class="form-control" name="value_column" value="${dashboardConfigValue(widget, "value_column")}" placeholder="Tự nhận diện nếu để trống" /></label>
       </div>
+      ${dashboardColorScaleOption(widget)}
+    </div>
+    <div class="dashboard-widget-config ${type === "line_chart" ? "active" : ""}" data-config-for="line_chart">
+      <div class="grid gap-2 md:grid-cols-2">
+        <label>Cột nhãn<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="Tự nhận diện nếu để trống" /></label>
+        <label>Cột giá trị<input class="form-control" name="value_column" value="${dashboardConfigValue(widget, "value_column")}" placeholder="Tự nhận diện nếu để trống" /></label>
+      </div>
+      ${dashboardColorScaleOption(widget)}
     </div>
     <div class="dashboard-widget-config ${type === "combo_chart" ? "active" : ""}" data-config-for="combo_chart">
       <div class="grid gap-2 md:grid-cols-2">
@@ -1771,6 +1803,7 @@ function renderDashboardWidgetAdvancedConfig(widget) {
         <label>Nhãn đường<input class="form-control" name="line_label" value="${dashboardConfigValue(widget, "line_label", "Đường")}" /></label>
         <label>Cột dữ liệu dạng đường<input class="form-control" name="line_column" value="${dashboardConfigValue(widget, "line_column")}" placeholder="Ví dụ: ty_le" /></label>
       </div>
+      ${dashboardColorScaleOption(widget)}
     </div>
     <div class="dashboard-widget-config ${type === "data_card" ? "active" : ""}" data-config-for="data_card">
       <label>Ảnh biểu tượng<input class="form-control" name="icon_url" value="${escapeHtml(widget.icon_url || "")}" placeholder="https://.../icon.png" /></label>
@@ -2121,6 +2154,7 @@ function extractDashboardChartData(result, chartConfig = {}) {
     labels: rows.map((row, index) => String(row[labelColumn] ?? `Dòng ${index + 1}`)),
     values: rows.map((row) => parseDashboardNumber(row[valueColumn]) || 0),
     orientation: chartConfig.orientation || "vertical",
+    colorScale: Boolean(chartConfig.color_scale),
   };
 }
 
@@ -2137,6 +2171,7 @@ function extractDashboardComboChartData(result, chartConfig = {}) {
     lineValues: rows.map((row) => parseDashboardNumber(row[lineColumn]) || 0),
     barLabel: chartConfig.bar_label || barColumn || "Cột",
     lineLabel: chartConfig.line_label || lineColumn || "Đường",
+    colorScale: Boolean(chartConfig.color_scale),
   };
 }
 
@@ -2182,6 +2217,17 @@ function dashboardValueColors(values) {
   return colors;
 }
 
+function dashboardLineGradient(context, alpha = 1) {
+  const chart = context.chart;
+  const area = chart.chartArea;
+  if (!area) return `rgba(59, 130, 246, ${alpha})`;
+  const gradient = chart.ctx.createLinearGradient(0, area.bottom, 0, area.top);
+  gradient.addColorStop(0, `rgba(239, 68, 68, ${alpha})`);
+  gradient.addColorStop(.5, `rgba(245, 158, 11, ${alpha})`);
+  gradient.addColorStop(1, `rgba(59, 130, 246, ${alpha})`);
+  return gradient;
+}
+
 function parseDashboardNumber(value) {
   if (value === null || value === undefined || value === "") return NaN;
   if (typeof value === "number") return value;
@@ -2196,7 +2242,8 @@ function renderPendingDashboardCharts() {
   jobs.forEach(({ elementId, widgetType, chartData }) => {
     const canvas = document.getElementById(elementId);
     if (!canvas || !window.Chart) return;
-    const palette = dashboardValueColors(dashboardChartPrimaryValues(chartData));
+    const useColorScale = Boolean(chartData.colorScale);
+    const palette = useColorScale ? dashboardValueColors(dashboardChartPrimaryValues(chartData)) : ["#38bdf8", "#0ea5e9", "#22c55e", "#f59e0b", "#ef4444", "#a78bfa", "#14b8a6", "#f97316"];
     const isPie = widgetType === "pie_chart";
     const isLine = widgetType === "line_chart";
     const isCombo = widgetType === "combo_chart";
@@ -2206,7 +2253,7 @@ function renderPendingDashboardCharts() {
         type: "bar",
         label: chartData.barLabel,
         data: chartData.barValues,
-        backgroundColor: dashboardValueColors(chartData.barValues),
+        backgroundColor: useColorScale ? dashboardValueColors(chartData.barValues) : "rgba(56, 189, 248, .72)",
         borderColor: "#e0f2fe",
         borderWidth: 1,
         yAxisID: "y",
@@ -2215,9 +2262,9 @@ function renderPendingDashboardCharts() {
         type: "line",
         label: chartData.lineLabel,
         data: chartData.lineValues,
-        borderColor: "#2563eb",
-        backgroundColor: "rgba(37, 99, 235, .14)",
-        pointBackgroundColor: dashboardValueColors(chartData.lineValues),
+        borderColor: useColorScale ? (context) => dashboardLineGradient(context, 1) : "#2563eb",
+        backgroundColor: useColorScale ? (context) => dashboardLineGradient(context, .18) : "rgba(37, 99, 235, .14)",
+        pointBackgroundColor: useColorScale ? dashboardValueColors(chartData.lineValues) : "#2563eb",
         pointBorderColor: "#e0f2fe",
         pointRadius: 4,
         borderWidth: 3,
@@ -2227,9 +2274,9 @@ function renderPendingDashboardCharts() {
     ] : [{
       label: "Giá trị",
       data: chartData.values,
-      backgroundColor: isPie ? palette : isLine ? "rgba(37, 99, 235, .14)" : palette,
-      borderColor: isPie ? "#061d38" : "#2563eb",
-      pointBackgroundColor: isLine ? palette : undefined,
+      backgroundColor: isPie ? palette : isLine ? (useColorScale ? (context) => dashboardLineGradient(context, .18) : "rgba(37, 99, 235, .14)") : (useColorScale ? palette : "rgba(56, 189, 248, .72)"),
+      borderColor: isPie ? "#061d38" : isLine && useColorScale ? (context) => dashboardLineGradient(context, 1) : "#2563eb",
+      pointBackgroundColor: isLine ? (useColorScale ? palette : "#2563eb") : undefined,
       pointBorderColor: isLine ? "#e0f2fe" : undefined,
       pointRadius: isLine ? 4 : undefined,
       borderWidth: isLine ? 3 : 1,

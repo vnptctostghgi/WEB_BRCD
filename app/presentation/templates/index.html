@@ -153,9 +153,8 @@
             <section class="data-card" id="dashboard-designed-section">
               <div class="section-heading">
                 <div>
-                  <p class="eyebrow">Dashboard Builder</p>
-                  <h2>Dashboard đã thiết kế</h2>
-                  <p>Hiển thị các Trang, Tab và biểu đồ đã lưu từ chức năng Thiết kế Layout báo cáo. Dữ liệu chỉ tải khi Admin mở từng Tab.</p>
+                  <h2 id="dashboard-viewer-title">Dashboard</h2>
+                  <p id="dashboard-viewer-loaded-at">Dữ liệu được lấy vào lúc: Chưa tải</p>
                 </div>
                 <div class="dashboard-viewer-actions">
                   <label class="sr-only" for="dashboard-viewer-page">Trang Dashboard</label>
@@ -471,6 +470,6 @@
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="/static/app.js?v=45"></script>
+    <script src="/static/app.js?v=46"></script>
   </body>
 </html>
