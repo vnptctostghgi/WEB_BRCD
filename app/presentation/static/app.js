@@ -53,8 +53,31 @@ const navGroupIcons = {
   reports: "chart",
 };
 
+const mojibakePattern = /(?:Ã|Ä|Â|Æ|áº|á»|â€)/;
+const windows1252ByteMap = new Map([
+  ["€", 0x80], ["‚", 0x82], ["ƒ", 0x83], ["„", 0x84], ["…", 0x85], ["†", 0x86], ["‡", 0x87],
+  ["ˆ", 0x88], ["‰", 0x89], ["Š", 0x8a], ["‹", 0x8b], ["Œ", 0x8c], ["Ž", 0x8e],
+  ["‘", 0x91], ["’", 0x92], ["“", 0x93], ["”", 0x94], ["•", 0x95], ["–", 0x96], ["—", 0x97],
+  ["˜", 0x98], ["™", 0x99], ["š", 0x9a], ["›", 0x9b], ["œ", 0x9c], ["ž", 0x9e], ["Ÿ", 0x9f],
+]);
+
+function repairTextEncoding(value) {
+  const text = String(value ?? "");
+  if (!mojibakePattern.test(text) || !window.TextDecoder) return text;
+  try {
+    const bytes = Uint8Array.from([...text].map((character) => {
+      const mapped = windows1252ByteMap.get(character);
+      return mapped ?? (character.charCodeAt(0) & 0xff);
+    }));
+    const decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return decoded.includes(String.fromCharCode(0xfffd)) ? text : decoded;
+  } catch {
+    return text;
+  }
+}
+
 function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+  return repairTextEncoding(value).replace(/[&<>"']/g, (character) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
   }[character]));
 }
@@ -80,7 +103,7 @@ async function api(url, options = {}) {
 
 function showMessage(element, text, type = "success") {
   element.className = `result ${type}`;
-  element.textContent = text;
+  element.textContent = repairTextEncoding(text);
 }
 
 let toastTimer;
@@ -88,7 +111,7 @@ function showToast(text, type = "success") {
   const toast = $("#toast");
   if (!toast) return;
   window.clearTimeout(toastTimer);
-  toast.textContent = text;
+  toast.textContent = repairTextEncoding(text);
   toast.className = `toast ${type === "error" ? "error" : ""}`.trim();
   toastTimer = window.setTimeout(() => toast.classList.add("hidden"), 3200);
 }
@@ -1198,7 +1221,7 @@ async function saveMenuLayout(button = null) {
 function dashboardLayoutTemplate(pageName = "Dashboard Kinh doanh", pageId = "DASHBOARD_KINH_DOANH") {
   return {
     page_id: pageId,
-    page_name: pageName,
+    page_name: repairTextEncoding(pageName),
     tabs: [
       {
         tab_id: `tab_${Date.now()}`,
@@ -1215,10 +1238,10 @@ function dashboardLayoutTemplate(pageName = "Dashboard Kinh doanh", pageId = "DA
 function normalizeDashboardLayoutData(layout, pageName = "") {
   return {
     page_id: String(layout?.page_id || "DASHBOARD_KINH_DOANH").trim().toUpperCase(),
-    page_name: pageName || layout?.page_name || String(layout?.page_id || "Dashboard Kinh doanh"),
+    page_name: repairTextEncoding(pageName || layout?.page_name || String(layout?.page_id || "Dashboard Kinh doanh")),
     tabs: Array.isArray(layout?.tabs) ? layout.tabs.map((tab, index) => ({
       tab_id: String(tab.tab_id || `tab_${Date.now()}_${index}`).trim(),
-      tab_name: String(tab.tab_name || `Tab ${index + 1}`).trim(),
+      tab_name: repairTextEncoding(String(tab.tab_name || `Tab ${index + 1}`).trim()),
       order: index + 1,
       grid_layout: Array.isArray(tab.grid_layout) ? tab.grid_layout.map((row, rowIndex) => ({
         row_id: Number(row.row_id || rowIndex + 1),
@@ -1226,11 +1249,11 @@ function normalizeDashboardLayoutData(layout, pageName = "") {
         widgets: Array.isArray(row.widgets) ? row.widgets.map((widget) => ({
           position: Number(widget.position || 1),
           type: String(widget.type || "bar_chart"),
-          title: String(widget.title || ""),
+          title: repairTextEncoding(String(widget.title || "")),
           sql_code: String(widget.sql_code || "").trim().toUpperCase(),
           filters: widget.filters && typeof widget.filters === "object" && !Array.isArray(widget.filters) ? widget.filters : {},
           chart_config: widget.chart_config && typeof widget.chart_config === "object" && !Array.isArray(widget.chart_config) ? widget.chart_config : {},
-          text_content: String(widget.text_content || ""),
+          text_content: repairTextEncoding(String(widget.text_content || "")),
           icon_url: String(widget.icon_url || ""),
         })).filter((widget) => widget.sql_code || widget.type === "text_title") : [],
       })) : [],
@@ -1276,14 +1299,14 @@ function dashboardLayoutColumnCount(layoutType) {
 
 function dashboardWidgetTypeLabel(type) {
   return {
-    bar_chart: "Bi?u d? c?t",
-    pie_chart: "Bi?u d? tr�n",
-    line_chart: "Bi?u d? du?ng",
-    combo_chart: "Bi?u d? k?t h?p",
-    data_table: "B?ng s? li?u",
-    metric: "Th? s? li?u",
-    data_card: "Th? d? li?u",
-    text_title: "Ti�u d? text",
+    bar_chart: "Biểu đồ cột",
+    pie_chart: "Biểu đồ tròn",
+    line_chart: "Biểu đồ đường",
+    combo_chart: "Biểu đồ kết hợp",
+    data_table: "Bảng số liệu",
+    metric: "Thẻ số liệu",
+    data_card: "Thẻ dữ liệu",
+    text_title: "Tiêu đề text",
   }[type] || type;
 }
 
@@ -1410,7 +1433,7 @@ async function openDashboardLayout(pageId) {
   const data = await api(`/api/admin/dashboard-layouts/${encodeURIComponent(pageId)}`);
   const page = dashboardBuilderPageById(pageId);
   dashboardBuilderLayout = normalizeDashboardBuilderLayout(data.layout || {}, data.page_name || "");
-  dashboardBuilderLayout.page_name = page?.page_name || data.page_name || dashboardBuilderLayout.page_name;
+  dashboardBuilderLayout.page_name = repairTextEncoding(page?.page_name || data.page_name || dashboardBuilderLayout.page_name);
   dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0]?.tab_id || "";
   dashboardBuilderLoadedTabs = {};
   renderDashboardBuilder();
@@ -1472,7 +1495,7 @@ function renderDashboardBuilderTabs() {
   container.innerHTML = dashboardBuilderLayout.tabs.map((tab) => `
     <button class="builder-tab ${tab.tab_id === dashboardBuilderActiveTabId ? "active" : ""}" draggable="true" data-tab-id="${escapeHtml(tab.tab_id)}" type="button" role="tab" aria-selected="${tab.tab_id === dashboardBuilderActiveTabId}">
       <span>${escapeHtml(tab.tab_name)}</span>
-      <span class="builder-tab-edit" data-rename-tab="${escapeHtml(tab.tab_id)}" title="�?i t�n Tab">?</span>
+      <span class="builder-tab-edit" data-rename-tab="${escapeHtml(tab.tab_id)}" title="Đổi tên Tab">✎</span>
       <span class="builder-tab-delete" data-delete-tab="${escapeHtml(tab.tab_id)}" title="Xóa Tab">×</span>
     </button>
   `).join("");
@@ -1536,7 +1559,7 @@ function renameDashboardTab(tabId) {
   if (!tab) return;
   const newName = prompt("Đổi tên Tab:", tab.tab_name);
   if (newName === null) return;
-  tab.tab_name = newName.trim() || tab.tab_name;
+  tab.tab_name = repairTextEncoding(newName.trim() || tab.tab_name);
   renderDashboardBuilder();
 }
 
@@ -1614,7 +1637,7 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
   const pageId = $("#dashboard-page-id")?.value.trim().toUpperCase();
   const pageName = $("#dashboard-page-name")?.value.trim();
   if (pageId) dashboardBuilderLayout.page_id = pageId;
-  if (pageName) dashboardBuilderLayout.page_name = pageName;
+  if (pageName) dashboardBuilderLayout.page_name = repairTextEncoding(pageName);
   const tab = currentDashboardTab();
   if (!tab) return;
   const rows = [...document.querySelectorAll("#dashboard-builder-workspace .builder-row")];
@@ -1666,14 +1689,14 @@ function renderDashboardWorkspace() {
   workspace.innerHTML = tab.grid_layout?.length ? tab.grid_layout.map((row, index) => renderDashboardBuilderRow(row, index)).join("") : `
     <div class="dashboard-empty">
       <p class="eyebrow">Workspace Grid</p>
-      <h2>Tab n�y chua c� Layout</h2>
-      <p>B?m Th�m Layout 1, 2, 3 ho?c 4 c?t d? b?t d?u b? tr� ti�u d?, th? d? li?u v� bi?u d?.</p>
+      <h2>Tab này chưa có Layout</h2>
+      <p>Bấm Thêm Layout 1, 2, 3 hoặc 4 cột để bắt đầu bố trí tiêu đề, thẻ dữ liệu và biểu đồ.</p>
     </div>
   `;
 }
 
 function dashboardLayoutTypeOptions(selectedType) {
-  const labels = { "1_column": "1 c?t", "2_columns": "2 c?t", "3_columns": "3 c?t", "4_columns": "4 c?t" };
+  const labels = { "1_column": "1 cột", "2_columns": "2 cột", "3_columns": "3 cột", "4_columns": "4 cột" };
   return Object.keys(dashboardLayoutColumns).map((type) => `<option value="${type}" ${selectedType === type ? "selected" : ""}>${labels[type]}</option>`).join("");
 }
 
@@ -1686,27 +1709,27 @@ function renderDashboardWidgetAdvancedConfig(widget) {
   const orientation = widget.chart_config?.orientation || "vertical";
   return `
     <div class="dashboard-widget-config ${type === "bar_chart" ? "active" : ""}" data-config-for="bar_chart">
-      <label>Hu?ng bi?u d? c?t<select class="form-control" name="chart_orientation"><option value="vertical" ${orientation !== "horizontal" ? "selected" : ""}>C?t d?ng</option><option value="horizontal" ${orientation === "horizontal" ? "selected" : ""}>C?t ngang</option></select></label>
+      <label>Hướng biểu đồ cột<select class="form-control" name="chart_orientation"><option value="vertical" ${orientation !== "horizontal" ? "selected" : ""}>Cột đứng</option><option value="horizontal" ${orientation === "horizontal" ? "selected" : ""}>Cột ngang</option></select></label>
       <div class="grid gap-2 md:grid-cols-2">
-        <label>C?t nh�n<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="T? nh?n di?n n?u d? tr?ng" /></label>
-        <label>C?t gi� tr?<input class="form-control" name="value_column" value="${dashboardConfigValue(widget, "value_column")}" placeholder="T? nh?n di?n n?u d? tr?ng" /></label>
+        <label>Cột nhãn<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="Tự nhận diện nếu để trống" /></label>
+        <label>Cột giá trị<input class="form-control" name="value_column" value="${dashboardConfigValue(widget, "value_column")}" placeholder="Tự nhận diện nếu để trống" /></label>
       </div>
     </div>
     <div class="dashboard-widget-config ${type === "combo_chart" ? "active" : ""}" data-config-for="combo_chart">
       <div class="grid gap-2 md:grid-cols-2">
-        <label>C?t nh�n<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="V� d?: ten_don_vi" /></label>
-        <label>Nh�n c?t<input class="form-control" name="bar_label" value="${dashboardConfigValue(widget, "bar_label", "C?t")}" /></label>
-        <label>C?t d? li?u d?ng c?t<input class="form-control" name="bar_column" value="${dashboardConfigValue(widget, "bar_column")}" placeholder="V� d?: san_luong" /></label>
-        <label>Nh�n du?ng<input class="form-control" name="line_label" value="${dashboardConfigValue(widget, "line_label", "�u?ng")}" /></label>
-        <label>C?t d? li?u d?ng du?ng<input class="form-control" name="line_column" value="${dashboardConfigValue(widget, "line_column")}" placeholder="V� d?: ty_le" /></label>
+        <label>Cột nhãn<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="Ví dụ: ten_don_vi" /></label>
+        <label>Nhãn cột<input class="form-control" name="bar_label" value="${dashboardConfigValue(widget, "bar_label", "Cột")}" /></label>
+        <label>Cột dữ liệu dạng cột<input class="form-control" name="bar_column" value="${dashboardConfigValue(widget, "bar_column")}" placeholder="Ví dụ: san_luong" /></label>
+        <label>Nhãn đường<input class="form-control" name="line_label" value="${dashboardConfigValue(widget, "line_label", "Đường")}" /></label>
+        <label>Cột dữ liệu dạng đường<input class="form-control" name="line_column" value="${dashboardConfigValue(widget, "line_column")}" placeholder="Ví dụ: ty_le" /></label>
       </div>
     </div>
     <div class="dashboard-widget-config ${type === "data_card" ? "active" : ""}" data-config-for="data_card">
-      <label>?nh bi?u tu?ng<input class="form-control" name="icon_url" value="${escapeHtml(widget.icon_url || "")}" placeholder="https://.../icon.png" /></label>
-      <label>Ghi ch� th?<textarea class="form-control" name="text_content" rows="2" placeholder="D�ng ghi ch� du?i s? li?u">${escapeHtml(widget.text_content || "")}</textarea></label>
+      <label>Ảnh biểu tượng<input class="form-control" name="icon_url" value="${escapeHtml(widget.icon_url || "")}" placeholder="https://.../icon.png" /></label>
+      <label>Ghi chú thẻ<textarea class="form-control" name="text_content" rows="2" placeholder="Dòng ghi chú dưới số liệu">${escapeHtml(widget.text_content || "")}</textarea></label>
     </div>
     <div class="dashboard-widget-config ${type === "text_title" ? "active" : ""}" data-config-for="text_title">
-      <label>N?i dung text<textarea class="form-control" name="text_content" rows="3" placeholder="Nh?p m� t? ho?c ti�u d? ph?">${escapeHtml(widget.text_content || "")}</textarea></label>
+      <label>Nội dung text<textarea class="form-control" name="text_content" rows="3" placeholder="Nhập mô tả hoặc tiêu đề phụ">${escapeHtml(widget.text_content || "")}</textarea></label>
     </div>
   `;
 }
@@ -1720,11 +1743,11 @@ function renderDashboardBuilderRow(row, index) {
     const isTextWidget = widget.type === "text_title";
     return `
       <div class="builder-widget-card" data-position="${position}">
-        <small>� ${position}</small>
-        <label>Ti�u d?<input class="form-control" name="title" value="${escapeHtml(widget.title || "")}" placeholder="T�n bi?u d?, th? ho?c ti�u d?" /></label>
-        <label>Lo?i hi?n th?<select class="form-control" name="type">${dashboardWidgetTypeOptions(widget.type)}</select></label>
-        <label class="dashboard-sql-field ${isTextWidget ? "hidden" : ""}">M� SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "")}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
-        <label class="dashboard-filter-field ${isTextWidget ? "hidden" : ""}">B? l?c m?c d?nh<textarea class="form-control dashboard-filter-json" name="filters" rows="2" placeholder='{"status":"1"}'>${escapeHtml(dashboardFiltersToText(widget.filters))}</textarea></label>
+        <small>Ô ${position}</small>
+        <label>Tiêu đề<input class="form-control" name="title" value="${escapeHtml(widget.title || "")}" placeholder="Tên biểu đồ, thẻ hoặc tiêu đề" /></label>
+        <label>Loại hiển thị<select class="form-control" name="type">${dashboardWidgetTypeOptions(widget.type)}</select></label>
+        <label class="dashboard-sql-field ${isTextWidget ? "hidden" : ""}">Mã SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "")}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
+        <label class="dashboard-filter-field ${isTextWidget ? "hidden" : ""}">Bộ lọc mặc định<textarea class="form-control dashboard-filter-json" name="filters" rows="2" placeholder='{"status":"1"}'>${escapeHtml(dashboardFiltersToText(widget.filters))}</textarea></label>
         ${renderDashboardWidgetAdvancedConfig(widget)}
       </div>
     `;
@@ -1732,9 +1755,9 @@ function renderDashboardBuilderRow(row, index) {
   return `
     <section class="builder-row" draggable="true" data-row-id="${escapeHtml(row.row_id || index + 1)}">
       <div class="builder-row-header">
-        <div><p class="eyebrow">D�ng Layout ${index + 1}</p><div class="builder-row-title">K�o d�ng n�y d? d?i th? t? trong Tab</div></div>
-        <label>Lo?i Layout<select class="form-control" name="layout_type">${dashboardLayoutTypeOptions(row.layout_type)}</select></label>
-        <button class="table-action danger" data-delete-dashboard-row="${escapeHtml(row.row_id || index + 1)}" type="button">X�a d�ng</button>
+        <div><p class="eyebrow">Dòng Layout ${index + 1}</p><div class="builder-row-title">Kéo dòng này để đổi thứ tự trong Tab</div></div>
+        <label>Loại Layout<select class="form-control" name="layout_type">${dashboardLayoutTypeOptions(row.layout_type)}</select></label>
+        <button class="table-action danger" data-delete-dashboard-row="${escapeHtml(row.row_id || index + 1)}" type="button">Xóa dòng</button>
       </div>
       <div class="${dashboardGridClass(row.layout_type)}">${cells}</div>
     </section>
@@ -1929,19 +1952,19 @@ function renderDashboardPreview() {
 
 function renderRuntimeWidget(widget, widgetData, elementId) {
   if (!widget) {
-    return `<article class="runtime-widget-card"><div class="runtime-widget-empty">� tr?ng</div></article>`;
+    return `<article class="runtime-widget-card"><div class="runtime-widget-empty">Ô trống</div></article>`;
   }
-  const title = widget.title || widget.sql_code || "Ti�u d?";
+  const title = widget.title || widget.sql_code || "Tiêu đề";
   if (widget.type === "text_title") return renderRuntimeTextTitleWidget(widget);
   if (!widget.sql_code) {
-    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Chua ch?n m� SQL cho � n�y.</div></article>`;
+    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Chưa chọn mã SQL cho ô này.</div></article>`;
   }
   const result = widgetData?.data;
   if (!result) {
-    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Chua t?i d? li?u. M? Tab n�y d? h? th?ng g?i API.</div></article>`;
+    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Chưa tải dữ liệu. Mở Tab này để hệ thống gọi API.</div></article>`;
   }
   if (!result.ok) {
-    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-error">${escapeHtml(result.message || "Kh�ng t?i du?c d? li?u.")}</div></article>`;
+    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-error">${escapeHtml(result.message || "Không tải được dữ liệu.")}</div></article>`;
   }
   if (widget.type === "data_table") return renderRuntimeTableWidget(title, result);
   if (widget.type === "metric") return renderRuntimeMetricWidget(title, result, widget.sql_code);
@@ -1967,7 +1990,7 @@ function renderRuntimeTableWidget(title, result) {
       <div class="table-scroll">
         <table>
           <thead>${columns.length ? `<tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>` : ""}</thead>
-          <tbody>${rows.length ? rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(row[column])}</td>`).join("")}</tr>`).join("") : emptyRow(Math.max(columns.length, 1), "Kh�ng c� d? li?u", "API chua tr? d�ng d? li?u n�o.")}</tbody>
+          <tbody>${rows.length ? rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(row[column])}</td>`).join("")}</tr>`).join("") : emptyRow(Math.max(columns.length, 1), "Không có dữ liệu", "API chưa trả dòng dữ liệu nào.")}</tbody>
         </table>
       </div>
     </article>
@@ -2025,7 +2048,7 @@ function renderRuntimeDataCardWidget(widget, result) {
 function renderRuntimeChartWidget(title, result, widget, elementId) {
   const chartData = widget.type === "combo_chart" ? extractDashboardComboChartData(result, widget.chart_config || {}) : extractDashboardChartData(result, widget.chart_config || {});
   if (!chartData.labels.length) {
-    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Kh�ng c� d? li?u d? v? bi?u d?.</div></article>`;
+    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Không có dữ liệu để vẽ biểu đồ.</div></article>`;
   }
   pendingDashboardCharts.push({ elementId, widgetType: widget.type, chartData, chartConfig: widget.chart_config || {} });
   return `
@@ -2043,7 +2066,7 @@ function extractDashboardChartData(result, chartConfig = {}) {
   const valueColumn = pickDashboardNumericColumn(rows, columns, chartConfig.value_column || "");
   const labelColumn = pickDashboardLabelColumn(rows, columns, chartConfig.label_column || "", new Set([valueColumn]));
   return {
-    labels: rows.slice(0, 12).map((row, index) => String(row[labelColumn] ?? `D�ng ${index + 1}`)),
+    labels: rows.slice(0, 12).map((row, index) => String(row[labelColumn] ?? `Dòng ${index + 1}`)),
     values: rows.slice(0, 12).map((row) => parseDashboardNumber(row[valueColumn]) || 0),
     orientation: chartConfig.orientation || "vertical",
   };
@@ -2057,11 +2080,11 @@ function extractDashboardComboChartData(result, chartConfig = {}) {
   const lineColumn = pickDashboardNumericColumn(rows, columns, chartConfig.line_column || "", new Set([barColumn]));
   const labelColumn = pickDashboardLabelColumn(rows, columns, chartConfig.label_column || "", new Set([barColumn, lineColumn]));
   return {
-    labels: rows.slice(0, 12).map((row, index) => String(row[labelColumn] ?? `D�ng ${index + 1}`)),
+    labels: rows.slice(0, 12).map((row, index) => String(row[labelColumn] ?? `Dòng ${index + 1}`)),
     barValues: rows.slice(0, 12).map((row) => parseDashboardNumber(row[barColumn]) || 0),
     lineValues: rows.slice(0, 12).map((row) => parseDashboardNumber(row[lineColumn]) || 0),
-    barLabel: chartConfig.bar_label || barColumn || "C?t",
-    lineLabel: chartConfig.line_label || lineColumn || "�u?ng",
+    barLabel: chartConfig.bar_label || barColumn || "Cột",
+    lineLabel: chartConfig.line_label || lineColumn || "Đường",
   };
 }
 
@@ -2105,7 +2128,7 @@ function renderPendingDashboardCharts() {
         yAxisID: "y1",
       },
     ] : [{
-      label: "Gi� tr?",
+      label: "Giá trị",
       data: chartData.values,
       backgroundColor: isPie ? chartData.labels.map((_, index) => palette[index % palette.length]) : "rgba(56, 189, 248, .72)",
       borderColor: isPie ? "#061d38" : "#7dd3fc",
