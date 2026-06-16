@@ -215,6 +215,14 @@ WHERE loaitb_id = '&p_loaihinh'
     assert "'' IS NULL OR '' = ''" in compiled
     assert not compiled.endswith(";")
     assert details["define_params"] == ["p_loaihinh", "p_thang", "p_donvi"]
+    assert DatabaseService._filters_for_compiled_sql(compiled, {"LOAIHINH": "58", "MONTH": "", "DONVI": "VNPT%"}) == {}
+
+
+def test_compiled_sql_keeps_only_remaining_bind_params() -> None:
+    sql = "SELECT * FROM css_cto.db_thuebao WHERE ngay >= :FROM_DATE AND ten_donvi_cha LIKE '&p_donvi';"
+    params = {"FROM_DATE": "2026-05-01", "DONVI": "VNPT%"}
+
+    assert DatabaseService._filters_for_compiled_sql(sql, params) == {"FROM_DATE": "2026-05-01"}
 
 
 def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data() -> None:

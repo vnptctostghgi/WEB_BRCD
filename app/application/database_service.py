@@ -94,19 +94,20 @@ class DatabaseService:
             else:
                 safe_filters[str(key).strip().lstrip(":")] = value
         compiled_sql, define_details = self._compile_define_sql(report["cau_lenh_sql"], safe_filters)
+        executable_filters = self._filters_for_compiled_sql(compiled_sql, safe_filters)
 
         try:
             result = self.internal_api.run_sql_report(
                 ten_bao_cao=report["ten_bao_cao"],
                 ma_bao_cao=report["ma_bao_cao"],
                 cau_lenh_sql=compiled_sql,
-                tham_so=safe_filters,
+                tham_so=executable_filters,
                 page=safe_page,
                 page_size=safe_page_size,
             )
         except httpx.TimeoutException as error:
             logger.exception("Dynamic report timeout: %s", error)
-            return self._failed_report("API dữ liệu nội bộ phản hồi quá lâu.", safe_page, safe_page_size, str(error))
+            return self._failed_report("API dữ liệu nội bộ phản hồi quá lâu.", safe_page, safe_page_size, str(error), compiled_sql, executable_filters, define_details)
         except httpx.HTTPStatusError as error:
             logger.exception("Dynamic report HTTP error: %s", error)
             return self._failed_report(
@@ -114,10 +115,13 @@ class DatabaseService:
                 safe_page,
                 safe_page_size,
                 error.response.text[:300],
+                compiled_sql,
+                executable_filters,
+                define_details,
             )
         except httpx.HTTPError as error:
             logger.exception("Dynamic report connection error: %s", error)
-            return self._failed_report("Không kết nối được API dữ liệu nội bộ.", safe_page, safe_page_size, str(error))
+            return self._failed_report("Không kết nối được API dữ liệu nội bộ.", safe_page, safe_page_size, str(error), compiled_sql, executable_filters, define_details)
 
         rows = result.get("rows") or result.get("data") or []
         if not isinstance(rows, list):
@@ -130,6 +134,8 @@ class DatabaseService:
             details = {**details, "ignored_filters": ignored_filters, "allowed_params": allowed_params}
         if define_details:
             details = {**details, **define_details}
+        if define_details:
+            details = {**details, "sent_params": executable_filters}
 
         return {
             "ok": bool(result.get("ok", True)),
@@ -185,6 +191,17 @@ class DatabaseService:
     @staticmethod
     def _escape_define_value(value: str) -> str:
         return str(value).replace("'", "''")
+
+    @staticmethod
+    def _filters_for_compiled_sql(sql: str, filters: dict[str, Any]) -> dict[str, Any]:
+        bind_names = {match.upper() for match in re.findall(r":([A-Za-z][A-Za-z0-9_$#]*)", sql)}
+        if not bind_names:
+            return {}
+        return {
+            key: value
+            for key, value in filters.items()
+            if str(key).strip().lstrip(":").upper() in bind_names
+        }
 
     def run_dashboard_layout_tab(self, *, page_id: str, tab_id: str) -> dict[str, Any]:
         layout_row = self.app_repository.get_dashboard_layout(page_id)
@@ -294,11 +311,26 @@ class DatabaseService:
         return []
 
     @staticmethod
-    def _failed_report(message: str, page: int, page_size: int, detail: str) -> dict[str, Any]:
+    def _failed_report(
+        message: str,
+        page: int,
+        page_size: int,
+        detail: str,
+        compiled_sql: str | None = None,
+        sent_params: dict[str, Any] | None = None,
+        extra_details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        details = {"error": detail}
+        if compiled_sql is not None:
+            details["compiled_sql_preview"] = compiled_sql[:1200]
+        if sent_params is not None:
+            details["sent_params"] = sent_params
+        if extra_details:
+            details.update(extra_details)
         return {
             "ok": False,
             "message": message,
-            "details": {"error": detail},
+            "details": details,
             "columns": [],
             "rows": [],
             "pagination": {"page": page, "page_size": page_size, "total": 0},

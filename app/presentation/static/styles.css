@@ -1261,7 +1261,15 @@ p {
 }
 
 .dashboard-dynamic-mode .dashboard-tabs {
-  display: none;
+  display: none !important;
+}
+
+.dashboard-dynamic-mode .dashboard-tab-panel {
+  display: none !important;
+}
+
+.dashboard-dynamic-mode #dashboard-tab-summary {
+  display: block !important;
 }
 
 .dashboard-section-label {
