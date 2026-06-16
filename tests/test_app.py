@@ -291,6 +291,17 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data() -> None:
         assert layouts.status_code == 200
         assert any(item["page_id"] == "DASHBOARD_TEST_BUILDER" for item in layouts.json()["layouts"])
 
+        pages = client.get("/api/admin/dashboard-layout-pages")
+        assert pages.status_code == 200
+        builder_page = next(page for page in pages.json()["pages"] if page["page_id"] == "DASHBOARD_TEST_BUILDER")
+        assert builder_page["feature_code"] == "dashboard_test_builder"
+        assert builder_page["feature_name"] == "Dashboard Test Builder"
+        assert builder_page["saved"] is True
+
+        me = client.get("/api/auth/me")
+        assert me.status_code == 200
+        assert "dashboard_test_builder" in me.json()["user"]["permissions"]
+
         tab_a = client.get("/api/admin/dashboard-layouts/DASHBOARD_TEST_BUILDER/tabs/tab_a/data")
         assert tab_a.status_code == 200
         tab_payload = tab_a.json()
@@ -333,15 +344,20 @@ def test_dashboard_layout_pages_include_overview_and_reports_not_web_admin() -> 
 
         assert "DASHBOARD_KINH_DOANH" in page_ids
         assert "REPORTS" in page_ids
-        assert "ADMIN_USERS" not in page_ids
+        assert "ADMIN_USERS" in page_ids
+        assert page_ids.count("DASHBOARD_KINH_DOANH") == 1
 
         overview = next(page for page in pages if page["page_id"] == "DASHBOARD_KINH_DOANH")
         reports = next(page for page in pages if page["page_id"] == "REPORTS")
+        generated_admin_page = next(page for page in pages if page["page_id"] == "ADMIN_USERS")
         assert overview["feature_code"] == "dashboard"
         assert overview["saved"] is True
         assert reports["feature_code"] == "reports"
         assert reports["saved"] is False
         assert reports["unsaved"] is True
+        assert generated_admin_page["feature_code"] == "admin_users"
+        assert generated_admin_page["saved"] is True
+        assert not any(page["feature_code"] == "admin.users" for page in pages)
 
 
 def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:

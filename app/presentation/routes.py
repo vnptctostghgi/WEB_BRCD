@@ -904,11 +904,11 @@ def save_dashboard_layout(request: Request, payload: DashboardLayoutPayload) -> 
     repository = build_app_repository()
     page_id, page_name, layout = normalize_dashboard_layout(payload)
     try:
-        repository.save_dashboard_layout(page_id, page_name, layout)
+        feature_code = repository.save_dashboard_layout(page_id, page_name, layout)
     except RuntimeError as error:
         raise_dashboard_layout_schema_error(error)
     repository.add_audit_log(actor["username"], "dashboard_layout_saved", f"Lưu layout dashboard {page_id}")
-    return {"ok": True, "page_id": page_id, "layout": layout}
+    return {"ok": True, "page_id": page_id, "feature_code": feature_code, "layout": layout}
 
 
 @router.delete("/api/admin/dashboard-layouts/{page_id}")

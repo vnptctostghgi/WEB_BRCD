@@ -9,6 +9,7 @@ from app.data_access.app_repository import (
     DEFAULT_DASHBOARD_LAYOUT,
     DEFAULT_DASHBOARD_PAGE_ID,
     DEFAULT_DASHBOARD_PAGE_NAME,
+    dashboard_feature_code_for_page,
     hash_password,
 )
 
@@ -292,6 +293,34 @@ class SupabaseRepository:
             "sort_order": sort_order,
         })
 
+    def ensure_dashboard_layout_feature(self, page_id: str, page_name: str) -> str:
+        code = dashboard_feature_code_for_page(page_id)
+        existing = self._get("features", {"code": f"eq.{code}", "select": "code", "limit": "1"})
+        if existing and code in {"dashboard", "reports"}:
+            self._patch("features", {"code": f"eq.{code}"}, {"name": page_name})
+        elif existing:
+            self._patch("features", {"code": f"eq.{code}"}, {
+                "name": page_name,
+                "parent_code": "reports",
+            })
+        else:
+            siblings = self._get("features", {"parent_code": "eq.reports", "select": "sort_order"})
+            max_order = max([int(row.get("sort_order") or 0) for row in siblings] or [30])
+            self._insert("features", {
+                "code": code,
+                "name": page_name,
+                "parent_code": "reports",
+                "sort_order": max_order + 10,
+            })
+        admin_users = self._get("users", {"role": "eq.admin", "select": "id"})
+        if admin_users:
+            self._post(
+                "user_permissions",
+                [{"user_id": int(user["id"]), "feature_code": code} for user in admin_users],
+                {"Prefer": "resolution=ignore-duplicates,return=minimal"},
+            )
+        return code
+
     def get_user_permissions(self, user_id: int) -> list[str]:
         return [row["feature_code"] for row in self._get("user_permissions", {"user_id": f"eq.{user_id}", "select": "feature_code"})]
 
@@ -427,10 +456,10 @@ class SupabaseRepository:
         }
         if existing:
             self._patch("dashboard_layouts", {"page_id": f"eq.{page_id}"}, payload)
-            return page_id
+            return self.ensure_dashboard_layout_feature(page_id, page_name)
         payload["created_at"] = now
         self._insert("dashboard_layouts", payload)
-        return page_id
+        return self.ensure_dashboard_layout_feature(page_id, page_name)
 
     def delete_dashboard_layout(self, page_id: str) -> None:
         self._delete("dashboard_layouts", {"page_id": f"eq.{page_id}"})

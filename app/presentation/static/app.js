@@ -145,6 +145,7 @@ document.querySelectorAll(".nav-group").forEach((group) => {
 
 async function activateNavItem(item) {
   const nextView = item.dataset.view || "";
+  const dashboardPageId = item.dataset.dashboardPageId || "";
   if (nextView !== "dashboard") {
     dashboardFiberLoaded = false;
     dashboardViewerLoadedTabs = {};
@@ -160,6 +161,10 @@ async function activateNavItem(item) {
   $("#sidebar").classList.remove("menu-open");
   $("#menu-button")?.setAttribute("aria-expanded", "false");
   if (nextView === "dashboard") await initDashboard();
+  if (nextView === "dashboard" && dashboardPageId) {
+    await switchDashboardTab("summary");
+    await openDashboardViewerLayout(dashboardPageId);
+  }
   if (nextView === "users") await loadUsers();
   if (nextView === "vault") await loadCredentials();
   if (nextView === "websites") await loadAdminWebsites();
@@ -985,28 +990,51 @@ function flattenFeatureTree(nodes, level = 0, rows = []) {
 }
 
 function featureIcon(feature) {
-  return navFeatureConfig[feature.code]?.icon || navGroupIcons[feature.code] || "list";
+  return featureNavigationConfig(feature)?.icon || navGroupIcons[feature.code] || "list";
 }
 
 function iconMarkup(icon) {
   return `<svg class="nav-svg"><use href="#icon-${escapeHtml(icon)}"></use></svg>`;
 }
 
+function dashboardPageIdFromFeatureCode(code) {
+  if (code === "dashboard") return "DASHBOARD_KINH_DOANH";
+  return String(code || "")
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toUpperCase() || "DASHBOARD_KINH_DOANH";
+}
+
+function featureNavigationConfig(feature) {
+  const staticConfig = navFeatureConfig[feature.code];
+  if (staticConfig) return staticConfig;
+  if (feature.parent_code === "reports") {
+    return {
+      view: "dashboard",
+      icon: "chart",
+      keywords: `dashboard bao cao thong ke ${feature.name || ""} ${feature.code || ""}`,
+      dashboardPageId: dashboardPageIdFromFeatureCode(feature.code),
+    };
+  }
+  return null;
+}
+
 function navNodeHasVisibleItem(node) {
-  if (navFeatureConfig[node.feature.code]?.view) return true;
+  if (featureNavigationConfig(node.feature)?.view) return true;
   return node.children.some((child) => navNodeHasVisibleItem(child));
 }
 
 function renderNavigationButton(feature, level) {
-  const config = navFeatureConfig[feature.code];
+  const config = featureNavigationConfig(feature);
   if (!config?.view) return "";
   const classes = ["nav-item"];
   if (level > 0) classes.push("child");
   if (level > 1) classes.push("subchild");
   const title = feature.name || feature.code;
   const keywords = `${config.keywords || ""} ${feature.name || ""} ${feature.code}`;
+  const dashboardPageAttr = config.dashboardPageId ? ` data-dashboard-page-id="${escapeHtml(config.dashboardPageId)}"` : "";
   return `
-    <button class="${classes.join(" ")}" data-feature-code="${escapeHtml(feature.code)}" data-view="${escapeHtml(config.view)}" data-title="${escapeHtml(title)}" data-keywords="${escapeHtml(keywords)}">
+    <button class="${classes.join(" ")}" data-feature-code="${escapeHtml(feature.code)}" data-view="${escapeHtml(config.view)}" data-title="${escapeHtml(title)}" data-keywords="${escapeHtml(keywords)}"${dashboardPageAttr}>
       ${iconMarkup(config.icon || "list")}<span>${escapeHtml(title)}</span>
     </button>
   `;
@@ -1014,7 +1042,7 @@ function renderNavigationButton(feature, level) {
 
 function renderNavigationNode(node, level = 0) {
   const visibleChildren = node.children.filter((child) => navNodeHasVisibleItem(child));
-  const canOpenView = Boolean(navFeatureConfig[node.feature.code]?.view);
+  const canOpenView = Boolean(featureNavigationConfig(node.feature)?.view);
   if (!visibleChildren.length) return renderNavigationButton(node.feature, level);
   const groupClass = `nav-group${level > 0 ? " nav-subgroup" : ""}`;
   const children = [
@@ -1867,6 +1895,8 @@ async function saveDashboardLayout(button = null) {
     const response = await api("/api/admin/dashboard-layouts", { method: "POST", body: JSON.stringify(payload) });
     dashboardBuilderLayout = normalizeDashboardBuilderLayout(response.layout || payload.layout, payload.page_name);
     await loadDashboardLayoutPages();
+    features = [];
+    await syncNavigationFromFeatures();
     dashboardBuilderLoadedTabs = {};
     renderDashboardBuilder();
     showMessage($("#dashboard-builder-message"), "Đã lưu Layout báo cáo.");

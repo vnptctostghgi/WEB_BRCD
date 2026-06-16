@@ -3,6 +3,7 @@ import hmac
 import os
 import sqlite3
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -70,6 +71,16 @@ DEFAULT_DASHBOARD_LAYOUT = {
         },
     ],
 }
+
+
+def dashboard_feature_code_for_page(page_id: str) -> str:
+    normalized_page_id = re.sub(r"[^A-Za-z0-9]+", "_", page_id).strip("_").upper()
+    if normalized_page_id == DEFAULT_DASHBOARD_PAGE_ID:
+        return "dashboard"
+    if normalized_page_id == "REPORTS":
+        return "reports"
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", page_id).strip("_").lower()
+    return normalized or DEFAULT_DASHBOARD_PAGE_ID.lower()
 
 
 def hash_password(password: str) -> str:
@@ -545,6 +556,34 @@ class AppRepository:
                 (name, parent, sort_order, code),
             )
 
+    def ensure_dashboard_layout_feature(self, page_id: str, page_name: str) -> str:
+        code = dashboard_feature_code_for_page(page_id)
+        with self.connect() as connection:
+            existing = connection.execute("SELECT code FROM features WHERE code=?", (code,)).fetchone()
+            if existing and code in {"dashboard", "reports"}:
+                connection.execute("UPDATE features SET name=? WHERE code=?", (page_name, code))
+            elif existing:
+                connection.execute("UPDATE features SET name=?, parent_code='reports' WHERE code=?", (page_name, code))
+            else:
+                max_order = connection.execute(
+                    "SELECT COALESCE(MAX(sort_order), 30) AS max_order FROM features WHERE parent_code='reports'"
+                ).fetchone()["max_order"]
+                connection.execute(
+                    """
+                    INSERT INTO features (code, name, parent_code, sort_order)
+                    VALUES (?, ?, 'reports', ?)
+                    """,
+                    (code, page_name, int(max_order or 30) + 10),
+                )
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO user_permissions (user_id, feature_code)
+                SELECT id, ? FROM users WHERE role='admin'
+                """,
+                (code,),
+            )
+        return code
+
     def get_user_permissions(self, user_id: int) -> list[str]:
         with self.connect() as connection:
             return [row["feature_code"] for row in connection.execute(
@@ -751,7 +790,7 @@ class AppRepository:
                 """,
                 (page_id, page_name, payload, now, now),
             )
-        return page_id
+        return self.ensure_dashboard_layout_feature(page_id, page_name)
 
     def delete_dashboard_layout(self, page_id: str) -> None:
         with self.connect() as connection:
