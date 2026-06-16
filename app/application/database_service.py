@@ -1,4 +1,5 @@
 import logging
+import json
 import re
 from datetime import datetime
 from typing import Any
@@ -203,6 +204,11 @@ class DatabaseService:
             if str(key).strip().lstrip(":").upper() in bind_names
         }
 
+    @staticmethod
+    def _dashboard_widget_query_key(sql_code: str, filters: dict[str, Any]) -> str:
+        normalized_filters = json.dumps(filters or {}, ensure_ascii=False, sort_keys=True, default=str)
+        return f"{sql_code}|{normalized_filters}"
+
     def run_dashboard_layout_tab(self, *, page_id: str, tab_id: str) -> dict[str, Any]:
         layout_row = self.app_repository.get_dashboard_layout(page_id)
         if not layout_row:
@@ -227,6 +233,7 @@ class DatabaseService:
             }
 
         widget_results = []
+        data_cache: dict[str, dict[str, Any]] = {}
         all_ok = True
         for row in tab.get("grid_layout") or []:
             row_id = row.get("row_id")
@@ -235,12 +242,15 @@ class DatabaseService:
                 if not sql_code:
                     continue
                 filters = widget.get("filters") if isinstance(widget.get("filters"), dict) else {}
-                result = self.run_dynamic_report(
-                    ma_bao_cao=sql_code,
-                    filters=filters,
-                    page=1,
-                    page_size=50,
-                )
+                cache_key = self._dashboard_widget_query_key(sql_code, filters)
+                if cache_key not in data_cache:
+                    data_cache[cache_key] = self.run_dynamic_report(
+                        ma_bao_cao=sql_code,
+                        filters=filters,
+                        page=1,
+                        page_size=50,
+                    )
+                result = data_cache[cache_key]
                 all_ok = all_ok and bool(result.get("ok"))
                 widget_results.append({
                     "row_id": row_id,

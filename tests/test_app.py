@@ -225,7 +225,7 @@ def test_compiled_sql_keeps_only_remaining_bind_params() -> None:
     assert DatabaseService._filters_for_compiled_sql(sql, params) == {"FROM_DATE": "2026-05-01"}
 
 
-def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data() -> None:
+def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data(monkeypatch) -> None:
     with TestClient(app) as client:
         login(client)
         report_payload = {
@@ -343,9 +343,18 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data() -> None:
         assert tab_payload["widgets"][0]["data"]["columns"] == ["STT", "MA_BAO_CAO", "TEN_BAO_CAO", "THAM_SO"]
         assert tab_payload["widgets"][0]["data"]["rows"][0]["THAM_SO"] == "status=1"
 
+        api_calls = []
+        original_run_sql_report = routes.InternalApiClient.run_sql_report
+
+        def counting_run_sql_report(self, **kwargs):
+            api_calls.append((kwargs["ma_bao_cao"], kwargs["tham_so"]))
+            return original_run_sql_report(self, **kwargs)
+
+        monkeypatch.setattr(routes.InternalApiClient, "run_sql_report", counting_run_sql_report)
         tab_b = client.get("/api/admin/dashboard-layouts/DASHBOARD_TEST_BUILDER/tabs/tab_b/data")
         assert tab_b.status_code == 200
         assert [widget["type"] for widget in tab_b.json()["widgets"]] == ["combo_chart", "data_card"]
+        assert api_calls == [("BC_BUILDER_TEST", {})]
 
         fiber_report = {
             "ten_bao_cao": "Fiber PTM",
