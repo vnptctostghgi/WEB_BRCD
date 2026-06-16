@@ -2101,11 +2101,14 @@ function renderRuntimeChartWidget(title, result, widget, elementId) {
   if (!chartData.labels.length) {
     return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Không có dữ liệu để vẽ biểu đồ.</div></article>`;
   }
+  const chartHeight = dashboardChartHeight(widget.type, chartData);
+  const details = dashboardChartDetails(chartData);
   pendingDashboardCharts.push({ elementId, widgetType: widget.type, chartData, chartConfig: widget.chart_config || {} });
   return `
     <article class="runtime-widget-card">
       <h3>${escapeHtml(title)}</h3>
-      <div class="runtime-chart-box"><canvas id="${escapeHtml(elementId)}"></canvas></div>
+      <div class="runtime-chart-details">${details}</div>
+      <div class="runtime-chart-box" style="--chart-height:${chartHeight}px"><canvas id="${escapeHtml(elementId)}"></canvas></div>
     </article>
   `;
 }
@@ -2117,8 +2120,8 @@ function extractDashboardChartData(result, chartConfig = {}) {
   const valueColumn = pickDashboardNumericColumn(rows, columns, chartConfig.value_column || "");
   const labelColumn = pickDashboardLabelColumn(rows, columns, chartConfig.label_column || "", new Set([valueColumn]));
   return {
-    labels: rows.slice(0, 12).map((row, index) => String(row[labelColumn] ?? `Dòng ${index + 1}`)),
-    values: rows.slice(0, 12).map((row) => parseDashboardNumber(row[valueColumn]) || 0),
+    labels: rows.map((row, index) => String(row[labelColumn] ?? `Dòng ${index + 1}`)),
+    values: rows.map((row) => parseDashboardNumber(row[valueColumn]) || 0),
     orientation: chartConfig.orientation || "vertical",
   };
 }
@@ -2131,12 +2134,48 @@ function extractDashboardComboChartData(result, chartConfig = {}) {
   const lineColumn = pickDashboardNumericColumn(rows, columns, chartConfig.line_column || "", new Set([barColumn]));
   const labelColumn = pickDashboardLabelColumn(rows, columns, chartConfig.label_column || "", new Set([barColumn, lineColumn]));
   return {
-    labels: rows.slice(0, 12).map((row, index) => String(row[labelColumn] ?? `Dòng ${index + 1}`)),
-    barValues: rows.slice(0, 12).map((row) => parseDashboardNumber(row[barColumn]) || 0),
-    lineValues: rows.slice(0, 12).map((row) => parseDashboardNumber(row[lineColumn]) || 0),
+    labels: rows.map((row, index) => String(row[labelColumn] ?? `Dòng ${index + 1}`)),
+    barValues: rows.map((row) => parseDashboardNumber(row[barColumn]) || 0),
+    lineValues: rows.map((row) => parseDashboardNumber(row[lineColumn]) || 0),
     barLabel: chartConfig.bar_label || barColumn || "Cột",
     lineLabel: chartConfig.line_label || lineColumn || "Đường",
   };
+}
+
+function dashboardChartHeight(widgetType, chartData) {
+  const count = Math.max(1, chartData.labels?.length || 1);
+  const horizontal = widgetType === "bar_chart" && chartData.orientation === "horizontal";
+  if (horizontal) return Math.min(1200, Math.max(280, count * 42 + 90));
+  if (widgetType === "combo_chart") return Math.min(860, Math.max(320, count * 24 + 140));
+  if (widgetType === "line_chart") return Math.min(780, Math.max(320, count * 18 + 120));
+  if (widgetType === "bar_chart") return Math.min(900, Math.max(320, count * 24 + 130));
+  return 320;
+}
+
+function dashboardChartPrimaryValues(chartData) {
+  return chartData.values || chartData.barValues || chartData.lineValues || [];
+}
+
+function dashboardValueColors(values) {
+  const finiteValues = values.filter((value) => Number.isFinite(Number(value)));
+  const min = finiteValues.length ? Math.min(...finiteValues) : 0;
+  const max = finiteValues.length ? Math.max(...finiteValues) : 0;
+  const span = Math.max(max - min, 1);
+  return values.map((value) => {
+    const ratio = (Number(value || 0) - min) / span;
+    if (ratio >= .67) return "rgba(37, 99, 235, .82)";
+    if (ratio >= .34) return "rgba(245, 158, 11, .82)";
+    return "rgba(239, 68, 68, .82)";
+  });
+}
+
+function dashboardChartDetails(chartData) {
+  const values = dashboardChartPrimaryValues(chartData);
+  return chartData.labels.map((label, index) => `
+    <span class="runtime-chart-detail" style="--detail-color:${dashboardValueColors(values)[index] || "rgba(56,189,248,.82)"}">
+      <b>${escapeHtml(label)}</b>${formatDashboardNumber(values[index] || 0)}
+    </span>
+  `).join("");
 }
 
 function parseDashboardNumber(value) {
@@ -2153,7 +2192,7 @@ function renderPendingDashboardCharts() {
   jobs.forEach(({ elementId, widgetType, chartData }) => {
     const canvas = document.getElementById(elementId);
     if (!canvas || !window.Chart) return;
-    const palette = ["#38bdf8", "#0ea5e9", "#22c55e", "#f59e0b", "#ef4444", "#a78bfa", "#14b8a6", "#f97316"];
+    const palette = dashboardValueColors(dashboardChartPrimaryValues(chartData));
     const isPie = widgetType === "pie_chart";
     const isLine = widgetType === "line_chart";
     const isCombo = widgetType === "combo_chart";
@@ -2163,8 +2202,8 @@ function renderPendingDashboardCharts() {
         type: "bar",
         label: chartData.barLabel,
         data: chartData.barValues,
-        backgroundColor: "rgba(56, 189, 248, .72)",
-        borderColor: "#7dd3fc",
+        backgroundColor: dashboardValueColors(chartData.barValues),
+        borderColor: "#e0f2fe",
         borderWidth: 1,
         yAxisID: "y",
       },
@@ -2172,8 +2211,11 @@ function renderPendingDashboardCharts() {
         type: "line",
         label: chartData.lineLabel,
         data: chartData.lineValues,
-        borderColor: "#fbbf24",
-        backgroundColor: "rgba(251, 191, 36, .16)",
+        borderColor: "#2563eb",
+        backgroundColor: "rgba(37, 99, 235, .14)",
+        pointBackgroundColor: dashboardValueColors(chartData.lineValues),
+        pointBorderColor: "#e0f2fe",
+        pointRadius: 4,
         borderWidth: 3,
         tension: .35,
         yAxisID: "y1",
@@ -2181,19 +2223,44 @@ function renderPendingDashboardCharts() {
     ] : [{
       label: "Giá trị",
       data: chartData.values,
-      backgroundColor: isPie ? chartData.labels.map((_, index) => palette[index % palette.length]) : "rgba(56, 189, 248, .72)",
-      borderColor: isPie ? "#061d38" : "#7dd3fc",
+      backgroundColor: isPie ? palette : isLine ? "rgba(37, 99, 235, .14)" : palette,
+      borderColor: isPie ? "#061d38" : "#2563eb",
+      pointBackgroundColor: isLine ? palette : undefined,
+      pointBorderColor: isLine ? "#e0f2fe" : undefined,
+      pointRadius: isLine ? 4 : undefined,
       borderWidth: isLine ? 3 : 1,
       tension: .35,
       fill: isLine,
     }];
     const scales = isPie ? {} : isCombo ? {
-      x: { ticks: { color: "#bae6fd" }, grid: { color: "rgba(125, 211, 252, .1)" } },
+      x: { ticks: { color: "#bae6fd", autoSkip: false, maxRotation: 55, minRotation: 0 }, grid: { color: "rgba(125, 211, 252, .1)" } },
       y: { beginAtZero: true, ticks: { color: "#bae6fd" }, grid: { color: "rgba(125, 211, 252, .12)" } },
       y1: { beginAtZero: true, position: "right", ticks: { color: "#fde68a" }, grid: { drawOnChartArea: false } },
     } : {
-      x: { ticks: { color: "#bae6fd" }, grid: { color: "rgba(125, 211, 252, .1)" } },
-      y: { beginAtZero: true, ticks: { color: "#bae6fd" }, grid: { color: "rgba(125, 211, 252, .12)" } },
+      x: { ticks: { color: "#bae6fd", autoSkip: false, maxRotation: 55, minRotation: 0 }, grid: { color: "rgba(125, 211, 252, .1)" } },
+      y: { beginAtZero: true, ticks: { color: "#bae6fd", autoSkip: false }, grid: { color: "rgba(125, 211, 252, .12)" } },
+    };
+    const valueLabelPlugin = {
+      id: `dashboardValueLabels-${elementId}`,
+      afterDatasetsDraw(chart) {
+        const { ctx } = chart;
+        ctx.save();
+        ctx.font = "700 11px Inter, system-ui, sans-serif";
+        ctx.fillStyle = "#e0f2fe";
+        chart.data.datasets.forEach((dataset, datasetIndex) => {
+          const meta = chart.getDatasetMeta(datasetIndex);
+          if (meta.hidden) return;
+          meta.data.forEach((point, index) => {
+            const value = dataset.data[index];
+            if (value === null || value === undefined || Number.isNaN(Number(value))) return;
+            const position = point.tooltipPosition();
+            const horizontal = chart.options.indexAxis === "y" && dataset.type !== "line";
+            ctx.textAlign = horizontal ? "left" : "center";
+            ctx.fillText(formatDashboardNumber(value), position.x + (horizontal ? 8 : 0), position.y - (horizontal ? 0 : 8));
+          });
+        });
+        ctx.restore();
+      },
     };
     dashboardChartInstances.set(elementId, new Chart(canvas, {
       type: chartType,
@@ -2207,6 +2274,7 @@ function renderPendingDashboardCharts() {
         },
         scales,
       },
+      plugins: [valueLabelPlugin],
     }));
   });
 }
