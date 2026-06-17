@@ -712,6 +712,7 @@ if (role === "admin") {
   $("#connection-form")?.addEventListener("submit", saveConnection);
   $("#sql-report-form")?.addEventListener("submit", saveSqlReport);
   $("#new-dashboard-page")?.addEventListener("click", createDashboardPage);
+  $("#new-dashboard-group")?.addEventListener("click", createDashboardGroup);
   $("#save-dashboard-layout")?.addEventListener("click", (event) => saveDashboardLayout(event.currentTarget));
   $("#refresh-dashboard-sql-reports")?.addEventListener("click", (event) => refreshDashboardSqlReports(event.currentTarget));
   $("#add-dashboard-tab")?.addEventListener("click", addDashboardTab);
@@ -1069,13 +1070,9 @@ function renderNavigationButton(feature, level) {
 
 function renderNavigationNode(node, level = 0) {
   const visibleChildren = node.children.filter((child) => navNodeHasVisibleItem(child));
-  const canOpenView = Boolean(featureNavigationConfig(node.feature)?.view);
   if (!visibleChildren.length) return renderNavigationButton(node.feature, level);
   const groupClass = `nav-group${level > 0 ? " nav-subgroup" : ""}`;
-  const children = [
-    canOpenView ? renderNavigationButton(node.feature, level + 1) : "",
-    ...visibleChildren.map((child) => renderNavigationNode(child, level + 1)),
-  ].join("");
+  const children = visibleChildren.map((child) => renderNavigationNode(child, level + 1)).join("");
   return `
     <details class="${groupClass}">
       <summary data-feature-code="${escapeHtml(node.feature.code)}">
@@ -1279,7 +1276,7 @@ async function saveMenuLayout(button = null) {
   }
 }
 
-function dashboardLayoutTemplate(pageName = "Dashboard Kinh doanh", pageId = "DASHBOARD_KINH_DOANH") {
+function dashboardLayoutTemplate(pageName = "Dashboard Kinh doanh", pageId = "DASHBOARD_KINH_DOANH", options = {}) {
   return {
     page_id: pageId,
     page_name: repairTextEncoding(pageName),
@@ -1288,7 +1285,7 @@ function dashboardLayoutTemplate(pageName = "Dashboard Kinh doanh", pageId = "DA
         tab_id: `tab_${Date.now()}`,
         tab_name: "Tab mới",
         order: 1,
-        grid_layout: [
+        grid_layout: options.empty ? [] : [
           { row_id: 1, layout_type: "2_columns", widgets: [] },
         ],
       },
@@ -1329,6 +1326,16 @@ function normalizeDashboardBuilderLayout(layout, pageName = "") {
     dashboardBuilderActiveTabId = normalized.tabs[0]?.tab_id || "";
   }
   return normalized;
+}
+
+function dashboardPageIdFromName(pageName) {
+  const generatedId = String(pageName || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || `DASHBOARD_${Date.now()}`;
+  return generatedId.startsWith("DASHBOARD_") ? generatedId : `DASHBOARD_${generatedId}`;
 }
 
 function normalizeDashboardViewerLayout(layout, pageName = "") {
@@ -1524,13 +1531,17 @@ function createDashboardPage() {
   const pageName = prompt("Nhập tên trang báo cáo mới:", "Dashboard mới");
   if (pageName === null) return;
   const cleanedName = pageName.trim() || "Dashboard mới";
-  const generatedId = cleanedName
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "") || `DASHBOARD_${Date.now()}`;
-  dashboardBuilderLayout = dashboardLayoutTemplate(cleanedName, generatedId.startsWith("DASHBOARD_") ? generatedId : `DASHBOARD_${generatedId}`);
+  dashboardBuilderLayout = dashboardLayoutTemplate(cleanedName, dashboardPageIdFromName(cleanedName));
+  dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0].tab_id;
+  dashboardBuilderLoadedTabs = {};
+  renderDashboardBuilder();
+}
+
+function createDashboardGroup() {
+  const pageName = prompt("Nhập tên mục cha:", "Nhóm Dashboard mới");
+  if (pageName === null) return;
+  const cleanedName = pageName.trim() || "Nhóm Dashboard mới";
+  dashboardBuilderLayout = dashboardLayoutTemplate(cleanedName, dashboardPageIdFromName(cleanedName), { empty: true });
   dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0].tab_id;
   dashboardBuilderLoadedTabs = {};
   renderDashboardBuilder();

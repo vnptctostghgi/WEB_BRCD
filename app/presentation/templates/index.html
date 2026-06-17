@@ -85,7 +85,6 @@
             {% if user.role == "admin" %}
             <details class="nav-group">
               <summary data-feature-code="reports"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-chart"></use></svg><strong>Báo cáo thống kê</strong></summary>
-              <button class="nav-item child" data-feature-code="reports" data-view="reports" data-title="Báo cáo thống kê" data-keywords="bao cao thong ke bieu do"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Báo cáo thống kê</span></button>
               <button class="nav-item child" data-feature-code="admin.dashboard_builder" data-view="dashboard-builder" data-title="Thiết kế Layout báo cáo" data-keywords="dashboard builder thiet ke layout bao cao tab bieu do"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Thiết kế Layout báo cáo</span></button>
             </details>
             {% endif %}
@@ -313,6 +312,7 @@
             <div><p class="eyebrow">Dashboard Builder</p><h1>Thiết kế Layout báo cáo</h1><p class="subtitle">Quản trị viên cấu hình Trang, Tab, Layout và biểu đồ. Nhân viên thường không thể mở chức năng này.</p></div>
             <div class="action-group">
               <button class="btn-secondary" id="new-dashboard-page" type="button">Tạo trang báo cáo</button>
+              <button class="btn-secondary" id="new-dashboard-group" type="button">Tạo mục cha</button>
               <button class="btn-primary" id="save-dashboard-layout" type="button"><span class="button-label">Lưu Layout</span><span class="spinner"></span></button>
             </div>
           </div>
@@ -468,6 +468,6 @@
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="/static/app.js?v=48"></script>
+    <script src="/static/app.js?v=49"></script>
   </body>
 </html>

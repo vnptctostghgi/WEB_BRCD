@@ -356,6 +356,28 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data(monkeypatch) -
         assert [widget["type"] for widget in tab_b.json()["widgets"]] == ["combo_chart", "data_card"]
         assert api_calls == [("BC_BUILDER_TEST", {})]
 
+        group_payload = {
+            "page_id": "DASHBOARD_EMPTY_GROUP",
+            "page_name": "NhÃ³m Dashboard rá»—ng",
+            "layout": {
+                "page_id": "DASHBOARD_EMPTY_GROUP",
+                "tabs": [
+                    {
+                        "tab_id": "tab_group",
+                        "tab_name": "NhÃ³m",
+                        "order": 1,
+                        "grid_layout": [],
+                    }
+                ],
+            },
+        }
+        group_saved = client.post("/api/admin/dashboard-layouts", json=group_payload)
+        assert group_saved.status_code == 200
+        assert group_saved.json()["layout"]["tabs"][0]["grid_layout"] == []
+        group_tab = client.get("/api/admin/dashboard-layouts/DASHBOARD_EMPTY_GROUP/tabs/tab_group/data")
+        assert group_tab.status_code == 200
+        assert group_tab.json()["widgets"] == []
+
         fiber_report = {
             "ten_bao_cao": "Fiber PTM",
             "ma_bao_cao": "FIBER_PTM",
