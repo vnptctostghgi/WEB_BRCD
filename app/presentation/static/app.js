@@ -37,7 +37,6 @@ const dashboardColorScaleStops = [
 ];
 
 const navFeatureConfig = {
-  dashboard: { view: "dashboard", icon: "dashboard", keywords: "tong quan dashboard" },
   "admin.work_tasks": { view: "work-tasks", icon: "list", keywords: "quan ly cong viec task lich telegram nhac viec" },
   vault: { view: "vault", icon: "vault", keywords: "tai khoan web mat khau" },
   "admin.users": { view: "users", icon: "users", keywords: "quan tri nguoi dung user" },
@@ -47,16 +46,20 @@ const navFeatureConfig = {
   "admin.permissions": { view: "permissions", icon: "shield", keywords: "phan quyen nguoi dung chuc nang" },
   "admin.data_permissions": { view: "data-permissions", icon: "database", keywords: "phan quyen du lieu phan vung" },
   "admin.audit": { view: "audit", icon: "audit", keywords: "nhat ky audit log" },
-  reports: { view: "reports", icon: "chart", keywords: "bao cao thong ke bieu do" },
+  reports: { view: "reports", icon: "chart", keywords: "truy van sql bao cao thong ke bieu do" },
   "admin.dashboard_builder": { view: "dashboard-builder", icon: "chart", keywords: "dashboard builder thiet ke layout bao cao tab bieu do" },
 };
+
+const navGroupOnlyFeatureCodes = new Set(["dashboard", "new_reports"]);
 
 const navGroupIcons = {
   "admin.web": "shield",
   "admin.catalogs": "list",
   "admin.connections": "plug",
   vault: "vault",
+  dashboard: "dashboard",
   reports: "chart",
+  new_reports: "chart",
 };
 
 const mojibakePattern = new RegExp("(?:\\u00c3|\\u00c4|\\u00c2|\\u00c6|\\u00e1\\u00ba|\\u00e1\\u00bb|\\u00e2\\u20ac)");
@@ -153,10 +156,7 @@ async function activateNavItem(item) {
   const nextView = item.dataset.view || "";
   const dashboardPageId = item.dataset.dashboardPageId || "";
   $("#view-dashboard")?.classList.toggle("dashboard-dynamic-mode", Boolean(dashboardPageId));
-  if (nextView !== "dashboard") {
-    dashboardFiberLoaded = false;
-    dashboardViewerLoadedTabs = {};
-  }
+  if (nextView !== "dashboard") dashboardViewerLoadedTabs = {};
   if (nextView !== "dashboard-builder") {
     dashboardBuilderLoadedTabs = {};
   }
@@ -167,9 +167,7 @@ async function activateNavItem(item) {
   if (moduleTitle) moduleTitle.textContent = item.dataset.title || item.textContent.trim();
   $("#sidebar").classList.remove("menu-open");
   $("#menu-button")?.setAttribute("aria-expanded", "false");
-  if (nextView === "dashboard") await initDashboard();
   if (nextView === "dashboard" && dashboardPageId) {
-    await switchDashboardTab("summary");
     await openDashboardViewerLayout(dashboardPageId);
   }
   if (nextView === "users") await loadUsers();
@@ -325,38 +323,6 @@ async function loadNotifications() {
   } catch (error) {
     list.innerHTML = `<div class="dropdown-empty error">${escapeHtml(error.message)}</div>`;
   }
-}
-
-document.querySelectorAll("[data-dashboard-tab]").forEach((button) => {
-  button.addEventListener("click", async () => {
-    await switchDashboardTab(button.dataset.dashboardTab);
-  });
-});
-
-$("#refresh-dashboard-fiber")?.addEventListener("click", () => loadDashboardFiber({ force: true }));
-
-initDashboard();
-
-async function initDashboard() {
-  if (!$("#view-dashboard")) return;
-  const activeTab = document.querySelector("[data-dashboard-tab].active")?.dataset.dashboardTab || "summary";
-  if (activeTab === "fiber") await loadDashboardFiber();
-  if (activeTab === "summary" && role === "admin") await ensureDashboardViewerLoaded();
-}
-
-async function switchDashboardTab(tabName) {
-  document.querySelectorAll("[data-dashboard-tab]").forEach((button) => {
-    const active = button.dataset.dashboardTab === tabName;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-selected", String(active));
-  });
-  document.querySelectorAll(".dashboard-tab-panel").forEach((panel) => {
-    const active = panel.id === `dashboard-tab-${tabName}`;
-    panel.classList.toggle("active", active);
-    panel.hidden = !active;
-  });
-  if (tabName === "fiber") await loadDashboardFiber();
-  if (tabName === "summary" && role === "admin") await ensureDashboardViewerLoaded();
 }
 
 async function ensureDashboardViewerLoaded() {
@@ -1033,6 +999,7 @@ function dashboardFeatureCodeForPageId(pageId) {
 }
 
 function featureNavigationConfig(feature) {
+  if (navGroupOnlyFeatureCodes.has(feature.code)) return null;
   const staticConfig = navFeatureConfig[feature.code];
   if (staticConfig) return staticConfig;
   const dashboardPageId = dashboardPageIdFromFeatureCode(feature.code);
@@ -1048,6 +1015,7 @@ function featureNavigationConfig(feature) {
 }
 
 function navNodeHasVisibleItem(node) {
+  if (navGroupOnlyFeatureCodes.has(node.feature.code)) return true;
   if (featureNavigationConfig(node.feature)?.view) return true;
   return node.children.some((child) => navNodeHasVisibleItem(child));
 }
@@ -1070,6 +1038,16 @@ function renderNavigationButton(feature, level) {
 
 function renderNavigationNode(node, level = 0) {
   const visibleChildren = node.children.filter((child) => navNodeHasVisibleItem(child));
+  if (!visibleChildren.length && navGroupOnlyFeatureCodes.has(node.feature.code)) {
+    const groupClass = `nav-group${level > 0 ? " nav-subgroup" : ""}`;
+    return `
+      <details class="${groupClass}">
+        <summary data-feature-code="${escapeHtml(node.feature.code)}">
+          <span class="chevron">›</span>${iconMarkup(featureIcon(node.feature))}<strong>${escapeHtml(node.feature.name || node.feature.code)}</strong>
+        </summary>
+      </details>
+    `;
+  }
   if (!visibleChildren.length) return renderNavigationButton(node.feature, level);
   const groupClass = `nav-group${level > 0 ? " nav-subgroup" : ""}`;
   const children = visibleChildren.map((child) => renderNavigationNode(child, level + 1)).join("");
@@ -1085,6 +1063,18 @@ function renderNavigationNode(node, level = 0) {
 
 function findNavItemByFeatureCode(code) {
   return [...document.querySelectorAll("#nav-tree .nav-item[data-feature-code]")].find((item) => item.dataset.featureCode === code);
+}
+
+function findFirstNavItemUnderFeatureCode(code) {
+  const summary = [...document.querySelectorAll("#nav-tree summary[data-feature-code]")].find((item) => item.dataset.featureCode === code);
+  return summary?.closest(".nav-group")?.querySelector(".nav-item[data-view]") || null;
+}
+
+function preferredNavItem(activeCode) {
+  if (!activeCode || activeCode === "dashboard") {
+    return findFirstNavItemUnderFeatureCode("dashboard") || document.querySelector("#nav-tree .nav-item[data-view]");
+  }
+  return findNavItemByFeatureCode(activeCode) || findFirstNavItemUnderFeatureCode("dashboard") || document.querySelector("#nav-tree .nav-item[data-view]");
 }
 
 function openNavParents(item) {
@@ -1112,10 +1102,9 @@ async function syncNavigationFromFeatures() {
       .map((node) => renderNavigationNode(node))
       .join("");
     if (html.trim()) tree.innerHTML = html;
-    const activeItem = findNavItemByFeatureCode(activeCode) || findNavItemByFeatureCode("dashboard") || tree.querySelector(".nav-item[data-view]");
+    const activeItem = preferredNavItem(activeCode);
     if (activeItem) {
-      activeItem.classList.add("active");
-      openNavParents(activeItem);
+      await activateNavItem(activeItem);
     }
     filterNavigation($("#menu-search")?.value || "");
   } catch {

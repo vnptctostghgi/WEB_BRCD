@@ -20,8 +20,9 @@ FEATURE_ROWS = [
     ("admin.roles", "Quản trị vai trò", "admin.catalogs", 26),
     ("admin.menu", "Quản trị menu", "admin.web", 27),
     ("admin.work_tasks", "Quản lý công việc", None, 28),
-    ("reports", "Báo cáo thống kê", None, 30),
-    ("admin.dashboard_builder", "Thiết kế Layout báo cáo", "reports", 31),
+    ("reports", "Truy vấn SQL", None, 30),
+    ("new_reports", "Báo cáo mới", None, 35),
+    ("admin.dashboard_builder", "Thiết kế Layout báo cáo", "new_reports", 36),
     ("vault", "Tài khoản web", "admin.web", 40),
     ("vault.view", "Xem danh sách tài khoản", "vault", 41),
     ("vault.manage", "Thêm và sửa tài khoản", "vault", 42),
@@ -291,6 +292,12 @@ class AppRepository:
                     "UPDATE features SET name=?, parent_code=?, sort_order=? WHERE code=?",
                     [(name, parent_code, sort_order, code) for code, name, parent_code, sort_order in FEATURE_ROWS],
                 )
+            connection.execute("UPDATE features SET name='Truy vấn SQL' WHERE code='reports'")
+            connection.execute("UPDATE features SET name='Báo cáo mới' WHERE code='new_reports'")
+            connection.execute(
+                "UPDATE features SET parent_code='new_reports', sort_order=36 WHERE code='admin.dashboard_builder' AND parent_code='reports'"
+            )
+            connection.execute("UPDATE features SET parent_code='new_reports' WHERE parent_code='reports'")
             connection.executemany(
                 "DELETE FROM user_permissions WHERE feature_code=?",
                 [(code,) for code in OBSOLETE_FEATURE_CODES],
@@ -566,14 +573,14 @@ class AppRepository:
                 connection.execute("UPDATE features SET name=? WHERE code=?", (page_name, code))
             else:
                 max_order = connection.execute(
-                    "SELECT COALESCE(MAX(sort_order), 30) AS max_order FROM features WHERE parent_code='reports'"
+                    "SELECT COALESCE(MAX(sort_order), 35) AS max_order FROM features WHERE parent_code='new_reports'"
                 ).fetchone()["max_order"]
                 connection.execute(
                     """
                     INSERT INTO features (code, name, parent_code, sort_order)
-                    VALUES (?, ?, 'reports', ?)
+                    VALUES (?, ?, 'new_reports', ?)
                     """,
-                    (code, page_name, int(max_order or 30) + 10),
+                    (code, page_name, int(max_order or 35) + 10),
                 )
             connection.execute(
                 """

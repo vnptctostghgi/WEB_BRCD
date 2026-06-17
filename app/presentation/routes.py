@@ -27,7 +27,7 @@ FAILED_LOGIN_COUNTS: dict[str, int] = {}
 ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
 DASHBOARD_LAYOUT_TYPES = {"1_column": 1, "2_columns": 2, "3_columns": 3, "4_columns": 4}
 DASHBOARD_WIDGET_TYPES = {"bar_chart", "pie_chart", "line_chart", "combo_chart", "data_table", "metric", "data_card", "text_title"}
-DASHBOARD_LAYOUT_EXCLUDED_FEATURE_CODES = {"admin.dashboard_builder"}
+DASHBOARD_LAYOUT_EXCLUDED_FEATURE_CODES = {"dashboard", "reports", "new_reports", "admin.dashboard_builder"}
 
 
 class LoginPayload(BaseModel):
@@ -323,7 +323,11 @@ def dashboard_page_id_from_feature_code(code: str) -> str:
 def is_dashboard_layout_feature(code: str, parent_by_code: dict[str, str | None]) -> bool:
     if code in DASHBOARD_LAYOUT_EXCLUDED_FEATURE_CODES:
         return False
-    return code == "dashboard" or dashboard_feature_has_ancestor(code, parent_by_code, "reports")
+    return (
+        dashboard_feature_has_ancestor(code, parent_by_code, "dashboard")
+        or dashboard_feature_has_ancestor(code, parent_by_code, "new_reports")
+        or dashboard_feature_has_ancestor(code, parent_by_code, "reports")
+    )
 
 
 def build_dashboard_layout_pages(features: list[dict], layouts: list[dict]) -> list[dict]:
@@ -333,6 +337,7 @@ def build_dashboard_layout_pages(features: list[dict], layouts: list[dict]) -> l
     designable_codes = {
         code for code in parent_by_code
         if code
+        and code not in DASHBOARD_LAYOUT_EXCLUDED_FEATURE_CODES
         and (is_dashboard_layout_feature(code, parent_by_code) or code in layout_feature_codes)
     }
     non_designable_page_ids = {

@@ -58,7 +58,9 @@
             <input id="menu-search" type="search" placeholder="Nhập tên chức năng..." autocomplete="off" />
           </label>
           <div class="nav-tree" id="nav-tree">
-            <button class="nav-item active" data-feature-code="dashboard" data-view="dashboard" data-title="Tổng quan" data-keywords="tong quan dashboard"><svg class="nav-svg"><use href="#icon-dashboard"></use></svg><span>Tổng quan</span></button>
+            <details class="nav-group">
+              <summary data-feature-code="dashboard"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-dashboard"></use></svg><strong>Tổng quan</strong></summary>
+            </details>
             {% if user.role == "admin" %}
             <button class="nav-item" data-feature-code="admin.work_tasks" data-view="work-tasks" data-title="Quản lý công việc" data-keywords="quan ly cong viec task lich telegram nhac viec"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản lý công việc</span></button>
             {% endif %}
@@ -83,8 +85,9 @@
             </details>
             {% endif %}
             {% if user.role == "admin" %}
+            <button class="nav-item" data-feature-code="reports" data-view="reports" data-title="Truy vấn SQL" data-keywords="truy van sql bao cao thong ke bieu do"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Truy vấn SQL</span></button>
             <details class="nav-group">
-              <summary data-feature-code="reports"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-chart"></use></svg><strong>Báo cáo thống kê</strong></summary>
+              <summary data-feature-code="new_reports"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-chart"></use></svg><strong>Báo cáo mới</strong></summary>
               <button class="nav-item child" data-feature-code="admin.dashboard_builder" data-view="dashboard-builder" data-title="Thiết kế Layout báo cáo" data-keywords="dashboard builder thiet ke layout bao cao tab bieu do"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Thiết kế Layout báo cáo</span></button>
             </details>
             {% endif %}
@@ -135,19 +138,11 @@
       </aside>
 
       <main class="app-main flex min-h-screen min-w-0 flex-col px-4 pb-6 pt-4 sm:px-6 lg:px-8 lg:pt-6 xl:px-10">
-        <section class="app-view active" id="view-dashboard">
+        <section class="app-view active dashboard-dynamic-mode" id="view-dashboard">
           {% if user.must_change_password %}
           <div class="notice warning"><strong>Cần đổi mật khẩu.</strong> Đây là mật khẩu khởi tạo hoặc vừa được đặt lại. Hãy đổi mật khẩu trước khi sử dụng lâu dài.</div>
           {% endif %}
-          <div class="dashboard-tabs" role="tablist" aria-label="Nhóm tổng quan">
-            <button class="dashboard-tab active" id="dashboard-tab-summary-button" data-dashboard-tab="summary" type="button" role="tab" aria-selected="true" aria-controls="dashboard-tab-summary">Tổng</button>
-            <button class="dashboard-tab" id="dashboard-tab-fiber-button" data-dashboard-tab="fiber" type="button" role="tab" aria-selected="false" aria-controls="dashboard-tab-fiber">Fiber</button>
-            <button class="dashboard-tab" id="dashboard-tab-mytv-button" data-dashboard-tab="mytv" type="button" role="tab" aria-selected="false" aria-controls="dashboard-tab-mytv">MyTV</button>
-            <button class="dashboard-tab" id="dashboard-tab-mesh-button" data-dashboard-tab="mesh" type="button" role="tab" aria-selected="false" aria-controls="dashboard-tab-mesh">Mesh</button>
-            <button class="dashboard-tab" id="dashboard-tab-cam-button" data-dashboard-tab="cam" type="button" role="tab" aria-selected="false" aria-controls="dashboard-tab-cam">CAM</button>
-          </div>
-
-          <section class="dashboard-tab-panel active" id="dashboard-tab-summary" role="tabpanel" aria-labelledby="dashboard-tab-summary-button">
+          <section class="dashboard-runtime-home">
             {% if user.role == "admin" %}
             <section class="data-card" id="dashboard-designed-section">
               <div class="section-heading">
@@ -172,64 +167,6 @@
             {% endif %}
           </section>
 
-          <section class="dashboard-tab-panel" id="dashboard-tab-fiber" role="tabpanel" aria-labelledby="dashboard-tab-fiber-button" hidden>
-            <section class="data-card dashboard-toolbar dashboard-toolbar-compact">
-              <button class="btn-secondary" id="refresh-dashboard-fiber" type="button"><span class="button-label">Tải lại</span><span class="spinner"></span></button>
-              <div id="dashboard-fiber-message" class="result hidden" role="status"></div>
-            </section>
-
-            <div class="dashboard-chart-grid mt-4">
-              <section class="data-card dashboard-chart-card">
-                <div class="section-heading">
-                  <div><p class="eyebrow">Biểu đồ</p><h2>VNPT Khu vực</h2></div>
-                </div>
-                <div class="horizontal-bar-chart" id="dashboard-fiber-vnpt-chart"></div>
-              </section>
-              <section class="data-card dashboard-chart-card">
-                <div class="section-heading">
-                  <div><p class="eyebrow">Biểu đồ</p><h2>TTVT Khu vực</h2></div>
-                </div>
-                <div class="horizontal-bar-chart" id="dashboard-fiber-ttvt-chart"></div>
-              </section>
-            </div>
-
-            <div class="dashboard-table-grid mt-4">
-              <section class="data-card">
-                <div class="section-heading">
-                  <div><p class="eyebrow">Bảng xếp hạng</p><h2>VNPT Khu vực</h2></div>
-                </div>
-                <div class="table-scroll dashboard-rank-table">
-                  <table>
-                    <thead><tr><th>Xếp hạng</th><th>Tên đơn vị</th><th>Sản lượng Fiber</th></tr></thead>
-                    <tbody id="dashboard-fiber-vnpt-body"></tbody>
-                  </table>
-                </div>
-              </section>
-              <section class="data-card">
-                <div class="section-heading">
-                  <div><p class="eyebrow">Bảng xếp hạng</p><h2>TTVT Khu vực</h2></div>
-                </div>
-                <div class="table-scroll dashboard-rank-table">
-                  <table>
-                    <thead><tr><th>Xếp hạng</th><th>Tên đơn vị</th><th>Sản lượng Fiber</th></tr></thead>
-                    <tbody id="dashboard-fiber-ttvt-body"></tbody>
-                  </table>
-                </div>
-              </section>
-            </div>
-          </section>
-
-          <section class="dashboard-tab-panel" id="dashboard-tab-mytv" role="tabpanel" aria-labelledby="dashboard-tab-mytv-button" hidden>
-            <section class="dashboard-empty"><p class="eyebrow">MyTV</p><h2>Chờ thiết kế chi tiết</h2><p>Tab đã sẵn khung sạch để bổ sung sản lượng, doanh thu và biểu đồ MyTV.</p></section>
-          </section>
-
-          <section class="dashboard-tab-panel" id="dashboard-tab-mesh" role="tabpanel" aria-labelledby="dashboard-tab-mesh-button" hidden>
-            <section class="dashboard-empty"><p class="eyebrow">Mesh</p><h2>Chờ thiết kế chi tiết</h2><p>Tab đã sẵn khung sạch để bổ sung sản lượng, doanh thu và biểu đồ Mesh.</p></section>
-          </section>
-
-          <section class="dashboard-tab-panel" id="dashboard-tab-cam" role="tabpanel" aria-labelledby="dashboard-tab-cam-button" hidden>
-            <section class="dashboard-empty"><p class="eyebrow">CAM</p><h2>Chờ thiết kế chi tiết</h2><p>Tab đã sẵn khung sạch để bổ sung sản lượng, doanh thu và biểu đồ CAM.</p></section>
-          </section>
         </section>
 
         {% if user.role == "admin" or "vault.view" in user.permissions %}
@@ -374,7 +311,7 @@
         </section>
 
         <section class="app-view" id="view-reports">
-          <div class="page-header"><div><p class="eyebrow">Báo cáo thống kê</p><h1>Báo cáo động</h1><p class="subtitle">Dữ liệu được lấy theo thời gian thực qua API nội bộ và hiển thị có phân trang.</p></div></div>
+          <div class="page-header"><div><p class="eyebrow">Truy vấn SQL</p><h1>Truy vấn SQL</h1><p class="subtitle">Dữ liệu được lấy theo thời gian thực qua API nội bộ và hiển thị có phân trang.</p></div></div>
           <section class="data-card">
             <form id="dynamic-report-form" class="grid gap-3 xl:grid-cols-[1.2fr_2fr_auto]">
               <label>Loại báo cáo<select class="form-control" id="dynamic-report-select" name="ma_bao_cao"></select></label>
@@ -402,7 +339,7 @@
         </section>
 
         <section class="app-view hidden" id="view-reports-old">
-          <div class="page-header"><div><p class="eyebrow">Báo cáo thống kê</p><h1>Báo cáo thống kê</h1><p class="subtitle">Khu vực này sẽ hiển thị biểu đồ và báo cáo BRCĐ theo yêu cầu tiếp theo.</p></div></div>
+          <div class="page-header"><div><p class="eyebrow">Truy vấn SQL</p><h1>Truy vấn SQL</h1><p class="subtitle">Khu vực này sẽ hiển thị biểu đồ và báo cáo BRCĐ theo yêu cầu tiếp theo.</p></div></div>
           <section class="data-card"><div class="grid gap-4 md:grid-cols-3"><div class="chart-placeholder">Thuê bao</div><div class="chart-placeholder">Doanh thu</div><div class="chart-placeholder">Chất lượng</div></div></section>
         </section>
 
@@ -468,6 +405,6 @@
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="/static/app.js?v=49"></script>
+    <script src="/static/app.js?v=50"></script>
   </body>
 </html>

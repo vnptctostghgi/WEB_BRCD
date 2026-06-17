@@ -25,8 +25,9 @@ FEATURE_ROWS = [
     {"code": "admin.roles", "name": "Quản trị vai trò", "parent_code": "admin.catalogs", "sort_order": 26},
     {"code": "admin.menu", "name": "Quản trị menu", "parent_code": "admin.web", "sort_order": 27},
     {"code": "admin.work_tasks", "name": "Quản lý công việc", "parent_code": None, "sort_order": 28},
-    {"code": "reports", "name": "Báo cáo thống kê", "parent_code": None, "sort_order": 30},
-    {"code": "admin.dashboard_builder", "name": "Thiết kế Layout báo cáo", "parent_code": "reports", "sort_order": 31},
+    {"code": "reports", "name": "Truy vấn SQL", "parent_code": None, "sort_order": 30},
+    {"code": "new_reports", "name": "Báo cáo mới", "parent_code": None, "sort_order": 35},
+    {"code": "admin.dashboard_builder", "name": "Thiết kế Layout báo cáo", "parent_code": "new_reports", "sort_order": 36},
     {"code": "vault", "name": "Tài khoản web", "parent_code": "admin.web", "sort_order": 40},
     {"code": "vault.view", "name": "Xem danh sách tài khoản", "parent_code": "vault", "sort_order": 41},
     {"code": "vault.manage", "name": "Thêm và sửa tài khoản", "parent_code": "vault", "sort_order": 42},
@@ -63,6 +64,7 @@ class SupabaseRepository:
     def initialize(self, admin_username: str, admin_password: str) -> None:
         for feature in FEATURE_ROWS:
             self._seed_feature(feature)
+        self._patch_fixed_feature_labels()
         for region in REGION_ROWS:
             now = self._now()
             try:
@@ -101,6 +103,19 @@ class SupabaseRepository:
             # Giữ nguyên name/parent_code/sort_order vì admin có thể đã sắp xếp menu trong giao diện.
             return
         self._insert("features", feature)
+
+    def _patch_fixed_feature_labels(self) -> None:
+        try:
+            self._patch("features", {"code": "eq.reports"}, {"name": "Truy vấn SQL"})
+            self._patch("features", {"code": "eq.new_reports"}, {"name": "Báo cáo mới"})
+            report_children = self._get("features", {"parent_code": "eq.reports", "select": "code"})
+            for child in report_children:
+                payload = {"parent_code": "new_reports"}
+                if child.get("code") == "admin.dashboard_builder":
+                    payload["sort_order"] = 36
+                self._patch("features", {"code": f"eq.{child.get('code')}"}, payload)
+        except RuntimeError:
+            pass
 
     def _migrate_legacy_feature_layout(self) -> None:
         has_legacy = False
@@ -301,12 +316,12 @@ class SupabaseRepository:
         elif existing:
             self._patch("features", {"code": f"eq.{code}"}, {"name": page_name})
         else:
-            siblings = self._get("features", {"parent_code": "eq.reports", "select": "sort_order"})
-            max_order = max([int(row.get("sort_order") or 0) for row in siblings] or [30])
+            siblings = self._get("features", {"parent_code": "eq.new_reports", "select": "sort_order"})
+            max_order = max([int(row.get("sort_order") or 0) for row in siblings] or [35])
             self._insert("features", {
                 "code": code,
                 "name": page_name,
-                "parent_code": "reports",
+                "parent_code": "new_reports",
                 "sort_order": max_order + 10,
             })
         admin_users = self._get("users", {"role": "eq.admin", "select": "id"})

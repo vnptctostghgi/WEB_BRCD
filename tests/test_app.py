@@ -37,6 +37,9 @@ def test_admin_can_login_and_open_dashboard() -> None:
         response = client.get("/")
         assert response.status_code == 200
         assert 'rel="icon" type="image/png" href="/static/images/system-logo.png"' in response.text
+        assert "dashboard-tab-fiber" not in response.text
+        assert "Truy vấn SQL" in response.text
+        assert "Báo cáo mới" in response.text
         assert "Quản trị người dùng" in response.text
 
 
@@ -425,24 +428,24 @@ def test_dashboard_layout_pages_include_overview_and_reports_not_web_admin() -> 
         pages = response.json()["pages"]
         page_ids = [page["page_id"] for page in pages]
 
-        assert "DASHBOARD_KINH_DOANH" in page_ids
-        assert "REPORTS" in page_ids
+        assert "DASHBOARD_KINH_DOANH" not in page_ids
+        assert "REPORTS" not in page_ids
         assert "ADMIN_USERS" in page_ids
-        assert page_ids.count("DASHBOARD_KINH_DOANH") == 1
 
-        overview = next(page for page in pages if page["page_id"] == "DASHBOARD_KINH_DOANH")
-        reports = next(page for page in pages if page["page_id"] == "REPORTS")
         generated_admin_page = next(page for page in pages if page["page_id"] == "ADMIN_USERS")
-        assert overview["feature_code"] == "dashboard"
-        assert overview["saved"] is True
-        assert reports["feature_code"] == "reports"
-        assert reports["saved"] is False
-        assert reports["unsaved"] is True
         assert generated_admin_page["feature_code"] == "admin_users"
         assert generated_admin_page["saved"] is True
         assert not any(page["feature_code"] == "admin.users" for page in pages)
 
         features = client.get("/api/admin/features").json()["features"]
+        reports_feature = next(feature for feature in features if feature["code"] == "reports")
+        new_reports_feature = next(feature for feature in features if feature["code"] == "new_reports")
+        builder_feature = next(feature for feature in features if feature["code"] == "admin.dashboard_builder")
+        generated_feature = next(feature for feature in features if feature["code"] == "admin_users")
+        assert reports_feature["name"] == "Truy vấn SQL"
+        assert new_reports_feature["name"] == "Báo cáo mới"
+        assert builder_feature["parent_code"] == "new_reports"
+        assert generated_feature["parent_code"] == "new_reports"
         moved_features = []
         for feature in features:
             item = {
