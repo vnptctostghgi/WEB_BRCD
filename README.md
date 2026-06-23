@@ -286,7 +286,7 @@ Mở `http://127.0.0.1:8000`. Không chia sẻ file `.env` hoặc thư mục `da
 - Tài khoản website thuộc riêng từng người dùng.
 - Mật khẩu website được mã hóa bằng khóa ứng dụng trước khi lưu vào SQLite.
 - API danh sách không trả mật khẩu hoặc chuỗi mã hóa.
-- Chỉ giải mã khi người dùng có quyền `vault.reveal` bấm **Xem mật khẩu**; thao tác này được ghi audit log.
+- Chỉ giải mã khi người dùng có quyền `xemmatkhaudaluu` bấm **Xem mật khẩu**; thao tác này được ghi audit log.
 - Admin cấp quyền theo cây trong màn hình **Quản trị người dùng**.
 
 Cây chức năng hiện có:

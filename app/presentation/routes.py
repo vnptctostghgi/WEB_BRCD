@@ -3,6 +3,7 @@ import re
 import sqlite3
 from io import BytesIO
 from typing import Any, Literal
+from urllib.parse import quote
 
 import openpyxl
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
@@ -15,7 +16,12 @@ from app.application.database_service import DatabaseService
 from app.application.vault_service import VaultService
 from app.application.connection_service import ConnectionService
 from app.application.telegram_notifier import TelegramNotifier
-from app.data_access.app_repository import AppRepository, DEFAULT_DASHBOARD_PAGE_ID, dashboard_feature_code_for_page
+from app.data_access.app_repository import (
+    AppRepository,
+    DEFAULT_DASHBOARD_PAGE_ID,
+    dashboard_feature_code_for_page,
+    normalize_feature_code,
+)
 from app.data_access.internal_api_client import InternalApiClient
 from app.data_access.repository_factory import build_repository
 from app.settings import get_settings
@@ -27,7 +33,15 @@ FAILED_LOGIN_COUNTS: dict[str, int] = {}
 ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
 DASHBOARD_LAYOUT_TYPES = {"1_column": 1, "2_columns": 2, "3_columns": 3, "4_columns": 4}
 DASHBOARD_WIDGET_TYPES = {"bar_chart", "pie_chart", "line_chart", "combo_chart", "data_table", "metric", "data_card", "text_title"}
-DASHBOARD_LAYOUT_EXCLUDED_FEATURE_CODES = {"dashboard", "reports", "new_reports", "admin.dashboard_builder"}
+DASHBOARD_LAYOUT_EXCLUDED_FEATURE_CODES = {
+    "dashboard",
+    "truyvansql",
+    "baocaomoi",
+    "thietkelayoutbaocao",
+    "reports",
+    "new_reports",
+    "admin.dashboard_builder",
+}
 
 
 class LoginPayload(BaseModel):
@@ -333,7 +347,7 @@ def dashboard_feature_has_ancestor(code: str, parent_by_code: dict[str, str | No
 def dashboard_page_id_from_feature_code(code: str) -> str:
     if code == "dashboard":
         return DEFAULT_DASHBOARD_PAGE_ID
-    page_id = re.sub(r"[^A-Za-z0-9]+", "_", code).strip("_").upper()
+    page_id = re.sub(r"[^A-Za-z0-9]+", "", code).upper()
     return page_id or DEFAULT_DASHBOARD_PAGE_ID
 
 
@@ -342,6 +356,8 @@ def is_dashboard_layout_feature(code: str, parent_by_code: dict[str, str | None]
         return False
     return (
         dashboard_feature_has_ancestor(code, parent_by_code, "dashboard")
+        or dashboard_feature_has_ancestor(code, parent_by_code, "baocaomoi")
+        or dashboard_feature_has_ancestor(code, parent_by_code, "truyvansql")
         or dashboard_feature_has_ancestor(code, parent_by_code, "new_reports")
         or dashboard_feature_has_ancestor(code, parent_by_code, "reports")
     )
@@ -350,7 +366,8 @@ def is_dashboard_layout_feature(code: str, parent_by_code: dict[str, str | None]
 def build_dashboard_layout_pages(features: list[dict], layouts: list[dict]) -> list[dict]:
     parent_by_code = {str(feature.get("code") or ""): feature.get("parent_code") for feature in features}
     layout_by_id = {str(layout.get("page_id") or ""): layout for layout in layouts if layout.get("page_id")}
-    layout_feature_codes = {dashboard_feature_code_for_page(page_id) for page_id in layout_by_id}
+    layout_by_feature_code = {dashboard_feature_code_for_page(page_id): layout for page_id, layout in layout_by_id.items()}
+    layout_feature_codes = set(layout_by_feature_code)
     designable_codes = {
         code for code in parent_by_code
         if code
@@ -377,8 +394,8 @@ def build_dashboard_layout_pages(features: list[dict], layouts: list[dict]) -> l
         code = str(feature.get("code") or "")
         if code not in designable_codes:
             continue
-        page_id = dashboard_page_id_from_feature_code(code)
-        layout = layout_by_id.get(page_id)
+        layout = layout_by_feature_code.get(code)
+        page_id = str(layout.get("page_id") or "") if layout else dashboard_page_id_from_feature_code(code)
         pages.append({
             "page_id": page_id,
             "page_name": str(feature.get("name") or (layout.get("page_name") if layout else page_id)),
@@ -566,8 +583,11 @@ def require_feature(request: Request, feature_code: str) -> dict:
 
 @router.get("/login", response_class=HTMLResponse)
 def login_page(request: Request) -> Response:
+    next_path = request.query_params.get("next") or "/"
     if request.session.get("user"):
-        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+        if not next_path.startswith("/") or next_path.startswith("//"):
+            next_path = "/"
+        return RedirectResponse(next_path, status_code=status.HTTP_303_SEE_OTHER)
     return templates.TemplateResponse(
         request=request,
         name="login.html",
@@ -582,10 +602,16 @@ def favicon() -> Response:
 
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request) -> Response:
+    return render_index_page(request, "")
+
+
+def render_index_page(request: Request, feature_path: str) -> Response:
     try:
         user = current_user(request)
     except HTTPException:
-        return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+        next_path = "/" + feature_path.strip("/") if feature_path else "/"
+        next_query = f"?next={quote(next_path, safe='/')}" if next_path != "/" else ""
+        return RedirectResponse(f"/login{next_query}", status_code=status.HTTP_303_SEE_OTHER)
     return templates.TemplateResponse(
         request=request,
         name="index.html",
@@ -1127,19 +1153,19 @@ def notifications(request: Request) -> dict:
 
 @router.get("/api/websites")
 def websites(request: Request) -> dict:
-    require_feature(request, "vault.view")
+    require_feature(request, "xemdanhsachtaikhoan")
     return {"websites": build_app_repository().list_websites(active_only=True)}
 
 
 @router.get("/api/credentials")
 def credentials(request: Request) -> dict:
-    user = require_feature(request, "vault.view")
+    user = require_feature(request, "xemdanhsachtaikhoan")
     return {"credentials": build_app_repository().list_credentials(user["id"])}
 
 
 @router.post("/api/credentials")
 def save_credential(request: Request, payload: CredentialPayload) -> dict:
-    user = require_feature(request, "vault.manage")
+    user = require_feature(request, "themvasuataikhoan")
     try:
         build_vault_service().save_credential(
             user, payload.id, payload.website_id, payload.login_username, payload.password, payload.notes
@@ -1151,7 +1177,7 @@ def save_credential(request: Request, payload: CredentialPayload) -> dict:
 
 @router.post("/api/credentials/{credential_id}/reveal")
 def reveal_credential(request: Request, credential_id: int) -> dict:
-    user = require_feature(request, "vault.reveal")
+    user = require_feature(request, "xemmatkhaudaluu")
     try:
         password = build_vault_service().reveal_password(user, credential_id)
     except ValueError as error:
@@ -1161,7 +1187,7 @@ def reveal_credential(request: Request, credential_id: int) -> dict:
 
 @router.delete("/api/credentials/{credential_id}")
 def delete_credential(request: Request, credential_id: int) -> dict:
-    user = require_feature(request, "vault.manage")
+    user = require_feature(request, "themvasuataikhoan")
     try:
         build_vault_service().delete_credential(user, credential_id)
     except ValueError as error:
@@ -1310,3 +1336,11 @@ def update_bulk_data_permissions(request: Request, payload: BulkDataPermissionPa
     build_app_repository().set_bulk_user_data_permissions(payload.user_ids, payload.region_codes)
     build_app_repository().add_audit_log(actor["username"], "bulk_data_permissions_updated", f"Cap vung du lieu cho {len(payload.user_ids)} user")
     return {"ok": True}
+
+
+@router.get("/{feature_path:path}", response_class=HTMLResponse)
+def feature_page(request: Request, feature_path: str) -> Response:
+    if feature_path.startswith("api/"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy API.")
+    normalize_feature_code(feature_path)
+    return render_index_page(request, feature_path)

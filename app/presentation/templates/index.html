@@ -27,7 +27,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="/static/styles.css?v=40" />
   </head>
-  <body class="app-dark min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'vault.manage' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'vault.reveal' in user.permissions }}">
+  <body class="app-dark min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'themvasuataikhoan' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'xemmatkhaudaluu' in user.permissions }}">
     <svg class="icon-sprite" aria-hidden="true">
       <symbol id="icon-dashboard" viewBox="0 0 24 24"><path d="M4 13h7V4H4v9Zm0 7h7v-5H4v5Zm9 0h7v-9h-7v9Zm0-16v5h7V4h-7Z"/></symbol>
       <symbol id="icon-vault" viewBox="0 0 24 24"><path d="M6 10V8a6 6 0 1 1 12 0v2h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1Zm2 0h8V8a4 4 0 0 0-8 0v2Zm4 4a2 2 0 0 0-1 3.73V19h2v-1.27A2 2 0 0 0 12 14Z"/></symbol>
@@ -62,33 +62,33 @@
               <summary data-feature-code="dashboard"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-dashboard"></use></svg><strong>Tổng quan</strong></summary>
             </details>
             {% if user.role == "admin" %}
-            <button class="nav-item" data-feature-code="admin.work_tasks" data-view="work-tasks" data-title="Quản lý công việc" data-keywords="quan ly cong viec task lich telegram nhac viec"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản lý công việc</span></button>
+            <button class="nav-item" data-feature-code="quanlycongviec" data-view="work-tasks" data-title="Quản lý công việc" data-keywords="quan ly cong viec task lich telegram nhac viec"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản lý công việc</span></button>
             {% endif %}
-            {% if user.role == "admin" or "vault.view" in user.permissions %}
+            {% if user.role == "admin" or "xemdanhsachtaikhoan" in user.permissions %}
             <details class="nav-group">
-              <summary data-feature-code="admin.web"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-shield"></use></svg><strong>Quản trị web</strong></summary>
-              {% if user.role == "admin" or "vault.view" in user.permissions %}
-              <button class="nav-item child" data-feature-code="vault" data-view="vault" data-title="Tài khoản web" data-keywords="tai khoan web mat khau"><svg class="nav-svg"><use href="#icon-vault"></use></svg><span>Tài khoản web</span></button>
+              <summary data-feature-code="quantriweb"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-shield"></use></svg><strong>Quản trị web</strong></summary>
+              {% if user.role == "admin" or "xemdanhsachtaikhoan" in user.permissions %}
+              <button class="nav-item child" data-feature-code="taikhoanweb" data-view="vault" data-title="Tài khoản web" data-keywords="tai khoan web mat khau"><svg class="nav-svg"><use href="#icon-vault"></use></svg><span>Tài khoản web</span></button>
               {% endif %}
               {% if user.role == "admin" %}
-              <button class="nav-item child" data-feature-code="admin.users" data-view="users" data-title="Quản trị người dùng" data-keywords="quan tri nguoi dung user"><svg class="nav-svg"><use href="#icon-users"></use></svg><span>Quản trị người dùng</span></button>
-              <button class="nav-item child" data-feature-code="admin.menu" data-view="menu-admin" data-title="Quản trị menu" data-keywords="quan tri menu sap xep di chuyen module"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản trị menu</span></button>
-              <button class="nav-item child" data-feature-code="admin.catalogs" data-view="catalogs" data-title="Quản trị danh mục" data-keywords="quan tri danh muc phan vung vai tro bien"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản trị danh mục</span></button>
-              <button class="nav-item child" data-feature-code="admin.connections" data-view="system" data-title="Quản trị kết nối" data-keywords="quan tri ket noi api db ftp drive telegram"><svg class="nav-svg"><use href="#icon-plug"></use></svg><span>Quản trị kết nối</span></button>
+              <button class="nav-item child" data-feature-code="quantringuoidung" data-view="users" data-title="Quản trị người dùng" data-keywords="quan tri nguoi dung user"><svg class="nav-svg"><use href="#icon-users"></use></svg><span>Quản trị người dùng</span></button>
+              <button class="nav-item child" data-feature-code="quantrimenu" data-view="menu-admin" data-title="Quản trị menu" data-keywords="quan tri menu sap xep di chuyen module"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản trị menu</span></button>
+              <button class="nav-item child" data-feature-code="quantridanhmuc" data-view="catalogs" data-title="Quản trị danh mục" data-keywords="quan tri danh muc phan vung vai tro bien"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản trị danh mục</span></button>
+              <button class="nav-item child" data-feature-code="quantriketnoi" data-view="system" data-title="Quản trị kết nối" data-keywords="quan tri ket noi api db ftp drive telegram"><svg class="nav-svg"><use href="#icon-plug"></use></svg><span>Quản trị kết nối</span></button>
               <details class="nav-group nav-subgroup">
-                <summary data-feature-code="admin.permissions.group"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-shield"></use></svg><strong>Phân quyền</strong></summary>
-                <button class="nav-item child subchild" data-feature-code="admin.permissions" data-view="permissions" data-title="Phân quyền người dùng" data-keywords="phan quyen nguoi dung chuc nang"><svg class="nav-svg"><use href="#icon-shield"></use></svg><span>Người dùng</span></button>
-                <button class="nav-item child subchild" data-feature-code="admin.data_permissions" data-view="data-permissions" data-title="Phân quyền dữ liệu người dùng" data-keywords="phan quyen du lieu phan vung"><svg class="nav-svg"><use href="#icon-database"></use></svg><span>Dữ liệu</span></button>
+                <summary data-feature-code="phanquyen"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-shield"></use></svg><strong>Phân quyền</strong></summary>
+                <button class="nav-item child subchild" data-feature-code="phanquyennguoidung" data-view="permissions" data-title="Phân quyền người dùng" data-keywords="phan quyen nguoi dung chuc nang"><svg class="nav-svg"><use href="#icon-shield"></use></svg><span>Người dùng</span></button>
+                <button class="nav-item child subchild" data-feature-code="phanquyendulieunguoidung" data-view="data-permissions" data-title="Phân quyền dữ liệu người dùng" data-keywords="phan quyen du lieu phan vung"><svg class="nav-svg"><use href="#icon-database"></use></svg><span>Dữ liệu</span></button>
               </details>
-              <button class="nav-item child" data-feature-code="admin.audit" data-view="audit" data-title="Nhật ký hoạt động" data-keywords="nhat ky audit log"><svg class="nav-svg"><use href="#icon-audit"></use></svg><span>Nhật ký hoạt động</span></button>
+              <button class="nav-item child" data-feature-code="nhatkyhoatdong" data-view="audit" data-title="Nhật ký hoạt động" data-keywords="nhat ky audit log"><svg class="nav-svg"><use href="#icon-audit"></use></svg><span>Nhật ký hoạt động</span></button>
               {% endif %}
             </details>
             {% endif %}
             {% if user.role == "admin" %}
-            <button class="nav-item" data-feature-code="reports" data-view="reports" data-title="Truy vấn SQL" data-keywords="truy van sql bao cao thong ke bieu do"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Truy vấn SQL</span></button>
+            <button class="nav-item" data-feature-code="truyvansql" data-view="reports" data-title="Truy vấn SQL" data-keywords="truy van sql bao cao thong ke bieu do"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Truy vấn SQL</span></button>
             <details class="nav-group">
-              <summary data-feature-code="new_reports"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-chart"></use></svg><strong>Báo cáo mới</strong></summary>
-              <button class="nav-item child" data-feature-code="admin.dashboard_builder" data-view="dashboard-builder" data-title="Thiết kế Layout báo cáo" data-keywords="dashboard builder thiet ke layout bao cao tab bieu do"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Thiết kế Layout báo cáo</span></button>
+              <summary data-feature-code="baocaomoi"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-chart"></use></svg><strong>Báo cáo mới</strong></summary>
+              <button class="nav-item child" data-feature-code="thietkelayoutbaocao" data-view="dashboard-builder" data-title="Thiết kế Layout báo cáo" data-keywords="dashboard builder thiet ke layout bao cao tab bieu do"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Thiết kế Layout báo cáo</span></button>
             </details>
             {% endif %}
           </div>
@@ -169,11 +169,11 @@
 
         </section>
 
-        {% if user.role == "admin" or "vault.view" in user.permissions %}
+        {% if user.role == "admin" or "xemdanhsachtaikhoan" in user.permissions %}
         <section class="app-view" id="view-vault">
           <div class="page-header">
             <div><p class="eyebrow">Kho cá nhân</p><h1>Tài khoản website</h1><p class="subtitle">Mật khẩu được mã hóa khi lưu. Thao tác xem mật khẩu được ghi nhật ký.</p></div>
-            {% if user.role == "admin" or "vault.manage" in user.permissions %}<button class="btn-primary" data-open-dialog="credential-dialog">Thêm tài khoản</button>{% endif %}
+            {% if user.role == "admin" or "themvasuataikhoan" in user.permissions %}<button class="btn-primary" data-open-dialog="credential-dialog">Thêm tài khoản</button>{% endif %}
           </div>
           <div class="notice warning"><strong>Lưu ý bảo mật.</strong> Chỉ lưu tài khoản phục vụ công việc và được đơn vị cho phép.</div>
           <section class="data-card"><div class="table-scroll"><table><thead><tr><th>Website</th><th>Địa chỉ</th><th>Tài khoản</th><th>OTP</th><th>Thao tác</th></tr></thead><tbody id="credentials-table"></tbody></table></div></section>
@@ -400,7 +400,7 @@
         <button class="btn-primary" type="submit">Lưu cấu hình SQL</button>
       </form>
     </dialog>
-    {% if user.role == "admin" or "vault.manage" in user.permissions %}
+    {% if user.role == "admin" or "themvasuataikhoan" in user.permissions %}
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>

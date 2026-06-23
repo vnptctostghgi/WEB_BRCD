@@ -24,6 +24,7 @@ let dashboardLayouts = [];
 let dashboardBuilderLayout = null;
 let dashboardBuilderActiveTabId = "";
 let dashboardBuilderLoadedTabs = {};
+let dashboardPageIdByFeatureCode = new Map();
 let draggedDashboardTabId = "";
 let draggedDashboardRowId = "";
 const dashboardChartInstances = new Map();
@@ -37,29 +38,29 @@ const dashboardColorScaleStops = [
 ];
 
 const navFeatureConfig = {
-  "admin.work_tasks": { view: "work-tasks", icon: "list", keywords: "quan ly cong viec task lich telegram nhac viec" },
-  vault: { view: "vault", icon: "vault", keywords: "tai khoan web mat khau" },
-  "admin.users": { view: "users", icon: "users", keywords: "quan tri nguoi dung user" },
-  "admin.menu": { view: "menu-admin", icon: "list", keywords: "quan tri menu sap xep di chuyen module" },
-  "admin.catalogs": { view: "catalogs", icon: "list", keywords: "quan tri danh muc phan vung vai tro bien" },
-  "admin.connections": { view: "system", icon: "plug", keywords: "quan tri ket noi api db ftp drive telegram" },
-  "admin.permissions": { view: "permissions", icon: "shield", keywords: "phan quyen nguoi dung chuc nang" },
-  "admin.data_permissions": { view: "data-permissions", icon: "database", keywords: "phan quyen du lieu phan vung" },
-  "admin.audit": { view: "audit", icon: "audit", keywords: "nhat ky audit log" },
-  reports: { view: "reports", icon: "chart", keywords: "truy van sql bao cao thong ke bieu do" },
-  "admin.dashboard_builder": { view: "dashboard-builder", icon: "chart", keywords: "dashboard builder thiet ke layout bao cao tab bieu do" },
+  quanlycongviec: { view: "work-tasks", icon: "list", keywords: "quan ly cong viec task lich telegram nhac viec" },
+  taikhoanweb: { view: "vault", icon: "vault", keywords: "tai khoan web mat khau" },
+  quantringuoidung: { view: "users", icon: "users", keywords: "quan tri nguoi dung user" },
+  quantrimenu: { view: "menu-admin", icon: "list", keywords: "quan tri menu sap xep di chuyen module" },
+  quantridanhmuc: { view: "catalogs", icon: "list", keywords: "quan tri danh muc phan vung vai tro bien" },
+  quantriketnoi: { view: "system", icon: "plug", keywords: "quan tri ket noi api db ftp drive telegram" },
+  phanquyennguoidung: { view: "permissions", icon: "shield", keywords: "phan quyen nguoi dung chuc nang" },
+  phanquyendulieunguoidung: { view: "data-permissions", icon: "database", keywords: "phan quyen du lieu phan vung" },
+  nhatkyhoatdong: { view: "audit", icon: "audit", keywords: "nhat ky audit log" },
+  truyvansql: { view: "reports", icon: "chart", keywords: "truy van sql bao cao thong ke bieu do" },
+  thietkelayoutbaocao: { view: "dashboard-builder", icon: "chart", keywords: "dashboard builder thiet ke layout bao cao tab bieu do" },
 };
 
-const navGroupOnlyFeatureCodes = new Set(["dashboard", "new_reports"]);
+const navGroupOnlyFeatureCodes = new Set(["dashboard", "baocaomoi"]);
 
 const navGroupIcons = {
-  "admin.web": "shield",
-  "admin.catalogs": "list",
-  "admin.connections": "plug",
-  vault: "vault",
+  quantriweb: "shield",
+  quantridanhmuc: "list",
+  quantriketnoi: "plug",
+  taikhoanweb: "vault",
   dashboard: "dashboard",
-  reports: "chart",
-  new_reports: "chart",
+  truyvansql: "chart",
+  baocaomoi: "chart",
 };
 
 const mojibakePattern = new RegExp("(?:\\u00c3|\\u00c4|\\u00c2|\\u00c6|\\u00e1\\u00ba|\\u00e1\\u00bb|\\u00e2\\u20ac)");
@@ -152,7 +153,30 @@ document.querySelectorAll(".nav-group").forEach((group) => {
   group.open = false;
 });
 
-async function activateNavItem(item) {
+function featurePathFromCode(code) {
+  const normalized = String(code || "").trim().replace(/^\/+|\/+$/g, "");
+  return normalized ? `/${encodeURIComponent(normalized)}` : "/";
+}
+
+function featureCodeFromCurrentPath() {
+  const path = window.location.pathname.replace(/^\/+|\/+$/g, "");
+  if (!path || path === "login") return "";
+  return decodeURIComponent(path).toLowerCase();
+}
+
+function updateFeatureUrl(code, { replace = false } = {}) {
+  const nextPath = featurePathFromCode(code);
+  if (!nextPath || nextPath === window.location.pathname) return;
+  const nextUrl = `${nextPath}${window.location.hash || ""}`;
+  if (replace) {
+    window.history.replaceState({ featureCode: code }, "", nextUrl);
+  } else {
+    window.history.pushState({ featureCode: code }, "", nextUrl);
+  }
+}
+
+async function activateNavItem(item, options = {}) {
+  const { updateUrl = true, replaceUrl = false } = options;
   const nextView = item.dataset.view || "";
   const dashboardPageId = item.dataset.dashboardPageId || "";
   $("#view-dashboard")?.classList.toggle("dashboard-dynamic-mode", Boolean(dashboardPageId));
@@ -162,11 +186,13 @@ async function activateNavItem(item) {
   }
   document.querySelectorAll(".nav-item, .app-view").forEach((element) => element.classList.remove("active"));
   item.classList.add("active");
+  openNavParents(item);
   $(`#view-${item.dataset.view}`)?.classList.add("active");
   const moduleTitle = $("#module-title");
   if (moduleTitle) moduleTitle.textContent = item.dataset.title || item.textContent.trim();
   $("#sidebar").classList.remove("menu-open");
   $("#menu-button")?.setAttribute("aria-expanded", "false");
+  if (updateUrl) updateFeatureUrl(item.dataset.featureCode, { replace: replaceUrl });
   if (nextView === "dashboard" && dashboardPageId) {
     await openDashboardViewerLayout(dashboardPageId);
   }
@@ -265,7 +291,13 @@ if (mustChangePassword) {
 
 if (role === "admin") {
   syncNavigationFromFeatures();
+} else {
+  activateNavForCurrentPath();
 }
+
+window.addEventListener("popstate", () => {
+  activateNavForCurrentPath();
+});
 
 function closeTopDropdowns(except = null) {
   ["notification-menu", "user-menu"].forEach((id) => {
@@ -994,19 +1026,21 @@ function iconMarkup(icon) {
 
 function dashboardPageIdFromFeatureCode(code) {
   if (code === "dashboard") return "DASHBOARD_KINH_DOANH";
+  const mappedPageId = dashboardPageIdByFeatureCode.get(code);
+  if (mappedPageId) return mappedPageId;
   return String(code || "")
-    .replace(/[^A-Za-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
+    .replace(/[^A-Za-z0-9]+/g, "")
     .toUpperCase() || "DASHBOARD_KINH_DOANH";
 }
 
 function dashboardFeatureCodeForPageId(pageId) {
-  const normalized = String(pageId || "")
+  const compact = String(pageId || "")
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return normalized || "dashboard";
+    .replace(/[^a-z0-9]+/g, "");
+  if (compact === "dashboardkinhdoanh") return "dashboard";
+  if (compact === "reports") return "truyvansql";
+  return compact || "dashboard";
 }
 
 function featureNavigationConfig(feature) {
@@ -1014,7 +1048,7 @@ function featureNavigationConfig(feature) {
   const staticConfig = navFeatureConfig[feature.code];
   if (staticConfig) return staticConfig;
   const dashboardPageId = dashboardPageIdFromFeatureCode(feature.code);
-  if (feature.parent_code === "reports" || dashboardFeatureCodes.has(feature.code)) {
+  if (feature.parent_code === "truyvansql" || feature.parent_code === "reports" || dashboardFeatureCodes.has(feature.code)) {
     return {
       view: "dashboard",
       icon: "chart",
@@ -1082,10 +1116,17 @@ function findFirstNavItemUnderFeatureCode(code) {
 }
 
 function preferredNavItem(activeCode) {
-  if (!activeCode || activeCode === "dashboard") {
+  const routeCode = featureCodeFromCurrentPath();
+  const preferredCode = routeCode || activeCode;
+  if (!preferredCode || preferredCode === "dashboard") {
     return findFirstNavItemUnderFeatureCode("dashboard") || document.querySelector("#nav-tree .nav-item[data-view]");
   }
-  return findNavItemByFeatureCode(activeCode) || findFirstNavItemUnderFeatureCode("dashboard") || document.querySelector("#nav-tree .nav-item[data-view]");
+  return (
+    findNavItemByFeatureCode(preferredCode)
+    || findFirstNavItemUnderFeatureCode(preferredCode)
+    || findFirstNavItemUnderFeatureCode("dashboard")
+    || document.querySelector("#nav-tree .nav-item[data-view]")
+  );
 }
 
 function openNavParents(item) {
@@ -1101,8 +1142,13 @@ async function syncNavigationFromFeatures() {
     features = (await api("/api/admin/features")).features;
     try {
       const layoutsData = await api("/api/admin/dashboard-layouts");
-      dashboardFeatureCodes = new Set((layoutsData.layouts || []).map((layout) => dashboardFeatureCodeForPageId(layout.page_id)).filter(Boolean));
+      dashboardPageIdByFeatureCode = new Map((layoutsData.layouts || []).map((layout) => [
+        dashboardFeatureCodeForPageId(layout.page_id),
+        layout.page_id,
+      ]).filter(([code, pageId]) => code && pageId));
+      dashboardFeatureCodes = new Set(dashboardPageIdByFeatureCode.keys());
     } catch {
+      dashboardPageIdByFeatureCode = new Map();
       dashboardFeatureCodes = new Set();
     }
     const tree = $("#nav-tree");
@@ -1115,12 +1161,22 @@ async function syncNavigationFromFeatures() {
     if (html.trim()) tree.innerHTML = html;
     const activeItem = preferredNavItem(activeCode);
     if (activeItem) {
-      await activateNavItem(activeItem);
+      await activateNavItem(activeItem, { updateUrl: !featureCodeFromCurrentPath(), replaceUrl: true });
     }
     filterNavigation($("#menu-search")?.value || "");
   } catch {
     // Nếu API layout chưa sẵn sàng, sidebar vẫn dùng cấu trúc tĩnh đã render từ server.
   }
+}
+
+async function activateNavForCurrentPath() {
+  const routeCode = featureCodeFromCurrentPath();
+  if (!routeCode && window.location.pathname !== "/") return false;
+  const item = preferredNavItem(routeCode || "dashboard");
+  if (!item) return false;
+  openNavParents(item);
+  await activateNavItem(item, { updateUrl: false });
+  return true;
 }
 
 function collectMenuLayoutStateFromDom() {

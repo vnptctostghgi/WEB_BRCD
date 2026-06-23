@@ -9,6 +9,12 @@ if (rememberedUsername) {
   rememberLogin.checked = true;
 }
 
+function safeNextPath() {
+  const next = new URLSearchParams(window.location.search).get("next") || "/";
+  if (!next.startsWith("/") || next.startsWith("//")) return "/";
+  return next;
+}
+
 function showMessage(text, type = "error") {
   message.className = `result ${type}`;
   message.textContent = text;
@@ -38,7 +44,7 @@ form.addEventListener("submit", async (event) => {
     });
 
     if (response.ok) {
-      window.location.href = "/";
+      window.location.href = safeNextPath();
       return;
     }
     const body = await response.json();

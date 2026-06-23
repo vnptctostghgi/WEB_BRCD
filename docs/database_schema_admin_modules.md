@@ -13,7 +13,7 @@ Dự án đang dùng FastAPI + Jinja2 + JavaScript thuần ở frontend và Supa
 
 ## Bảng chức năng và phân quyền chức năng
 
-- `features`: danh mục chức năng theo cây, ví dụ `admin.web`, `admin.users`, `admin.connections`, `reports`.
+- `features`: danh mục chức năng theo cây, mã dùng dạng không dấu liền chữ, ví dụ `quantriweb`, `quantringuoidung`, `quantriketnoi`, `truyvansql`.
 - `user_permissions`: liên kết người dùng với nhiều chức năng.
 - Sidebar sau đăng nhập đọc `user.permissions` để hiển thị đúng chức năng được cấp. Riêng admin luôn được xem tất cả.
 - Module `Quản trị menu` cập nhật `features.parent_code` và `features.sort_order` để đổi nhóm hoặc sắp xếp thứ tự module.

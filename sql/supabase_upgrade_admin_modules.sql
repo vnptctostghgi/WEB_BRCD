@@ -11,32 +11,86 @@ alter table public.users add column if not exists job_title text;
 
 insert into public.features (code, name, parent_code, sort_order)
 values
-  ('admin.menu', 'Quản trị menu', 'admin.web', 27),
-  ('admin.work_tasks', 'Quản lý công việc', null, 28),
-  ('admin.roles', 'Quản trị vai trò', 'admin.catalogs', 26),
+  ('quantrimenu', 'Quản trị menu', 'quantriweb', 27),
+  ('quanlycongviec', 'Quản lý công việc', null, 28),
+  ('quantrivaitro', 'Quản trị vai trò', 'quantridanhmuc', 26),
   ('dashboard', 'Tổng quan', null, 10),
-  ('admin.web', 'Quản trị web', null, 20),
-  ('admin.users', 'Quản trị người dùng', 'admin.web', 21),
-  ('admin.connections', 'Quản trị kết nối', 'admin.web', 22),
-  ('admin.permissions', 'Phân quyền người dùng', 'admin.web', 23),
-  ('admin.data_permissions', 'Phân quyền dữ liệu người dùng', 'admin.web', 24),
-  ('admin.catalogs', 'Quản trị danh mục', 'admin.web', 25),
-  ('reports', 'Báo cáo thống kê', null, 30),
-  ('admin.dashboard_builder', 'Thiết kế Layout báo cáo', 'reports', 31),
-  ('vault', 'Tài khoản web', 'admin.web', 40),
-  ('vault.view', 'Xem danh sách tài khoản', 'vault', 41),
-  ('vault.manage', 'Thêm và sửa tài khoản', 'vault', 42),
-  ('vault.reveal', 'Xem mật khẩu đã lưu', 'vault', 43),
-  ('admin.audit', 'Nhật ký hoạt động', 'admin.web', 90)
+  ('quantriweb', 'Quản trị web', null, 20),
+  ('quantringuoidung', 'Quản trị người dùng', 'quantriweb', 21),
+  ('quantriketnoi', 'Quản trị kết nối', 'quantriweb', 22),
+  ('phanquyennguoidung', 'Phân quyền người dùng', 'quantriweb', 23),
+  ('phanquyendulieunguoidung', 'Phân quyền dữ liệu người dùng', 'quantriweb', 24),
+  ('quantridanhmuc', 'Quản trị danh mục', 'quantriweb', 25),
+  ('truyvansql', 'Truy vấn SQL', null, 30),
+  ('baocaomoi', 'Báo cáo mới', null, 35),
+  ('thietkelayoutbaocao', 'Thiết kế Layout báo cáo', 'baocaomoi', 36),
+  ('taikhoanweb', 'Tài khoản web', 'quantriweb', 40),
+  ('xemdanhsachtaikhoan', 'Xem danh sách tài khoản', 'taikhoanweb', 41),
+  ('themvasuataikhoan', 'Thêm và sửa tài khoản', 'taikhoanweb', 42),
+  ('xemmatkhaudaluu', 'Xem mật khẩu đã lưu', 'taikhoanweb', 43),
+  ('nhatkyhoatdong', 'Nhật ký hoạt động', 'quantriweb', 90)
 on conflict (code) do update
 set name = excluded.name,
     parent_code = excluded.parent_code,
     sort_order = excluded.sort_order;
 
-delete from public.user_permissions where feature_code in ('admin', 'admin.connections.test', 'auto', 'auto.attt_quarterly', 'auto.attt_links');
-delete from public.features where code in ('admin', 'admin.connections.test', 'auto', 'auto.attt_quarterly', 'auto.attt_links');
+with feature_code_map(old_code, new_code) as (
+  values
+    ('admin.web', 'quantriweb'),
+    ('admin.users', 'quantringuoidung'),
+    ('admin.connections', 'quantriketnoi'),
+    ('admin.permissions', 'phanquyennguoidung'),
+    ('admin.data_permissions', 'phanquyendulieunguoidung'),
+    ('admin.catalogs', 'quantridanhmuc'),
+    ('admin.roles', 'quantrivaitro'),
+    ('admin.menu', 'quantrimenu'),
+    ('admin.work_tasks', 'quanlycongviec'),
+    ('reports', 'truyvansql'),
+    ('new_reports', 'baocaomoi'),
+    ('admin.dashboard_builder', 'thietkelayoutbaocao'),
+    ('vault', 'taikhoanweb'),
+    ('vault.view', 'xemdanhsachtaikhoan'),
+    ('vault.manage', 'themvasuataikhoan'),
+    ('vault.reveal', 'xemmatkhaudaluu'),
+    ('admin.audit', 'nhatkyhoatdong'),
+    ('admin.sql_reports', 'quantrisql')
+)
+insert into public.user_permissions (user_id, feature_code)
+select up.user_id, m.new_code
+from public.user_permissions up
+join feature_code_map m on m.old_code = up.feature_code
+on conflict do nothing;
+
+with feature_code_map(old_code, new_code) as (
+  values
+    ('admin.web', 'quantriweb'),
+    ('admin.users', 'quantringuoidung'),
+    ('admin.connections', 'quantriketnoi'),
+    ('admin.permissions', 'phanquyennguoidung'),
+    ('admin.data_permissions', 'phanquyendulieunguoidung'),
+    ('admin.catalogs', 'quantridanhmuc'),
+    ('admin.roles', 'quantrivaitro'),
+    ('admin.menu', 'quantrimenu'),
+    ('admin.work_tasks', 'quanlycongviec'),
+    ('reports', 'truyvansql'),
+    ('new_reports', 'baocaomoi'),
+    ('admin.dashboard_builder', 'thietkelayoutbaocao'),
+    ('vault', 'taikhoanweb'),
+    ('vault.view', 'xemdanhsachtaikhoan'),
+    ('vault.manage', 'themvasuataikhoan'),
+    ('vault.reveal', 'xemmatkhaudaluu'),
+    ('admin.audit', 'nhatkyhoatdong'),
+    ('admin.sql_reports', 'quantrisql')
+)
+update public.features f
+set parent_code = m.new_code
+from feature_code_map m
+where f.parent_code = m.old_code;
+
+delete from public.user_permissions where feature_code in ('admin', 'admin.connections.test', 'auto', 'auto.attt_quarterly', 'auto.attt_links', 'admin.web', 'admin.users', 'admin.connections', 'admin.permissions', 'admin.data_permissions', 'admin.catalogs', 'admin.roles', 'admin.menu', 'admin.work_tasks', 'reports', 'new_reports', 'admin.dashboard_builder', 'vault', 'vault.view', 'vault.manage', 'vault.reveal', 'admin.audit', 'admin.sql_reports');
+delete from public.features where code in ('admin', 'admin.connections.test', 'auto', 'auto.attt_quarterly', 'auto.attt_links', 'admin.web', 'admin.users', 'admin.connections', 'admin.permissions', 'admin.data_permissions', 'admin.catalogs', 'admin.roles', 'admin.menu', 'admin.work_tasks', 'reports', 'new_reports', 'admin.dashboard_builder', 'vault', 'vault.view', 'vault.manage', 'vault.reveal', 'admin.audit', 'admin.sql_reports');
 insert into public.features (code, name, parent_code, sort_order)
-values ('admin.sql_reports', 'Quản trị SQL', 'admin.connections', 23)
+values ('quantrisql', 'Quản trị SQL', 'quantriketnoi', 23)
 on conflict (code) do update
 set name = excluded.name,
     parent_code = excluded.parent_code,

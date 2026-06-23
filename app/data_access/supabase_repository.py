@@ -9,34 +9,40 @@ from app.data_access.app_repository import (
     DEFAULT_DASHBOARD_LAYOUT,
     DEFAULT_DASHBOARD_PAGE_ID,
     DEFAULT_DASHBOARD_PAGE_NAME,
+    FEATURE_CODE_ALIASES,
+    LEGACY_REMOVED_FEATURE_CODES,
     dashboard_feature_code_for_page,
     hash_password,
+    normalize_feature_code,
 )
 
 
 FEATURE_ROWS = [
     {"code": "dashboard", "name": "Tổng quan", "parent_code": None, "sort_order": 10},
-    {"code": "admin.web", "name": "Quản trị web", "parent_code": None, "sort_order": 20},
-    {"code": "admin.users", "name": "Quản trị người dùng", "parent_code": "admin.web", "sort_order": 21},
-    {"code": "admin.connections", "name": "Quản trị kết nối", "parent_code": "admin.web", "sort_order": 22},
-    {"code": "admin.permissions", "name": "Phân quyền người dùng", "parent_code": "admin.web", "sort_order": 23},
-    {"code": "admin.data_permissions", "name": "Phân quyền dữ liệu người dùng", "parent_code": "admin.web", "sort_order": 24},
-    {"code": "admin.catalogs", "name": "Quản trị danh mục", "parent_code": "admin.web", "sort_order": 25},
-    {"code": "admin.roles", "name": "Quản trị vai trò", "parent_code": "admin.catalogs", "sort_order": 26},
-    {"code": "admin.menu", "name": "Quản trị menu", "parent_code": "admin.web", "sort_order": 27},
-    {"code": "admin.work_tasks", "name": "Quản lý công việc", "parent_code": None, "sort_order": 28},
-    {"code": "reports", "name": "Truy vấn SQL", "parent_code": None, "sort_order": 30},
-    {"code": "new_reports", "name": "Báo cáo mới", "parent_code": None, "sort_order": 35},
-    {"code": "admin.dashboard_builder", "name": "Thiết kế Layout báo cáo", "parent_code": "new_reports", "sort_order": 36},
-    {"code": "vault", "name": "Tài khoản web", "parent_code": "admin.web", "sort_order": 40},
-    {"code": "vault.view", "name": "Xem danh sách tài khoản", "parent_code": "vault", "sort_order": 41},
-    {"code": "vault.manage", "name": "Thêm và sửa tài khoản", "parent_code": "vault", "sort_order": 42},
-    {"code": "vault.reveal", "name": "Xem mật khẩu đã lưu", "parent_code": "vault", "sort_order": 43},
-    {"code": "admin.audit", "name": "Nhật ký hoạt động", "parent_code": "admin.web", "sort_order": 90},
+    {"code": "quantriweb", "name": "Quản trị web", "parent_code": None, "sort_order": 20},
+    {"code": "quantringuoidung", "name": "Quản trị người dùng", "parent_code": "quantriweb", "sort_order": 21},
+    {"code": "quantriketnoi", "name": "Quản trị kết nối", "parent_code": "quantriweb", "sort_order": 22},
+    {"code": "phanquyennguoidung", "name": "Phân quyền người dùng", "parent_code": "quantriweb", "sort_order": 23},
+    {"code": "phanquyendulieunguoidung", "name": "Phân quyền dữ liệu người dùng", "parent_code": "quantriweb", "sort_order": 24},
+    {"code": "quantridanhmuc", "name": "Quản trị danh mục", "parent_code": "quantriweb", "sort_order": 25},
+    {"code": "quantrivaitro", "name": "Quản trị vai trò", "parent_code": "quantridanhmuc", "sort_order": 26},
+    {"code": "quantrimenu", "name": "Quản trị menu", "parent_code": "quantriweb", "sort_order": 27},
+    {"code": "quanlycongviec", "name": "Quản lý công việc", "parent_code": None, "sort_order": 28},
+    {"code": "truyvansql", "name": "Truy vấn SQL", "parent_code": None, "sort_order": 30},
+    {"code": "baocaomoi", "name": "Báo cáo mới", "parent_code": None, "sort_order": 35},
+    {"code": "thietkelayoutbaocao", "name": "Thiết kế Layout báo cáo", "parent_code": "baocaomoi", "sort_order": 36},
+    {"code": "taikhoanweb", "name": "Tài khoản web", "parent_code": "quantriweb", "sort_order": 40},
+    {"code": "xemdanhsachtaikhoan", "name": "Xem danh sách tài khoản", "parent_code": "taikhoanweb", "sort_order": 41},
+    {"code": "themvasuataikhoan", "name": "Thêm và sửa tài khoản", "parent_code": "taikhoanweb", "sort_order": 42},
+    {"code": "xemmatkhaudaluu", "name": "Xem mật khẩu đã lưu", "parent_code": "taikhoanweb", "sort_order": 43},
+    {"code": "nhatkyhoatdong", "name": "Nhật ký hoạt động", "parent_code": "quantriweb", "sort_order": 90},
 ]
 
-FEATURE_ROWS.append({"code": "admin.sql_reports", "name": "Quản trị SQL", "parent_code": "admin.connections", "sort_order": 23})
-OBSOLETE_FEATURE_CODES = ("admin", "admin.connections.test", "auto", "auto.attt_quarterly", "auto.attt_links")
+FEATURE_ROWS.append({"code": "quantrisql", "name": "Quản trị SQL", "parent_code": "quantriketnoi", "sort_order": 23})
+OBSOLETE_FEATURE_CODES = (
+    *LEGACY_REMOVED_FEATURE_CODES,
+    *FEATURE_CODE_ALIASES.keys(),
+)
 
 
 REGION_ROWS = [
@@ -62,6 +68,7 @@ class SupabaseRepository:
         self.secret_key = secret_key
 
     def initialize(self, admin_username: str, admin_password: str) -> None:
+        self._migrate_feature_codes()
         for feature in FEATURE_ROWS:
             self._seed_feature(feature)
         self._patch_fixed_feature_labels()
@@ -97,6 +104,58 @@ class SupabaseRepository:
         rows = self._get("users", {"username": f"eq.{username}"})
         return rows[0] if rows else None
 
+    def _migrate_feature_codes(self) -> None:
+        try:
+            rows = self._get("features", {"select": "code,name,parent_code,sort_order"})
+        except RuntimeError:
+            return
+        existing_codes = {str(row.get("code") or "") for row in rows}
+        migrations: dict[str, str] = {}
+        for row in rows:
+            old_code = str(row.get("code") or "")
+            if old_code in LEGACY_REMOVED_FEATURE_CODES:
+                continue
+            new_code = normalize_feature_code(old_code)
+            if not new_code or new_code == old_code:
+                continue
+            migrations[old_code] = new_code
+            if new_code not in existing_codes:
+                try:
+                    self._insert("features", {
+                        "code": new_code,
+                        "name": row.get("name") or new_code,
+                        "parent_code": normalize_feature_code(row.get("parent_code")) or None,
+                        "sort_order": int(row.get("sort_order") or 0),
+                    })
+                    existing_codes.add(new_code)
+                except RuntimeError:
+                    pass
+            try:
+                permissions = self._get("user_permissions", {
+                    "feature_code": f"eq.{old_code}",
+                    "select": "user_id",
+                })
+                if permissions:
+                    self._post(
+                        "user_permissions",
+                        [{"user_id": int(permission["user_id"]), "feature_code": new_code} for permission in permissions],
+                        {"Prefer": "resolution=ignore-duplicates,return=minimal"},
+                    )
+            except RuntimeError:
+                pass
+
+        for old_code, new_code in migrations.items():
+            try:
+                self._patch("features", {"parent_code": f"eq.{old_code}"}, {"parent_code": new_code})
+            except RuntimeError:
+                pass
+        for old_code in migrations:
+            try:
+                self._delete("user_permissions", {"feature_code": f"eq.{old_code}"})
+                self._delete("features", {"code": f"eq.{old_code}"})
+            except RuntimeError:
+                pass
+
     def _seed_feature(self, feature: dict[str, Any]) -> None:
         rows = self._get("features", {"code": f"eq.{feature['code']}", "select": "code", "limit": "1"})
         if rows:
@@ -106,12 +165,12 @@ class SupabaseRepository:
 
     def _patch_fixed_feature_labels(self) -> None:
         try:
-            self._patch("features", {"code": "eq.reports"}, {"name": "Truy vấn SQL"})
-            self._patch("features", {"code": "eq.new_reports"}, {"name": "Báo cáo mới"})
-            report_children = self._get("features", {"parent_code": "eq.reports", "select": "code"})
+            self._patch("features", {"code": "eq.truyvansql"}, {"name": "Truy vấn SQL"})
+            self._patch("features", {"code": "eq.baocaomoi"}, {"name": "Báo cáo mới"})
+            report_children = self._get("features", {"parent_code": "eq.truyvansql", "select": "code"})
             for child in report_children:
-                payload = {"parent_code": "new_reports"}
-                if child.get("code") == "admin.dashboard_builder":
+                payload = {"parent_code": "baocaomoi"}
+                if child.get("code") == "thietkelayoutbaocao":
                     payload["sort_order"] = 36
                 self._patch("features", {"code": f"eq.{child.get('code')}"}, payload)
         except RuntimeError:
@@ -119,7 +178,7 @@ class SupabaseRepository:
 
     def _migrate_legacy_feature_layout(self) -> None:
         has_legacy = False
-        for code in ("admin", "admin.connections.test"):
+        for code in ("admin", "admin.connections.test", "admin.menu", "new_reports"):
             try:
                 has_legacy = bool(self._get("features", {"code": f"eq.{code}", "select": "code", "limit": "1"})) or has_legacy
             except RuntimeError:
@@ -311,17 +370,17 @@ class SupabaseRepository:
     def ensure_dashboard_layout_feature(self, page_id: str, page_name: str) -> str:
         code = dashboard_feature_code_for_page(page_id)
         existing = self._get("features", {"code": f"eq.{code}", "select": "code", "limit": "1"})
-        if existing and code in {"dashboard", "reports"}:
+        if existing and code in {"dashboard", "truyvansql"}:
             self._patch("features", {"code": f"eq.{code}"}, {"name": page_name})
         elif existing:
             self._patch("features", {"code": f"eq.{code}"}, {"name": page_name})
         else:
-            siblings = self._get("features", {"parent_code": "eq.new_reports", "select": "sort_order"})
+            siblings = self._get("features", {"parent_code": "eq.baocaomoi", "select": "sort_order"})
             max_order = max([int(row.get("sort_order") or 0) for row in siblings] or [35])
             self._insert("features", {
                 "code": code,
                 "name": page_name,
-                "parent_code": "new_reports",
+                "parent_code": "baocaomoi",
                 "sort_order": max_order + 10,
             })
         admin_users = self._get("users", {"role": "eq.admin", "select": "id"})

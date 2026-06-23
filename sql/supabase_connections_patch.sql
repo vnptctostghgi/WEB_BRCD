@@ -17,17 +17,16 @@ alter table public.system_connections enable row level security;
 
 insert into public.features (code, name, parent_code, sort_order)
 values
-  ('admin.connections', 'Quản trị kết nối hệ thống', 'admin', 35),
-  ('admin.connections.test', 'Kiểm tra kết nối hệ thống', 'admin.connections', 36)
+  ('quantriketnoi', 'Quản trị kết nối hệ thống', 'quantriweb', 22)
 on conflict (code) do update
 set name = excluded.name,
     parent_code = excluded.parent_code,
     sort_order = excluded.sort_order;
 
 insert into public.user_permissions (user_id, feature_code)
-select u.id, f.codea
+select u.id, f.code
 from public.users u
 cross join public.features f
 where u.role = 'admin'
-  and f.code in ('admin.connections', 'admin.connections.test')
+  and f.code in ('quantriketnoi')
 on conflict do nothing;

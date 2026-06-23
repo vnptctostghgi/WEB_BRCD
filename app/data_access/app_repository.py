@@ -4,6 +4,7 @@ import os
 import sqlite3
 import json
 import re
+import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -11,27 +12,61 @@ from typing import Any
 
 FEATURE_ROWS = [
     ("dashboard", "Tổng quan", None, 10),
-    ("admin.web", "Quản trị web", None, 20),
-    ("admin.users", "Quản trị người dùng", "admin.web", 21),
-    ("admin.connections", "Quản trị kết nối", "admin.web", 22),
-    ("admin.permissions", "Phân quyền người dùng", "admin.web", 23),
-    ("admin.data_permissions", "Phân quyền dữ liệu người dùng", "admin.web", 24),
-    ("admin.catalogs", "Quản trị danh mục", "admin.web", 25),
-    ("admin.roles", "Quản trị vai trò", "admin.catalogs", 26),
-    ("admin.menu", "Quản trị menu", "admin.web", 27),
-    ("admin.work_tasks", "Quản lý công việc", None, 28),
-    ("reports", "Truy vấn SQL", None, 30),
-    ("new_reports", "Báo cáo mới", None, 35),
-    ("admin.dashboard_builder", "Thiết kế Layout báo cáo", "new_reports", 36),
-    ("vault", "Tài khoản web", "admin.web", 40),
-    ("vault.view", "Xem danh sách tài khoản", "vault", 41),
-    ("vault.manage", "Thêm và sửa tài khoản", "vault", 42),
-    ("vault.reveal", "Xem mật khẩu đã lưu", "vault", 43),
-    ("admin.audit", "Nhật ký hoạt động", "admin.web", 90),
-    ("admin.sql_reports", "Quản trị SQL", "admin.connections", 23),
+    ("quantriweb", "Quản trị web", None, 20),
+    ("quantringuoidung", "Quản trị người dùng", "quantriweb", 21),
+    ("quantriketnoi", "Quản trị kết nối", "quantriweb", 22),
+    ("phanquyennguoidung", "Phân quyền người dùng", "quantriweb", 23),
+    ("phanquyendulieunguoidung", "Phân quyền dữ liệu người dùng", "quantriweb", 24),
+    ("quantridanhmuc", "Quản trị danh mục", "quantriweb", 25),
+    ("quantrivaitro", "Quản trị vai trò", "quantridanhmuc", 26),
+    ("quantrimenu", "Quản trị menu", "quantriweb", 27),
+    ("quanlycongviec", "Quản lý công việc", None, 28),
+    ("truyvansql", "Truy vấn SQL", None, 30),
+    ("baocaomoi", "Báo cáo mới", None, 35),
+    ("thietkelayoutbaocao", "Thiết kế Layout báo cáo", "baocaomoi", 36),
+    ("taikhoanweb", "Tài khoản web", "quantriweb", 40),
+    ("xemdanhsachtaikhoan", "Xem danh sách tài khoản", "taikhoanweb", 41),
+    ("themvasuataikhoan", "Thêm và sửa tài khoản", "taikhoanweb", 42),
+    ("xemmatkhaudaluu", "Xem mật khẩu đã lưu", "taikhoanweb", 43),
+    ("nhatkyhoatdong", "Nhật ký hoạt động", "quantriweb", 90),
+    ("quantrisql", "Quản trị SQL", "quantriketnoi", 23),
 ]
 
-OBSOLETE_FEATURE_CODES = ("admin", "admin.connections.test", "auto", "auto.attt_quarterly", "auto.attt_links")
+FEATURE_CODE_ALIASES = {
+    "admin.web": "quantriweb",
+    "admin.users": "quantringuoidung",
+    "admin.connections": "quantriketnoi",
+    "admin.permissions": "phanquyennguoidung",
+    "admin.data_permissions": "phanquyendulieunguoidung",
+    "admin.catalogs": "quantridanhmuc",
+    "admin.roles": "quantrivaitro",
+    "admin.menu": "quantrimenu",
+    "admin.work_tasks": "quanlycongviec",
+    "reports": "truyvansql",
+    "new_reports": "baocaomoi",
+    "admin.dashboard_builder": "thietkelayoutbaocao",
+    "vault": "taikhoanweb",
+    "vault.view": "xemdanhsachtaikhoan",
+    "vault.manage": "themvasuataikhoan",
+    "vault.reveal": "xemmatkhaudaluu",
+    "admin.audit": "nhatkyhoatdong",
+    "admin.sql_reports": "quantrisql",
+    "web_links": "lienketweb",
+    "web_links.elearning": "elearning",
+}
+
+LEGACY_REMOVED_FEATURE_CODES = (
+    "admin",
+    "admin.connections.test",
+    "auto",
+    "auto.attt_quarterly",
+    "auto.attt_links",
+)
+
+OBSOLETE_FEATURE_CODES = (
+    *LEGACY_REMOVED_FEATURE_CODES,
+    *FEATURE_CODE_ALIASES.keys(),
+)
 
 DEFAULT_DASHBOARD_PAGE_ID = "DASHBOARD_KINH_DOANH"
 DEFAULT_DASHBOARD_PAGE_NAME = "Dashboard Kinh doanh"
@@ -75,13 +110,23 @@ DEFAULT_DASHBOARD_LAYOUT = {
 
 
 def dashboard_feature_code_for_page(page_id: str) -> str:
-    normalized_page_id = re.sub(r"[^A-Za-z0-9]+", "_", page_id).strip("_").upper()
-    if normalized_page_id == DEFAULT_DASHBOARD_PAGE_ID:
+    normalized_page_id = re.sub(r"[^A-Za-z0-9]+", "", page_id).upper()
+    if normalized_page_id == re.sub(r"[^A-Za-z0-9]+", "", DEFAULT_DASHBOARD_PAGE_ID).upper():
         return "dashboard"
     if normalized_page_id == "REPORTS":
-        return "reports"
-    normalized = re.sub(r"[^A-Za-z0-9]+", "_", page_id).strip("_").lower()
-    return normalized or DEFAULT_DASHBOARD_PAGE_ID.lower()
+        return "truyvansql"
+    return normalize_feature_code(page_id) or normalize_feature_code(DEFAULT_DASHBOARD_PAGE_ID)
+
+
+def normalize_feature_code(value: Any) -> str:
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return ""
+    alias = FEATURE_CODE_ALIASES.get(raw_value)
+    if alias:
+        return alias
+    ascii_value = unicodedata.normalize("NFD", raw_value).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^A-Za-z0-9]+", "", ascii_value).lower()
 
 
 def hash_password(password: str) -> str:
@@ -281,8 +326,9 @@ class AppRepository:
                 except sqlite3.OperationalError:
                     pass
             legacy_menu = connection.execute(
-                "SELECT 1 FROM features WHERE code IN ('admin', 'admin.connections.test') LIMIT 1"
+                "SELECT 1 FROM features WHERE code IN ('admin', 'admin.connections.test', 'admin.menu', 'new_reports') LIMIT 1"
             ).fetchone()
+            self._migrate_feature_codes(connection)
             connection.executemany(
                 "INSERT OR IGNORE INTO features (code, name, parent_code, sort_order) VALUES (?, ?, ?, ?)",
                 FEATURE_ROWS,
@@ -292,12 +338,12 @@ class AppRepository:
                     "UPDATE features SET name=?, parent_code=?, sort_order=? WHERE code=?",
                     [(name, parent_code, sort_order, code) for code, name, parent_code, sort_order in FEATURE_ROWS],
                 )
-            connection.execute("UPDATE features SET name='Truy vấn SQL' WHERE code='reports'")
-            connection.execute("UPDATE features SET name='Báo cáo mới' WHERE code='new_reports'")
+            connection.execute("UPDATE features SET name='Truy vấn SQL' WHERE code='truyvansql'")
+            connection.execute("UPDATE features SET name='Báo cáo mới' WHERE code='baocaomoi'")
             connection.execute(
-                "UPDATE features SET parent_code='new_reports', sort_order=36 WHERE code='admin.dashboard_builder' AND parent_code='reports'"
+                "UPDATE features SET parent_code='baocaomoi', sort_order=36 WHERE code='thietkelayoutbaocao' AND parent_code='truyvansql'"
             )
-            connection.execute("UPDATE features SET parent_code='new_reports' WHERE parent_code='reports'")
+            connection.execute("UPDATE features SET parent_code='baocaomoi' WHERE parent_code='truyvansql'")
             connection.executemany(
                 "DELETE FROM user_permissions WHERE feature_code=?",
                 [(code,) for code in OBSOLETE_FEATURE_CODES],
@@ -359,6 +405,48 @@ class AppRepository:
                     now,
                 ),
             )
+
+    def _migrate_feature_codes(self, connection: sqlite3.Connection) -> None:
+        rows = connection.execute(
+            "SELECT code, name, parent_code, sort_order FROM features"
+        ).fetchall()
+        migrations: dict[str, str] = {}
+        for row in rows:
+            old_code = str(row["code"])
+            if old_code in LEGACY_REMOVED_FEATURE_CODES:
+                continue
+            new_code = normalize_feature_code(old_code)
+            if not new_code or new_code == old_code:
+                continue
+            migrations[old_code] = new_code
+            existing = connection.execute(
+                "SELECT code FROM features WHERE code=?", (new_code,)
+            ).fetchone()
+            if not existing:
+                parent_code = normalize_feature_code(row["parent_code"]) or None
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO features (code, name, parent_code, sort_order)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (new_code, row["name"], parent_code, row["sort_order"]),
+                )
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO user_permissions (user_id, feature_code)
+                SELECT user_id, ? FROM user_permissions WHERE feature_code=?
+                """,
+                (new_code, old_code),
+            )
+
+        for old_code, new_code in migrations.items():
+            connection.execute(
+                "UPDATE features SET parent_code=? WHERE parent_code=?",
+                (new_code, old_code),
+            )
+        for old_code in migrations:
+            connection.execute("DELETE FROM user_permissions WHERE feature_code=?", (old_code,))
+            connection.execute("DELETE FROM features WHERE code=?", (old_code,))
 
     def get_user_by_username(self, username: str) -> dict[str, Any] | None:
         with self.connect() as connection:
@@ -567,18 +655,18 @@ class AppRepository:
         code = dashboard_feature_code_for_page(page_id)
         with self.connect() as connection:
             existing = connection.execute("SELECT code FROM features WHERE code=?", (code,)).fetchone()
-            if existing and code in {"dashboard", "reports"}:
+            if existing and code in {"dashboard", "truyvansql"}:
                 connection.execute("UPDATE features SET name=? WHERE code=?", (page_name, code))
             elif existing:
                 connection.execute("UPDATE features SET name=? WHERE code=?", (page_name, code))
             else:
                 max_order = connection.execute(
-                    "SELECT COALESCE(MAX(sort_order), 35) AS max_order FROM features WHERE parent_code='new_reports'"
+                    "SELECT COALESCE(MAX(sort_order), 35) AS max_order FROM features WHERE parent_code='baocaomoi'"
                 ).fetchone()["max_order"]
                 connection.execute(
                     """
                     INSERT INTO features (code, name, parent_code, sort_order)
-                    VALUES (?, ?, 'new_reports', ?)
+                    VALUES (?, ?, 'baocaomoi', ?)
                     """,
                     (code, page_name, int(max_order or 35) + 10),
                 )

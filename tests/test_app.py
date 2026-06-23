@@ -43,6 +43,14 @@ def test_admin_can_login_and_open_dashboard() -> None:
         assert "Quản trị người dùng" in response.text
 
 
+def test_feature_path_opens_current_app_shell() -> None:
+    with TestClient(app) as client:
+        login(client)
+        response = client.get("/quantrimenu")
+        assert response.status_code == 200
+        assert 'data-feature-code="quantrimenu"' in response.text
+
+
 def test_favicon_redirects_to_system_logo() -> None:
     with TestClient(app) as client:
         response = client.get("/favicon.ico", follow_redirects=False)
@@ -330,13 +338,13 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data(monkeypatch) -
         pages = client.get("/api/admin/dashboard-layout-pages")
         assert pages.status_code == 200
         builder_page = next(page for page in pages.json()["pages"] if page["page_id"] == "DASHBOARD_TEST_BUILDER")
-        assert builder_page["feature_code"] == "dashboard_test_builder"
+        assert builder_page["feature_code"] == "dashboardtestbuilder"
         assert builder_page["feature_name"] == "Dashboard Test Builder"
         assert builder_page["saved"] is True
 
         me = client.get("/api/auth/me")
         assert me.status_code == 200
-        assert "dashboard_test_builder" in me.json()["user"]["permissions"]
+        assert "dashboardtestbuilder" in me.json()["user"]["permissions"]
 
         tab_a = client.get("/api/admin/dashboard-layouts/DASHBOARD_TEST_BUILDER/tabs/tab_a/data")
         assert tab_a.status_code == 200
@@ -522,19 +530,20 @@ def test_dashboard_layout_pages_include_overview_and_reports_not_web_admin() -> 
         assert "ADMIN_USERS" in page_ids
 
         generated_admin_page = next(page for page in pages if page["page_id"] == "ADMIN_USERS")
-        assert generated_admin_page["feature_code"] == "admin_users"
+        assert generated_admin_page["feature_code"] == "adminusers"
         assert generated_admin_page["saved"] is True
         assert not any(page["feature_code"] == "admin.users" for page in pages)
+        assert not any(page["feature_code"] == "admin_users" for page in pages)
 
         features = client.get("/api/admin/features").json()["features"]
-        reports_feature = next(feature for feature in features if feature["code"] == "reports")
-        new_reports_feature = next(feature for feature in features if feature["code"] == "new_reports")
-        builder_feature = next(feature for feature in features if feature["code"] == "admin.dashboard_builder")
-        generated_feature = next(feature for feature in features if feature["code"] == "admin_users")
+        reports_feature = next(feature for feature in features if feature["code"] == "truyvansql")
+        new_reports_feature = next(feature for feature in features if feature["code"] == "baocaomoi")
+        builder_feature = next(feature for feature in features if feature["code"] == "thietkelayoutbaocao")
+        generated_feature = next(feature for feature in features if feature["code"] == "adminusers")
         assert reports_feature["name"] == "Truy vấn SQL"
         assert new_reports_feature["name"] == "Báo cáo mới"
-        assert builder_feature["parent_code"] == "new_reports"
-        assert generated_feature["parent_code"] == "new_reports"
+        assert builder_feature["parent_code"] == "baocaomoi"
+        assert generated_feature["parent_code"] == "baocaomoi"
         moved_features = []
         for feature in features:
             item = {
@@ -543,21 +552,21 @@ def test_dashboard_layout_pages_include_overview_and_reports_not_web_admin() -> 
                 "parent_code": feature.get("parent_code"),
                 "sort_order": feature.get("sort_order") or 0,
             }
-            if item["code"] == "admin_users":
-                item["parent_code"] = "admin.web"
+            if item["code"] == "adminusers":
+                item["parent_code"] = "quantriweb"
                 item["sort_order"] = 999
             moved_features.append(item)
         assert client.put("/api/admin/features/layout", json={"features": moved_features}).status_code == 200
 
         moved_pages = client.get("/api/admin/dashboard-layout-pages").json()["pages"]
         moved_admin_page = next(page for page in moved_pages if page["page_id"] == "ADMIN_USERS")
-        assert moved_admin_page["feature_code"] == "admin_users"
+        assert moved_admin_page["feature_code"] == "adminusers"
         assert moved_admin_page["saved"] is True
 
         assert client.post("/api/admin/dashboard-layouts", json=web_layout).status_code == 200
         refreshed_features = client.get("/api/admin/features").json()["features"]
-        refreshed_admin_feature = next(feature for feature in refreshed_features if feature["code"] == "admin_users")
-        assert refreshed_admin_feature["parent_code"] == "admin.web"
+        refreshed_admin_feature = next(feature for feature in refreshed_features if feature["code"] == "adminusers")
+        assert refreshed_admin_feature["parent_code"] == "quantriweb"
 
 
 def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
@@ -660,7 +669,7 @@ def test_viewer_needs_feature_permission_for_vault() -> None:
         login(client)
         response = client.put(
             f"/api/admin/users/{viewer['id']}/permissions",
-            json={"feature_codes": ["vault", "vault.view", "vault.manage", "vault.reveal"]},
+            json={"feature_codes": ["taikhoanweb", "xemdanhsachtaikhoan", "themvasuataikhoan", "xemmatkhaudaluu"]},
         )
         assert response.status_code == 200
         client.post("/api/auth/logout")
