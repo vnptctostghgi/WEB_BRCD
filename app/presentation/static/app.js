@@ -501,7 +501,7 @@ async function loadDashboardViewerTab(tabId, { force = false } = {}) {
     const response = await api(`/api/admin/dashboard-layouts/${encodeURIComponent(dashboardViewerLayout.page_id)}/tabs/${encodeURIComponent(tabId)}/data`);
     dashboardViewerLoadedTabs[key] = { ...response, loaded_at: new Date().toISOString() };
     renderDashboardViewer();
-    if (!response.ok) showMessage($("#dashboard-viewer-message"), response.message || "Một số biểu đồ chưa tải được dữ liệu.", "error");
+    if (!response.ok) showMessage($("#dashboard-viewer-message"), dashboardRuntimeErrorSummary(response), "error");
     else $("#dashboard-viewer-message")?.classList.add("hidden");
   } catch (error) {
     showMessage($("#dashboard-viewer-message"), error.message, "error");
@@ -975,6 +975,17 @@ function flattenFeatureTree(nodes, level = 0, rows = []) {
 
 function featureIcon(feature) {
   return featureNavigationConfig(feature)?.icon || navGroupIcons[feature.code] || "list";
+}
+
+function dashboardRuntimeErrorSummary(response) {
+  const failedWidgets = Array.isArray(response?.failed_widgets) ? response.failed_widgets : [];
+  if (!failedWidgets.length) return response?.message || "Một số biểu đồ chưa tải được dữ liệu.";
+  const details = failedWidgets.slice(0, 3).map((item) => {
+    const label = item.title || item.sql_code || `Ô ${item.row_id || "?"}.${item.position || "?"}`;
+    const error = item.message || item.details?.error || "Không rõ lỗi.";
+    return `${label}: ${error}`;
+  }).join(" | ");
+  return `${response?.message || "Một số biểu đồ chưa tải được dữ liệu."} ${details}`;
 }
 
 function iconMarkup(icon) {
@@ -2040,7 +2051,7 @@ async function loadDashboardPreviewTab(tabId, { force = false } = {}) {
     const response = await api(`/api/admin/dashboard-layouts/${encodeURIComponent(dashboardBuilderLayout.page_id)}/tabs/${encodeURIComponent(tabId)}/data`);
     dashboardBuilderLoadedTabs[key] = response;
     renderDashboardPreview();
-    showMessage($("#dashboard-preview-message"), response.message || "Đã tải dữ liệu Tab dashboard.", response.ok ? "success" : "error");
+    showMessage($("#dashboard-preview-message"), response.ok ? (response.message || "Đã tải dữ liệu Tab dashboard.") : dashboardRuntimeErrorSummary(response), response.ok ? "success" : "error");
   } catch (error) {
     showMessage($("#dashboard-preview-message"), error.message, "error");
   } finally {

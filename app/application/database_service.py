@@ -274,7 +274,7 @@ class DatabaseService:
                         ma_bao_cao=sql_code,
                         filters=filters,
                         page=1,
-                        page_size=50,
+                        page_size=20,
                     )
                 result = data_cache[cache_key]
                 all_ok = all_ok and bool(result.get("ok"))
@@ -287,12 +287,26 @@ class DatabaseService:
                     "data": result,
                 })
 
+        failed_widgets = [
+            {
+                "row_id": item.get("row_id"),
+                "position": item.get("position"),
+                "title": item.get("title"),
+                "sql_code": item.get("sql_code"),
+                "message": (item.get("data") or {}).get("message"),
+                "details": (item.get("data") or {}).get("details"),
+            }
+            for item in widget_results
+            if not bool((item.get("data") or {}).get("ok"))
+        ]
+
         return {
             "ok": all_ok,
             "message": "Đã tải dữ liệu Tab dashboard." if all_ok else "Một số biểu đồ chưa tải được dữ liệu.",
             "page_id": page_id,
             "tab_id": tab_id,
             "widgets": widget_results,
+            "failed_widgets": failed_widgets,
         }
 
     def run_dashboard_datcoc_test(self) -> dict[str, Any]:
