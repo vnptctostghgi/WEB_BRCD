@@ -1309,6 +1309,7 @@ function normalizeDashboardLayoutData(layout, pageName = "") {
           type: String(widget.type || "bar_chart"),
           title: repairTextEncoding(String(widget.title || "")),
           sql_code: String(widget.sql_code || "").trim().toUpperCase(),
+          report_id: widget.report_id ?? null,
           filters: widget.filters && typeof widget.filters === "object" && !Array.isArray(widget.filters) ? widget.filters : {},
           chart_config: widget.chart_config && typeof widget.chart_config === "object" && !Array.isArray(widget.chart_config) ? widget.chart_config : {},
           text_content: repairTextEncoding(String(widget.text_content || "")),
@@ -1410,14 +1411,16 @@ function dashboardReportByCode(code) {
   return sqlReports.find((report) => dashboardReportCode(report) === normalizedCode);
 }
 
-function dashboardSqlOptions(selectedCode) {
+function dashboardSqlOptions(selectedCode, selectedReportId = null) {
   const normalizedSelectedCode = normalizeDashboardSqlCode(selectedCode);
+  const normalizedReportId = selectedReportId === null || selectedReportId === undefined || selectedReportId === "" ? "" : String(selectedReportId);
   const options = [`<option value="">Chọn mã SQL</option>`].concat(sqlReports.map((report) => {
     const code = dashboardReportCode(report);
     const name = dashboardReportName(report);
-    const selected = code === normalizedSelectedCode ? " selected" : "";
+    const reportId = String(report.id || "");
+    const selected = (normalizedReportId && reportId === normalizedReportId) || (!normalizedReportId && code === normalizedSelectedCode) ? " selected" : "";
     if (!code) return "";
-    return `<option value="${escapeHtml(code)}"${selected}>${escapeHtml(code)} (${escapeHtml(name)})</option>`;
+    return `<option value="${escapeHtml(code)}" data-report-id="${escapeHtml(reportId)}"${selected}>${escapeHtml(code)} (${escapeHtml(name)})</option>`;
   }).filter(Boolean));
   if (selectedCode && !dashboardReportByCode(selectedCode)) {
     options.push(`<option value="${escapeHtml(selectedCode)}" selected>${escapeHtml(selectedCode)} (chưa có trong cấu hình SQL)</option>`);
@@ -1762,7 +1765,9 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
     const layoutType = dashboardLayoutColumns[layoutValue] ? layoutValue : "2_columns";
     const widgets = [...row.querySelectorAll(".builder-widget-card")].map((card) => {
       const type = card.querySelector("[name='type']")?.value || "bar_chart";
-      const sqlCode = card.querySelector("[name='sql_code']")?.value.trim().toUpperCase() || "";
+      const sqlSelect = card.querySelector("[name='sql_code']");
+      const sqlCode = sqlSelect?.value.trim().toUpperCase() || "";
+      const selectedReportId = sqlSelect?.selectedOptions?.[0]?.dataset.reportId || "";
       const title = card.querySelector("[name='title']")?.value.trim() || "";
       const textContent = card.querySelector("[name='text_content']")?.value.trim() || "";
       const iconUrl = card.querySelector("[name='icon_url']")?.value.trim() || "";
@@ -1785,6 +1790,7 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
         type,
         title,
         sql_code: sqlCode,
+        report_id: selectedReportId ? Number(selectedReportId) : null,
         filters,
         chart_config: chartConfig,
         text_content: textContent,
@@ -1878,14 +1884,14 @@ function renderDashboardBuilderRow(row, index) {
   const widgetsByPosition = new Map((row.widgets || []).map((widget) => [Number(widget.position), widget]));
   const cells = Array.from({ length: columns }, (_, cellIndex) => {
     const position = cellIndex + 1;
-    const widget = widgetsByPosition.get(position) || { position, type: "bar_chart", title: "", sql_code: "", chart_config: {}, filters: {} };
+    const widget = widgetsByPosition.get(position) || { position, type: "bar_chart", title: "", sql_code: "", report_id: null, chart_config: {}, filters: {} };
     const isTextWidget = widget.type === "text_title";
     return `
       <div class="builder-widget-card" data-position="${position}">
         <small>Ô ${position}</small>
         <label>Tiêu đề<input class="form-control" name="title" value="${escapeHtml(widget.title || "")}" placeholder="Tên biểu đồ, thẻ hoặc tiêu đề" /></label>
         <label>Loại hiển thị<select class="form-control" name="type">${dashboardWidgetTypeOptions(widget.type)}</select></label>
-        <label class="dashboard-sql-field ${isTextWidget ? "hidden" : ""}">Mã SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "")}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
+        <label class="dashboard-sql-field ${isTextWidget ? "hidden" : ""}">Mã SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "", widget.report_id)}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
         <label class="dashboard-filter-field ${isTextWidget ? "hidden" : ""}">Bộ lọc mặc định<textarea class="form-control dashboard-filter-json" name="filters" rows="3" placeholder='{"LOAIHINH":"58"}&#10;{"MONTH":""}&#10;{"DONVI":"VNPT%"}'>${escapeHtml(dashboardFiltersToText(widget.filters))}</textarea></label>
         ${renderDashboardWidgetAdvancedConfig(widget)}
       </div>

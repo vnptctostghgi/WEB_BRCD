@@ -33,17 +33,27 @@ class DatabaseService:
         text = str(value or "").strip()
         return text.upper() if re.fullmatch(r"[A-Za-z0-9_-]+", text) else ""
 
-    def _find_sql_report(self, ma_bao_cao: str) -> dict[str, Any] | None:
+    def _find_sql_report(self, ma_bao_cao: str, report_id: Any = None, report_name: Any = None) -> dict[str, Any] | None:
+        if report_id not in (None, ""):
+            try:
+                report = self.app_repository.get_sql_report_by_id(int(report_id))
+                if report:
+                    return report
+            except (TypeError, ValueError):
+                pass
         target_code = self._normalized_report_code(ma_bao_cao)
         report = self.app_repository.get_sql_report_by_code(target_code or ma_bao_cao)
         if report:
             return report
-        if not target_code:
+        target_name = str(report_name or "").strip().casefold()
+        if not target_code and not target_name:
             return None
         for item in self.app_repository.list_sql_reports():
             if self._normalized_report_code(item.get("ma_bao_cao")) == target_code:
                 return item
             if self._normalized_report_code(item.get("ten_bao_cao")) == target_code:
+                return item
+            if target_name and str(item.get("ten_bao_cao") or "").strip().casefold() == target_name:
                 return item
         return None
 
@@ -84,8 +94,10 @@ class DatabaseService:
         filters: dict[str, Any],
         page: int,
         page_size: int,
+        report_id: Any = None,
+        report_name: Any = None,
     ) -> dict[str, Any]:
-        report = self._find_sql_report(ma_bao_cao)
+        report = self._find_sql_report(ma_bao_cao, report_id=report_id, report_name=report_name)
         if not report:
             return {
                 "ok": False,
@@ -231,9 +243,9 @@ class DatabaseService:
         }
 
     @staticmethod
-    def _dashboard_widget_query_key(sql_code: str, filters: dict[str, Any]) -> str:
+    def _dashboard_widget_query_key(sql_code: str, filters: dict[str, Any], report_id: Any = None) -> str:
         normalized_filters = json.dumps(filters or {}, ensure_ascii=False, sort_keys=True, default=str)
-        return f"{sql_code}|{normalized_filters}"
+        return f"{report_id or ''}|{sql_code}|{normalized_filters}"
 
     def run_dashboard_layout_tab(self, *, page_id: str, tab_id: str) -> dict[str, Any]:
         layout_row = self.app_repository.get_dashboard_layout(page_id)
@@ -268,13 +280,15 @@ class DatabaseService:
                 if not sql_code:
                     continue
                 filters = widget.get("filters") if isinstance(widget.get("filters"), dict) else {}
-                cache_key = self._dashboard_widget_query_key(sql_code, filters)
+                cache_key = self._dashboard_widget_query_key(sql_code, filters, widget.get("report_id"))
                 if cache_key not in data_cache:
                     data_cache[cache_key] = self.run_dynamic_report(
                         ma_bao_cao=sql_code,
                         filters=filters,
                         page=1,
                         page_size=20,
+                        report_id=widget.get("report_id"),
+                        report_name=widget.get("title"),
                     )
                 result = data_cache[cache_key]
                 all_ok = all_ok and bool(result.get("ok"))

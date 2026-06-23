@@ -287,11 +287,17 @@ def normalize_dashboard_layout(payload: DashboardLayoutPayload) -> tuple[str, st
                 filters = {str(key).strip(): value for key, value in raw_filters.items() if str(key).strip()}
                 raw_chart_config = widget.get("chart_config") if isinstance(widget.get("chart_config"), dict) else {}
                 chart_config = {str(key).strip(): value for key, value in raw_chart_config.items() if str(key).strip()}
+                raw_report_id = widget.get("report_id")
+                try:
+                    report_id = int(raw_report_id) if raw_report_id not in (None, "") else None
+                except (TypeError, ValueError):
+                    report_id = None
                 normalized_widgets.append({
                     "position": position,
                     "type": widget_type,
                     "title": title,
                     "sql_code": normalize_dashboard_sql_code(sql_code) if sql_code else "",
+                    "report_id": report_id,
                     "filters": filters,
                     "chart_config": chart_config,
                     "text_content": text_content,
