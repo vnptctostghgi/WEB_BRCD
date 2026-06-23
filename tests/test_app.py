@@ -359,6 +359,51 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data(monkeypatch) -
         assert [widget["type"] for widget in tab_b.json()["widgets"]] == ["combo_chart", "data_card"]
         assert api_calls == [("BC_BUILDER_TEST", {})]
 
+        inverted_report_payload = {
+            "ten_bao_cao": "Check_Job",
+            "ma_bao_cao": "CHECK JOB DU LIEU",
+            "cau_lenh_sql": "SELECT job_name, status FROM css_cto.check_job;",
+            "cac_tham_so": [],
+        }
+        assert client.post("/api/admin/sql-reports", json=inverted_report_payload).status_code == 200
+        table_layout_payload = {
+            "page_id": "DASHBOARD_CHECK_JOB",
+            "page_name": "CHECK_JOB",
+            "layout": {
+                "page_id": "DASHBOARD_CHECK_JOB",
+                "tabs": [
+                    {
+                        "tab_id": "tab_check",
+                        "tab_name": "Tab moi",
+                        "order": 1,
+                        "grid_layout": [
+                            {
+                                "row_id": 1,
+                                "layout_type": "1_column",
+                                "widgets": [
+                                    {
+                                        "position": 1,
+                                        "type": "data_table",
+                                        "title": "Check job",
+                                        "sql_code": "Check_Job (CHECK JOB DU LIEU)",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+        }
+        saved_table_layout = client.post("/api/admin/dashboard-layouts", json=table_layout_payload)
+        assert saved_table_layout.status_code == 200
+        saved_widget = saved_table_layout.json()["layout"]["tabs"][0]["grid_layout"][0]["widgets"][0]
+        assert saved_widget["sql_code"] == "CHECK_JOB"
+        tab_check = client.get("/api/admin/dashboard-layouts/DASHBOARD_CHECK_JOB/tabs/tab_check/data")
+        assert tab_check.status_code == 200
+        tab_check_payload = tab_check.json()
+        assert tab_check_payload["widgets"][0]["sql_code"] == "CHECK_JOB"
+        assert tab_check_payload["widgets"][0]["data"]["ok"] is True
+
         group_payload = {
             "page_id": "DASHBOARD_EMPTY_GROUP",
             "page_name": "NhÃ³m Dashboard rá»—ng",

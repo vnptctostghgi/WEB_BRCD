@@ -1373,16 +1373,41 @@ function dashboardWidgetTypeOptions(selectedType) {
   )).join("");
 }
 
+function normalizeDashboardSqlCode(value) {
+  const text = String(value || "").trim();
+  const prefix = text.includes("(") ? text.split("(")[0].trim() : text;
+  if (/^[A-Za-z0-9_-]+$/.test(prefix)) return prefix.toUpperCase();
+  const match = text.match(/[A-Za-z0-9_-]+/);
+  return match ? match[0].toUpperCase() : "";
+}
+
+function dashboardReportCode(report) {
+  return normalizeDashboardSqlCode(report?.ma_bao_cao) || normalizeDashboardSqlCode(report?.ten_bao_cao);
+}
+
+function dashboardReportName(report) {
+  const code = dashboardReportCode(report);
+  const name = String(report?.ten_bao_cao || "").trim();
+  const rawCode = String(report?.ma_bao_cao || "").trim();
+  if (name && normalizeDashboardSqlCode(name) !== code) return name;
+  if (rawCode && normalizeDashboardSqlCode(rawCode) !== code) return rawCode;
+  return name || rawCode || code;
+}
+
 function dashboardReportByCode(code) {
-  return sqlReports.find((report) => report.ma_bao_cao === code);
+  const normalizedCode = normalizeDashboardSqlCode(code);
+  return sqlReports.find((report) => dashboardReportCode(report) === normalizedCode);
 }
 
 function dashboardSqlOptions(selectedCode) {
+  const normalizedSelectedCode = normalizeDashboardSqlCode(selectedCode);
   const options = [`<option value="">Chọn mã SQL</option>`].concat(sqlReports.map((report) => {
-    const code = report.ma_bao_cao || "";
-    const selected = code === selectedCode ? " selected" : "";
-    return `<option value="${escapeHtml(code)}"${selected}>${escapeHtml(report.ten_bao_cao)} (${escapeHtml(code)})</option>`;
-  }));
+    const code = dashboardReportCode(report);
+    const name = dashboardReportName(report);
+    const selected = code === normalizedSelectedCode ? " selected" : "";
+    if (!code) return "";
+    return `<option value="${escapeHtml(code)}"${selected}>${escapeHtml(code)} (${escapeHtml(name)})</option>`;
+  }).filter(Boolean));
   if (selectedCode && !dashboardReportByCode(selectedCode)) {
     options.push(`<option value="${escapeHtml(selectedCode)}" selected>${escapeHtml(selectedCode)} (chưa có trong cấu hình SQL)</option>`);
   }

@@ -28,6 +28,25 @@ class DatabaseService:
         self.internal_api = internal_api
         self.app_repository = app_repository
 
+    @staticmethod
+    def _normalized_report_code(value: Any) -> str:
+        text = str(value or "").strip()
+        return text.upper() if re.fullmatch(r"[A-Za-z0-9_-]+", text) else ""
+
+    def _find_sql_report(self, ma_bao_cao: str) -> dict[str, Any] | None:
+        target_code = self._normalized_report_code(ma_bao_cao)
+        report = self.app_repository.get_sql_report_by_code(target_code or ma_bao_cao)
+        if report:
+            return report
+        if not target_code:
+            return None
+        for item in self.app_repository.list_sql_reports():
+            if self._normalized_report_code(item.get("ma_bao_cao")) == target_code:
+                return item
+            if self._normalized_report_code(item.get("ten_bao_cao")) == target_code:
+                return item
+        return None
+
     def get_connection_status(self) -> dict[str, Any]:
         try:
             details = self.internal_api.health_check()
@@ -66,7 +85,7 @@ class DatabaseService:
         page: int,
         page_size: int,
     ) -> dict[str, Any]:
-        report = self.app_repository.get_sql_report_by_code(ma_bao_cao)
+        report = self._find_sql_report(ma_bao_cao)
         if not report:
             return {
                 "ok": False,

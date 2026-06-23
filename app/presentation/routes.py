@@ -223,6 +223,17 @@ def normalize_dashboard_code(value: Any, label: str, *, uppercase: bool = True) 
     return normalized.upper() if uppercase else normalized
 
 
+def normalize_dashboard_sql_code(value: Any) -> str:
+    raw_value = str(value or "").strip()
+    candidate = raw_value
+    if "(" in candidate:
+        candidate = candidate.split("(", 1)[0].strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", candidate):
+        match = re.search(r"[A-Za-z0-9_-]+", raw_value)
+        candidate = match.group(0) if match else raw_value
+    return normalize_dashboard_code(candidate, "Mã SQL")
+
+
 def normalize_dashboard_layout(payload: DashboardLayoutPayload) -> tuple[str, str, dict[str, Any]]:
     page_id = normalize_dashboard_code(payload.page_id, "Mã trang")
     page_name = payload.page_name.strip() or page_id
@@ -280,7 +291,7 @@ def normalize_dashboard_layout(payload: DashboardLayoutPayload) -> tuple[str, st
                     "position": position,
                     "type": widget_type,
                     "title": title,
-                    "sql_code": normalize_dashboard_code(sql_code, "Mã SQL") if sql_code else "",
+                    "sql_code": normalize_dashboard_sql_code(sql_code) if sql_code else "",
                     "filters": filters,
                     "chart_config": chart_config,
                     "text_content": text_content,
