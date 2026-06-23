@@ -116,10 +116,17 @@ class DatabaseService:
         compiled_sql, define_details = self._compile_define_sql(report["cau_lenh_sql"], safe_filters)
         executable_filters = self._filters_for_compiled_sql(compiled_sql, safe_filters)
 
+        safe_report_code = (
+            self._normalized_report_code(report.get("ma_bao_cao"))
+            or self._normalized_report_code(report.get("ten_bao_cao"))
+            or self._normalized_report_code(ma_bao_cao)
+            or str(report.get("ma_bao_cao") or ma_bao_cao).strip()
+        )
+
         try:
             result = self.internal_api.run_sql_report(
                 ten_bao_cao=report["ten_bao_cao"],
-                ma_bao_cao=report["ma_bao_cao"],
+                ma_bao_cao=safe_report_code,
                 cau_lenh_sql=compiled_sql,
                 tham_so=executable_filters,
                 page=safe_page,

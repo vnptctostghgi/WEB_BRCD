@@ -403,6 +403,7 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data(monkeypatch) -
         tab_check_payload = tab_check.json()
         assert tab_check_payload["widgets"][0]["sql_code"] == "CHECK_JOB"
         assert tab_check_payload["widgets"][0]["data"]["ok"] is True
+        assert api_calls[-1] == ("CHECK_JOB", {})
 
         group_payload = {
             "page_id": "DASHBOARD_EMPTY_GROUP",
