@@ -50,6 +50,14 @@ app.mount("/static", StaticFiles(directory="app/presentation/static"), name="sta
 app.include_router(router)
 
 
+@app.middleware("http")
+async def add_static_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/static/") and response.status_code < 400:
+        response.headers.setdefault("Cache-Control", "public, max-age=604800")
+    return response
+
+
 @app.exception_handler(Exception)
 async def notify_unhandled_exception(request: Request, exc: Exception):
     TelegramNotifier(settings).send_message(

@@ -16,6 +16,7 @@ let dynamicReportTotal = 0;
 let menuLayoutState = [];
 let dashboardFiberLoaded = false;
 let dashboardViewerLayouts = [];
+let dashboardViewerLayoutsLoaded = false;
 let dashboardViewerLayout = null;
 let dashboardViewerActiveTabId = "";
 let dashboardViewerLoadedTabs = {};
@@ -36,6 +37,9 @@ const dashboardColorScaleStops = [
   { ratio: .5, rgb: [245, 158, 11] },
   { ratio: 1, rgb: [59, 130, 246] },
 ];
+const chartJsSource = "https://cdn.jsdelivr.net/npm/chart.js";
+let chartJsLoadPromise = null;
+let dashboardChartRenderToken = 0;
 
 const navFeatureConfig = {
   quanlycongviec: { view: "work-tasks", icon: "list", keywords: "quan ly cong viec task lich telegram nhac viec" },
@@ -457,11 +461,23 @@ function renderDashboardFiberChart(selector, rows) {
   }).join("");
 }
 
+function applyDashboardLayoutList(layouts = []) {
+  dashboardViewerLayouts = Array.isArray(layouts) ? layouts : [];
+  dashboardViewerLayoutsLoaded = true;
+  dashboardPageIdByFeatureCode = new Map(dashboardViewerLayouts.map((layout) => [
+    dashboardFeatureCodeForPageId(layout.page_id),
+    layout.page_id,
+  ]).filter(([code, pageId]) => code && pageId));
+  dashboardFeatureCodes = new Set(dashboardPageIdByFeatureCode.keys());
+}
+
 async function loadDashboardViewer() {
   if (!$("#dashboard-designed-section")) return;
   try {
-    const data = await api("/api/admin/dashboard-layouts");
-    dashboardViewerLayouts = data.layouts || [];
+    if (!dashboardViewerLayoutsLoaded) {
+      const data = await api("/api/admin/dashboard-layouts");
+      applyDashboardLayoutList(data.layouts || []);
+    }
     if (!dashboardViewerLayouts.length) {
       dashboardViewerLayout = null;
       renderDashboardViewerEmpty("Chưa có trang Dashboard", "Hãy tạo Layout trong chức năng Thiết kế Layout báo cáo.");
@@ -582,7 +598,7 @@ function renderDashboardViewer() {
       <p>Mở chức năng Thiết kế Layout báo cáo để thêm biểu đồ cho Tab này.</p>
     </div>
   `;
-  window.requestAnimationFrame(renderPendingDashboardCharts);
+  schedulePendingDashboardCharts();
 }
 
 function formatDashboardNumber(value) {
@@ -1139,17 +1155,18 @@ function openNavParents(item) {
 
 async function syncNavigationFromFeatures() {
   try {
-    features = (await api("/api/admin/features")).features;
     try {
-      const layoutsData = await api("/api/admin/dashboard-layouts");
-      dashboardPageIdByFeatureCode = new Map((layoutsData.layouts || []).map((layout) => [
-        dashboardFeatureCodeForPageId(layout.page_id),
-        layout.page_id,
-      ]).filter(([code, pageId]) => code && pageId));
-      dashboardFeatureCodes = new Set(dashboardPageIdByFeatureCode.keys());
+      const navigationData = await api("/api/navigation");
+      features = navigationData.features || [];
+      applyDashboardLayoutList(navigationData.dashboard_layouts || []);
     } catch {
-      dashboardPageIdByFeatureCode = new Map();
-      dashboardFeatureCodes = new Set();
+      features = (await api("/api/admin/features")).features;
+      try {
+        const layoutsData = await api("/api/admin/dashboard-layouts");
+        applyDashboardLayoutList(layoutsData.layouts || []);
+      } catch {
+        applyDashboardLayoutList([]);
+      }
     }
     const tree = $("#nav-tree");
     if (!tree) return;
@@ -2150,7 +2167,7 @@ function renderDashboardPreview() {
       <p>Thêm Layout và chọn mã SQL để xem dữ liệu dashboard tại đây.</p>
     </div>
   `;
-  window.requestAnimationFrame(renderPendingDashboardCharts);
+  schedulePendingDashboardCharts();
 }
 
 function renderRuntimeWidget(widget, widgetData, elementId) {
@@ -2356,9 +2373,49 @@ function parseDashboardNumber(value) {
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
-function renderPendingDashboardCharts() {
+function ensureChartJsLoaded() {
+  if (window.Chart) return Promise.resolve();
+  if (chartJsLoadPromise) return chartJsLoadPromise;
+  chartJsLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = chartJsSource;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => {
+      chartJsLoadPromise = null;
+      reject(new Error("KhÃ´ng táº£i Ä‘Æ°á»£c thÆ° viá»‡n biá»ƒu Ä‘á»“."));
+    };
+    document.head.appendChild(script);
+  });
+  return chartJsLoadPromise;
+}
+
+function schedulePendingDashboardCharts() {
+  if (!pendingDashboardCharts.length) return;
+  const token = dashboardChartRenderToken;
+  window.requestAnimationFrame(() => renderPendingDashboardCharts(token));
+}
+
+function renderChartLoadError(jobs, message) {
+  jobs.forEach(({ elementId }) => {
+    const canvas = document.getElementById(elementId);
+    const box = canvas?.closest(".runtime-chart-box");
+    if (box) box.innerHTML = `<div class="runtime-widget-empty">${escapeHtml(message)}</div>`;
+  });
+}
+
+async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
   const jobs = pendingDashboardCharts;
   pendingDashboardCharts = [];
+  if (!jobs.length) return;
+  if (token !== dashboardChartRenderToken) return;
+  try {
+    await ensureChartJsLoaded();
+  } catch (error) {
+    renderChartLoadError(jobs, error.message);
+    return;
+  }
+  if (token !== dashboardChartRenderToken) return;
   jobs.forEach(({ elementId, widgetType, chartData }) => {
     const canvas = document.getElementById(elementId);
     if (!canvas || !window.Chart) return;
@@ -2451,6 +2508,7 @@ function renderPendingDashboardCharts() {
 }
 
 function destroyDashboardCharts() {
+  dashboardChartRenderToken += 1;
   dashboardChartInstances.forEach((chart) => chart.destroy());
   dashboardChartInstances.clear();
   pendingDashboardCharts = [];

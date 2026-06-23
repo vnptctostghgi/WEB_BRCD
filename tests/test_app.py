@@ -58,6 +58,24 @@ def test_favicon_redirects_to_system_logo() -> None:
         assert response.headers["location"] == "/static/images/system-logo.png"
 
 
+def test_static_assets_are_cacheable() -> None:
+    with TestClient(app) as client:
+        response = client.get("/static/app.js?v=53")
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "public, max-age=604800"
+
+
+def test_admin_navigation_payload_combines_features_and_layouts() -> None:
+    with TestClient(app) as client:
+        assert client.get("/api/navigation").status_code == 401
+        login(client)
+        response = client.get("/api/navigation")
+        assert response.status_code == 200
+        payload = response.json()
+        assert any(feature["code"] == "quantrimenu" for feature in payload["features"])
+        assert any(layout["page_id"] == "DASHBOARD_KINH_DOANH" for layout in payload["dashboard_layouts"])
+
+
 def test_five_failed_logins_send_telegram_alert(monkeypatch) -> None:
     sent_messages = []
     routes.FAILED_LOGIN_COUNTS.clear()

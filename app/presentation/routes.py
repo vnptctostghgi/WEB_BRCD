@@ -943,6 +943,18 @@ def list_dashboard_layout_pages(request: Request) -> dict:
     return {"pages": build_dashboard_layout_pages(features, layouts)}
 
 
+@router.get("/api/navigation")
+def navigation(request: Request) -> dict:
+    admin_user(request)
+    repository = build_app_repository()
+    features = repository.list_features()
+    try:
+        layouts = repository.list_dashboard_layouts()
+    except RuntimeError:
+        layouts = []
+    return {"features": features, "dashboard_layouts": layouts}
+
+
 @router.get("/api/admin/dashboard-layouts/{page_id}")
 def get_dashboard_layout(request: Request, page_id: str) -> dict:
     admin_user(request)
