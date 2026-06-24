@@ -30,8 +30,26 @@ let draggedDashboardTabId = "";
 let draggedDashboardRowId = "";
 const dashboardChartInstances = new Map();
 let pendingDashboardCharts = [];
-const dashboardLayoutColumns = { "1_column": 1, "2_columns": 2, "3_columns": 3, "4_columns": 4 };
-const dashboardDataWidgetTypes = new Set(["bar_chart", "pie_chart", "line_chart", "combo_chart", "data_table", "metric", "data_card"]);
+const dashboardLayoutDefinitions = {
+  "1_column": { total: 1, spans: [1], label: "1 cột" },
+  "2_columns": { total: 2, spans: [1, 1], label: "2 cột" },
+  "3_columns": { total: 3, spans: [1, 1, 1], label: "3 cột" },
+  "4_columns": { total: 4, spans: [1, 1, 1, 1], label: "4 cột" },
+  "5_columns": { total: 5, spans: [1, 1, 1, 1, 1], label: "5 cột" },
+  "6_columns": { total: 6, spans: [1, 1, 1, 1, 1, 1], label: "6 cột" },
+  "4_columns_1_3": { total: 4, spans: [1, 3], label: "4 cột: 1 + 3" },
+  "4_columns_3_1": { total: 4, spans: [3, 1], label: "4 cột: 3 + 1" },
+  "5_columns_1_4": { total: 5, spans: [1, 4], label: "5 cột: 1 + 4" },
+  "5_columns_4_1": { total: 5, spans: [4, 1], label: "5 cột: 4 + 1" },
+  "5_columns_2_3": { total: 5, spans: [2, 3], label: "5 cột: 2 + 3" },
+  "5_columns_3_2": { total: 5, spans: [3, 2], label: "5 cột: 3 + 2" },
+  "6_columns_1_5": { total: 6, spans: [1, 5], label: "6 cột: 1 + 5" },
+  "6_columns_5_1": { total: 6, spans: [5, 1], label: "6 cột: 5 + 1" },
+  "6_columns_2_4": { total: 6, spans: [2, 4], label: "6 cột: 2 + 4" },
+  "6_columns_4_2": { total: 6, spans: [4, 2], label: "6 cột: 4 + 2" },
+};
+const dashboardLayoutColumns = Object.fromEntries(Object.entries(dashboardLayoutDefinitions).map(([key, definition]) => [key, definition.spans.length]));
+const dashboardDataWidgetTypes = new Set(["bar_chart", "pie_chart", "line_chart", "combo_chart", "multi_bar_chart", "multi_line_chart", "data_table", "metric", "data_card"]);
 const dashboardColorScaleStops = [
   { ratio: 0, rgb: [239, 68, 68] },
   { ratio: .5, rgb: [245, 158, 11] },
@@ -549,8 +567,7 @@ async function loadDashboardViewerTab(tabId, { force = false } = {}) {
     const response = await api(`/api/admin/dashboard-layouts/${encodeURIComponent(dashboardViewerLayout.page_id)}/tabs/${encodeURIComponent(tabId)}/data`);
     dashboardViewerLoadedTabs[key] = { ...response, loaded_at: new Date().toISOString() };
     renderDashboardViewer();
-    if (!response.ok) showMessage($("#dashboard-viewer-message"), dashboardRuntimeErrorSummary(response), "error");
-    else $("#dashboard-viewer-message")?.classList.add("hidden");
+    $("#dashboard-viewer-message")?.classList.add("hidden");
   } catch (error) {
     showMessage($("#dashboard-viewer-message"), error.message, "error");
   } finally {
@@ -588,9 +605,9 @@ function renderDashboardViewer() {
       const position = cellIndex + 1;
       const widget = widgetsByPosition.get(position);
       const data = dataByWidget.get(`${row.row_id}:${position}`);
-      return renderRuntimeWidget(widget, data, `dashboard-viewer-${rowIndex}-${position}`);
+      return `<div class="dashboard-layout-cell" style="${dashboardCellStyle(row.layout_type, cellIndex)}">${renderRuntimeWidget(widget, data, `dashboard-viewer-${rowIndex}-${position}`)}</div>`;
     }).join("");
-    return `<section class="${dashboardGridClass(row.layout_type)}">${cells}</section>`;
+    return `<section class="${dashboardGridClass(row.layout_type)}" style="${dashboardGridStyle(row.layout_type)}">${cells}</section>`;
   }).join("") : `
     <div class="dashboard-empty">
       <p class="eyebrow">Dashboard Builder</p>
@@ -730,10 +747,8 @@ if (role === "admin") {
   $("#save-dashboard-layout")?.addEventListener("click", (event) => saveDashboardLayout(event.currentTarget));
   $("#refresh-dashboard-sql-reports")?.addEventListener("click", (event) => refreshDashboardSqlReports(event.currentTarget));
   $("#add-dashboard-tab")?.addEventListener("click", addDashboardTab);
-  $("#add-dashboard-row-1")?.addEventListener("click", () => addDashboardRow("1_column"));
-  $("#add-dashboard-row-2")?.addEventListener("click", () => addDashboardRow("2_columns"));
-  $("#add-dashboard-row-3")?.addEventListener("click", () => addDashboardRow("3_columns"));
-  $("#add-dashboard-row-4")?.addEventListener("click", () => addDashboardRow("4_columns"));
+  $("#dashboard-row-type") && ($("#dashboard-row-type").innerHTML = dashboardLayoutTypeOptions("2_columns"));
+  $("#add-dashboard-row")?.addEventListener("click", () => addDashboardRow($("#dashboard-row-type")?.value || "2_columns"));
   $("#refresh-dashboard-preview")?.addEventListener("click", () => loadDashboardPreviewTab(dashboardBuilderActiveTabId, { force: true }));
   $("#dashboard-viewer-page")?.addEventListener("change", (event) => {
     if (event.currentTarget.value) openDashboardViewerLayout(event.currentTarget.value);
@@ -1426,20 +1441,33 @@ function currentDashboardTab() {
 }
 
 function dashboardGridClass(layoutType) {
-  const classes = {
-    "1_column": "grid grid-cols-1 gap-4",
-    "2_columns": "grid grid-cols-1 gap-4 md:grid-cols-2",
-    "3_columns": "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3",
-    "4_columns": "grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4",
-  };
-  return classes[layoutType] || classes["2_columns"];
+  return "dashboard-layout-grid";
+}
+
+function dashboardGridStyle(layoutType) {
+  const definition = dashboardLayoutDefinitions[layoutType] || dashboardLayoutDefinitions["2_columns"];
+  return `--dashboard-layout-columns:${definition.total}`;
+}
+
+function dashboardLayoutSpans(layoutType) {
+  return (dashboardLayoutDefinitions[layoutType] || dashboardLayoutDefinitions["2_columns"]).spans;
+}
+
+function dashboardCellStyle(layoutType, index) {
+  const span = dashboardLayoutSpans(layoutType)[index] || 1;
+  return `--dashboard-cell-span:${span}`;
 }
 
 function dashboardLayoutColumnCount(layoutType) {
-  return dashboardLayoutColumns[layoutType] || 2;
+  return dashboardLayoutSpans(layoutType).length;
 }
 
 function dashboardWidgetTypeLabel(type) {
+  const extraLabels = {
+    multi_bar_chart: "Biểu đồ cột nhiều đơn vị",
+    multi_line_chart: "Biểu đồ đường nhiều đơn vị",
+  };
+  if (extraLabels[type]) return extraLabels[type];
   return {
     bar_chart: "Biểu đồ cột",
     pie_chart: "Biểu đồ tròn",
@@ -1453,7 +1481,7 @@ function dashboardWidgetTypeLabel(type) {
 }
 
 function dashboardWidgetTypeOptions(selectedType) {
-  return ["bar_chart", "pie_chart", "line_chart", "combo_chart", "data_table", "metric", "data_card", "text_title"].map((type) => (
+  return ["bar_chart", "multi_bar_chart", "pie_chart", "line_chart", "multi_line_chart", "combo_chart", "data_table", "metric", "data_card", "text_title"].map((type) => (
     `<option value="${type}" ${selectedType === type ? "selected" : ""}>${dashboardWidgetTypeLabel(type)}</option>`
   )).join("");
 }
@@ -1837,6 +1865,8 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
     const layoutValue = row.querySelector("[name='layout_type']")?.value || "2_columns";
     const layoutType = dashboardLayoutColumns[layoutValue] ? layoutValue : "2_columns";
     const widgets = [...row.querySelectorAll(".builder-widget-card")].map((card) => {
+      const position = Number(card.dataset.position || 1);
+      if (position > dashboardLayoutColumnCount(layoutType)) return null;
       const type = card.querySelector("[name='type']")?.value || "bar_chart";
       const sqlSelect = card.querySelector("[name='sql_code']");
       const sqlCode = sqlSelect?.value.trim().toUpperCase() || "";
@@ -1854,12 +1884,14 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
         line_column: activeConfig?.querySelector("[name='line_column']")?.value.trim() || "",
         bar_label: activeConfig?.querySelector("[name='bar_label']")?.value.trim() || "",
         line_label: activeConfig?.querySelector("[name='line_label']")?.value.trim() || "",
+        series_columns: activeConfig?.querySelector("[name='series_columns']")?.value.trim() || "",
+        series_labels: activeConfig?.querySelector("[name='series_labels']")?.value.trim() || "",
         color_scale: Boolean(activeConfig?.querySelector("[name='color_scale']")?.checked),
       };
       const hasDisplayConfig = title || textContent || iconUrl || sqlCode;
       if (!hasDisplayConfig) return null;
       return {
-        position: Number(card.dataset.position || 1),
+        position,
         type,
         title,
         sql_code: sqlCode,
@@ -1892,8 +1924,9 @@ function renderDashboardWorkspace() {
 }
 
 function dashboardLayoutTypeOptions(selectedType) {
-  const labels = { "1_column": "1 cột", "2_columns": "2 cột", "3_columns": "3 cột", "4_columns": "4 cột" };
-  return Object.keys(dashboardLayoutColumns).map((type) => `<option value="${type}" ${selectedType === type ? "selected" : ""}>${labels[type]}</option>`).join("");
+  return Object.entries(dashboardLayoutDefinitions).map(([type, definition]) => (
+    `<option value="${type}" ${selectedType === type ? "selected" : ""}>${escapeHtml(definition.label)}</option>`
+  )).join("");
 }
 
 function dashboardConfigValue(widget, key, fallback = "") {
@@ -1932,6 +1965,22 @@ function renderDashboardWidgetAdvancedConfig(widget) {
       </div>
       ${dashboardColorScaleOption(widget)}
     </div>
+    <div class="dashboard-widget-config ${type === "multi_bar_chart" ? "active" : ""}" data-config-for="multi_bar_chart">
+      <div class="grid gap-2 md:grid-cols-2">
+        <label>Cột nhãn<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="Ví dụ: ten_don_vi" /></label>
+        <label>Các cột dữ liệu<input class="form-control" name="series_columns" value="${dashboardConfigValue(widget, "series_columns")}" placeholder="fiber,mytv,cam,mesh" /></label>
+        <label>Nhãn hiển thị<input class="form-control" name="series_labels" value="${dashboardConfigValue(widget, "series_labels")}" placeholder="Fiber, MyTV, CAM, Mesh" /></label>
+      </div>
+      ${dashboardColorScaleOption(widget)}
+    </div>
+    <div class="dashboard-widget-config ${type === "multi_line_chart" ? "active" : ""}" data-config-for="multi_line_chart">
+      <div class="grid gap-2 md:grid-cols-2">
+        <label>Cột nhãn<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="Ví dụ: ten_don_vi" /></label>
+        <label>Các cột dữ liệu<input class="form-control" name="series_columns" value="${dashboardConfigValue(widget, "series_columns")}" placeholder="fiber,mytv,cam,mesh" /></label>
+        <label>Nhãn hiển thị<input class="form-control" name="series_labels" value="${dashboardConfigValue(widget, "series_labels")}" placeholder="Fiber, MyTV, CAM, Mesh" /></label>
+      </div>
+      ${dashboardColorScaleOption(widget)}
+    </div>
     <div class="dashboard-widget-config ${type === "combo_chart" ? "active" : ""}" data-config-for="combo_chart">
       <div class="grid gap-2 md:grid-cols-2">
         <label>Cột nhãn<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="Ví dụ: ten_don_vi" /></label>
@@ -1960,7 +2009,7 @@ function renderDashboardBuilderRow(row, index) {
     const widget = widgetsByPosition.get(position) || { position, type: "bar_chart", title: "", sql_code: "", report_id: null, chart_config: {}, filters: {} };
     const isTextWidget = widget.type === "text_title";
     return `
-      <div class="builder-widget-card" data-position="${position}">
+      <div class="builder-widget-card dashboard-layout-cell" style="${dashboardCellStyle(row.layout_type, cellIndex)}" data-position="${position}">
         <small>Ô ${position}</small>
         <label>Tiêu đề<input class="form-control" name="title" value="${escapeHtml(widget.title || "")}" placeholder="Tên biểu đồ, thẻ hoặc tiêu đề" /></label>
         <label>Loại hiển thị<select class="form-control" name="type">${dashboardWidgetTypeOptions(widget.type)}</select></label>
@@ -1975,9 +2024,13 @@ function renderDashboardBuilderRow(row, index) {
       <div class="builder-row-header">
         <div><p class="eyebrow">Dòng Layout ${index + 1}</p><div class="builder-row-title">Kéo dòng này để đổi thứ tự trong Tab</div></div>
         <label>Loại Layout<select class="form-control" name="layout_type">${dashboardLayoutTypeOptions(row.layout_type)}</select></label>
-        <button class="table-action danger" data-delete-dashboard-row="${escapeHtml(row.row_id || index + 1)}" type="button">Xóa dòng</button>
+        <div class="action-group">
+          <button class="table-action" data-move-dashboard-row="up" data-row-id="${escapeHtml(row.row_id || index + 1)}" type="button" ${index <= 0 ? "disabled" : ""}>Lên</button>
+          <button class="table-action" data-move-dashboard-row="down" data-row-id="${escapeHtml(row.row_id || index + 1)}" type="button" ${index >= ((currentDashboardTab()?.grid_layout || []).length - 1) ? "disabled" : ""}>Xuống</button>
+          <button class="table-action danger" data-delete-dashboard-row="${escapeHtml(row.row_id || index + 1)}" type="button">Xóa dòng</button>
+        </div>
       </div>
-      <div class="${dashboardGridClass(row.layout_type)}">${cells}</div>
+      <div class="${dashboardGridClass(row.layout_type)}" style="${dashboardGridStyle(row.layout_type)}">${cells}</div>
     </section>
   `;
 }
@@ -1992,9 +2045,26 @@ function addDashboardRow(layoutType) {
 }
 
 function handleDashboardWorkspaceClick(event) {
+  const moveButton = event.target.closest("[data-move-dashboard-row]");
+  if (moveButton) {
+    moveDashboardRow(moveButton.dataset.rowId, moveButton.dataset.moveDashboardRow);
+    return;
+  }
   const deleteButton = event.target.closest("[data-delete-dashboard-row]");
   if (!deleteButton) return;
   deleteDashboardRow(deleteButton.dataset.deleteDashboardRow);
+}
+
+function moveDashboardRow(rowId, direction) {
+  collectDashboardBuilderStateFromDom();
+  const tab = currentDashboardTab();
+  if (!tab?.grid_layout?.length) return;
+  const index = tab.grid_layout.findIndex((row) => String(row.row_id) === String(rowId));
+  if (index < 0) return;
+  const targetIndex = direction === "up" ? index - 1 : index + 1;
+  if (targetIndex < 0 || targetIndex >= tab.grid_layout.length) return;
+  [tab.grid_layout[index], tab.grid_layout[targetIndex]] = [tab.grid_layout[targetIndex], tab.grid_layout[index]];
+  renderDashboardBuilder();
 }
 
 function applyDashboardSqlSelection(select) {
@@ -2130,7 +2200,8 @@ async function loadDashboardPreviewTab(tabId, { force = false } = {}) {
     const response = await api(`/api/admin/dashboard-layouts/${encodeURIComponent(dashboardBuilderLayout.page_id)}/tabs/${encodeURIComponent(tabId)}/data`);
     dashboardBuilderLoadedTabs[key] = response;
     renderDashboardPreview();
-    showMessage($("#dashboard-preview-message"), response.ok ? (response.message || "Đã tải dữ liệu Tab dashboard.") : dashboardRuntimeErrorSummary(response), response.ok ? "success" : "error");
+    if (response.ok) showMessage($("#dashboard-preview-message"), response.message || "Đã tải dữ liệu Tab dashboard.", "success");
+    else $("#dashboard-preview-message")?.classList.add("hidden");
   } catch (error) {
     showMessage($("#dashboard-preview-message"), error.message, "error");
   } finally {
@@ -2157,9 +2228,9 @@ function renderDashboardPreview() {
       const position = cellIndex + 1;
       const widget = widgetsByPosition.get(position);
       const data = dataByWidget.get(`${row.row_id}:${position}`);
-      return renderRuntimeWidget(widget, data, `dashboard-preview-${rowIndex}-${position}`);
+      return `<div class="dashboard-layout-cell" style="${dashboardCellStyle(row.layout_type, cellIndex)}">${renderRuntimeWidget(widget, data, `dashboard-preview-${rowIndex}-${position}`)}</div>`;
     }).join("");
-    return `<section class="${dashboardGridClass(row.layout_type)}">${cells}</section>`;
+    return `<section class="${dashboardGridClass(row.layout_type)}" style="${dashboardGridStyle(row.layout_type)}">${cells}</section>`;
   }).join("") : `
     <div class="dashboard-empty">
       <p class="eyebrow">Preview</p>
@@ -2267,8 +2338,12 @@ function renderRuntimeDataCardWidget(widget, result) {
 }
 
 function renderRuntimeChartWidget(title, result, widget, elementId) {
-  const chartData = widget.type === "combo_chart" ? extractDashboardComboChartData(result, widget.chart_config || {}) : extractDashboardChartData(result, widget.chart_config || {});
-  if (!chartData.labels.length) {
+  const chartData = widget.type === "combo_chart"
+    ? extractDashboardComboChartData(result, widget.chart_config || {})
+    : (widget.type === "multi_bar_chart" || widget.type === "multi_line_chart")
+      ? extractDashboardMultiSeriesChartData(result, widget.chart_config || {})
+      : extractDashboardChartData(result, widget.chart_config || {});
+  if (!chartData.labels.length || (Array.isArray(chartData.series) && !chartData.series.length)) {
     return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Không có dữ liệu để vẽ biểu đồ.</div></article>`;
   }
   const chartHeight = dashboardChartHeight(widget.type, chartData);
@@ -2312,17 +2387,43 @@ function extractDashboardComboChartData(result, chartConfig = {}) {
   };
 }
 
+function dashboardConfigList(value) {
+  return String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function extractDashboardMultiSeriesChartData(result, chartConfig = {}) {
+  const rows = result.rows || [];
+  const columns = result.columns || [];
+  if (!rows.length || !columns.length) return { labels: [], datasets: [] };
+  const configuredColumns = dashboardConfigList(chartConfig.series_columns);
+  const seriesColumns = configuredColumns.length
+    ? configuredColumns.filter((column) => columns.includes(column))
+    : columns.filter((column) => rows.some((row) => Number.isFinite(parseDashboardNumber(row[column])))).slice(0, 6);
+  const labelColumn = pickDashboardLabelColumn(rows, columns, chartConfig.label_column || "", new Set(seriesColumns));
+  const configuredLabels = dashboardConfigList(chartConfig.series_labels);
+  return {
+    labels: rows.map((row, index) => String(row[labelColumn] ?? `Dòng ${index + 1}`)),
+    series: seriesColumns.map((column, index) => ({
+      label: configuredLabels[index] || column,
+      values: rows.map((row) => parseDashboardNumber(row[column]) || 0),
+    })),
+    colorScale: Boolean(chartConfig.color_scale),
+  };
+}
+
 function dashboardChartHeight(widgetType, chartData) {
   const count = Math.max(1, chartData.labels?.length || 1);
   const horizontal = widgetType === "bar_chart" && chartData.orientation === "horizontal";
   if (horizontal) return Math.min(1200, Math.max(280, count * 42 + 90));
   if (widgetType === "combo_chart") return Math.min(860, Math.max(320, count * 24 + 140));
+  if (widgetType === "multi_bar_chart" || widgetType === "multi_line_chart") return Math.min(980, Math.max(340, count * 26 + 150));
   if (widgetType === "line_chart") return Math.min(780, Math.max(320, count * 18 + 120));
   if (widgetType === "bar_chart") return Math.min(900, Math.max(320, count * 24 + 130));
   return 320;
 }
 
 function dashboardChartPrimaryValues(chartData) {
+  if (Array.isArray(chartData.series)) return chartData.series.flatMap((series) => series.values || []);
   return chartData.values || chartData.barValues || chartData.lineValues || [];
 }
 
@@ -2424,8 +2525,20 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
     const isPie = widgetType === "pie_chart";
     const isLine = widgetType === "line_chart";
     const isCombo = widgetType === "combo_chart";
-    const chartType = isCombo ? "bar" : isPie ? "pie" : isLine ? "line" : "bar";
-    const datasets = isCombo ? [
+    const isMulti = widgetType === "multi_bar_chart" || widgetType === "multi_line_chart";
+    const isMultiLine = widgetType === "multi_line_chart";
+    const chartType = isCombo || isMulti && !isMultiLine ? "bar" : isPie ? "pie" : (isLine || isMultiLine) ? "line" : "bar";
+    const seriesPalette = ["#38bdf8", "#f59e0b", "#22c55e", "#ef4444", "#a78bfa", "#14b8a6", "#f97316", "#60a5fa"];
+    const datasets = isMulti ? chartData.series.map((series, seriesIndex) => ({
+      label: series.label,
+      data: series.values,
+      backgroundColor: isMultiLine ? (useColorScale ? (context) => dashboardLineGradient(context, .16) : `${seriesPalette[seriesIndex % seriesPalette.length]}33`) : (useColorScale ? dashboardValueColors(series.values, .82) : `${seriesPalette[seriesIndex % seriesPalette.length]}cc`),
+      borderColor: isMultiLine && useColorScale ? (context) => dashboardLineGradient(context, 1) : seriesPalette[seriesIndex % seriesPalette.length],
+      pointBackgroundColor: isMultiLine ? seriesPalette[seriesIndex % seriesPalette.length] : undefined,
+      borderWidth: isMultiLine ? 3 : 1,
+      tension: .35,
+      fill: isMultiLine,
+    })) : isCombo ? [
       {
         type: "bar",
         label: chartData.barLabel,
@@ -2498,7 +2611,7 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { display: isPie || isCombo, labels: { color: "#e0f2fe" } },
+          legend: { display: isPie || isCombo || isMulti, labels: { color: "#e0f2fe" } },
         },
         scales,
       },

@@ -1,6 +1,7 @@
 import logging
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any
 
@@ -272,6 +273,7 @@ class DatabaseService:
 
         widget_results = []
         data_cache: dict[str, dict[str, Any]] = {}
+        query_jobs: dict[str, dict[str, Any]] = {}
         all_ok = True
         for row in tab.get("grid_layout") or []:
             row_id = row.get("row_id")
@@ -281,16 +283,15 @@ class DatabaseService:
                     continue
                 filters = widget.get("filters") if isinstance(widget.get("filters"), dict) else {}
                 cache_key = self._dashboard_widget_query_key(sql_code, filters, widget.get("report_id"))
-                if cache_key not in data_cache:
-                    data_cache[cache_key] = self.run_dynamic_report(
-                        ma_bao_cao=sql_code,
-                        filters=filters,
-                        page=1,
-                        page_size=20,
-                        report_id=widget.get("report_id"),
-                        report_name=widget.get("title"),
-                    )
-                result = data_cache[cache_key]
+                query_jobs.setdefault(cache_key, {
+                    "ma_bao_cao": sql_code,
+                    "filters": filters,
+                    "page": 1,
+                    "page_size": 20,
+                    "report_id": widget.get("report_id"),
+                    "report_name": widget.get("title"),
+                })
+                result = data_cache.get(cache_key) or {}
                 all_ok = all_ok and bool(result.get("ok"))
                 widget_results.append({
                     "row_id": row_id,
@@ -299,7 +300,24 @@ class DatabaseService:
                     "title": widget.get("title") or sql_code,
                     "sql_code": sql_code,
                     "data": result,
+                    "_cache_key": cache_key,
                 })
+
+        if query_jobs:
+            max_workers = min(6, len(query_jobs))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_by_key = {
+                    executor.submit(self.run_dynamic_report, **job): key
+                    for key, job in query_jobs.items()
+                }
+                for future in as_completed(future_by_key):
+                    data_cache[future_by_key[future]] = future.result()
+
+        all_ok = True
+        for item in widget_results:
+            cache_key = item.pop("_cache_key", "")
+            item["data"] = data_cache.get(cache_key, item.get("data") or {})
+            all_ok = all_ok and bool((item.get("data") or {}).get("ok"))
 
         failed_widgets = [
             {

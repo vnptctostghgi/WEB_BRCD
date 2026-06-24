@@ -31,8 +31,25 @@ router = APIRouter()
 templates = Jinja2Templates(directory=Path("app/presentation/templates"))
 FAILED_LOGIN_COUNTS: dict[str, int] = {}
 ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
-DASHBOARD_LAYOUT_TYPES = {"1_column": 1, "2_columns": 2, "3_columns": 3, "4_columns": 4}
-DASHBOARD_WIDGET_TYPES = {"bar_chart", "pie_chart", "line_chart", "combo_chart", "data_table", "metric", "data_card", "text_title"}
+DASHBOARD_LAYOUT_TYPES = {
+    "1_column": 1,
+    "2_columns": 2,
+    "3_columns": 3,
+    "4_columns": 4,
+    "5_columns": 5,
+    "6_columns": 6,
+    "4_columns_1_3": 2,
+    "4_columns_3_1": 2,
+    "5_columns_1_4": 2,
+    "5_columns_4_1": 2,
+    "5_columns_2_3": 2,
+    "5_columns_3_2": 2,
+    "6_columns_1_5": 2,
+    "6_columns_5_1": 2,
+    "6_columns_2_4": 2,
+    "6_columns_4_2": 2,
+}
+DASHBOARD_WIDGET_TYPES = {"bar_chart", "pie_chart", "line_chart", "combo_chart", "multi_bar_chart", "multi_line_chart", "data_table", "metric", "data_card", "text_title"}
 DASHBOARD_LAYOUT_EXCLUDED_FEATURE_CODES = {
     "dashboard",
     "truyvansql",
@@ -276,7 +293,7 @@ def normalize_dashboard_layout(payload: DashboardLayoutPayload) -> tuple[str, st
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cấu trúc dòng Layout không hợp lệ.")
             layout_type = str(row.get("layout_type") or "").strip()
             if layout_type not in DASHBOARD_LAYOUT_TYPES:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Loại Layout chỉ hỗ trợ 1_column, 2_columns, 3_columns hoặc 4_columns.")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Loại Layout không hợp lệ.")
             max_position = DASHBOARD_LAYOUT_TYPES[layout_type]
             row_id = int(row.get("row_id") or row_index)
             normalized_widgets = []
