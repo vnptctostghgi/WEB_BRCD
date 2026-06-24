@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     internal_api_mock_mode: bool = True
     internal_api_timeout_seconds: int = 20
     internal_api_token: SecretStr = Field(default=SecretStr(""))
+    dashboard_tab_max_workers: int = 10
 
     supabase_rest_url: str = ""
     supabase_publishable_key: SecretStr = Field(default=SecretStr(""))

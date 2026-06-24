@@ -304,7 +304,8 @@ class DatabaseService:
                 })
 
         if query_jobs:
-            max_workers = min(6, len(query_jobs))
+            configured_workers = getattr(self.internal_api.settings, "dashboard_tab_max_workers", 10)
+            max_workers = min(max(1, int(configured_workers or 10)), 24, len(query_jobs))
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_by_key = {
                     executor.submit(self.run_dynamic_report, **job): key
