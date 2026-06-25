@@ -156,6 +156,11 @@ function emptyRow(colspan, title, description = "Chưa có dữ liệu để hi�
   return `<tr><td colspan="${colspan}"><div class="empty-state"><div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(description)}</p></div></div></td></tr>`;
 }
 
+function renderCompactCode(value) {
+  const text = typeof value === "string" ? value.trim() : (JSON.stringify(value ?? {}, null, 2) || "");
+  return `<code class="compact-code" title="${escapeHtml(text)}">${escapeHtml(text)}</code>`;
+}
+
 function setTableLoading(selector, colspan, text) {
   const element = $(selector);
   if (element) element.innerHTML = loadingRow(colspan, text);
@@ -660,11 +665,11 @@ function renderUsersTable() {
   if (count) count.textContent = `${filteredUsers.length}/${users.length} người dùng`;
   $("#users-table").innerHTML = filteredUsers.length ? filteredUsers.map((user) => `
     <tr>
+      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-user="${user.id}">Chỉnh sửa</button> <button class="table-action danger" data-delete-user="${user.id}">Xóa</button></div></td>
       <td><strong>${escapeHtml(user.username)}</strong><small class='cell-note'>${escapeHtml(user.email || user.employee_code || "")}</small>${user.must_change_password ? "<small class='cell-note'>Cần đổi mật khẩu</small>" : ""}</td>
       <td>${escapeHtml(user.full_name)}<small class='cell-note'>${escapeHtml(user.department || "")}</small></td>
       <td><span class="status ${user.role === "admin" ? "admin" : "viewer"}">${user.role === "admin" ? "Quản trị viên" : "Người xem"}</span></td>
       <td><span class="status ${user.is_active ? "active" : "inactive"}">${user.is_active ? "Hoạt động" : "Đã khóa"}</span></td>
-      <td><button class="table-action" data-edit-user="${user.id}">Chỉnh sửa</button> <button class="table-action danger" data-delete-user="${user.id}">Xóa</button></td>
     </tr>`).join("") : emptyRow(5, keyword ? "Không tìm thấy người dùng" : "Chưa có người dùng", keyword ? "Hãy thử nhập từ khóa khác." : "Hãy tạo hoặc import người dùng từ Excel.");
   document.querySelectorAll("[data-edit-user]").forEach((button) => button.addEventListener("click", () => openEditUser(Number(button.dataset.editUser))));
   document.querySelectorAll("[data-delete-user]").forEach((button) => button.addEventListener("click", () => deleteUser(Number(button.dataset.deleteUser))));
@@ -845,11 +850,11 @@ function renderWebsitesTable() {
   if (!table) return;
   table.innerHTML = websites.length ? websites.map((website) => `
     <tr>
+      <td class="table-action-cell"><button class="table-action" data-edit-website="${website.id}" type="button">Sửa</button></td>
       <td><strong>${escapeHtml(website.name)}</strong></td>
       <td><a class="text-sky-200 hover:underline" href="${escapeHtml(website.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(website.url)}</a></td>
       <td><span class="status ${website.requires_otp ? "pending" : "viewer"}">${website.requires_otp ? "Có OTP" : "Không"}</span></td>
       <td><span class="status ${website.is_active ? "active" : "inactive"}">${website.is_active ? "Đang dùng" : "Ngừng dùng"}</span></td>
-      <td><button class="table-action" data-edit-website="${website.id}" type="button">Sửa</button></td>
     </tr>
   `).join("") : emptyRow(5, "Chưa có website", "Bấm Thêm website để tạo danh mục dùng chung.");
   document.querySelectorAll("[data-edit-website]").forEach((button) => {
@@ -933,12 +938,12 @@ async function loadRoles() {
   systemRoles = (await api("/api/admin/roles")).roles;
   $("#roles-table").innerHTML = systemRoles.length ? systemRoles.map((roleItem) => `
     <tr>
+      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-role="${escapeHtml(roleItem.code)}">Sửa</button> <button class="table-action danger" data-delete-role="${escapeHtml(roleItem.code)}">Xóa</button></div></td>
       <td><strong>${escapeHtml(roleItem.code)}</strong></td>
       <td>${escapeHtml(roleItem.name)}</td>
       <td>${escapeHtml(roleItem.description || "")}</td>
       <td><span class="status ${roleItem.is_active ? "active" : "inactive"}">${roleItem.is_active ? "Đang dùng" : "Ngừng dùng"}</span></td>
       <td>${escapeHtml(roleItem.sort_order)}</td>
-      <td><button class="table-action" data-edit-role="${escapeHtml(roleItem.code)}">Sửa</button> <button class="table-action danger" data-delete-role="${escapeHtml(roleItem.code)}">Xóa</button></td>
     </tr>
   `).join("") : emptyRow(6, "Chưa có vai trò", "Thêm vai trò để chuẩn hóa nhóm người dùng.");
   document.querySelectorAll("[data-edit-role]").forEach((button) => button.addEventListener("click", () => openRole(button.dataset.editRole)));
@@ -1279,15 +1284,15 @@ function renderMenuLayout() {
     const siblingIndex = siblings.findIndex((item) => item.code === feature.code);
     return `
       <tr data-feature-row="${escapeHtml(feature.code)}">
-        <td><div class="menu-feature-cell" style="--menu-level:${level}"><strong>${escapeHtml(feature.code)}</strong><small>Cấp ${level + 1}</small></div></td>
-        <td><input class="form-control" name="name" value="${escapeHtml(feature.name)}" /></td>
-        <td><select class="form-control" name="parent_code">${renderParentOptions(feature)}</select></td>
-        <td>
+        <td class="table-action-cell">
           <div class="action-group menu-move-actions">
             <button class="table-action" data-menu-move="up" data-menu-code="${escapeHtml(feature.code)}" type="button" ${siblingIndex <= 0 ? "disabled" : ""}>Lên</button>
             <button class="table-action" data-menu-move="down" data-menu-code="${escapeHtml(feature.code)}" type="button" ${siblingIndex >= siblings.length - 1 ? "disabled" : ""}>Xuống</button>
           </div>
         </td>
+        <td><div class="menu-feature-cell" style="--menu-level:${level}"><strong>${escapeHtml(feature.code)}</strong><small>Cấp ${level + 1}</small></div></td>
+        <td><input class="form-control" name="name" value="${escapeHtml(feature.name)}" /></td>
+        <td><select class="form-control" name="parent_code">${renderParentOptions(feature)}</select></td>
       </tr>
     `;
   }).join("") : emptyRow(4, "Chưa có chức năng", "Danh mục chức năng chưa có dữ liệu.");
@@ -1718,14 +1723,14 @@ function renderDashboardPages() {
   }
   table.innerHTML = rows.length ? rows.map((page) => `
     <tr class="${page.page_id === currentPageId ? "active-row" : ""}">
-      <td><strong>${escapeHtml(page.page_id)}</strong>${page.unsaved ? "<small class='cell-note'>Chưa lưu</small>" : ""}</td>
-      <td>${escapeHtml(page.page_name || page.page_id)}</td>
-      <td>
+      <td class="table-action-cell">
         <div class="action-group">
           <button class="table-action" data-dashboard-open="${escapeHtml(page.page_id)}" type="button">Mở</button>
           <button class="table-action danger" data-dashboard-delete="${escapeHtml(page.page_id)}" type="button" ${page.unsaved ? "disabled" : ""}>Xóa</button>
         </div>
       </td>
+      <td><strong>${escapeHtml(page.page_id)}</strong>${page.unsaved ? "<small class='cell-note'>Chưa lưu</small>" : ""}</td>
+      <td>${escapeHtml(page.page_name || page.page_id)}</td>
     </tr>
   `).join("") : emptyRow(3, "Chưa có trang báo cáo", "Bấm Tạo trang báo cáo để bắt đầu thiết kế.");
 }
@@ -2670,11 +2675,11 @@ async function loadRegions() {
   regions = (await api("/api/admin/regions")).regions;
   $("#regions-table").innerHTML = regions.length ? regions.map((region) => `
     <tr>
+      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-region="${escapeHtml(region.code)}">Sửa</button> <button class="table-action danger" data-delete-region="${escapeHtml(region.code)}">Xóa</button></div></td>
       <td><strong>${escapeHtml(region.code)}</strong></td>
       <td>${escapeHtml(region.name)}</td>
       <td><span class="status ${region.is_active ? "active" : "inactive"}">${region.is_active ? "Đang dùng" : "Ngừng dùng"}</span></td>
       <td>${escapeHtml(region.sort_order)}</td>
-      <td><button class="table-action" data-edit-region="${escapeHtml(region.code)}">Sửa</button> <button class="table-action danger" data-delete-region="${escapeHtml(region.code)}">Xóa</button></td>
     </tr>
   `).join("") : emptyRow(5, "Chưa có phân vùng", "Thêm phân vùng để phân quyền dữ liệu.");
   document.querySelectorAll("[data-edit-region]").forEach((button) => button.addEventListener("click", () => openRegion(button.dataset.editRegion)));
@@ -2737,6 +2742,13 @@ function renderWorkTasks() {
   if (!table) return;
   table.innerHTML = workTasks.length ? workTasks.map((task) => `
     <tr>
+      <td class="table-action-cell">
+        <div class="action-group">
+          <button class="table-action" data-edit-work-task="${escapeHtml(task.task_id)}">Sửa</button>
+          <button class="table-action" data-complete-work-task="${escapeHtml(task.task_id)}">Hoàn thành</button>
+          <button class="table-action danger" data-delete-work-task="${escapeHtml(task.task_id)}">Xóa</button>
+        </div>
+      </td>
       <td><strong>${escapeHtml(task.task_id)}</strong></td>
       <td>${escapeHtml(task.ten_cong_viec)}${task.last_notified_at ? `<small class="cell-note">Đã nhắc: ${escapeHtml(new Date(task.last_notified_at).toLocaleString("vi-VN"))}</small>` : ""}</td>
       <td><span class="status viewer">${escapeHtml(task.type)}</span></td>
@@ -2745,13 +2757,6 @@ function renderWorkTasks() {
       <td>${escapeHtml(task.once_date || "-")}</td>
       <td>${escapeHtml(task.group || "-")}</td>
       <td><span class="status ${task.check ? "active" : "inactive"}">${task.check ? "Đã xong" : "Đang chờ"}</span></td>
-      <td>
-        <div class="action-group">
-          <button class="table-action" data-edit-work-task="${escapeHtml(task.task_id)}">Sửa</button>
-          <button class="table-action" data-complete-work-task="${escapeHtml(task.task_id)}">Hoàn thành</button>
-          <button class="table-action danger" data-delete-work-task="${escapeHtml(task.task_id)}">Xóa</button>
-        </div>
-      </td>
     </tr>
   `).join("") : emptyRow(9, "Chưa có lịch công việc", "Hãy thêm công việc để hệ thống nhắc qua Telegram đúng giờ.");
   document.querySelectorAll("[data-edit-work-task]").forEach((button) => button.addEventListener("click", () => openWorkTask(button.dataset.editWorkTask)));
@@ -2846,12 +2851,12 @@ async function loadConnections() {
   connections = data.connections;
   $("#connections-table").innerHTML = connections.length ? connections.map((connection) => `
     <tr>
+      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-connection="${escapeHtml(connection.code)}">Cấu hình</button><button class="table-action" data-test-connection="${escapeHtml(connection.code)}"><span class="button-label">Kiểm tra</span><span class="spinner"></span></button></div><div class="cell-note" id="connection-result-${escapeHtml(connection.code)}"></div></td>
       <td><strong>${escapeHtml(connection.name)}</strong><small class="cell-note">${escapeHtml(connection.description)}</small></td>
       <td><span class="status viewer">${escapeHtml(connection.connection_type)}</span></td>
       <td><span class="status ${connection.is_active ? "active" : "inactive"}">${connection.is_active ? "Đang dùng" : "Chưa cấu hình"}</span></td>
-      <td><code>${escapeHtml(JSON.stringify(connection.config))}</code></td>
+      <td class="compact-code-cell">${renderCompactCode(connection.config || {})}</td>
       <td>${escapeHtml(connection.secret_ref || "Không có")}</td>
-      <td><div class="action-group"><button class="table-action" data-edit-connection="${escapeHtml(connection.code)}">Cấu hình</button><button class="table-action" data-test-connection="${escapeHtml(connection.code)}"><span class="button-label">Kiểm tra</span><span class="spinner"></span></button></div><div class="cell-note" id="connection-result-${escapeHtml(connection.code)}"></div></td>
     </tr>`).join("") : emptyRow(6, "Chưa có kết nối", "Hãy cấu hình kết nối trong phần quản trị hệ thống.");
   document.querySelectorAll("[data-edit-connection]").forEach((button) => {
     button.addEventListener("click", () => openConnection(button.dataset.editConnection));
@@ -2940,11 +2945,11 @@ function renderSqlReports() {
   if (!table) return;
   table.innerHTML = sqlReports.length ? sqlReports.map((report) => `
     <tr>
+      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-sql-report="${escapeHtml(report.id)}">Sửa</button><button class="table-action danger" data-delete-sql-report="${escapeHtml(report.id)}">Xóa</button></div></td>
       <td><strong>${escapeHtml(report.ten_bao_cao)}</strong></td>
       <td><code>${escapeHtml(report.ma_bao_cao)}</code></td>
       <td>${(report.cac_tham_so || []).map((item) => `<span class="status viewer">${escapeHtml(item)}</span>`).join(" ") || "Không có"}</td>
-      <td><code>${escapeHtml(report.cau_lenh_sql)}</code></td>
-      <td><div class="action-group"><button class="table-action" data-edit-sql-report="${report.id}">Sửa</button><button class="table-action danger" data-delete-sql-report="${report.id}">Xóa</button></div></td>
+      <td class="compact-code-cell">${renderCompactCode(report.cau_lenh_sql || "")}</td>
     </tr>
   `).join("") : emptyRow(5, "Chưa có cấu hình SQL", "Bấm Thêm SQL để tạo báo cáo động đầu tiên.");
   document.querySelectorAll("[data-edit-sql-report]").forEach((button) => button.addEventListener("click", () => openSqlReport(button.dataset.editSqlReport)));

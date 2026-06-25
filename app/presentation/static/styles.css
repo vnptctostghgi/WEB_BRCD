@@ -2017,6 +2017,11 @@ table {
   line-height: 1.5;
 }
 
+.compact-admin-table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
 @media (min-width: 1024px) {
   table {
     font-size: .875rem;
@@ -2030,6 +2035,45 @@ td {
   text-align: left;
   vertical-align: middle;
   white-space: nowrap;
+}
+
+.table-action-column,
+.table-action-cell {
+  width: 10.5rem;
+}
+
+.table-action-cell,
+.compact-admin-table td {
+  white-space: normal;
+}
+
+.table-action-cell {
+  vertical-align: top;
+}
+
+.compact-code-column,
+.compact-code-cell {
+  width: 34%;
+}
+
+.compact-code {
+  display: block;
+  max-height: 5.8rem;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: .6rem .7rem;
+  color: #0f172a;
+  font-size: .76rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.dark .compact-code {
+  background: rgba(15, 23, 42, .85);
+  color: #dbeafe;
 }
 
 .dark th,
