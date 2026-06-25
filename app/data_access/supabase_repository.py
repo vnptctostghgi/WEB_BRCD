@@ -370,10 +370,15 @@ class SupabaseRepository:
     def ensure_dashboard_layout_feature(self, page_id: str, page_name: str) -> str:
         code = dashboard_feature_code_for_page(page_id)
         existing = self._get("features", {"code": f"eq.{code}", "select": "code", "limit": "1"})
-        if existing and code in {"dashboard", "truyvansql"}:
-            self._patch("features", {"code": f"eq.{code}"}, {"name": page_name})
-        elif existing:
-            self._patch("features", {"code": f"eq.{code}"}, {"name": page_name})
+        existing_code = existing[0]["code"] if existing else None
+        if not existing_code:
+            for row in self._get("features", {"select": "code"}):
+                if normalize_feature_code(row.get("code")) == code:
+                    existing_code = row["code"]
+                    break
+        if existing_code:
+            self._patch("features", {"code": f"eq.{existing_code}"}, {"name": page_name})
+            code = existing_code
         else:
             siblings = self._get("features", {"parent_code": "eq.baocaomoi", "select": "sort_order"})
             max_order = max([int(row.get("sort_order") or 0) for row in siblings] or [35])

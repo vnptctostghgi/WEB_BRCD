@@ -655,10 +655,16 @@ class AppRepository:
         code = dashboard_feature_code_for_page(page_id)
         with self.connect() as connection:
             existing = connection.execute("SELECT code FROM features WHERE code=?", (code,)).fetchone()
-            if existing and code in {"dashboard", "truyvansql"}:
-                connection.execute("UPDATE features SET name=? WHERE code=?", (page_name, code))
-            elif existing:
-                connection.execute("UPDATE features SET name=? WHERE code=?", (page_name, code))
+            existing_code = existing["code"] if existing else None
+            if not existing_code:
+                rows = connection.execute("SELECT code FROM features").fetchall()
+                for row in rows:
+                    if normalize_feature_code(row["code"]) == code:
+                        existing_code = row["code"]
+                        break
+            if existing_code:
+                connection.execute("UPDATE features SET name=? WHERE code=?", (page_name, existing_code))
+                code = existing_code
             else:
                 max_order = connection.execute(
                     "SELECT COALESCE(MAX(sort_order), 35) AS max_order FROM features WHERE parent_code='baocaomoi'"

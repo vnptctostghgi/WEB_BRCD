@@ -411,8 +411,11 @@ def build_dashboard_layout_pages(features: list[dict], layouts: list[dict]) -> l
         code = str(feature.get("code") or "")
         if code not in designable_codes:
             continue
-        layout = layout_by_feature_code.get(code)
+        normalized_code = normalize_feature_code(code)
+        layout = layout_by_feature_code.get(code) or layout_by_feature_code.get(normalized_code)
         page_id = str(layout.get("page_id") or "") if layout else dashboard_page_id_from_feature_code(code)
+        if page_id in included_page_ids:
+            continue
         pages.append({
             "page_id": page_id,
             "page_name": str(feature.get("name") or (layout.get("page_name") if layout else page_id)),

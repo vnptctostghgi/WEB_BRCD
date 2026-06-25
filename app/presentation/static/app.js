@@ -487,10 +487,15 @@ function renderDashboardFiberChart(selector, rows) {
 function applyDashboardLayoutList(layouts = []) {
   dashboardViewerLayouts = Array.isArray(layouts) ? layouts : [];
   dashboardViewerLayoutsLoaded = true;
-  dashboardPageIdByFeatureCode = new Map(dashboardViewerLayouts.map((layout) => [
-    dashboardFeatureCodeForPageId(layout.page_id),
-    layout.page_id,
-  ]).filter(([code, pageId]) => code && pageId));
+  const pageEntries = [];
+  dashboardViewerLayouts.forEach((layout) => {
+    const pageId = layout.page_id || "";
+    const compactCode = dashboardFeatureCodeForPageId(pageId);
+    const underscoreCode = String(pageId).trim().toLowerCase();
+    if (compactCode && pageId) pageEntries.push([compactCode, pageId]);
+    if (underscoreCode && pageId) pageEntries.push([underscoreCode, pageId]);
+  });
+  dashboardPageIdByFeatureCode = new Map(pageEntries);
   dashboardFeatureCodes = new Set(dashboardPageIdByFeatureCode.keys());
 }
 
@@ -1762,10 +1767,20 @@ function handleDashboardPageAction(event) {
 async function deleteDashboardPage(pageId) {
   if (!confirm(`Xóa trang báo cáo ${pageId}?`)) return;
   try {
+    const deletedName = dashboardBuilderLayout?.page_id === pageId
+      ? dashboardBuilderLayout.page_name
+      : (dashboardLayouts.find((page) => page.page_id === pageId)?.page_name || pageId);
     await api(`/api/admin/dashboard-layouts/${encodeURIComponent(pageId)}`, { method: "DELETE" });
     showMessage($("#dashboard-builder-message"), "Đã xóa trang báo cáo.");
     await loadDashboardLayoutPages();
-    if (dashboardLayouts.length) {
+    let deletedPage = dashboardLayouts.find((page) => page.page_id === pageId);
+    if (!deletedPage) {
+      deletedPage = { page_id: pageId, page_name: deletedName, unsaved: true, saved: false };
+      dashboardLayouts.unshift(deletedPage);
+    }
+    if (deletedPage) {
+      await openDashboardPage(deletedPage.page_id);
+    } else if (dashboardLayouts.length) {
       await openDashboardPage(dashboardLayouts[0].page_id);
     } else {
       dashboardBuilderLayout = dashboardLayoutTemplate();

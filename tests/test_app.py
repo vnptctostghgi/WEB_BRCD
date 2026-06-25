@@ -623,6 +623,44 @@ def test_dashboard_layout_pages_include_overview_and_reports_not_web_admin() -> 
         assert refreshed_admin_feature["parent_code"] == "quantriweb"
 
 
+def test_dashboard_layout_delete_keeps_page_as_unsaved_and_aliases_duplicate_codes() -> None:
+    with TestClient(app) as client:
+        login(client)
+        layout_payload = {
+            "page_id": "DASHBOARD_DELETE_ME",
+            "page_name": "Dashboard Delete Me",
+            "layout": {
+                "page_id": "DASHBOARD_DELETE_ME",
+                "tabs": [
+                    {
+                        "tab_id": "tab_delete",
+                        "tab_name": "Tab delete",
+                        "order": 1,
+                        "grid_layout": [],
+                    }
+                ],
+            },
+        }
+        assert client.post("/api/admin/dashboard-layouts", json=layout_payload).status_code == 200
+        assert client.delete("/api/admin/dashboard-layouts/DASHBOARD_DELETE_ME").status_code == 200
+        pages = client.get("/api/admin/dashboard-layout-pages").json()["pages"]
+        deleted_page = next(page for page in pages if page["feature_code"] == "dashboarddeleteme")
+        assert deleted_page["saved"] is False
+        assert deleted_page["unsaved"] is True
+
+    pages = routes.build_dashboard_layout_pages(
+        [
+            {"code": "baocaomoi", "name": "Bao cao moi", "parent_code": None, "sort_order": 1},
+            {"code": "dashboard_tong_quan", "name": "Tong quan cu", "parent_code": "baocaomoi", "sort_order": 2},
+            {"code": "dashboardtongquan", "name": "Tong quan moi", "parent_code": "baocaomoi", "sort_order": 3},
+        ],
+        [
+            {"page_id": "DASHBOARD_TONG_QUAN", "page_name": "Tong quan", "created_at": None, "updated_at": None},
+        ],
+    )
+    assert [page["page_id"] for page in pages].count("DASHBOARD_TONG_QUAN") == 1
+
+
 def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
     with TestClient(app) as client:
         login(client)
