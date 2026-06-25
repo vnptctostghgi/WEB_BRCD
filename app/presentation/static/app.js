@@ -1730,18 +1730,18 @@ function renderDashboardPages() {
   container.innerHTML = rows.length ? rows.map((page) => `
     <article class="dashboard-page-card ${page.page_id === currentPageId ? "active" : ""}">
       <div class="dashboard-page-card-body">
-        <span class="status ${page.unsaved ? "inactive" : "active"}">${page.unsaved ? "Ch?a l?u" : "?? l?u"}</span>
+        <span class="status ${page.unsaved ? "inactive" : "active"}">${page.unsaved ? "Ch\u01b0a l\u01b0u" : "\u0110\u00e3 l\u01b0u"}</span>
         <strong>${escapeHtml(page.page_name || page.page_id)}</strong>
         <code>${escapeHtml(page.page_id)}</code>
       </div>
       <div class="action-group dashboard-page-card-actions">
-        <button class="table-action" data-dashboard-open="${escapeHtml(page.page_id)}" type="button">M?</button>
+        <button class="table-action" data-dashboard-open="${escapeHtml(page.page_id)}" type="button">M\u1edf</button>
         ${page.unsaved
-          ? `<button class="table-action danger" data-dashboard-purge="${escapeHtml(page.feature_code || "")}" type="button" ${page.feature_code ? "" : "disabled"}>X?a h?n</button>`
-          : `<button class="table-action danger" data-dashboard-delete="${escapeHtml(page.page_id)}" type="button">X?a layout</button>`}
+          ? `<button class="table-action danger" data-dashboard-purge="${escapeHtml(page.feature_code || "")}" type="button" ${page.feature_code ? "" : "disabled"}>X\u00f3a h\u1eb3n</button>`
+          : `<button class="table-action danger" data-dashboard-delete="${escapeHtml(page.page_id)}" type="button">X\u00f3a layout</button>`}
       </div>
     </article>
-  `).join("") : `<div class="dashboard-empty"><h2>Ch?a c? trang b?o c?o</h2><p>B?m T?o trang b?o c?o ?? b?t ??u thi?t k?.</p></div>`;
+  `).join("") : `<div class="dashboard-empty"><h2>Ch\u01b0a c\u00f3 trang b\u00e1o c\u00e1o</h2><p>B\u1ea5m T\u1ea1o trang b\u00e1o c\u00e1o \u0111\u1ec3 b\u1eaft \u0111\u1ea7u thi\u1ebft k\u1ebf.</p></div>`;
 }
 
 function renderDashboardBuilderTabs() {
@@ -2570,7 +2570,7 @@ function ensureChartJsLoaded() {
     script.onload = () => resolve();
     script.onerror = () => {
       chartJsLoadPromise = null;
-      reject(new Error("KhÃ´ng táº£i Ä‘Æ°á»£c thÆ° viá»‡n biá»ƒu Ä‘á»“."));
+      reject(new Error("Kh\u00f4ng t\u1ea3i \u0111\u01b0\u1ee3c th\u01b0 vi\u1ec7n bi\u1ec3u \u0111\u1ed3."));
     };
     document.head.appendChild(script);
   });
