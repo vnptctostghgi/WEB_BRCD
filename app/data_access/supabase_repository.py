@@ -544,6 +544,34 @@ class SupabaseRepository:
     def delete_dashboard_layout(self, page_id: str) -> None:
         self._delete("dashboard_layouts", {"page_id": f"eq.{page_id}"})
 
+    def get_dashboard_chart_cache(self, chart_key: str) -> dict[str, Any] | None:
+        rows = self._get("dashboard_chart_cache", {"chart_key": f"eq.{chart_key}", "limit": "1"})
+        return self._decode_dashboard_chart_cache(rows[0]) if rows else None
+
+    def upsert_dashboard_chart_cache(self, entry: dict[str, Any]) -> None:
+        payload = {
+            "chart_key": entry["chart_key"],
+            "page_id": entry["page_id"],
+            "tab_id": entry["tab_id"],
+            "widget_key": entry["widget_key"],
+            "report_id": entry.get("report_id"),
+            "sql_code": entry["sql_code"],
+            "report_code": entry.get("report_code"),
+            "report_name": entry.get("report_name"),
+            "widget_title": entry.get("widget_title"),
+            "widget_type": entry.get("widget_type"),
+            "filters": entry.get("filters") or {},
+            "payload": entry.get("payload") or {},
+            "status": entry.get("status") or "success",
+            "error_message": entry.get("error_message"),
+            "duration_ms": entry.get("duration_ms"),
+            "row_count": entry.get("row_count") or 0,
+            "refreshed_at": entry["refreshed_at"],
+            "expires_at": entry.get("expires_at"),
+            "updated_at": entry["updated_at"],
+        }
+        self._upsert("dashboard_chart_cache", payload, "chart_key")
+
     def _ensure_default_dashboard_layout(self) -> None:
         rows = self._get("dashboard_layouts", {"page_id": f"eq.{DEFAULT_DASHBOARD_PAGE_ID}", "select": "page_id", "limit": "1"})
         if rows:
@@ -638,6 +666,12 @@ class SupabaseRepository:
                 layout = {}
         row.pop("layout_json", None)
         row["layout"] = layout if isinstance(layout, dict) else {}
+        return row
+
+    @staticmethod
+    def _decode_dashboard_chart_cache(row: dict[str, Any]) -> dict[str, Any]:
+        row["filters"] = row.get("filters") if isinstance(row.get("filters"), dict) else {}
+        row["payload"] = row.get("payload") if isinstance(row.get("payload"), dict) else {}
         return row
 
     @staticmethod

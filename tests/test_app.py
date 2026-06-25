@@ -466,6 +466,13 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data(monkeypatch) -
         assert tab_check_payload["widgets"][0]["sql_code"] == "CHECK_JOB"
         assert tab_check_payload["widgets"][0]["data"]["ok"] is True
         assert api_calls[-1] == ("CHECK_JOB", {})
+        calls_after_cache_fill = len(api_calls)
+        tab_check_cached = client.get("/api/admin/dashboard-layouts/DASHBOARD_CHECK_JOB/tabs/tab_check/data")
+        assert tab_check_cached.status_code == 200
+        cached_data = tab_check_cached.json()["widgets"][0]["data"]
+        assert cached_data["ok"] is True
+        assert cached_data["details"]["dashboard_cache"]["hit"] is True
+        assert len(api_calls) == calls_after_cache_fill
 
         short_code_report_payload = {
             "ten_bao_cao": "Check_Job_Table",

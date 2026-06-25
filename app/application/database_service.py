@@ -1,8 +1,9 @@
 import logging
+import hashlib
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -298,6 +299,135 @@ class DatabaseService:
         normalized_filters = json.dumps(filters or {}, ensure_ascii=False, sort_keys=True, default=str)
         return f"{report_id or ''}|{sql_code}|{normalized_filters}"
 
+    @staticmethod
+    def _csv_settings(value: Any) -> set[str]:
+        return {
+            item.strip().upper()
+            for item in str(value or "").split(",")
+            if item.strip()
+        }
+
+    @classmethod
+    def dashboard_chart_cache_key(cls, *, report_id: Any, sql_code: str, filters: dict[str, Any], report_code: str | None = None) -> str:
+        normalized_filters = json.dumps(filters or {}, ensure_ascii=False, sort_keys=True, default=str)
+        identity = str(report_id or report_code or sql_code or "").strip().upper()
+        digest = hashlib.sha256(f"{identity}|{normalized_filters}".encode("utf-8")).hexdigest()[:24]
+        return f"chart:{digest}"
+
+    def dashboard_chart_cache_enabled_for(self, *, report: dict[str, Any] | None, sql_code: str, report_id: Any = None) -> bool:
+        settings = getattr(self.internal_api, "settings", None)
+        if not bool(getattr(settings, "dashboard_chart_cache_enabled", True)):
+            return False
+
+        enabled_ids = self._csv_settings(getattr(settings, "dashboard_chart_cache_report_ids", ""))
+        candidate_id = str((report or {}).get("id") or report_id or "").strip().upper()
+        if candidate_id and candidate_id in enabled_ids:
+            return True
+
+        enabled_codes = self._csv_settings(getattr(settings, "dashboard_chart_cache_report_codes", ""))
+        candidates = [
+            sql_code,
+            (report or {}).get("ma_bao_cao"),
+            (report or {}).get("ten_bao_cao"),
+        ]
+        for candidate in candidates:
+            normalized = self._normalized_report_code(candidate)
+            raw = str(candidate or "").strip().upper()
+            if normalized and normalized in enabled_codes:
+                return True
+            if raw and raw in enabled_codes:
+                return True
+        return False
+
+    def dashboard_widget_cache_metadata(
+        self,
+        *,
+        page_id: str,
+        tab_id: str,
+        row_id: Any,
+        widget: dict[str, Any],
+        sql_code: str,
+        filters: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        report = self._find_sql_report(sql_code, report_id=widget.get("report_id"), report_name=widget.get("title"))
+        if not self.dashboard_chart_cache_enabled_for(report=report, sql_code=sql_code, report_id=widget.get("report_id")):
+            return None
+
+        report_id = (report or {}).get("id") or widget.get("report_id")
+        report_code = (report or {}).get("ma_bao_cao") or sql_code
+        return {
+            "chart_key": self.dashboard_chart_cache_key(report_id=report_id, sql_code=sql_code, filters=filters, report_code=report_code),
+            "page_id": page_id,
+            "tab_id": tab_id,
+            "widget_key": f"{page_id}:{tab_id}:row:{row_id}:pos:{widget.get('position')}",
+            "report_id": report_id,
+            "sql_code": sql_code,
+            "report_code": report_code,
+            "report_name": (report or {}).get("ten_bao_cao") or widget.get("title") or sql_code,
+            "widget_title": widget.get("title") or sql_code,
+            "widget_type": widget.get("type"),
+            "filters": filters or {},
+        }
+
+    def _dashboard_cache_result(self, metadata: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not metadata or not hasattr(self.app_repository, "get_dashboard_chart_cache"):
+            return None
+        try:
+            entry = self.app_repository.get_dashboard_chart_cache(metadata["chart_key"])
+        except RuntimeError as error:
+            logger.warning("Cannot read dashboard chart cache %s: %s", metadata.get("chart_key"), error)
+            return None
+        if not entry or entry.get("status") != "success":
+            return None
+        payload = entry.get("payload") if isinstance(entry.get("payload"), dict) else {}
+        if not payload:
+            return None
+        result = json.loads(json.dumps(payload, ensure_ascii=False, default=str))
+        details = result.get("details") if isinstance(result.get("details"), dict) else {}
+        result["details"] = {
+            **details,
+            "dashboard_cache": {
+                "hit": True,
+                "chart_key": entry.get("chart_key"),
+                "refreshed_at": entry.get("refreshed_at"),
+                "expires_at": entry.get("expires_at"),
+            },
+        }
+        result.setdefault("ok", True)
+        result.setdefault("message", "Đã tải dữ liệu biểu đồ từ cache.")
+        return result
+
+    def save_dashboard_chart_cache(
+        self,
+        metadata: dict[str, Any] | None,
+        result: dict[str, Any],
+        *,
+        duration_ms: int | None = None,
+    ) -> bool:
+        if not metadata or not bool(result.get("ok")) or not hasattr(self.app_repository, "upsert_dashboard_chart_cache"):
+            return False
+
+        now = datetime.now(UTC)
+        ttl_seconds = int(getattr(self.internal_api.settings, "dashboard_chart_cache_ttl_seconds", 300) or 300)
+        rows = result.get("rows") if isinstance(result.get("rows"), list) else []
+        entry = {
+            **metadata,
+            "payload": result,
+            "status": "success",
+            "error_message": None,
+            "duration_ms": duration_ms,
+            "row_count": len(rows),
+            "refreshed_at": now.isoformat(timespec="seconds"),
+            "expires_at": (now + timedelta(seconds=max(60, ttl_seconds))).isoformat(timespec="seconds"),
+            "updated_at": now.isoformat(timespec="seconds"),
+        }
+        try:
+            self.app_repository.upsert_dashboard_chart_cache(entry)
+            return True
+        except RuntimeError as error:
+            logger.warning("Cannot save dashboard chart cache %s: %s", metadata.get("chart_key"), error)
+            return False
+
     def run_dashboard_layout_tab(self, *, page_id: str, tab_id: str) -> dict[str, Any]:
         layout_row = self.app_repository.get_dashboard_layout(page_id)
         if not layout_row:
@@ -324,6 +454,7 @@ class DatabaseService:
         widget_results = []
         data_cache: dict[str, dict[str, Any]] = {}
         query_jobs: dict[str, dict[str, Any]] = {}
+        query_cache_metadata: dict[str, dict[str, Any]] = {}
         all_ok = True
         for row in tab.get("grid_layout") or []:
             row_id = row.get("row_id")
@@ -333,14 +464,29 @@ class DatabaseService:
                     continue
                 filters = widget.get("filters") if isinstance(widget.get("filters"), dict) else {}
                 cache_key = self._dashboard_widget_query_key(sql_code, filters, widget.get("report_id"))
-                query_jobs.setdefault(cache_key, {
-                    "ma_bao_cao": sql_code,
-                    "filters": filters,
-                    "page": 1,
-                    "page_size": 20,
-                    "report_id": widget.get("report_id"),
-                    "report_name": widget.get("title"),
-                })
+                cache_metadata = self.dashboard_widget_cache_metadata(
+                    page_id=page_id,
+                    tab_id=tab_id,
+                    row_id=row_id,
+                    widget=widget,
+                    sql_code=sql_code,
+                    filters=filters,
+                )
+                if cache_key not in data_cache:
+                    cached_result = self._dashboard_cache_result(cache_metadata)
+                    if cached_result:
+                        data_cache[cache_key] = cached_result
+                    else:
+                        query_jobs.setdefault(cache_key, {
+                            "ma_bao_cao": sql_code,
+                            "filters": filters,
+                            "page": 1,
+                            "page_size": 50,
+                            "report_id": widget.get("report_id"),
+                            "report_name": widget.get("title"),
+                        })
+                        if cache_metadata:
+                            query_cache_metadata.setdefault(cache_key, cache_metadata)
                 result = data_cache.get(cache_key) or {}
                 all_ok = all_ok and bool(result.get("ok"))
                 widget_results.append({
@@ -362,7 +508,10 @@ class DatabaseService:
                     for key, job in query_jobs.items()
                 }
                 for future in as_completed(future_by_key):
-                    data_cache[future_by_key[future]] = future.result()
+                    cache_key = future_by_key[future]
+                    result = future.result()
+                    data_cache[cache_key] = result
+                    self.save_dashboard_chart_cache(query_cache_metadata.get(cache_key), result)
 
         all_ok = True
         for item in widget_results:

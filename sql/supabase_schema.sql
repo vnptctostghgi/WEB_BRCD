@@ -127,6 +127,38 @@ create table if not exists public.dashboard_layouts (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.dashboard_chart_cache (
+  chart_key text primary key,
+  page_id text not null,
+  tab_id text not null,
+  widget_key text not null,
+  report_id bigint,
+  sql_code text not null,
+  report_code text,
+  report_name text,
+  widget_title text,
+  widget_type text,
+  filters jsonb not null default '{}'::jsonb,
+  payload jsonb not null default '{}'::jsonb,
+  status text not null default 'success' check (status in ('success', 'error', 'refreshing')),
+  error_message text,
+  duration_ms integer,
+  row_count integer not null default 0,
+  refreshed_at timestamptz not null default now(),
+  expires_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists dashboard_chart_cache_report_id_idx
+on public.dashboard_chart_cache (report_id);
+
+create index if not exists dashboard_chart_cache_sql_code_idx
+on public.dashboard_chart_cache (sql_code);
+
+create index if not exists dashboard_chart_cache_expires_at_idx
+on public.dashboard_chart_cache (expires_at);
+
 insert into public.dashboard_layouts (page_id, page_name, layout_json, created_at, updated_at)
 values (
   'DASHBOARD_KINH_DOANH',
@@ -233,9 +265,55 @@ alter table public.work_tasks enable row level security;
 alter table public.login_attempts enable row level security;
 alter table public.sql_reports enable row level security;
 alter table public.dashboard_layouts enable row level security;
+alter table public.dashboard_chart_cache enable row level security;
 
 grant select, insert, update, delete on public.work_tasks to anon, authenticated, service_role;
 grant select, insert, update, delete on public.login_attempts to anon, authenticated, service_role;
 grant select, insert, update, delete on public.sql_reports to anon, authenticated, service_role;
 grant usage, select on sequence public.sql_reports_id_seq to anon, authenticated, service_role;
 grant select, insert, update, delete on public.dashboard_layouts to service_role;
+grant select, insert, update, delete on public.dashboard_chart_cache to service_role;
+grant select on public.dashboard_chart_cache to anon, authenticated;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'dashboard_chart_cache'
+      and policyname = 'backend service can manage dashboard chart cache'
+  ) then
+    create policy "backend service can manage dashboard chart cache"
+    on public.dashboard_chart_cache
+    for all
+    to service_role
+    using (true)
+    with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'dashboard_chart_cache'
+      and policyname = 'anon can read dashboard chart cache'
+  ) then
+    create policy "anon can read dashboard chart cache"
+    on public.dashboard_chart_cache
+    for select
+    to anon
+    using (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'dashboard_chart_cache'
+      and policyname = 'authenticated can read dashboard chart cache'
+  ) then
+    create policy "authenticated can read dashboard chart cache"
+    on public.dashboard_chart_cache
+    for select
+    to authenticated
+    using (true);
+  end if;
+end $$;

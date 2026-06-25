@@ -268,6 +268,29 @@ class AppRepository:
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS dashboard_chart_cache (
+                    chart_key TEXT PRIMARY KEY,
+                    page_id TEXT NOT NULL,
+                    tab_id TEXT NOT NULL,
+                    widget_key TEXT NOT NULL,
+                    report_id INTEGER,
+                    sql_code TEXT NOT NULL,
+                    report_code TEXT,
+                    report_name TEXT,
+                    widget_title TEXT,
+                    widget_type TEXT,
+                    filters_json TEXT NOT NULL DEFAULT '{}',
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    status TEXT NOT NULL DEFAULT 'success',
+                    error_message TEXT,
+                    duration_ms INTEGER,
+                    row_count INTEGER NOT NULL DEFAULT 0,
+                    refreshed_at TEXT NOT NULL,
+                    expires_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS data_regions (
                     code TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -902,6 +925,57 @@ class AppRepository:
         with self.connect() as connection:
             connection.execute("DELETE FROM dashboard_layouts WHERE page_id=?", (page_id,))
 
+    def get_dashboard_chart_cache(self, chart_key: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM dashboard_chart_cache WHERE chart_key=?",
+                (chart_key,),
+            ).fetchone()
+            return self._decode_dashboard_chart_cache(dict(row)) if row else None
+
+    def upsert_dashboard_chart_cache(self, entry: dict[str, Any]) -> None:
+        now = self._now()
+        payload = {
+            **entry,
+            "filters_json": json.dumps(entry.get("filters") or {}, ensure_ascii=False),
+            "payload_json": json.dumps(entry.get("payload") or {}, ensure_ascii=False),
+            "created_at": entry.get("created_at") or now,
+            "updated_at": entry.get("updated_at") or now,
+            "refreshed_at": entry.get("refreshed_at") or now,
+        }
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO dashboard_chart_cache
+                (chart_key, page_id, tab_id, widget_key, report_id, sql_code, report_code, report_name,
+                 widget_title, widget_type, filters_json, payload_json, status, error_message,
+                 duration_ms, row_count, refreshed_at, expires_at, created_at, updated_at)
+                VALUES (:chart_key, :page_id, :tab_id, :widget_key, :report_id, :sql_code, :report_code, :report_name,
+                        :widget_title, :widget_type, :filters_json, :payload_json, :status, :error_message,
+                        :duration_ms, :row_count, :refreshed_at, :expires_at, :created_at, :updated_at)
+                ON CONFLICT(chart_key) DO UPDATE SET
+                  page_id=excluded.page_id,
+                  tab_id=excluded.tab_id,
+                  widget_key=excluded.widget_key,
+                  report_id=excluded.report_id,
+                  sql_code=excluded.sql_code,
+                  report_code=excluded.report_code,
+                  report_name=excluded.report_name,
+                  widget_title=excluded.widget_title,
+                  widget_type=excluded.widget_type,
+                  filters_json=excluded.filters_json,
+                  payload_json=excluded.payload_json,
+                  status=excluded.status,
+                  error_message=excluded.error_message,
+                  duration_ms=excluded.duration_ms,
+                  row_count=excluded.row_count,
+                  refreshed_at=excluded.refreshed_at,
+                  expires_at=excluded.expires_at,
+                  updated_at=excluded.updated_at
+                """,
+                payload,
+            )
+
     def list_work_tasks(self, include_completed: bool = False) -> list[dict[str, Any]]:
         query = "SELECT * FROM work_tasks"
         if not include_completed:
@@ -1013,6 +1087,17 @@ class AppRepository:
         except json.JSONDecodeError:
             layout = {}
         row["layout"] = layout if isinstance(layout, dict) else {}
+        return row
+
+    @staticmethod
+    def _decode_dashboard_chart_cache(row: dict[str, Any]) -> dict[str, Any]:
+        for source_key, target_key in (("filters_json", "filters"), ("payload_json", "payload")):
+            raw_value = row.pop(source_key, None)
+            try:
+                decoded = json.loads(raw_value or "{}")
+            except json.JSONDecodeError:
+                decoded = {}
+            row[target_key] = decoded if isinstance(decoded, dict) else {}
         return row
 
     @staticmethod
