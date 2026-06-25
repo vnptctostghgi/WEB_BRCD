@@ -543,6 +543,7 @@ class SupabaseRepository:
 
     def delete_dashboard_layout(self, page_id: str) -> None:
         self._delete("dashboard_layouts", {"page_id": f"eq.{page_id}"})
+        self._delete("dashboard_chart_cache", {"page_id": f"eq.{page_id}"})
 
     def get_dashboard_chart_cache(self, chart_key: str) -> dict[str, Any] | None:
         rows = self._get("dashboard_chart_cache", {"chart_key": f"eq.{chart_key}", "limit": "1"})
@@ -571,6 +572,16 @@ class SupabaseRepository:
             "updated_at": entry["updated_at"],
         }
         self._upsert("dashboard_chart_cache", payload, "chart_key")
+
+    def list_dashboard_chart_cache_keys(self, page_id: str | None = None) -> list[str]:
+        params = {"select": "chart_key"}
+        if page_id:
+            params["page_id"] = f"eq.{page_id}"
+        rows = self._get("dashboard_chart_cache", params)
+        return [str(row.get("chart_key") or "") for row in rows if row.get("chart_key")]
+
+    def delete_dashboard_chart_cache(self, chart_key: str) -> None:
+        self._delete("dashboard_chart_cache", {"chart_key": f"eq.{chart_key}"})
 
     def _ensure_default_dashboard_layout(self) -> None:
         rows = self._get("dashboard_layouts", {"page_id": f"eq.{DEFAULT_DASHBOARD_PAGE_ID}", "select": "page_id", "limit": "1"})

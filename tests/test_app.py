@@ -473,6 +473,26 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data(monkeypatch) -
         assert cached_data["ok"] is True
         assert cached_data["details"]["dashboard_cache"]["hit"] is True
         assert len(api_calls) == calls_after_cache_fill
+        refresh_result = DatabaseService(routes.InternalApiClient(routes.get_settings()), routes.build_app_repository()).refresh_dashboard_chart_cache(page_id="DASHBOARD_CHECK_JOB")
+        assert refresh_result["deleted_stale"] == 0
+
+        empty_check_layout_payload = {
+            **table_layout_payload,
+            "layout": {
+                "page_id": "DASHBOARD_CHECK_JOB",
+                "tabs": [
+                    {
+                        "tab_id": "tab_check",
+                        "tab_name": "Tab moi",
+                        "order": 1,
+                        "grid_layout": [],
+                    }
+                ],
+            },
+        }
+        assert client.post("/api/admin/dashboard-layouts", json=empty_check_layout_payload).status_code == 200
+        refresh_after_delete = DatabaseService(routes.InternalApiClient(routes.get_settings()), routes.build_app_repository()).refresh_dashboard_chart_cache(page_id="DASHBOARD_CHECK_JOB")
+        assert refresh_after_delete["deleted_stale"] == 1
 
         short_code_report_payload = {
             "ten_bao_cao": "Check_Job_Table",

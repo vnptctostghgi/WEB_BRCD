@@ -28,6 +28,7 @@ def refresh_cache(dry_run: bool = False, page_id: str | None = None, fail_on_err
         f"refreshed={result['refreshed']}, "
         f"failed={result['failed']}, "
         f"skipped={result['skipped']}, "
+        f"deleted_stale={result.get('deleted_stale', 0)}, "
         f"dry_run={result['dry_run']}"
     )
     return 1 if result["failed"] and fail_on_error else 0

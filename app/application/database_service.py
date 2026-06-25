@@ -318,13 +318,18 @@ class DatabaseService:
         settings = getattr(self.internal_api, "settings", None)
         if not bool(getattr(settings, "dashboard_chart_cache_enabled", True)):
             return False
+        if not report:
+            return False
 
         enabled_ids = self._csv_settings(getattr(settings, "dashboard_chart_cache_report_ids", ""))
+        enabled_codes = self._csv_settings(getattr(settings, "dashboard_chart_cache_report_codes", ""))
+        if "*" in enabled_ids or "*" in enabled_codes or (not enabled_ids and not enabled_codes):
+            return True
+
         candidate_id = str((report or {}).get("id") or report_id or "").strip().upper()
         if candidate_id and candidate_id in enabled_ids:
             return True
 
-        enabled_codes = self._csv_settings(getattr(settings, "dashboard_chart_cache_report_codes", ""))
         candidates = [
             sql_code,
             (report or {}).get("ma_bao_cao"),
@@ -428,6 +433,25 @@ class DatabaseService:
             logger.warning("Cannot save dashboard chart cache %s: %s", metadata.get("chart_key"), error)
             return False
 
+    def prune_stale_dashboard_chart_cache(self, active_chart_keys: set[str], page_id: str | None = None) -> int:
+        required_methods = ("list_dashboard_chart_cache_keys", "delete_dashboard_chart_cache")
+        if not all(hasattr(self.app_repository, name) for name in required_methods):
+            return 0
+        try:
+            existing_keys = set(self.app_repository.list_dashboard_chart_cache_keys(page_id=page_id))
+        except RuntimeError as error:
+            logger.warning("Cannot list dashboard chart cache keys: %s", error)
+            return 0
+
+        deleted = 0
+        for chart_key in sorted(existing_keys - active_chart_keys):
+            try:
+                self.app_repository.delete_dashboard_chart_cache(chart_key)
+                deleted += 1
+            except RuntimeError as error:
+                logger.warning("Cannot delete stale dashboard chart cache %s: %s", chart_key, error)
+        return deleted
+
     def iter_cacheable_dashboard_widgets(
         self,
         page_id_filter: str | None = None,
@@ -468,7 +492,9 @@ class DatabaseService:
         skipped = 0
         results: list[dict[str, Any]] = []
         seen_chart_keys: set[str] = set()
-        for metadata, widget in self.iter_cacheable_dashboard_widgets(page_id_filter=page_id):
+        cacheable_widgets = self.iter_cacheable_dashboard_widgets(page_id_filter=page_id)
+        active_chart_keys = {metadata["chart_key"] for metadata, _ in cacheable_widgets}
+        for metadata, widget in cacheable_widgets:
             chart_key = metadata["chart_key"]
             if chart_key in seen_chart_keys:
                 skipped += 1
@@ -508,11 +534,13 @@ class DatabaseService:
                 item["message"] = "Không ghi được cache biểu đồ."
             results.append(item)
 
+        deleted_stale = 0 if dry_run else self.prune_stale_dashboard_chart_cache(active_chart_keys, page_id=page_id)
         return {
             "ok": failed == 0,
             "refreshed": refreshed,
             "failed": failed,
             "skipped": skipped,
+            "deleted_stale": deleted_stale,
             "dry_run": dry_run,
             "results": results,
         }

@@ -924,6 +924,7 @@ class AppRepository:
     def delete_dashboard_layout(self, page_id: str) -> None:
         with self.connect() as connection:
             connection.execute("DELETE FROM dashboard_layouts WHERE page_id=?", (page_id,))
+            connection.execute("DELETE FROM dashboard_chart_cache WHERE page_id=?", (page_id,))
 
     def get_dashboard_chart_cache(self, chart_key: str) -> dict[str, Any] | None:
         with self.connect() as connection:
@@ -975,6 +976,21 @@ class AppRepository:
                 """,
                 payload,
             )
+
+    def list_dashboard_chart_cache_keys(self, page_id: str | None = None) -> list[str]:
+        with self.connect() as connection:
+            if page_id:
+                rows = connection.execute(
+                    "SELECT chart_key FROM dashboard_chart_cache WHERE page_id=?",
+                    (page_id,),
+                ).fetchall()
+            else:
+                rows = connection.execute("SELECT chart_key FROM dashboard_chart_cache").fetchall()
+            return [str(row["chart_key"]) for row in rows]
+
+    def delete_dashboard_chart_cache(self, chart_key: str) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM dashboard_chart_cache WHERE chart_key=?", (chart_key,))
 
     def list_work_tasks(self, include_completed: bool = False) -> list[dict[str, Any]]:
         query = "SELECT * FROM work_tasks"
