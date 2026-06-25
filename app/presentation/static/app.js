@@ -1512,6 +1512,27 @@ function dashboardReportByCode(code) {
   return sqlReports.find((report) => dashboardReportCode(report) === normalizedCode);
 }
 
+function dashboardReportParams(report) {
+  return (report?.cac_tham_so || []).map((param) => String(param || "").trim()).filter(Boolean);
+}
+
+function dashboardFilterValueForParam(filters, param) {
+  if (!filters || typeof filters !== "object" || Array.isArray(filters)) return "";
+  if (Object.prototype.hasOwnProperty.call(filters, param)) return filters[param];
+  const normalizedParam = param.toUpperCase();
+  const matchingKey = Object.keys(filters).find((key) => String(key).trim().toUpperCase() === normalizedParam);
+  return matchingKey ? filters[matchingKey] : "";
+}
+
+function dashboardParamFiltersToText(params, existingFilters = {}) {
+  if (!params.length) return "";
+  const filters = {};
+  params.forEach((param) => {
+    filters[param] = dashboardFilterValueForParam(existingFilters, param);
+  });
+  return JSON.stringify(filters, null, 2);
+}
+
 function dashboardSqlOptions(selectedCode, selectedReportId = null) {
   const normalizedSelectedCode = normalizeDashboardSqlCode(selectedCode);
   const normalizedReportId = selectedReportId === null || selectedReportId === undefined || selectedReportId === "" ? "" : String(selectedReportId);
@@ -1533,7 +1554,7 @@ function dashboardWidgetParamHint(sqlCode) {
   if (!sqlCode) return "Chọn mã SQL từ danh mục Cấu hình báo cáo động.";
   const report = dashboardReportByCode(sqlCode);
   if (!report) return "Mã này chưa có trong Cấu hình báo cáo động. Hãy thêm SQL hoặc đổi sang mã khác.";
-  const params = report.cac_tham_so || [];
+  const params = dashboardReportParams(report);
   return params.length ? `Tham số hỗ trợ: ${params.join(", ")}` : "Báo cáo này không có tham số lọc.";
 }
 
@@ -2008,13 +2029,18 @@ function renderDashboardBuilderRow(row, index) {
     const position = cellIndex + 1;
     const widget = widgetsByPosition.get(position) || { position, type: "bar_chart", title: "", sql_code: "", report_id: null, chart_config: {}, filters: {} };
     const isTextWidget = widget.type === "text_title";
+    const report = dashboardReportByCode(widget.sql_code || "");
+    const params = dashboardReportParams(report);
+    const existingFilters = widget.filters && typeof widget.filters === "object" && !Array.isArray(widget.filters) ? widget.filters : {};
+    const filterText = Object.keys(existingFilters).length ? dashboardFiltersToText(existingFilters) : dashboardParamFiltersToText(params);
+    const showFilterField = !isTextWidget && (params.length || Object.keys(existingFilters).length);
     return `
       <div class="builder-widget-card dashboard-layout-cell" style="${dashboardCellStyle(row.layout_type, cellIndex)}" data-position="${position}">
         <small>Ô ${position}</small>
         <label>Tiêu đề<input class="form-control" name="title" value="${escapeHtml(widget.title || "")}" placeholder="Tên biểu đồ, thẻ hoặc tiêu đề" /></label>
         <label>Loại hiển thị<select class="form-control" name="type">${dashboardWidgetTypeOptions(widget.type)}</select></label>
         <label class="dashboard-sql-field ${isTextWidget ? "hidden" : ""}">Mã SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "", widget.report_id)}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
-        <label class="dashboard-filter-field ${isTextWidget ? "hidden" : ""}">Bộ lọc mặc định<textarea class="form-control dashboard-filter-json" name="filters" rows="3" placeholder='{"LOAIHINH":"58"}&#10;{"MONTH":""}&#10;{"DONVI":"VNPT%"}'>${escapeHtml(dashboardFiltersToText(widget.filters))}</textarea></label>
+        <label class="dashboard-filter-field ${showFilterField ? "" : "hidden"}">Bộ lọc mặc định<textarea class="form-control dashboard-filter-json" name="filters" rows="3" placeholder='{"LOAIHINH":""}'>${escapeHtml(filterText)}</textarea></label>
         ${renderDashboardWidgetAdvancedConfig(widget)}
       </div>
     `;
@@ -2079,6 +2105,19 @@ function applyDashboardSqlSelection(select) {
   }
   const hint = card.querySelector("[data-sql-param-hint]");
   if (hint) hint.textContent = dashboardWidgetParamHint(select.value);
+  const filterField = card.querySelector(".dashboard-filter-field");
+  const filterInput = card.querySelector("[name='filters']");
+  if (filterField && filterInput) {
+    const params = dashboardReportParams(report);
+    if (params.length) {
+      const existingFilters = parseDashboardFilters(filterInput.value || "", false);
+      filterInput.value = dashboardParamFiltersToText(params, existingFilters);
+      filterField.classList.remove("hidden");
+    } else {
+      filterInput.value = "";
+      filterField.classList.add("hidden");
+    }
+  }
   select.dataset.previousCode = select.value;
 }
 
@@ -2990,11 +3029,18 @@ function renderDynamicReportFilters() {
   if (!container || !select) return;
   const report = sqlReports.find((item) => item.ma_bao_cao === select.value);
   if (!report) {
-    container.innerHTML = `<div class="empty-state"><strong>Chưa có tham số</strong><p>Hãy tạo cấu hình SQL trước.</p></div>`;
+    container.innerHTML = "";
+    container.classList.add("hidden");
     return;
   }
-  const params = report.cac_tham_so || [];
-  container.innerHTML = params.length ? params.map((param) => {
+  const params = dashboardReportParams(report);
+  if (!params.length) {
+    container.innerHTML = "";
+    container.classList.add("hidden");
+    return;
+  }
+  container.classList.remove("hidden");
+  container.innerHTML = params.map((param) => {
     const lower = param.toLowerCase();
     if (lower.includes("ngay") || lower.includes("date")) {
       return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter" name="${escapeHtml(param)}" type="date" /></label>`;
@@ -3003,7 +3049,7 @@ function renderDynamicReportFilters() {
       return `<label>${escapeHtml(param)}<select class="form-control dynamic-filter" name="${escapeHtml(param)}"><option value="">Tất cả</option><option value="1">Đang hoạt động</option><option value="0">Không hoạt động</option></select></label>`;
     }
     return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter" name="${escapeHtml(param)}" placeholder="Nhập ${escapeHtml(param)}" /></label>`;
-  }).join("") : `<div class="empty-state"><strong>Không có tham số lọc</strong><p>Báo cáo này sẽ chạy trực tiếp theo SQL đã cấu hình.</p></div>`;
+  }).join("");
 }
 
 async function runDynamicReport() {
