@@ -25,7 +25,7 @@
       };
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=42" />
+    <link rel="stylesheet" href="/static/styles.css?v=43" />
   </head>
   <body class="app-dark min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'themvasuataikhoan' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'xemmatkhaudaluu' in user.permissions }}">
     <svg class="icon-sprite" aria-hidden="true">
@@ -255,17 +255,12 @@
           </div>
           <div id="dashboard-builder-message" class="result hidden mb-4"></div>
           <section class="dashboard-builder-shell">
-            <aside class="data-card dashboard-page-list">
+            <section class="data-card dashboard-page-list">
               <div class="section-heading">
-                <div><p class="eyebrow">Trang</p><h2>Danh sách trang báo cáo</h2></div>
+                <div><p class="eyebrow">Trang báo cáo</p><h2>Chọn trang để thiết kế</h2></div>
               </div>
-              <div class="table-scroll mt-3">
-                <table class="dashboard-page-table">
-                  <thead><tr><th class="table-action-column">Thao tác</th><th>Mã trang</th><th>Tên trang</th></tr></thead>
-                  <tbody id="dashboard-layout-pages"></tbody>
-                </table>
-              </div>
-            </aside>
+              <div class="dashboard-page-grid" id="dashboard-layout-pages"></div>
+            </section>
 
             <section class="dashboard-builder-main">
               <section class="data-card">
@@ -402,6 +397,6 @@
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script src="/static/app.js?v=57"></script>
+    <script src="/static/app.js?v=58"></script>
   </body>
 </html>

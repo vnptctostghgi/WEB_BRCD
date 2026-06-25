@@ -1621,7 +1621,8 @@ async function loadDashboardLayoutPages() {
 
 async function loadDashboardBuilder() {
   const message = $("#dashboard-builder-message");
-  setTableLoading("#dashboard-layout-pages", 3, "Đang tải danh sách trang báo cáo...");
+  const pageList = $("#dashboard-layout-pages");
+  if (pageList) pageList.innerHTML = `<div class="dashboard-empty"><p>Đang tải danh sách trang báo cáo...</p></div>`;
   try {
     const [pagesData, reportsData] = await Promise.all([
       api("/api/admin/dashboard-layout-pages"),
@@ -1718,28 +1719,29 @@ function renderDashboardBuilder() {
 }
 
 function renderDashboardPages() {
-  const table = $("#dashboard-layout-pages");
-  if (!table) return;
+  const container = $("#dashboard-layout-pages");
+  if (!container) return;
   const currentPageId = dashboardBuilderLayout?.page_id || "";
   const hasCurrent = dashboardLayouts.some((page) => page.page_id === currentPageId);
   const rows = [...dashboardLayouts];
   if (currentPageId && !hasCurrent) {
     rows.unshift({ page_id: currentPageId, page_name: dashboardBuilderLayout.page_name, unsaved: true });
   }
-  table.innerHTML = rows.length ? rows.map((page) => `
-    <tr class="${page.page_id === currentPageId ? "active-row" : ""}">
-      <td class="table-action-cell">
-        <div class="action-group">
-          <button class="table-action" data-dashboard-open="${escapeHtml(page.page_id)}" type="button">Mở</button>
-          ${page.unsaved
-            ? `<button class="table-action danger" data-dashboard-purge="${escapeHtml(page.feature_code || "")}" type="button" ${page.feature_code ? "" : "disabled"}>Xóa hẳn</button>`
-            : `<button class="table-action danger" data-dashboard-delete="${escapeHtml(page.page_id)}" type="button">Xóa layout</button>`}
-        </div>
-      </td>
-      <td><strong>${escapeHtml(page.page_id)}</strong>${page.unsaved ? "<small class='cell-note'>Chưa lưu</small>" : ""}</td>
-      <td>${escapeHtml(page.page_name || page.page_id)}</td>
-    </tr>
-  `).join("") : emptyRow(3, "Chưa có trang báo cáo", "Bấm Tạo trang báo cáo để bắt đầu thiết kế.");
+  container.innerHTML = rows.length ? rows.map((page) => `
+    <article class="dashboard-page-card ${page.page_id === currentPageId ? "active" : ""}">
+      <div class="dashboard-page-card-body">
+        <span class="status ${page.unsaved ? "inactive" : "active"}">${page.unsaved ? "Ch?a l?u" : "?? l?u"}</span>
+        <strong>${escapeHtml(page.page_name || page.page_id)}</strong>
+        <code>${escapeHtml(page.page_id)}</code>
+      </div>
+      <div class="action-group dashboard-page-card-actions">
+        <button class="table-action" data-dashboard-open="${escapeHtml(page.page_id)}" type="button">M?</button>
+        ${page.unsaved
+          ? `<button class="table-action danger" data-dashboard-purge="${escapeHtml(page.feature_code || "")}" type="button" ${page.feature_code ? "" : "disabled"}>X?a h?n</button>`
+          : `<button class="table-action danger" data-dashboard-delete="${escapeHtml(page.page_id)}" type="button">X?a layout</button>`}
+      </div>
+    </article>
+  `).join("") : `<div class="dashboard-empty"><h2>Ch?a c? trang b?o c?o</h2><p>B?m T?o trang b?o c?o ?? b?t ??u thi?t k?.</p></div>`;
 }
 
 function renderDashboardBuilderTabs() {
