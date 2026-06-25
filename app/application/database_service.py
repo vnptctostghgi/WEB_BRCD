@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 DEFINE_PATTERN = re.compile(r"^\s*define\s+([A-Za-z][A-Za-z0-9_$#]*)\s*=\s*(.+?)\s*$", re.IGNORECASE)
+IN_LIST_BIND_PATTERN = re.compile(r"\bin\s*\(\s*:([A-Za-z][A-Za-z0-9_$#]*)\s*\)", re.IGNORECASE)
 
 
 class DatabaseService:
@@ -127,7 +128,8 @@ class DatabaseService:
             else:
                 safe_filters[str(key).strip().lstrip(":")] = value
         compiled_sql, define_details = self._compile_define_sql(report["cau_lenh_sql"], safe_filters)
-        executable_filters = self._filters_for_compiled_sql(compiled_sql, safe_filters)
+        compiled_sql, bind_filters = self._expand_in_list_bind_params(compiled_sql, safe_filters)
+        executable_filters = self._filters_for_compiled_sql(compiled_sql, bind_filters)
 
         safe_report_code = (
             self._normalized_report_code(report.get("ma_bao_cao"))
@@ -231,6 +233,54 @@ class DatabaseService:
     @staticmethod
     def _escape_define_value(value: str) -> str:
         return str(value).replace("'", "''")
+
+    @classmethod
+    def _expand_in_list_bind_params(cls, sql: str, filters: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        if not filters:
+            return sql, filters
+
+        filters_by_upper = {
+            str(key).strip().lstrip(":").upper(): (key, value)
+            for key, value in filters.items()
+        }
+        expanded_filters = dict(filters)
+
+        def replace(match: re.Match[str]) -> str:
+            param_name = match.group(1)
+            original = filters_by_upper.get(param_name.upper())
+            if not original:
+                return match.group(0)
+
+            original_key, raw_value = original
+            values = cls._bind_list_values(raw_value)
+            if not values:
+                return match.group(0)
+            if len(values) == 1:
+                expanded_filters[original_key] = values[0]
+                return match.group(0)
+
+            bind_names: list[str] = []
+            for index, value in enumerate(values, start=1):
+                bind_name = f"{param_name}_{index}"
+                expanded_filters[bind_name] = value
+                bind_names.append(f":{bind_name}")
+            return f"IN ({', '.join(bind_names)})"
+
+        return IN_LIST_BIND_PATTERN.sub(replace, sql), expanded_filters
+
+    @staticmethod
+    def _bind_list_values(value: Any) -> list[Any]:
+        if isinstance(value, str):
+            if "," not in value:
+                return []
+            return [part.strip() for part in value.split(",") if part.strip()]
+        if isinstance(value, (list, tuple)):
+            return [
+                item.strip() if isinstance(item, str) else item
+                for item in value
+                if str(item).strip()
+            ]
+        return []
 
     @staticmethod
     def _filters_for_compiled_sql(sql: str, filters: dict[str, Any]) -> dict[str, Any]:

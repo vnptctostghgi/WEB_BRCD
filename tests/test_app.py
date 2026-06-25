@@ -222,6 +222,26 @@ def test_admin_can_manage_sql_reports_and_run_dynamic_report() -> None:
         assert body["pagination"]["page_size"] == 20
 
 
+def test_dynamic_report_expands_comma_values_for_in_bind_params() -> None:
+    with TestClient(app) as client:
+        login(client)
+        payload = {
+            "ten_bao_cao": "Loai hinh IN test",
+            "ma_bao_cao": "BC_TEST_LOAIHINH_IN",
+            "cau_lenh_sql": "SELECT COUNT(*) AS thuebao FROM V_CHITIET_PTM WHERE loaitb_id in (:LOAIHINH);",
+            "cac_tham_so": ["LOAIHINH"],
+        }
+        assert client.post("/api/admin/sql-reports", json=payload).status_code == 200
+
+        result = client.post(
+            "/api/reports/run",
+            json={"ma_bao_cao": "BC_TEST_LOAIHINH_IN", "filters": {"LOAIHINH": "61,171,271"}, "page": 1, "page_size": 20},
+        )
+
+        assert result.status_code == 200
+        assert result.json()["rows"][0]["THAM_SO"] == "LOAIHINH_1=61, LOAIHINH_2=171, LOAIHINH_3=271"
+
+
 def test_define_sql_is_compiled_with_raw_filter_values() -> None:
     sql = """
 DEFINE p_loaihinh = :LOAIHINH
@@ -252,6 +272,22 @@ def test_compiled_sql_keeps_only_remaining_bind_params() -> None:
     params = {"FROM_DATE": "2026-05-01", "DONVI": "VNPT%"}
 
     assert DatabaseService._filters_for_compiled_sql(sql, params) == {"FROM_DATE": "2026-05-01"}
+
+
+def test_in_bind_param_expands_comma_values() -> None:
+    sql = "SELECT COUNT(*) FROM V_CHITIET_PTM WHERE loaitb_id in (:LOAIHINH) AND trangthaitb_id = :STATUS;"
+    expanded_sql, filters = DatabaseService._expand_in_list_bind_params(
+        sql,
+        {"LOAIHINH": "61,171,271", "STATUS": "1"},
+    )
+
+    assert "loaitb_id IN (:LOAIHINH_1, :LOAIHINH_2, :LOAIHINH_3)" in expanded_sql
+    assert DatabaseService._filters_for_compiled_sql(expanded_sql, filters) == {
+        "LOAIHINH_1": "61",
+        "LOAIHINH_2": "171",
+        "LOAIHINH_3": "271",
+        "STATUS": "1",
+    }
 
 
 def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data(monkeypatch) -> None:
