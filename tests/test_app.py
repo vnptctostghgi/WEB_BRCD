@@ -647,6 +647,14 @@ def test_dashboard_layout_delete_keeps_page_as_unsaved_and_aliases_duplicate_cod
         deleted_page = next(page for page in pages if page["feature_code"] == "dashboarddeleteme")
         assert deleted_page["saved"] is False
         assert deleted_page["unsaved"] is True
+        assert client.delete(f"/api/admin/dashboard-layout-pages/{deleted_page['feature_code']}").status_code == 200
+        purged_pages = client.get("/api/admin/dashboard-layout-pages").json()["pages"]
+        assert not any(page["feature_code"] == "dashboarddeleteme" for page in purged_pages)
+
+        assert client.post("/api/admin/dashboard-layouts", json=layout_payload).status_code == 200
+        saved_pages = client.get("/api/admin/dashboard-layout-pages").json()["pages"]
+        saved_page = next(page for page in saved_pages if page["page_id"] == "DASHBOARD_DELETE_ME")
+        assert client.delete(f"/api/admin/dashboard-layout-pages/{saved_page['feature_code']}").status_code == 400
 
     pages = routes.build_dashboard_layout_pages(
         [

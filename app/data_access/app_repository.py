@@ -651,6 +651,11 @@ class AppRepository:
                 (name, parent, sort_order, code),
             )
 
+    def delete_feature(self, code: str) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM user_permissions WHERE feature_code=?", (code,))
+            connection.execute("DELETE FROM features WHERE code=?", (code,))
+
     def ensure_dashboard_layout_feature(self, page_id: str, page_name: str) -> str:
         code = dashboard_feature_code_for_page(page_id)
         with self.connect() as connection:

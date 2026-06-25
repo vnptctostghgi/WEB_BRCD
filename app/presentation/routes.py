@@ -1013,6 +1013,33 @@ def delete_dashboard_layout(request: Request, page_id: str) -> dict:
     return {"ok": True}
 
 
+@router.delete("/api/admin/dashboard-layout-pages/{feature_code}")
+def purge_unsaved_dashboard_layout_page(request: Request, feature_code: str) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    raw_code = str(feature_code or "").strip()
+    normalized_code = normalize_feature_code(raw_code)
+    features = repository.list_features()
+    feature = next((item for item in features if str(item.get("code") or "") == raw_code), None)
+    if not feature and normalized_code:
+        feature = next((item for item in features if normalize_feature_code(item.get("code")) == normalized_code), None)
+    if not feature:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy mục Dashboard chưa lưu.")
+    code = str(feature.get("code") or "")
+    if code in DASHBOARD_LAYOUT_EXCLUDED_FEATURE_CODES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Không được xóa mục hệ thống.")
+    try:
+        layouts = repository.list_dashboard_layouts()
+    except RuntimeError as error:
+        raise_dashboard_layout_schema_error(error)
+    page = next((item for item in build_dashboard_layout_pages(features, layouts) if item.get("feature_code") == code), None)
+    if not page or page.get("saved"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chỉ xóa hẳn được mục Dashboard đang ở trạng thái Chưa lưu.")
+    repository.delete_feature(code)
+    repository.add_audit_log(actor["username"], "dashboard_layout_page_purged", f"Xóa hẳn mục dashboard chưa lưu {code}")
+    return {"ok": True}
+
+
 @router.get("/api/admin/dashboard-layouts/{page_id}/tabs/{tab_id}/data")
 def load_dashboard_layout_tab_data(request: Request, page_id: str, tab_id: str) -> dict:
     admin_user(request)

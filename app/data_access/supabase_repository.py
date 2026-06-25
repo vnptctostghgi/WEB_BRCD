@@ -367,6 +367,10 @@ class SupabaseRepository:
             "sort_order": sort_order,
         })
 
+    def delete_feature(self, code: str) -> None:
+        self._delete("user_permissions", {"feature_code": f"eq.{code}"})
+        self._delete("features", {"code": f"eq.{code}"})
+
     def ensure_dashboard_layout_feature(self, page_id: str, page_name: str) -> str:
         code = dashboard_feature_code_for_page(page_id)
         existing = self._get("features", {"code": f"eq.{code}", "select": "code", "limit": "1"})

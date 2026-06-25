@@ -1731,7 +1731,9 @@ function renderDashboardPages() {
       <td class="table-action-cell">
         <div class="action-group">
           <button class="table-action" data-dashboard-open="${escapeHtml(page.page_id)}" type="button">Mở</button>
-          <button class="table-action danger" data-dashboard-delete="${escapeHtml(page.page_id)}" type="button" ${page.unsaved ? "disabled" : ""}>Xóa</button>
+          ${page.unsaved
+            ? `<button class="table-action danger" data-dashboard-purge="${escapeHtml(page.feature_code || "")}" type="button" ${page.feature_code ? "" : "disabled"}>Xóa hẳn</button>`
+            : `<button class="table-action danger" data-dashboard-delete="${escapeHtml(page.page_id)}" type="button">Xóa layout</button>`}
         </div>
       </td>
       <td><strong>${escapeHtml(page.page_id)}</strong>${page.unsaved ? "<small class='cell-note'>Chưa lưu</small>" : ""}</td>
@@ -1755,12 +1757,17 @@ function renderDashboardBuilderTabs() {
 function handleDashboardPageAction(event) {
   const openButton = event.target.closest("[data-dashboard-open]");
   const deleteButton = event.target.closest("[data-dashboard-delete]");
+  const purgeButton = event.target.closest("[data-dashboard-purge]");
   if (openButton) {
     openDashboardPage(openButton.dataset.dashboardOpen).catch((error) => showMessage($("#dashboard-builder-message"), error.message, "error"));
     return;
   }
   if (deleteButton) {
     deleteDashboardPage(deleteButton.dataset.dashboardDelete);
+    return;
+  }
+  if (purgeButton) {
+    purgeUnsavedDashboardPage(purgeButton.dataset.dashboardPurge);
   }
 }
 
@@ -1807,6 +1814,24 @@ function handleDashboardBuilderTabClick(event) {
   }
   const tabButton = event.target.closest("[data-tab-id]");
   if (tabButton) switchDashboardBuilderTab(tabButton.dataset.tabId);
+}
+
+async function purgeUnsavedDashboardPage(featureCode) {
+  if (!featureCode || !confirm("Xóa hẳn mục Dashboard chưa lưu này khỏi cây chức năng?")) return;
+  try {
+    await api(`/api/admin/dashboard-layout-pages/${encodeURIComponent(featureCode)}`, { method: "DELETE" });
+    showMessage($("#dashboard-builder-message"), "Đã xóa hẳn mục Dashboard chưa lưu.");
+    await loadDashboardLayoutPages();
+    if (dashboardLayouts.length) {
+      await openDashboardPage(dashboardLayouts[0].page_id);
+    } else {
+      dashboardBuilderLayout = dashboardLayoutTemplate();
+      dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0].tab_id;
+      renderDashboardBuilder();
+    }
+  } catch (error) {
+    showMessage($("#dashboard-builder-message"), error.message, "error");
+  }
 }
 
 function handleDashboardBuilderTabRename(event) {
