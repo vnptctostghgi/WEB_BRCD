@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     dashboard_chart_cache_report_ids: str = "4,7"
     dashboard_chart_cache_report_codes: str = "CHECK_JOB,PTM_HC"
     dashboard_chart_cache_ttl_seconds: int = 300
+    dashboard_chart_cache_auto_refresh_enabled: bool = False
+    dashboard_chart_cache_refresh_interval_seconds: int = 300
 
     supabase_rest_url: str = ""
     supabase_publishable_key: SecretStr = Field(default=SecretStr(""))

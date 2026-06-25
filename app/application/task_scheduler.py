@@ -6,6 +6,8 @@ import threading
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.application.database_service import DatabaseService
+from app.data_access.internal_api_client import InternalApiClient
 from app.application.telegram_notifier import TelegramNotifier
 from app.settings import Settings
 
@@ -111,3 +113,60 @@ class WorkTaskScheduler:
 
 
 work_task_scheduler = WorkTaskScheduler()
+
+
+class DashboardChartCacheScheduler:
+    """Refresh cached dashboard chart payloads on the existing web service."""
+
+    def __init__(self) -> None:
+        self.repository: Any | None = None
+        self.settings: Settings | None = None
+        self.thread: threading.Thread | None = None
+        self.stop_event = threading.Event()
+        self.initial_delay_seconds = 20
+
+    def configure(self, repository: Any, settings: Settings) -> None:
+        self.repository = repository
+        self.settings = settings
+
+    def start(self) -> None:
+        if not self.repository or not self.settings:
+            raise RuntimeError("DashboardChartCacheScheduler chua duoc configure.")
+        if not getattr(self.settings, "dashboard_chart_cache_auto_refresh_enabled", False):
+            return
+        if self.thread and self.thread.is_alive():
+            return
+        self.stop_event.clear()
+        self.thread = threading.Thread(target=self._run_loop, name="dashboard-chart-cache-scheduler", daemon=True)
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=5)
+
+    def _run_loop(self) -> None:
+        if self.stop_event.wait(self.initial_delay_seconds):
+            return
+        while not self.stop_event.is_set():
+            try:
+                result = self.refresh_once()
+                logger.info(
+                    "Dashboard chart cache refresh finished: refreshed=%s failed=%s skipped=%s",
+                    result.get("refreshed"),
+                    result.get("failed"),
+                    result.get("skipped"),
+                )
+            except Exception:
+                logger.exception("Dashboard chart cache scheduler failed")
+            interval = int(getattr(self.settings, "dashboard_chart_cache_refresh_interval_seconds", 300) or 300)
+            self.stop_event.wait(max(60, interval))
+
+    def refresh_once(self) -> dict[str, Any]:
+        assert self.repository is not None
+        assert self.settings is not None
+        service = DatabaseService(InternalApiClient(self.settings), self.repository)
+        return service.refresh_dashboard_chart_cache()
+
+
+dashboard_chart_cache_scheduler = DashboardChartCacheScheduler()

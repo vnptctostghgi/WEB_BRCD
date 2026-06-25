@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-import time
-from typing import Any, Iterator
 
 from app.application.database_service import DatabaseService
 from app.data_access.internal_api_client import InternalApiClient
@@ -11,74 +9,28 @@ from app.data_access.repository_factory import build_repository
 from app.settings import get_settings
 
 
-def iter_cacheable_widgets(
-    service: DatabaseService,
-    page_id_filter: str | None = None,
-) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
-    layouts = service.app_repository.list_dashboard_layouts()
-    for layout_summary in layouts:
-        page_id = str(layout_summary.get("page_id") or "").strip()
-        if page_id_filter and page_id != page_id_filter:
-            continue
-        layout_row = service.app_repository.get_dashboard_layout(page_id)
-        layout = layout_row.get("layout") if layout_row else {}
-        for tab in layout.get("tabs") if isinstance(layout.get("tabs"), list) else []:
-            tab_id = str(tab.get("tab_id") or "").strip()
-            for row in tab.get("grid_layout") or []:
-                row_id = row.get("row_id")
-                for widget in row.get("widgets") or []:
-                    sql_code = str(widget.get("sql_code") or "").strip().upper()
-                    if not sql_code:
-                        continue
-                    filters = widget.get("filters") if isinstance(widget.get("filters"), dict) else {}
-                    metadata = service.dashboard_widget_cache_metadata(
-                        page_id=page_id,
-                        tab_id=tab_id,
-                        row_id=row_id,
-                        widget=widget,
-                        sql_code=sql_code,
-                        filters=filters,
-                    )
-                    if metadata:
-                        yield metadata, widget
-
-
 def refresh_cache(dry_run: bool = False, page_id: str | None = None, fail_on_error: bool = False) -> int:
     settings = get_settings()
     repository = build_repository(settings)
     service = DatabaseService(InternalApiClient(settings), repository)
 
-    refreshed = 0
-    failed = 0
-    seen_chart_keys: set[str] = set()
-    for metadata, widget in iter_cacheable_widgets(service, page_id_filter=page_id):
-        chart_key = metadata["chart_key"]
-        if chart_key in seen_chart_keys:
-            continue
-        seen_chart_keys.add(chart_key)
-
-        started = time.perf_counter()
-        result = service.run_dynamic_report(
-            ma_bao_cao=metadata["sql_code"],
-            filters=metadata.get("filters") or {},
-            page=1,
-            page_size=50,
-            report_id=metadata.get("report_id"),
-            report_name=metadata.get("report_name") or widget.get("title"),
+    result = service.refresh_dashboard_chart_cache(page_id=page_id, dry_run=dry_run)
+    for item in result["results"]:
+        prefix = "OK" if item["ok"] else "ERROR"
+        print(
+            f"{prefix} {item['report_name']} [{item['chart_key']}]: "
+            f"{item['row_count']} rows in {item['duration_ms']} ms"
         )
-        duration_ms = int((time.perf_counter() - started) * 1000)
-        label = f"{metadata.get('report_name') or metadata['sql_code']} [{chart_key}]"
-        if not result.get("ok"):
-            failed += 1
-            print(f"ERROR {label}: {result.get('message')}")
-            continue
-        if not dry_run:
-            service.save_dashboard_chart_cache(metadata, result, duration_ms=duration_ms)
-        refreshed += 1
-        print(f"OK {label}: {len(result.get('rows') or [])} rows in {duration_ms} ms")
-
-    print(f"Summary: refreshed={refreshed}, failed={failed}, dry_run={dry_run}")
-    return 1 if failed and fail_on_error else 0
+        if not item["ok"]:
+            print(f"  {item.get('message')}")
+    print(
+        "Summary: "
+        f"refreshed={result['refreshed']}, "
+        f"failed={result['failed']}, "
+        f"skipped={result['skipped']}, "
+        f"dry_run={result['dry_run']}"
+    )
+    return 1 if result["failed"] and fail_on_error else 0
 
 
 def main() -> int:

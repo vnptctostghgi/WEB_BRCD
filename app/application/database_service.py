@@ -428,6 +428,95 @@ class DatabaseService:
             logger.warning("Cannot save dashboard chart cache %s: %s", metadata.get("chart_key"), error)
             return False
 
+    def iter_cacheable_dashboard_widgets(
+        self,
+        page_id_filter: str | None = None,
+    ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+        widgets: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        layouts = self.app_repository.list_dashboard_layouts()
+        for layout_summary in layouts:
+            page_id = str(layout_summary.get("page_id") or "").strip()
+            if page_id_filter and page_id != page_id_filter:
+                continue
+            layout_row = self.app_repository.get_dashboard_layout(page_id)
+            layout = layout_row.get("layout") if layout_row else {}
+            tabs = layout.get("tabs") if isinstance(layout.get("tabs"), list) else []
+            for tab in tabs:
+                tab_id = str(tab.get("tab_id") or "").strip()
+                for row in tab.get("grid_layout") or []:
+                    row_id = row.get("row_id")
+                    for widget in row.get("widgets") or []:
+                        sql_code = str(widget.get("sql_code") or "").strip().upper()
+                        if not sql_code:
+                            continue
+                        filters = widget.get("filters") if isinstance(widget.get("filters"), dict) else {}
+                        metadata = self.dashboard_widget_cache_metadata(
+                            page_id=page_id,
+                            tab_id=tab_id,
+                            row_id=row_id,
+                            widget=widget,
+                            sql_code=sql_code,
+                            filters=filters,
+                        )
+                        if metadata:
+                            widgets.append((metadata, widget))
+        return widgets
+
+    def refresh_dashboard_chart_cache(self, page_id: str | None = None, dry_run: bool = False) -> dict[str, Any]:
+        refreshed = 0
+        failed = 0
+        skipped = 0
+        results: list[dict[str, Any]] = []
+        seen_chart_keys: set[str] = set()
+        for metadata, widget in self.iter_cacheable_dashboard_widgets(page_id_filter=page_id):
+            chart_key = metadata["chart_key"]
+            if chart_key in seen_chart_keys:
+                skipped += 1
+                continue
+            seen_chart_keys.add(chart_key)
+
+            started = datetime.now(UTC)
+            result = self.run_dynamic_report(
+                ma_bao_cao=metadata["sql_code"],
+                filters=metadata.get("filters") or {},
+                page=1,
+                page_size=50,
+                report_id=metadata.get("report_id"),
+                report_name=metadata.get("report_name") or widget.get("title"),
+            )
+            duration_ms = int((datetime.now(UTC) - started).total_seconds() * 1000)
+            row_count = len(result.get("rows") or []) if isinstance(result.get("rows"), list) else 0
+            item = {
+                "chart_key": chart_key,
+                "report_name": metadata.get("report_name") or metadata["sql_code"],
+                "ok": bool(result.get("ok")),
+                "message": result.get("message"),
+                "row_count": row_count,
+                "duration_ms": duration_ms,
+            }
+            if not result.get("ok"):
+                failed += 1
+                results.append(item)
+                continue
+            if not dry_run and self.save_dashboard_chart_cache(metadata, result, duration_ms=duration_ms):
+                refreshed += 1
+            elif dry_run:
+                refreshed += 1
+            else:
+                failed += 1
+                item["ok"] = False
+                item["message"] = "Không ghi được cache biểu đồ."
+            results.append(item)
+
+        return {
+            "ok": failed == 0,
+            "refreshed": refreshed,
+            "failed": failed,
+            "skipped": skipped,
+            "dry_run": dry_run,
+            "results": results,
+        }
+
     def run_dashboard_layout_tab(self, *, page_id: str, tab_id: str) -> dict[str, Any]:
         layout_row = self.app_repository.get_dashboard_layout(page_id)
         if not layout_row:

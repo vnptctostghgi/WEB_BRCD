@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.application.connection_service import ConnectionService
-from app.application.task_scheduler import work_task_scheduler
+from app.application.task_scheduler import dashboard_chart_cache_scheduler, work_task_scheduler
 from app.application.telegram_notifier import TelegramNotifier
 from app.data_access.repository_factory import build_repository
 from app.presentation.routes import router
@@ -26,9 +26,12 @@ async def lifespan(_: FastAPI):
     ConnectionService(repository, settings).seed_current_connections()
     work_task_scheduler.configure(repository, settings)
     work_task_scheduler.start()
+    dashboard_chart_cache_scheduler.configure(repository, settings)
+    dashboard_chart_cache_scheduler.start()
     try:
         yield
     finally:
+        dashboard_chart_cache_scheduler.stop()
         work_task_scheduler.stop()
 
 
