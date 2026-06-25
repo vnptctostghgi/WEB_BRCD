@@ -579,6 +579,109 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data(monkeypatch) -
         assert result.json()["rows"][0]["THAM_SO"] == "LOAIHINH=58, SYSDATE=SYSDATE, DONVI=VNPT%"
 
 
+def test_dashboard_layout_tab_uses_bulk_chart_cache_for_cached_widgets() -> None:
+    class FakeSettings:
+        dashboard_chart_cache_enabled = True
+        dashboard_chart_cache_report_ids = "*"
+        dashboard_chart_cache_report_codes = "*"
+        dashboard_chart_cache_ttl_seconds = 300
+        dashboard_tab_max_workers = 10
+
+    class FakeInternalApi:
+        settings = FakeSettings()
+
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run_sql_report(self, **kwargs):
+            self.calls.append(kwargs)
+            return {"ok": True, "columns": [], "rows": []}
+
+    class FakeRepository:
+        def __init__(self) -> None:
+            self.bulk_calls = []
+            self.single_reads = []
+            self.layout = {
+                "tabs": [
+                    {
+                        "tab_id": "tab_cache",
+                        "grid_layout": [
+                            {
+                                "row_id": 1,
+                                "widgets": [
+                                    {
+                                        "position": 1,
+                                        "type": "bar_chart",
+                                        "title": "Report A",
+                                        "sql_code": "REPORT_A",
+                                        "report_id": 1,
+                                        "filters": {},
+                                    },
+                                    {
+                                        "position": 2,
+                                        "type": "metric",
+                                        "title": "Report B",
+                                        "sql_code": "REPORT_B",
+                                        "report_id": 2,
+                                        "filters": {"status": "1"},
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+            self.reports = [
+                {"id": 1, "ma_bao_cao": "REPORT_A", "ten_bao_cao": "Report A"},
+                {"id": 2, "ma_bao_cao": "REPORT_B", "ten_bao_cao": "Report B"},
+            ]
+            self.cache_by_key = {}
+            for report, filters in ((self.reports[0], {}), (self.reports[1], {"status": "1"})):
+                chart_key = DatabaseService.dashboard_chart_cache_key(
+                    report_id=report["id"],
+                    sql_code=report["ma_bao_cao"],
+                    filters=filters,
+                    report_code=report["ma_bao_cao"],
+                )
+                self.cache_by_key[chart_key] = {
+                    "chart_key": chart_key,
+                    "status": "success",
+                    "payload": {
+                        "ok": True,
+                        "columns": ["TEN_BAO_CAO"],
+                        "rows": [{"TEN_BAO_CAO": report["ten_bao_cao"]}],
+                    },
+                    "refreshed_at": "2026-06-26T00:00:00+00:00",
+                    "expires_at": "2026-06-26T00:05:00+00:00",
+                }
+
+        def get_dashboard_layout(self, page_id):
+            return {"page_id": page_id, "layout": self.layout}
+
+        def list_sql_reports(self):
+            return self.reports
+
+        def get_dashboard_chart_cache_many(self, chart_keys):
+            self.bulk_calls.append(list(chart_keys))
+            return [self.cache_by_key[key] for key in chart_keys if key in self.cache_by_key]
+
+        def get_dashboard_chart_cache(self, chart_key):
+            self.single_reads.append(chart_key)
+            return self.cache_by_key.get(chart_key)
+
+    internal_api = FakeInternalApi()
+    repository = FakeRepository()
+    result = DatabaseService(internal_api, repository).run_dashboard_layout_tab(page_id="DASHBOARD_CACHE", tab_id="tab_cache")
+
+    assert result["ok"] is True
+    assert len(result["widgets"]) == 2
+    assert len(repository.bulk_calls) == 1
+    assert len(repository.bulk_calls[0]) == 2
+    assert repository.single_reads == []
+    assert internal_api.calls == []
+    assert all(widget["data"]["details"]["dashboard_cache"]["hit"] is True for widget in result["widgets"])
+
+
 def test_dashboard_layout_pages_include_overview_and_reports_not_web_admin() -> None:
     with TestClient(app) as client:
         login(client)

@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 DEFINE_PATTERN = re.compile(r"^\s*define\s+([A-Za-z][A-Za-z0-9_$#]*)\s*=\s*(.+?)\s*$", re.IGNORECASE)
 IN_LIST_BIND_PATTERN = re.compile(r"\bin\s*\(\s*:([A-Za-z][A-Za-z0-9_$#]*)\s*\)", re.IGNORECASE)
+REPORT_NOT_PROVIDED = object()
 
 
 class DatabaseService:
@@ -353,8 +354,10 @@ class DatabaseService:
         widget: dict[str, Any],
         sql_code: str,
         filters: dict[str, Any],
+        report: Any = REPORT_NOT_PROVIDED,
     ) -> dict[str, Any] | None:
-        report = self._find_sql_report(sql_code, report_id=widget.get("report_id"), report_name=widget.get("title"))
+        if report is REPORT_NOT_PROVIDED:
+            report = self._find_sql_report(sql_code, report_id=widget.get("report_id"), report_name=widget.get("title"))
         if not self.dashboard_chart_cache_enabled_for(report=report, sql_code=sql_code, report_id=widget.get("report_id")):
             return None
 
@@ -382,6 +385,9 @@ class DatabaseService:
         except RuntimeError as error:
             logger.warning("Cannot read dashboard chart cache %s: %s", metadata.get("chart_key"), error)
             return None
+        return self._dashboard_cache_result_from_entry(entry)
+
+    def _dashboard_cache_result_from_entry(self, entry: dict[str, Any] | None) -> dict[str, Any] | None:
         if not entry or entry.get("status") != "success":
             return None
         payload = entry.get("payload") if isinstance(entry.get("payload"), dict) else {}
@@ -401,6 +407,66 @@ class DatabaseService:
         result.setdefault("ok", True)
         result.setdefault("message", "Đã tải dữ liệu biểu đồ từ cache.")
         return result
+
+    def _dashboard_cache_results_by_key(self, metadata_by_query_key: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        if not metadata_by_query_key:
+            return {}
+        if not hasattr(self.app_repository, "get_dashboard_chart_cache_many"):
+            return {
+                query_key: result
+                for query_key, metadata in metadata_by_query_key.items()
+                if (result := self._dashboard_cache_result(metadata))
+            }
+
+        chart_keys = [metadata["chart_key"] for metadata in metadata_by_query_key.values()]
+        try:
+            entries = self.app_repository.get_dashboard_chart_cache_many(chart_keys)
+        except RuntimeError as error:
+            logger.warning("Cannot read dashboard chart cache in bulk: %s", error)
+            return {}
+
+        entry_by_chart_key = {entry.get("chart_key"): entry for entry in entries}
+        results: dict[str, dict[str, Any]] = {}
+        for query_key, metadata in metadata_by_query_key.items():
+            result = self._dashboard_cache_result_from_entry(entry_by_chart_key.get(metadata["chart_key"]))
+            if result:
+                results[query_key] = result
+        return results
+
+    @staticmethod
+    def _widget_report_id(widget: dict[str, Any]) -> int | None:
+        raw_report_id = widget.get("report_id")
+        if raw_report_id in (None, ""):
+            return None
+        try:
+            return int(raw_report_id)
+        except (TypeError, ValueError):
+            return None
+
+    def _dashboard_reports_by_id(self, tabs: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+        report_ids: set[int] = set()
+        for tab in tabs:
+            for row in tab.get("grid_layout") or []:
+                for widget in row.get("widgets") or []:
+                    report_id = self._widget_report_id(widget)
+                    if report_id is not None:
+                        report_ids.add(report_id)
+        if not report_ids:
+            return {}
+        try:
+            reports = self.app_repository.list_sql_reports()
+        except RuntimeError as error:
+            logger.warning("Cannot load SQL report metadata for dashboard cache: %s", error)
+            return {}
+        reports_by_id: dict[int, dict[str, Any]] = {}
+        for report in reports:
+            try:
+                report_id = int(report.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if report_id in report_ids:
+                reports_by_id[report_id] = report
+        return reports_by_id
 
     def save_dashboard_chart_cache(
         self,
@@ -465,6 +531,7 @@ class DatabaseService:
             layout_row = self.app_repository.get_dashboard_layout(page_id)
             layout = layout_row.get("layout") if layout_row else {}
             tabs = layout.get("tabs") if isinstance(layout.get("tabs"), list) else []
+            reports_by_id = self._dashboard_reports_by_id(tabs)
             for tab in tabs:
                 tab_id = str(tab.get("tab_id") or "").strip()
                 for row in tab.get("grid_layout") or []:
@@ -474,6 +541,7 @@ class DatabaseService:
                         if not sql_code:
                             continue
                         filters = widget.get("filters") if isinstance(widget.get("filters"), dict) else {}
+                        report_id = self._widget_report_id(widget)
                         metadata = self.dashboard_widget_cache_metadata(
                             page_id=page_id,
                             tab_id=tab_id,
@@ -481,6 +549,7 @@ class DatabaseService:
                             widget=widget,
                             sql_code=sql_code,
                             filters=filters,
+                            report=reports_by_id.get(report_id) if report_id is not None else REPORT_NOT_PROVIDED,
                         )
                         if metadata:
                             widgets.append((metadata, widget))
@@ -572,6 +641,7 @@ class DatabaseService:
         data_cache: dict[str, dict[str, Any]] = {}
         query_jobs: dict[str, dict[str, Any]] = {}
         query_cache_metadata: dict[str, dict[str, Any]] = {}
+        reports_by_id = self._dashboard_reports_by_id([tab])
         all_ok = True
         for row in tab.get("grid_layout") or []:
             row_id = row.get("row_id")
@@ -581,6 +651,7 @@ class DatabaseService:
                     continue
                 filters = widget.get("filters") if isinstance(widget.get("filters"), dict) else {}
                 cache_key = self._dashboard_widget_query_key(sql_code, filters, widget.get("report_id"))
+                report_id = self._widget_report_id(widget)
                 cache_metadata = self.dashboard_widget_cache_metadata(
                     page_id=page_id,
                     tab_id=tab_id,
@@ -588,22 +659,18 @@ class DatabaseService:
                     widget=widget,
                     sql_code=sql_code,
                     filters=filters,
+                    report=reports_by_id.get(report_id) if report_id is not None else REPORT_NOT_PROVIDED,
                 )
-                if cache_key not in data_cache:
-                    cached_result = self._dashboard_cache_result(cache_metadata)
-                    if cached_result:
-                        data_cache[cache_key] = cached_result
-                    else:
-                        query_jobs.setdefault(cache_key, {
-                            "ma_bao_cao": sql_code,
-                            "filters": filters,
-                            "page": 1,
-                            "page_size": 50,
-                            "report_id": widget.get("report_id"),
-                            "report_name": widget.get("title"),
-                        })
-                        if cache_metadata:
-                            query_cache_metadata.setdefault(cache_key, cache_metadata)
+                query_jobs.setdefault(cache_key, {
+                    "ma_bao_cao": sql_code,
+                    "filters": filters,
+                    "page": 1,
+                    "page_size": 50,
+                    "report_id": widget.get("report_id"),
+                    "report_name": widget.get("title"),
+                })
+                if cache_metadata:
+                    query_cache_metadata.setdefault(cache_key, cache_metadata)
                 result = data_cache.get(cache_key) or {}
                 all_ok = all_ok and bool(result.get("ok"))
                 widget_results.append({
@@ -615,6 +682,10 @@ class DatabaseService:
                     "data": result,
                     "_cache_key": cache_key,
                 })
+
+        data_cache.update(self._dashboard_cache_results_by_key(query_cache_metadata))
+        for cache_key in data_cache:
+            query_jobs.pop(cache_key, None)
 
         if query_jobs:
             configured_workers = getattr(self.internal_api.settings, "dashboard_tab_max_workers", 10)

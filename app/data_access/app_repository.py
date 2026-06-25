@@ -934,6 +934,18 @@ class AppRepository:
             ).fetchone()
             return self._decode_dashboard_chart_cache(dict(row)) if row else None
 
+    def get_dashboard_chart_cache_many(self, chart_keys: list[str]) -> list[dict[str, Any]]:
+        keys = [str(key) for key in chart_keys if str(key)]
+        if not keys:
+            return []
+        placeholders = ",".join("?" for _ in keys)
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM dashboard_chart_cache WHERE chart_key IN ({placeholders})",
+                keys,
+            ).fetchall()
+            return [self._decode_dashboard_chart_cache(dict(row)) for row in rows]
+
     def upsert_dashboard_chart_cache(self, entry: dict[str, Any]) -> None:
         now = self._now()
         payload = {

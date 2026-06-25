@@ -549,6 +549,15 @@ class SupabaseRepository:
         rows = self._get("dashboard_chart_cache", {"chart_key": f"eq.{chart_key}", "limit": "1"})
         return self._decode_dashboard_chart_cache(rows[0]) if rows else None
 
+    def get_dashboard_chart_cache_many(self, chart_keys: list[str]) -> list[dict[str, Any]]:
+        keys = [str(key) for key in chart_keys if str(key)]
+        if not keys:
+            return []
+        rows = self._get("dashboard_chart_cache", {
+            "chart_key": self._in_filter(keys),
+        })
+        return [self._decode_dashboard_chart_cache(row) for row in rows]
+
     def upsert_dashboard_chart_cache(self, entry: dict[str, Any]) -> None:
         payload = {
             "chart_key": entry["chart_key"],
@@ -750,6 +759,14 @@ class SupabaseRepository:
     def _next_id(self, table: str) -> int:
         rows = self._get(table, {"select": "id", "order": "id.desc", "limit": "1"})
         return int(rows[0]["id"]) + 1 if rows else 1
+
+    @staticmethod
+    def _in_filter(values: list[str]) -> str:
+        escaped_values = [
+            '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+            for value in values
+        ]
+        return f"in.({','.join(escaped_values)})"
 
     @staticmethod
     def _now() -> str:
