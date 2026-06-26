@@ -2608,6 +2608,13 @@ function dashboardChartPrimaryValues(chartData) {
   return chartData.values || chartData.barValues || chartData.lineValues || [];
 }
 
+function dashboardAxisMax(values) {
+  const finiteValues = (values || []).map(Number).filter(Number.isFinite);
+  if (!finiteValues.length) return 1;
+  const maxValue = Math.max(...finiteValues);
+  return Math.max(1, Math.ceil(maxValue) + 1);
+}
+
 function dashboardInterpolateRgb(start, end, ratio) {
   return start.map((channel, index) => Math.round(channel + (end[index] - channel) * ratio));
 }
@@ -2754,13 +2761,15 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
       tension: .35,
       fill: isLine,
     }];
+    const isHorizontalAxis = widgetType === "horizontal_multi_bar_chart" || widgetType === "bar_chart" && chartData.orientation === "horizontal";
+    const primaryAxisMax = dashboardAxisMax(dashboardChartPrimaryValues(chartData));
     const scales = isPie ? {} : isCombo ? {
       x: { ticks: { color: "#bae6fd", autoSkip: false, maxRotation: 55, minRotation: 0 }, grid: { color: "rgba(125, 211, 252, .1)" } },
-      y: { beginAtZero: true, ticks: { color: "#bae6fd" }, grid: { color: "rgba(125, 211, 252, .12)" } },
-      y1: { beginAtZero: true, position: "right", ticks: { color: "#fde68a" }, grid: { drawOnChartArea: false } },
+      y: { beginAtZero: true, max: dashboardAxisMax(chartData.barValues), ticks: { color: "#bae6fd" }, grid: { color: "rgba(125, 211, 252, .12)" } },
+      y1: { beginAtZero: true, max: dashboardAxisMax(chartData.lineValues), position: "right", ticks: { color: "#fde68a" }, grid: { drawOnChartArea: false } },
     } : {
-      x: { ticks: { color: "#bae6fd", autoSkip: false, maxRotation: 55, minRotation: 0 }, grid: { color: "rgba(125, 211, 252, .1)" } },
-      y: { beginAtZero: true, ticks: { color: "#bae6fd", autoSkip: false }, grid: { color: "rgba(125, 211, 252, .12)" } },
+      x: { beginAtZero: isHorizontalAxis, max: isHorizontalAxis ? primaryAxisMax : undefined, ticks: { color: "#bae6fd", autoSkip: false, maxRotation: 55, minRotation: 0 }, grid: { color: "rgba(125, 211, 252, .1)" } },
+      y: { beginAtZero: true, max: isHorizontalAxis ? undefined : primaryAxisMax, ticks: { color: "#bae6fd", autoSkip: false }, grid: { color: "rgba(125, 211, 252, .12)" } },
     };
     const valueLabelPlugin = {
       id: `dashboardValueLabels-${elementId}`,
@@ -2788,7 +2797,7 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
       type: chartType,
       data: { labels: chartData.labels, datasets },
       options: {
-        indexAxis: widgetType === "horizontal_multi_bar_chart" || widgetType === "bar_chart" && chartData.orientation === "horizontal" ? "y" : "x",
+        indexAxis: isHorizontalAxis ? "y" : "x",
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
