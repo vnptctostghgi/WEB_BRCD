@@ -2891,7 +2891,7 @@ function dashboardAxisMax(values) {
   const finiteValues = (values || []).map(Number).filter(Number.isFinite);
   if (!finiteValues.length) return 1;
   const maxValue = Math.max(...finiteValues);
-  return Math.max(1, Math.ceil(maxValue) + 1);
+  return Math.max(3, Math.ceil(maxValue) + 3);
 }
 
 function dashboardInterpolateRgb(start, end, ratio) {

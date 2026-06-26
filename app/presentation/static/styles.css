@@ -1921,6 +1921,11 @@ p {
   color: #0f172a;
 }
 
+.dashboard-theme-light .runtime-data-card span,
+.dashboard-theme-light .metric-preview span {
+  color: #075985;
+}
+
 .dashboard-theme-light .runtime-text-widget p,
 .dashboard-theme-light .runtime-data-card-note,
 .dashboard-theme-light .metric-preview small {
