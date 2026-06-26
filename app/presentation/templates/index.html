@@ -25,7 +25,7 @@
       };
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=50" />
+    <link rel="stylesheet" href="/static/styles.css?v=51" />
   </head>
   <body class="app-dark min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'themvasuataikhoan' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'xemmatkhaudaluu' in user.permissions }}">
     <svg class="icon-sprite" aria-hidden="true">
@@ -148,15 +148,13 @@
             <section class="data-card" id="dashboard-designed-section">
               <div class="section-heading">
                 <div>
-                  <div class="dashboard-title-row">
-                    <button class="dashboard-theme-toggle" id="dashboard-theme-toggle" type="button" aria-pressed="false" title="Chuyển nền sáng">
-                      <svg class="nav-svg"><use href="#icon-sun"></use></svg><span class="sr-only">Sáng</span>
-                    </button>
-                    <h2 id="dashboard-viewer-title">Dashboard</h2>
-                  </div>
+                  <h2 id="dashboard-viewer-title">Dashboard</h2>
                   <p id="dashboard-viewer-loaded-at">Dữ liệu được lấy vào lúc: Chưa tải</p>
                 </div>
                 <div class="dashboard-viewer-actions">
+                  <button class="dashboard-theme-toggle" id="dashboard-theme-toggle" type="button" aria-pressed="false" title="Chuyển nền sáng">
+                    <svg class="nav-svg"><use href="#icon-sun"></use></svg><span class="sr-only">Sáng</span>
+                  </button>
                   <button class="btn-secondary" id="refresh-dashboard-viewer-tab" type="button"><span class="button-label">Tải lại Tab</span><span class="spinner"></span></button>
                 </div>
               </div>

@@ -1563,18 +1563,18 @@ p {
   }
 }
 
-.dashboard-linked-tools,
-.dashboard-viewer-actions {
+.dashboard-linked-tools {
   display: grid;
   gap: .75rem;
   margin-top: 1rem;
   min-width: 0;
 }
 
-.dashboard-title-row {
+.dashboard-viewer-actions {
   display: flex;
   align-items: center;
-  gap: .6rem;
+  justify-content: flex-end;
+  gap: .55rem;
   min-width: 0;
 }
 
@@ -1605,12 +1605,6 @@ p {
     align-items: center;
   }
 
-  .dashboard-viewer-actions {
-    grid-template-columns: auto;
-    align-items: end;
-    justify-content: end;
-    margin-top: 0;
-  }
 }
 
 .builder-tabs-wrap,
@@ -1905,14 +1899,6 @@ p {
   background: rgba(14, 165, 233, .28);
 }
 
-.dashboard-theme-light {
-  border-color: rgba(14, 116, 144, .34);
-  background: #f8fafc;
-  color: #0f172a;
-}
-
-.dashboard-theme-light .section-heading h2,
-.dashboard-theme-light #dashboard-viewer-title,
 .dashboard-theme-light .runtime-widget-card h3,
 .dashboard-theme-light .runtime-text-widget h2,
 .dashboard-theme-light .runtime-data-card-value,
@@ -1920,7 +1906,6 @@ p {
   color: #0f172a;
 }
 
-.dashboard-theme-light #dashboard-viewer-loaded-at,
 .dashboard-theme-light .runtime-text-widget p,
 .dashboard-theme-light .runtime-data-card-note,
 .dashboard-theme-light .metric-preview small {
