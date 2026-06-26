@@ -367,29 +367,80 @@ class SupabaseRepository:
             "sort_order": sort_order,
         })
 
+    def create_menu_feature(self, name: str) -> dict[str, Any]:
+        menu_name = name.strip()
+        if not menu_name:
+            raise ValueError("Tên menu không được để trống.")
+        base_code = normalize_feature_code(menu_name) or "menu"
+        rows = self._get("features", {"select": "code"})
+        existing_codes = {str(row.get("code") or "") for row in rows}
+        existing_normalized_codes = {normalize_feature_code(code) for code in existing_codes}
+        code = base_code
+        suffix = 2
+        while code in existing_codes or normalize_feature_code(code) in existing_normalized_codes:
+            code = f"{base_code}{suffix}"
+            suffix += 1
+        root_rows = self._get("features", {"parent_code": "is.null", "select": "sort_order"})
+        max_order = max([int(row.get("sort_order") or 0) for row in root_rows] or [0])
+        feature = self._insert("features", {
+            "code": code,
+            "name": menu_name,
+            "parent_code": None,
+            "sort_order": max_order + 10,
+        })
+        admin_users = self._get("users", {"role": "eq.admin", "select": "id"})
+        if admin_users:
+            self._post(
+                "user_permissions",
+                [{"user_id": int(user["id"]), "feature_code": code} for user in admin_users],
+                {"Prefer": "resolution=ignore-duplicates,return=minimal"},
+            )
+        return feature
+
     def delete_feature(self, code: str) -> None:
         self._delete("user_permissions", {"feature_code": f"eq.{code}"})
         self._delete("features", {"code": f"eq.{code}"})
 
-    def ensure_dashboard_layout_feature(self, page_id: str, page_name: str) -> str:
+    def ensure_dashboard_layout_feature(self, page_id: str, page_name: str, parent_code: str | None = None) -> str:
         code = dashboard_feature_code_for_page(page_id)
-        existing = self._get("features", {"code": f"eq.{code}", "select": "code", "limit": "1"})
+        selected_parent = None
+        if parent_code is not None:
+            selected_parent = normalize_feature_code(parent_code) or "baocaomoi"
+        existing = self._get("features", {"code": f"eq.{code}", "select": "code,parent_code", "limit": "1"})
         existing_code = existing[0]["code"] if existing else None
+        existing_parent = existing[0].get("parent_code") if existing else None
         if not existing_code:
-            for row in self._get("features", {"select": "code"}):
+            for row in self._get("features", {"select": "code,parent_code"}):
                 if normalize_feature_code(row.get("code")) == code:
                     existing_code = row["code"]
+                    existing_parent = row.get("parent_code")
                     break
         if existing_code:
-            self._patch("features", {"code": f"eq.{existing_code}"}, {"name": page_name})
+            if selected_parent is not None and selected_parent == existing_code:
+                raise ValueError("Mục menu cha không được trùng với layout đang lưu.")
+            if selected_parent is None:
+                self._patch("features", {"code": f"eq.{existing_code}"}, {"name": page_name})
+            elif selected_parent != existing_parent:
+                siblings = self._get("features", {"parent_code": f"eq.{selected_parent}", "select": "sort_order"})
+                max_order = max([int(row.get("sort_order") or 0) for row in siblings] or [0])
+                self._patch("features", {"code": f"eq.{existing_code}"}, {
+                    "name": page_name,
+                    "parent_code": selected_parent,
+                    "sort_order": max_order + 10,
+                })
+            else:
+                self._patch("features", {"code": f"eq.{existing_code}"}, {"name": page_name, "parent_code": selected_parent})
             code = existing_code
         else:
-            siblings = self._get("features", {"parent_code": "eq.baocaomoi", "select": "sort_order"})
-            max_order = max([int(row.get("sort_order") or 0) for row in siblings] or [35])
+            selected_parent = selected_parent or "baocaomoi"
+            if selected_parent == code:
+                raise ValueError("Mục menu cha không được trùng với layout đang lưu.")
+            siblings = self._get("features", {"parent_code": f"eq.{selected_parent}", "select": "sort_order"})
+            max_order = max([int(row.get("sort_order") or 0) for row in siblings] or [0])
             self._insert("features", {
                 "code": code,
                 "name": page_name,
-                "parent_code": "baocaomoi",
+                "parent_code": selected_parent,
                 "sort_order": max_order + 10,
             })
         admin_users = self._get("users", {"role": "eq.admin", "select": "id"})
@@ -525,7 +576,7 @@ class SupabaseRepository:
         rows = self._get("dashboard_layouts", {"page_id": f"eq.{page_id}", "limit": "1"})
         return self._decode_dashboard_layout(rows[0]) if rows else None
 
-    def save_dashboard_layout(self, page_id: str, page_name: str, layout: dict[str, Any]) -> str:
+    def save_dashboard_layout(self, page_id: str, page_name: str, layout: dict[str, Any], parent_code: str | None = None) -> str:
         now = self._now()
         existing = self.get_dashboard_layout(page_id)
         payload = {
@@ -536,10 +587,10 @@ class SupabaseRepository:
         }
         if existing:
             self._patch("dashboard_layouts", {"page_id": f"eq.{page_id}"}, payload)
-            return self.ensure_dashboard_layout_feature(page_id, page_name)
+            return self.ensure_dashboard_layout_feature(page_id, page_name, parent_code)
         payload["created_at"] = now
         self._insert("dashboard_layouts", payload)
-        return self.ensure_dashboard_layout_feature(page_id, page_name)
+        return self.ensure_dashboard_layout_feature(page_id, page_name, parent_code)
 
     def delete_dashboard_layout(self, page_id: str) -> None:
         self._delete("dashboard_layouts", {"page_id": f"eq.{page_id}"})

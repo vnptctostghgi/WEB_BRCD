@@ -753,6 +753,48 @@ def test_dashboard_layout_pages_include_overview_and_reports_not_web_admin() -> 
         assert refreshed_admin_feature["parent_code"] == "quantriweb"
 
 
+def test_admin_can_create_root_menu_and_assign_dashboard_layout_to_it() -> None:
+    with TestClient(app) as client:
+        login(client)
+        menu_response = client.post("/api/admin/features/menu", json={"name": "Menu doanh thu"})
+        assert menu_response.status_code == 200
+        menu_feature = menu_response.json()["feature"]
+        assert menu_feature["code"] == "menudoanhthu"
+        assert menu_feature["parent_code"] is None
+
+        layout_payload = {
+            "page_id": "DASHBOARD_MENU_CHILD",
+            "page_name": "Dashboard menu con",
+            "parent_code": menu_feature["code"],
+            "layout": {
+                "tabs": [
+                    {
+                        "tab_id": "tab_menu_child",
+                        "tab_name": "Menu con",
+                        "grid_layout": [
+                            {"row_id": 1, "layout_type": "2_columns", "widgets": []},
+                        ],
+                    }
+                ],
+            },
+        }
+        saved = client.post("/api/admin/dashboard-layouts", json=layout_payload)
+        assert saved.status_code == 200
+        assert saved.json()["parent_code"] == menu_feature["code"]
+
+        features = client.get("/api/admin/features").json()["features"]
+        layout_feature = next(feature for feature in features if feature["code"] == "dashboardmenuchild")
+        assert layout_feature["parent_code"] == menu_feature["code"]
+
+        pages = client.get("/api/admin/dashboard-layout-pages").json()["pages"]
+        saved_page = next(page for page in pages if page["page_id"] == "DASHBOARD_MENU_CHILD")
+        assert saved_page["parent_code"] == menu_feature["code"]
+
+        detail = client.get("/api/admin/dashboard-layouts/DASHBOARD_MENU_CHILD")
+        assert detail.status_code == 200
+        assert detail.json()["parent_code"] == menu_feature["code"]
+
+
 def test_dashboard_layout_delete_keeps_page_as_unsaved_and_aliases_duplicate_codes() -> None:
     with TestClient(app) as client:
         login(client)

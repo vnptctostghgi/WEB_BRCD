@@ -59,6 +59,13 @@ DASHBOARD_LAYOUT_EXCLUDED_FEATURE_CODES = {
     "new_reports",
     "admin.dashboard_builder",
 }
+DASHBOARD_LAYOUT_PARENT_EXCLUDED_FEATURE_CODES = {
+    "dashboard",
+    "quanlycongviec",
+    "truyvansql",
+    "reports",
+    "new_reports",
+}
 
 
 class LoginPayload(BaseModel):
@@ -151,7 +158,12 @@ class RunReportPayload(BaseModel):
 class DashboardLayoutPayload(BaseModel):
     page_id: str
     page_name: str = ""
+    parent_code: str | None = None
     layout: dict[str, Any] = Field(default_factory=dict)
+
+
+class CreateMenuPayload(BaseModel):
+    name: str
 
 
 class SystemRolePayload(BaseModel):
@@ -380,6 +392,46 @@ def is_dashboard_layout_feature(code: str, parent_by_code: dict[str, str | None]
     )
 
 
+def dashboard_layout_parent_candidates(features: list[dict]) -> list[dict]:
+    candidates: list[dict] = []
+    for feature in features:
+        code = str(feature.get("code") or "")
+        if not code or feature.get("parent_code"):
+            continue
+        if code in DASHBOARD_LAYOUT_PARENT_EXCLUDED_FEATURE_CODES:
+            continue
+        candidates.append(feature)
+    return candidates
+
+
+def validate_dashboard_layout_parent_code(features: list[dict], parent_code: str | None) -> str | None:
+    raw_parent_code = str(parent_code or "").strip()
+    if not raw_parent_code:
+        return None
+    normalized_parent_code = normalize_feature_code(raw_parent_code)
+    selected_feature = next((feature for feature in features if str(feature.get("code") or "") == raw_parent_code), None)
+    if not selected_feature and normalized_parent_code:
+        selected_feature = next(
+            (feature for feature in features if normalize_feature_code(feature.get("code")) == normalized_parent_code),
+            None,
+        )
+    valid_parent_codes = {str(feature.get("code") or "") for feature in dashboard_layout_parent_candidates(features)}
+    if not selected_feature or str(selected_feature.get("code") or "") not in valid_parent_codes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mục menu cha không hợp lệ.")
+    return str(selected_feature.get("code") or "")
+
+
+def feature_parent_code_for_page(features: list[dict], page_id: str) -> tuple[str, str | None]:
+    feature_code = dashboard_feature_code_for_page(page_id)
+    feature = next((item for item in features if str(item.get("code") or "") == feature_code), None)
+    if not feature:
+        feature = next(
+            (item for item in features if normalize_feature_code(item.get("code")) == normalize_feature_code(feature_code)),
+            None,
+        )
+    return (str(feature.get("code") or feature_code) if feature else feature_code, feature.get("parent_code") if feature else None)
+
+
 def build_dashboard_layout_pages(features: list[dict], layouts: list[dict]) -> list[dict]:
     parent_by_code = {str(feature.get("code") or ""): feature.get("parent_code") for feature in features}
     layout_by_id = {str(layout.get("page_id") or ""): layout for layout in layouts if layout.get("page_id")}
@@ -422,6 +474,7 @@ def build_dashboard_layout_pages(features: list[dict], layouts: list[dict]) -> l
             "layout_page_name": layout.get("page_name") if layout else "",
             "feature_code": code,
             "feature_name": str(feature.get("name") or ""),
+            "parent_code": feature.get("parent_code"),
             "saved": bool(layout),
             "unsaved": not bool(layout),
             "created_at": layout.get("created_at") if layout else None,
@@ -439,6 +492,7 @@ def build_dashboard_layout_pages(features: list[dict], layouts: list[dict]) -> l
             "layout_page_name": layout.get("page_name") or page_id,
             "feature_code": "",
             "feature_name": "",
+            "parent_code": None,
             "saved": True,
             "unsaved": False,
             "created_at": layout.get("created_at"),
@@ -978,13 +1032,20 @@ def navigation(request: Request) -> dict:
 @router.get("/api/admin/dashboard-layouts/{page_id}")
 def get_dashboard_layout(request: Request, page_id: str) -> dict:
     admin_user(request)
+    repository = build_app_repository()
     safe_page_id = normalize_dashboard_code(page_id, "Mã trang")
     try:
-        layout = build_app_repository().get_dashboard_layout(safe_page_id)
+        layout = repository.get_dashboard_layout(safe_page_id)
     except RuntimeError as error:
         raise_dashboard_layout_schema_error(error)
     if not layout:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy trang dashboard.")
+    features = repository.list_features()
+    feature_code, parent_code = feature_parent_code_for_page(features, safe_page_id)
+    layout["feature_code"] = feature_code
+    layout["parent_code"] = parent_code
+    if isinstance(layout.get("layout"), dict):
+        layout["layout"]["parent_code"] = parent_code
     return layout
 
 
@@ -993,12 +1054,19 @@ def save_dashboard_layout(request: Request, payload: DashboardLayoutPayload) -> 
     actor = admin_user(request)
     repository = build_app_repository()
     page_id, page_name, layout = normalize_dashboard_layout(payload)
+    features = repository.list_features()
+    parent_code = validate_dashboard_layout_parent_code(features, payload.parent_code)
     try:
-        feature_code = repository.save_dashboard_layout(page_id, page_name, layout)
+        feature_code = repository.save_dashboard_layout(page_id, page_name, layout, parent_code)
     except RuntimeError as error:
         raise_dashboard_layout_schema_error(error)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     repository.add_audit_log(actor["username"], "dashboard_layout_saved", f"Lưu layout dashboard {page_id}")
-    return {"ok": True, "page_id": page_id, "feature_code": feature_code, "layout": layout}
+    refreshed_features = repository.list_features()
+    feature_code, saved_parent_code = feature_parent_code_for_page(refreshed_features, page_id)
+    layout["parent_code"] = saved_parent_code
+    return {"ok": True, "page_id": page_id, "feature_code": feature_code, "parent_code": saved_parent_code, "layout": layout}
 
 
 @router.delete("/api/admin/dashboard-layouts/{page_id}")
@@ -1277,6 +1345,18 @@ def save_admin_website(request: Request, payload: WebsitePayload) -> dict:
 def features(request: Request) -> dict:
     admin_user(request)
     return {"features": build_app_repository().list_features()}
+
+
+@router.post("/api/admin/features/menu")
+def create_menu_feature(request: Request, payload: CreateMenuPayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    try:
+        feature = repository.create_menu_feature(payload.name)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    repository.add_audit_log(actor["username"], "feature_menu_created", f"Create menu {feature.get('code')}")
+    return {"ok": True, "feature": feature}
 
 
 @router.put("/api/admin/features/layout")

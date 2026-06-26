@@ -674,35 +674,95 @@ class AppRepository:
                 (name, parent, sort_order, code),
             )
 
+    def create_menu_feature(self, name: str) -> dict[str, Any]:
+        menu_name = name.strip()
+        if not menu_name:
+            raise ValueError("Tên menu không được để trống.")
+        base_code = normalize_feature_code(menu_name) or "menu"
+        with self.connect() as connection:
+            existing_rows = connection.execute("SELECT code FROM features").fetchall()
+            existing_codes = {str(row["code"] or "") for row in existing_rows}
+            existing_normalized_codes = {normalize_feature_code(code) for code in existing_codes}
+            code = base_code
+            suffix = 2
+            while code in existing_codes or normalize_feature_code(code) in existing_normalized_codes:
+                code = f"{base_code}{suffix}"
+                suffix += 1
+            max_order = connection.execute(
+                "SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM features WHERE parent_code IS NULL"
+            ).fetchone()["max_order"]
+            connection.execute(
+                """
+                INSERT INTO features (code, name, parent_code, sort_order)
+                VALUES (?, ?, NULL, ?)
+                """,
+                (code, menu_name, int(max_order or 0) + 10),
+            )
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO user_permissions (user_id, feature_code)
+                SELECT id, ? FROM users WHERE role='admin'
+                """,
+                (code,),
+            )
+            row = connection.execute("SELECT * FROM features WHERE code=?", (code,)).fetchone()
+            return dict(row)
+
     def delete_feature(self, code: str) -> None:
         with self.connect() as connection:
             connection.execute("DELETE FROM user_permissions WHERE feature_code=?", (code,))
             connection.execute("DELETE FROM features WHERE code=?", (code,))
 
-    def ensure_dashboard_layout_feature(self, page_id: str, page_name: str) -> str:
+    def ensure_dashboard_layout_feature(self, page_id: str, page_name: str, parent_code: str | None = None) -> str:
         code = dashboard_feature_code_for_page(page_id)
+        selected_parent = None
+        if parent_code is not None:
+            selected_parent = normalize_feature_code(parent_code) or "baocaomoi"
         with self.connect() as connection:
-            existing = connection.execute("SELECT code FROM features WHERE code=?", (code,)).fetchone()
+            existing = connection.execute("SELECT code, parent_code FROM features WHERE code=?", (code,)).fetchone()
             existing_code = existing["code"] if existing else None
+            existing_parent = existing["parent_code"] if existing else None
             if not existing_code:
-                rows = connection.execute("SELECT code FROM features").fetchall()
+                rows = connection.execute("SELECT code, parent_code FROM features").fetchall()
                 for row in rows:
                     if normalize_feature_code(row["code"]) == code:
                         existing_code = row["code"]
+                        existing_parent = row["parent_code"]
                         break
             if existing_code:
-                connection.execute("UPDATE features SET name=? WHERE code=?", (page_name, existing_code))
+                if selected_parent is not None and selected_parent == existing_code:
+                    raise ValueError("Mục menu cha không được trùng với layout đang lưu.")
+                if selected_parent is None:
+                    connection.execute("UPDATE features SET name=? WHERE code=?", (page_name, existing_code))
+                elif selected_parent != existing_parent:
+                    max_order = connection.execute(
+                        "SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM features WHERE parent_code=?",
+                        (selected_parent,),
+                    ).fetchone()["max_order"]
+                    connection.execute(
+                        "UPDATE features SET name=?, parent_code=?, sort_order=? WHERE code=?",
+                        (page_name, selected_parent, int(max_order or 0) + 10, existing_code),
+                    )
+                else:
+                    connection.execute(
+                        "UPDATE features SET name=?, parent_code=? WHERE code=?",
+                        (page_name, selected_parent, existing_code),
+                    )
                 code = existing_code
             else:
+                selected_parent = selected_parent or "baocaomoi"
+                if selected_parent == code:
+                    raise ValueError("Mục menu cha không được trùng với layout đang lưu.")
                 max_order = connection.execute(
-                    "SELECT COALESCE(MAX(sort_order), 35) AS max_order FROM features WHERE parent_code='baocaomoi'"
+                    "SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM features WHERE parent_code=?",
+                    (selected_parent,),
                 ).fetchone()["max_order"]
                 connection.execute(
                     """
                     INSERT INTO features (code, name, parent_code, sort_order)
-                    VALUES (?, ?, 'baocaomoi', ?)
+                    VALUES (?, ?, ?, ?)
                     """,
-                    (code, page_name, int(max_order or 35) + 10),
+                    (code, page_name, selected_parent, int(max_order or 0) + 10),
                 )
             connection.execute(
                 """
@@ -904,7 +964,7 @@ class AppRepository:
             ).fetchone()
             return self._decode_dashboard_layout(dict(row)) if row else None
 
-    def save_dashboard_layout(self, page_id: str, page_name: str, layout: dict[str, Any]) -> str:
+    def save_dashboard_layout(self, page_id: str, page_name: str, layout: dict[str, Any], parent_code: str | None = None) -> str:
         now = self._now()
         payload = json.dumps(layout, ensure_ascii=False)
         with self.connect() as connection:
@@ -919,7 +979,7 @@ class AppRepository:
                 """,
                 (page_id, page_name, payload, now, now),
             )
-        return self.ensure_dashboard_layout_feature(page_id, page_name)
+        return self.ensure_dashboard_layout_feature(page_id, page_name, parent_code)
 
     def delete_dashboard_layout(self, page_id: str) -> None:
         with self.connect() as connection:

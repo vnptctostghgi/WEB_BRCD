@@ -752,8 +752,11 @@ if (role === "admin") {
   $("#save-work-task-button")?.addEventListener("click", () => $("#work-task-form")?.requestSubmit());
   $("#connection-form")?.addEventListener("submit", saveConnection);
   $("#sql-report-form")?.addEventListener("submit", saveSqlReport);
+  $("#create-menu")?.addEventListener("click", createMenu);
+  $("#new-menu-name")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") createMenu();
+  });
   $("#new-dashboard-page")?.addEventListener("click", createDashboardPage);
-  $("#new-dashboard-group")?.addEventListener("click", createDashboardGroup);
   $("#save-dashboard-layout")?.addEventListener("click", (event) => saveDashboardLayout(event.currentTarget));
   $("#refresh-dashboard-sql-reports")?.addEventListener("click", (event) => refreshDashboardSqlReports(event.currentTarget));
   $("#add-dashboard-tab")?.addEventListener("click", addDashboardTab);
@@ -762,6 +765,10 @@ if (role === "admin") {
   $("#refresh-dashboard-preview")?.addEventListener("click", () => loadDashboardPreviewTab(dashboardBuilderActiveTabId, { force: true }));
   $("#dashboard-viewer-page")?.addEventListener("change", (event) => {
     if (event.currentTarget.value) openDashboardViewerLayout(event.currentTarget.value);
+  });
+  $("#dashboard-parent-code")?.addEventListener("change", () => {
+    collectDashboardBuilderStateFromDom();
+    renderDashboardPages();
   });
   $("#dashboard-viewer-tabs")?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-viewer-tab]");
@@ -1044,6 +1051,43 @@ function flattenFeatureTree(nodes, level = 0, rows = []) {
     flattenFeatureTree(node.children, level + 1, rows);
   });
   return rows;
+}
+
+const dashboardParentExcludedFeatureCodes = new Set(["dashboard", "quanlycongviec", "truyvansql", "reports", "new_reports"]);
+
+function dashboardParentMenuCandidates(sourceFeatures = features) {
+  return sortFeaturesForTree((sourceFeatures || []).filter((feature) => {
+    const code = String(feature?.code || "");
+    if (!code || feature.parent_code || dashboardParentExcludedFeatureCodes.has(code)) return false;
+    if (navFeatureConfig[code]?.view) return false;
+    return true;
+  }));
+}
+
+function dashboardDefaultParentCode() {
+  const candidates = dashboardParentMenuCandidates();
+  return candidates.find((feature) => feature.code === "baocaomoi")?.code || candidates[0]?.code || "baocaomoi";
+}
+
+function dashboardParentMenuLabel(code) {
+  const feature = (features || []).find((item) => item.code === code);
+  if (feature?.name) return feature.name;
+  if (code === "baocaomoi") return "B\u00e1o c\u00e1o m\u1edbi";
+  if (code === "quantriweb") return "Qu\u1ea3n tr\u1ecb web";
+  return code || "B\u00e1o c\u00e1o m\u1edbi";
+}
+
+function dashboardParentMenuOptions(selectedCode = "") {
+  const selected = selectedCode || dashboardDefaultParentCode();
+  const candidates = dashboardParentMenuCandidates();
+  const options = candidates.length ? candidates : [{ code: "baocaomoi", name: "B\u00e1o c\u00e1o m\u1edbi" }];
+  if (selected && !options.some((feature) => feature.code === selected)) {
+    options.push({ code: selected, name: dashboardParentMenuLabel(selected) });
+  }
+  return options.map((feature) => {
+    const selectedAttr = feature.code === selected ? " selected" : "";
+    return `<option value="${escapeHtml(feature.code)}"${selectedAttr}>${escapeHtml(feature.name || feature.code)}</option>`;
+  }).join("");
 }
 
 function featureIcon(feature) {
@@ -1336,6 +1380,28 @@ function moveMenuItem(code, direction) {
   renderMenuLayout();
 }
 
+async function createMenu() {
+  const menuNameInput = $("#new-menu-name");
+  const cleanedName = menuNameInput?.value.trim() || "";
+  if (!cleanedName) {
+    showMessage($("#menu-layout-message"), "Nh\u1eadp t\u00ean menu tr\u01b0\u1edbc khi t\u1ea1o.", "error");
+    menuNameInput?.focus();
+    return;
+  }
+  const button = $("#create-menu");
+  if (button) button.disabled = true;
+  try {
+    await api("/api/admin/features/menu", { method: "POST", body: JSON.stringify({ name: cleanedName }) });
+    if (menuNameInput) menuNameInput.value = "";
+    await loadMenuLayout();
+    showMessage($("#menu-layout-message"), "\u0110\u00e3 t\u1ea1o menu. B\u1ea5m L\u01b0u c\u1ea5u tr\u00fac menu \u0111\u1ec3 ch\u1ed1t c\u00e2y menu.");
+  } catch (error) {
+    showMessage($("#menu-layout-message"), error.message, "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 async function loadMenuLayout() {
   features = (await api("/api/admin/features")).features;
   menuLayoutState = features.map((feature) => ({ ...feature }));
@@ -1378,6 +1444,7 @@ function dashboardLayoutTemplate(pageName = "Dashboard Kinh doanh", pageId = "DA
   return {
     page_id: pageId,
     page_name: repairTextEncoding(pageName),
+    parent_code: options.parentCode || dashboardDefaultParentCode(),
     tabs: [
       {
         tab_id: `tab_${Date.now()}`,
@@ -1395,6 +1462,7 @@ function normalizeDashboardLayoutData(layout, pageName = "") {
   return {
     page_id: String(layout?.page_id || "DASHBOARD_KINH_DOANH").trim().toUpperCase(),
     page_name: repairTextEncoding(pageName || layout?.page_name || String(layout?.page_id || "Dashboard Kinh doanh")),
+    parent_code: String(layout?.parent_code || layout?.parentCode || "").trim() || dashboardDefaultParentCode(),
     tabs: Array.isArray(layout?.tabs) ? layout.tabs.map((tab, index) => ({
       tab_id: String(tab.tab_id || `tab_${Date.now()}_${index}`).trim(),
       tab_name: repairTextEncoding(String(tab.tab_name || `Tab ${index + 1}`).trim()),
@@ -1624,12 +1692,14 @@ async function loadDashboardBuilder() {
   const pageList = $("#dashboard-layout-pages");
   if (pageList) pageList.innerHTML = `<div class="dashboard-empty"><p>Đang tải danh sách trang báo cáo...</p></div>`;
   try {
-    const [pagesData, reportsData] = await Promise.all([
+    const [pagesData, reportsData, featuresData] = await Promise.all([
       api("/api/admin/dashboard-layout-pages"),
       api("/api/admin/sql-reports"),
+      api("/api/admin/features"),
     ]);
     dashboardLayouts = pagesData.pages || [];
     sqlReports = reportsData.reports || [];
+    features = featuresData.features || features;
     if (dashboardLayouts.length) {
       await openDashboardPage(dashboardLayouts[0].page_id);
     } else {
@@ -1667,7 +1737,7 @@ async function refreshDashboardSqlReports(button = null) {
 async function openDashboardPage(pageId) {
   const page = dashboardBuilderPageById(pageId);
   if (page && !dashboardBuilderPageIsSaved(page)) {
-    dashboardBuilderLayout = dashboardLayoutTemplate(page.page_name || page.feature_name || page.page_id, page.page_id);
+    dashboardBuilderLayout = dashboardLayoutTemplate(page.page_name || page.feature_name || page.page_id, page.page_id, { parentCode: page.parent_code || dashboardDefaultParentCode() });
     dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0]?.tab_id || "";
     dashboardBuilderLoadedTabs = {};
     renderDashboardBuilder();
@@ -1682,6 +1752,7 @@ async function openDashboardLayout(pageId) {
   const page = dashboardBuilderPageById(pageId);
   dashboardBuilderLayout = normalizeDashboardBuilderLayout(data.layout || {}, data.page_name || "");
   dashboardBuilderLayout.page_name = repairTextEncoding(page?.page_name || data.page_name || dashboardBuilderLayout.page_name);
+  dashboardBuilderLayout.parent_code = page?.parent_code || data.parent_code || data.layout?.parent_code || dashboardBuilderLayout.parent_code || dashboardDefaultParentCode();
   dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0]?.tab_id || "";
   dashboardBuilderLoadedTabs = {};
   renderDashboardBuilder();
@@ -1692,17 +1763,7 @@ function createDashboardPage() {
   const pageName = prompt("Nhập tên trang báo cáo mới:", "Dashboard mới");
   if (pageName === null) return;
   const cleanedName = pageName.trim() || "Dashboard mới";
-  dashboardBuilderLayout = dashboardLayoutTemplate(cleanedName, dashboardPageIdFromName(cleanedName));
-  dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0].tab_id;
-  dashboardBuilderLoadedTabs = {};
-  renderDashboardBuilder();
-}
-
-function createDashboardGroup() {
-  const pageName = prompt("Nhập tên mục cha:", "Nhóm Dashboard mới");
-  if (pageName === null) return;
-  const cleanedName = pageName.trim() || "Nhóm Dashboard mới";
-  dashboardBuilderLayout = dashboardLayoutTemplate(cleanedName, dashboardPageIdFromName(cleanedName), { empty: true });
+  dashboardBuilderLayout = dashboardLayoutTemplate(cleanedName, dashboardPageIdFromName(cleanedName), { parentCode: $("#dashboard-parent-code")?.value || dashboardDefaultParentCode() });
   dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0].tab_id;
   dashboardBuilderLoadedTabs = {};
   renderDashboardBuilder();
@@ -1710,8 +1771,14 @@ function createDashboardGroup() {
 
 function renderDashboardBuilder() {
   if (!dashboardBuilderLayout) return;
+  if (!dashboardBuilderLayout.parent_code) dashboardBuilderLayout.parent_code = dashboardDefaultParentCode();
   $("#dashboard-page-id").value = dashboardBuilderLayout.page_id || "";
   $("#dashboard-page-name").value = dashboardBuilderLayout.page_name || "";
+  const parentSelect = $("#dashboard-parent-code");
+  if (parentSelect) {
+    parentSelect.innerHTML = dashboardParentMenuOptions(dashboardBuilderLayout.parent_code);
+    dashboardBuilderLayout.parent_code = parentSelect.value || dashboardBuilderLayout.parent_code;
+  }
   renderDashboardPages();
   renderDashboardBuilderTabs();
   renderDashboardWorkspace();
@@ -1725,7 +1792,7 @@ function renderDashboardPages() {
   const hasCurrent = dashboardLayouts.some((page) => page.page_id === currentPageId);
   const rows = [...dashboardLayouts];
   if (currentPageId && !hasCurrent) {
-    rows.unshift({ page_id: currentPageId, page_name: dashboardBuilderLayout.page_name, unsaved: true });
+    rows.unshift({ page_id: currentPageId, page_name: dashboardBuilderLayout.page_name, parent_code: dashboardBuilderLayout.parent_code, unsaved: true });
   }
   container.innerHTML = rows.length ? rows.map((page) => `
     <article class="dashboard-page-card ${page.page_id === currentPageId ? "active" : ""}">
@@ -1733,6 +1800,7 @@ function renderDashboardPages() {
         <span class="status ${page.unsaved ? "inactive" : "active"}">${page.unsaved ? "Ch\u01b0a l\u01b0u" : "\u0110\u00e3 l\u01b0u"}</span>
         <strong>${escapeHtml(page.page_name || page.page_id)}</strong>
         <code>${escapeHtml(page.page_id)}</code>
+        <small>Menu: ${escapeHtml(dashboardParentMenuLabel(page.parent_code || dashboardDefaultParentCode()))}</small>
       </div>
       <div class="action-group dashboard-page-card-actions">
         <button class="table-action" data-dashboard-open="${escapeHtml(page.page_id)}" type="button">M\u1edf</button>
@@ -1924,8 +1992,10 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
   if (!dashboardBuilderLayout) return;
   const pageId = $("#dashboard-page-id")?.value.trim().toUpperCase();
   const pageName = $("#dashboard-page-name")?.value.trim();
+  const parentCode = $("#dashboard-parent-code")?.value.trim();
   if (pageId) dashboardBuilderLayout.page_id = pageId;
   if (pageName) dashboardBuilderLayout.page_name = repairTextEncoding(pageName);
+  if (parentCode) dashboardBuilderLayout.parent_code = parentCode;
   const tab = currentDashboardTab();
   if (!tab) return;
   const rows = [...document.querySelectorAll("#dashboard-builder-workspace .builder-row")];
@@ -2230,16 +2300,20 @@ async function saveDashboardLayout(button = null) {
   if (saveButton) setButtonLoading(saveButton, true);
   try {
     collectDashboardBuilderStateFromDom({ strictFilters: true });
+    const parentCode = dashboardBuilderLayout.parent_code || dashboardDefaultParentCode();
     const payload = {
       page_id: dashboardBuilderLayout.page_id,
       page_name: dashboardBuilderLayout.page_name,
+      parent_code: parentCode,
       layout: {
         page_id: dashboardBuilderLayout.page_id,
+        parent_code: parentCode,
         tabs: dashboardBuilderLayout.tabs,
       },
     };
     const response = await api("/api/admin/dashboard-layouts", { method: "POST", body: JSON.stringify(payload) });
-    dashboardBuilderLayout = normalizeDashboardBuilderLayout(response.layout || payload.layout, payload.page_name);
+    dashboardBuilderLayout = normalizeDashboardBuilderLayout({ ...(response.layout || payload.layout), parent_code: response.parent_code || parentCode }, payload.page_name);
+    dashboardBuilderLayout.parent_code = response.parent_code || parentCode;
     await loadDashboardLayoutPages();
     features = [];
     await syncNavigationFromFeatures();

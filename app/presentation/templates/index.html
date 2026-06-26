@@ -224,6 +224,7 @@
         </section>
 
         <section class="app-view" id="view-menu-admin">
+          <div class="action-group mb-4"><input class="form-control" id="new-menu-name" placeholder="T&#234;n menu m&#7899;i" /><button class="btn-secondary" id="create-menu" type="button">T&#7841;o menu</button></div>
           <div class="page-header"><div><p class="eyebrow">Quản trị web</p><h1>Quản trị menu</h1><p class="subtitle">Sắp xếp thứ tự module hoặc di chuyển module sang nhóm chức năng khác.</p></div><button class="btn-primary" id="save-menu-layout" type="button">Lưu cấu trúc menu</button></div>
           <section class="data-card"><div id="menu-layout-message" class="result hidden mb-4"></div><div class="table-scroll"><table><thead><tr><th class="table-action-column">Di chuyển</th><th>Mã chức năng</th><th>Tên hiển thị</th><th>Thuộc nhóm</th></tr></thead><tbody id="menu-layout-table"></tbody></table></div></section>
         </section>
@@ -249,7 +250,6 @@
             <div><p class="eyebrow">Dashboard Builder</p><h1>Thiết kế Layout báo cáo</h1><p class="subtitle">Quản trị viên cấu hình Trang, Tab, Layout và biểu đồ. Nhân viên thường không thể mở chức năng này.</p></div>
             <div class="action-group">
               <button class="btn-secondary" id="new-dashboard-page" type="button">Tạo trang báo cáo</button>
-              <button class="btn-secondary" id="new-dashboard-group" type="button">Tạo mục cha</button>
               <button class="btn-primary" id="save-dashboard-layout" type="button"><span class="button-label">Lưu Layout</span><span class="spinner"></span></button>
             </div>
           </div>
@@ -265,6 +265,7 @@
             <section class="dashboard-builder-main">
               <section class="data-card">
                 <div class="dashboard-page-form">
+                  <label>M&#7909;c menu cha<select class="form-control" id="dashboard-parent-code"></select></label>
                   <label>Mã trang báo cáo<input class="form-control" id="dashboard-page-id" placeholder="DASHBOARD_KINH_DOANH" /></label>
                   <label>Tên trang báo cáo<input class="form-control" id="dashboard-page-name" placeholder="Dashboard Kinh doanh" /></label>
                 </div>
@@ -397,6 +398,6 @@
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script src="/static/app.js?v=59"></script>
+    <script src="/static/app.js?v=61"></script>
   </body>
 </html>
