@@ -77,7 +77,8 @@ const dashboardRuntimeThemes = {
     axisColor: "#f8fafc",
     secondaryAxisColor: "#fef3c7",
     gridColor: "rgba(186, 230, 253, .24)",
-    valueShadow: "rgba(2, 6, 23, .65)",
+    valueShadow: "transparent",
+    labelStroke: "rgba(2, 6, 23, .85)",
     lineColor: "#2563eb",
     lineFill: "rgba(37, 99, 235, .22)",
     pieBorder: "#082f49",
@@ -91,7 +92,8 @@ const dashboardRuntimeThemes = {
     axisColor: "#111827",
     secondaryAxisColor: "#92400e",
     gridColor: "rgba(15, 23, 42, .14)",
-    valueShadow: "rgba(255, 255, 255, .9)",
+    valueShadow: "transparent",
+    labelStroke: "rgba(255, 255, 255, .92)",
     lineColor: "#1d4ed8",
     lineFill: "rgba(29, 78, 216, .14)",
     pieBorder: "#ffffff",
@@ -2701,9 +2703,9 @@ async function copyDashboardChartImage(canvasId) {
 
   let blob = null;
   try {
-    blob = await captureDashboardCardBlob(card);
+    blob = await renderDashboardChartCardBlob(chartCanvas, card, title, canvasId);
   } catch {
-    blob = await renderDashboardChartCardBlob(chartCanvas, card, title);
+    blob = await captureDashboardCardBlob(card);
   }
   if (navigator.clipboard?.write && window.ClipboardItem) {
     try {
@@ -2725,7 +2727,7 @@ async function captureDashboardCardBlob(card) {
   try {
     const canvas = await html2canvas(card, {
       backgroundColor: null,
-      scale: Math.max(2, Math.min(3, window.devicePixelRatio || 1.5)),
+      scale: Math.max(3, Math.min(4, (window.devicePixelRatio || 1.5) * 1.5)),
       useCORS: true,
       logging: false,
     });
@@ -2735,9 +2737,9 @@ async function captureDashboardCardBlob(card) {
   }
 }
 
-async function renderDashboardChartCardBlob(chartCanvas, card, title) {
+async function renderDashboardChartCardBlob(chartCanvas, card, title, canvasId) {
   const theme = dashboardChartTheme();
-  const scale = Math.max(3, Math.min(4, (window.devicePixelRatio || 1) * 2));
+  const scale = Math.max(4, Math.min(5, (window.devicePixelRatio || 1) * 2.5));
   const cardRect = card.getBoundingClientRect();
   const chartRect = chartCanvas.getBoundingClientRect();
   const highResolutionChart = renderHighResolutionChart(canvasId, chartRect.width, chartRect.height, scale);
@@ -2756,7 +2758,7 @@ async function renderDashboardChartCardBlob(chartCanvas, card, title) {
   context.stroke();
 
   context.fillStyle = theme.textColor;
-  context.font = "900 14px Inter, system-ui, sans-serif";
+  context.font = "950 14px Arial, system-ui, sans-serif";
   context.textBaseline = "top";
   context.fillText(title, 12, 12);
 
@@ -3063,12 +3065,13 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
     }];
     const isHorizontalAxis = widgetType === "horizontal_multi_bar_chart" || widgetType === "bar_chart" && chartData.orientation === "horizontal";
     const primaryAxisMax = dashboardAxisMax(dashboardChartPrimaryValues(chartData));
-    const axisTickStyle = { color: theme.axisColor, font: { size: 13, weight: "850" } };
+    const chartFontFamily = "Arial, system-ui, sans-serif";
+    const axisTickStyle = { color: theme.axisColor, font: { size: 15, weight: "700", family: chartFontFamily }, textStrokeColor: theme.labelStroke, textStrokeWidth: 1 };
     const axisGridStyle = { color: theme.gridColor };
     const scales = isPie ? {} : isCombo ? {
       x: { ticks: { ...axisTickStyle, autoSkip: false, maxRotation: 55, minRotation: 0 }, grid: axisGridStyle },
       y: { beginAtZero: true, max: dashboardAxisMax(chartData.barValues), ticks: axisTickStyle, grid: axisGridStyle },
-      y1: { beginAtZero: true, max: dashboardAxisMax(chartData.lineValues), position: "right", ticks: { color: theme.secondaryAxisColor, font: { size: 13, weight: "850" } }, grid: { drawOnChartArea: false } },
+      y1: { beginAtZero: true, max: dashboardAxisMax(chartData.lineValues), position: "right", ticks: { color: theme.secondaryAxisColor, font: { size: 15, weight: "700", family: chartFontFamily }, textStrokeColor: theme.labelStroke, textStrokeWidth: 1 }, grid: { drawOnChartArea: false } },
     } : {
       x: { beginAtZero: isHorizontalAxis, max: isHorizontalAxis ? primaryAxisMax : undefined, ticks: { ...axisTickStyle, autoSkip: false, maxRotation: 55, minRotation: 0 }, grid: axisGridStyle },
       y: { beginAtZero: true, max: isHorizontalAxis ? undefined : primaryAxisMax, ticks: { ...axisTickStyle, autoSkip: false }, grid: axisGridStyle },
@@ -3078,10 +3081,12 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
       afterDatasetsDraw(chart) {
         const { ctx } = chart;
         ctx.save();
-        ctx.font = "900 14px Inter, system-ui, sans-serif";
+        ctx.font = `800 15px ${chartFontFamily}`;
         ctx.fillStyle = theme.textColor;
         ctx.shadowColor = theme.valueShadow;
-        ctx.shadowBlur = 3;
+        ctx.shadowBlur = 0;
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = theme.labelStroke;
         chart.data.datasets.forEach((dataset, datasetIndex) => {
           const meta = chart.getDatasetMeta(datasetIndex);
           if (meta.hidden) return;
@@ -3091,7 +3096,11 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
             const position = point.tooltipPosition();
             const horizontal = chart.options.indexAxis === "y" && dataset.type !== "line";
             ctx.textAlign = horizontal ? "left" : "center";
-            ctx.fillText(formatDashboardNumber(value), position.x + (horizontal ? 8 : 0), position.y - (horizontal ? 0 : 8));
+            const label = formatDashboardNumber(value);
+            const x = position.x + (horizontal ? 8 : 0);
+            const y = position.y - (horizontal ? 0 : 8);
+            ctx.strokeText(label, x, y);
+            ctx.fillText(label, x, y);
           });
         });
         ctx.restore();
@@ -3104,8 +3113,9 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
         indexAxis: isHorizontalAxis ? "y" : "x",
         responsive: true,
         maintainAspectRatio: false,
+        devicePixelRatio: Math.max(2, window.devicePixelRatio || 1),
         plugins: {
-          legend: { display: isPie || isCombo || isMulti, labels: { color: theme.textColor, font: { size: 13, weight: "850" } } },
+          legend: { display: isPie || isCombo || isMulti, labels: { color: theme.textColor, font: { size: 14, weight: "700", family: chartFontFamily } } },
         },
         scales,
       },
