@@ -1902,16 +1902,17 @@ p {
 }
 
 .runtime-chart-box {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   position: relative;
   width: 100%;
-  min-height: var(--chart-height, 260px);
+  height: var(--chart-height, 260px);
+  min-height: 0;
 }
 
 .runtime-chart-box canvas {
   width: 100% !important;
-  height: 100% !important;
-  min-height: var(--chart-height, 260px);
+  height: var(--chart-height, 260px) !important;
+  min-height: 0;
 }
 
 .runtime-widget-empty,
