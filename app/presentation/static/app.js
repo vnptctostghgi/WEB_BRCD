@@ -611,11 +611,12 @@ function renderDashboardViewer() {
   workspace.innerHTML = (tab.grid_layout || []).length ? tab.grid_layout.map((row, rowIndex) => {
     const columns = dashboardLayoutColumnCount(row.layout_type);
     const widgetsByPosition = new Map((row.widgets || []).map((widget) => [Number(widget.position), widget]));
+    const rowChartHeight = dashboardRowChartHeight(row, dataByWidget);
     const cells = Array.from({ length: columns }, (_, cellIndex) => {
       const position = cellIndex + 1;
       const widget = widgetsByPosition.get(position);
       const data = dataByWidget.get(`${row.row_id}:${position}`);
-      return `<div class="dashboard-layout-cell" style="${dashboardCellStyle(row.layout_type, cellIndex)}">${renderRuntimeWidget(widget, data, `dashboard-viewer-${rowIndex}-${position}`)}</div>`;
+      return `<div class="dashboard-layout-cell" style="${dashboardCellStyle(row.layout_type, cellIndex)}">${renderRuntimeWidget(widget, data, `dashboard-viewer-${rowIndex}-${position}`, { chartHeight: rowChartHeight })}</div>`;
     }).join("");
     return `<section class="${dashboardGridClass(row.layout_type)}" style="${dashboardGridStyle(row.layout_type)}">${cells}</section>`;
   }).join("") : `
@@ -2385,11 +2386,12 @@ function renderDashboardPreview() {
   workspace.innerHTML = (tab.grid_layout || []).length ? tab.grid_layout.map((row, rowIndex) => {
     const columns = dashboardLayoutColumnCount(row.layout_type);
     const widgetsByPosition = new Map((row.widgets || []).map((widget) => [Number(widget.position), widget]));
+    const rowChartHeight = dashboardRowChartHeight(row, dataByWidget);
     const cells = Array.from({ length: columns }, (_, cellIndex) => {
       const position = cellIndex + 1;
       const widget = widgetsByPosition.get(position);
       const data = dataByWidget.get(`${row.row_id}:${position}`);
-      return `<div class="dashboard-layout-cell" style="${dashboardCellStyle(row.layout_type, cellIndex)}">${renderRuntimeWidget(widget, data, `dashboard-preview-${rowIndex}-${position}`)}</div>`;
+      return `<div class="dashboard-layout-cell" style="${dashboardCellStyle(row.layout_type, cellIndex)}">${renderRuntimeWidget(widget, data, `dashboard-preview-${rowIndex}-${position}`, { chartHeight: rowChartHeight })}</div>`;
     }).join("");
     return `<section class="${dashboardGridClass(row.layout_type)}" style="${dashboardGridStyle(row.layout_type)}">${cells}</section>`;
   }).join("") : `
@@ -2402,7 +2404,7 @@ function renderDashboardPreview() {
   schedulePendingDashboardCharts();
 }
 
-function renderRuntimeWidget(widget, widgetData, elementId) {
+function renderRuntimeWidget(widget, widgetData, elementId, options = {}) {
   if (!widget) {
     return `<article class="runtime-widget-card"><div class="runtime-widget-empty">Ô trống</div></article>`;
   }
@@ -2422,7 +2424,7 @@ function renderRuntimeWidget(widget, widgetData, elementId) {
   if (widget.type === "data_table") return renderRuntimeTableWidget(title, result);
   if (widget.type === "metric") return renderRuntimeMetricWidget(title, result, widget.sql_code);
   if (widget.type === "data_card") return renderRuntimeDataCardWidget(widget, result);
-  return renderRuntimeChartWidget(title, result, widget, elementId);
+  return renderRuntimeChartWidget(title, result, widget, elementId, options);
 }
 
 function renderRuntimeTextTitleWidget(widget) {
@@ -2498,16 +2500,33 @@ function renderRuntimeDataCardWidget(widget, result) {
   `;
 }
 
-function renderRuntimeChartWidget(title, result, widget, elementId) {
-  const chartData = widget.type === "combo_chart"
-    ? extractDashboardComboChartData(result, widget.chart_config || {})
-    : (widget.type === "multi_bar_chart" || widget.type === "horizontal_multi_bar_chart" || widget.type === "multi_line_chart")
-      ? extractDashboardMultiSeriesChartData(result, widget.chart_config || {})
-      : extractDashboardChartData(result, widget.chart_config || {});
+function dashboardRuntimeChartData(widget, result) {
+  if (widget.type === "combo_chart") return extractDashboardComboChartData(result, widget.chart_config || {});
+  if (widget.type === "multi_bar_chart" || widget.type === "horizontal_multi_bar_chart" || widget.type === "multi_line_chart") {
+    return extractDashboardMultiSeriesChartData(result, widget.chart_config || {});
+  }
+  return extractDashboardChartData(result, widget.chart_config || {});
+}
+
+function dashboardRuntimeChartHeight(widget, widgetData) {
+  if (!widget || !dashboardDataWidgetTypes.has(widget.type) || ["data_table", "metric", "data_card"].includes(widget.type)) return 0;
+  const result = widgetData?.data;
+  if (!result?.ok) return 0;
+  const chartData = dashboardRuntimeChartData(widget, result);
+  if (!chartData.labels.length || (Array.isArray(chartData.series) && !chartData.series.length)) return 0;
+  return dashboardChartHeight(widget.type, chartData);
+}
+
+function dashboardRowChartHeight(row, dataByWidget) {
+  return Math.max(0, ...(row.widgets || []).map((widget) => dashboardRuntimeChartHeight(widget, dataByWidget.get(`${row.row_id}:${widget.position}`))));
+}
+
+function renderRuntimeChartWidget(title, result, widget, elementId, options = {}) {
+  const chartData = dashboardRuntimeChartData(widget, result);
   if (!chartData.labels.length || (Array.isArray(chartData.series) && !chartData.series.length)) {
     return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Không có dữ liệu để vẽ biểu đồ.</div></article>`;
   }
-  const chartHeight = dashboardChartHeight(widget.type, chartData);
+  const chartHeight = Math.max(dashboardChartHeight(widget.type, chartData), Number(options.chartHeight) || 0);
   pendingDashboardCharts.push({ elementId, widgetType: widget.type, chartData, chartConfig: widget.chart_config || {} });
   return `
     <article class="runtime-widget-card">
@@ -2576,7 +2595,7 @@ function extractDashboardMultiSeriesChartData(result, chartConfig = {}) {
 function dashboardChartHeight(widgetType, chartData) {
   const count = Math.max(1, chartData.labels?.length || 1);
   const horizontal = widgetType === "horizontal_multi_bar_chart" || widgetType === "bar_chart" && chartData.orientation === "horizontal";
-  if (horizontal) return Math.min(1200, Math.max(280, count * 42 + 90));
+  if (horizontal) return Math.min(1040, Math.max(260, count * 34 + 70));
   if (widgetType === "combo_chart") return Math.min(860, Math.max(320, count * 24 + 140));
   if (widgetType === "multi_bar_chart" || widgetType === "multi_line_chart") return Math.min(980, Math.max(340, count * 26 + 150));
   if (widgetType === "line_chart") return Math.min(780, Math.max(320, count * 18 + 120));
