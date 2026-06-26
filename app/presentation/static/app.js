@@ -100,7 +100,9 @@ const dashboardRuntimeThemes = {
   },
 };
 const chartJsSource = "https://cdn.jsdelivr.net/npm/chart.js";
+const html2CanvasSource = "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js";
 let chartJsLoadPromise = null;
+let html2CanvasLoadPromise = null;
 let dashboardChartRenderToken = 0;
 let dashboardRuntimeTheme = localStorage.getItem("dashboardRuntimeTheme") === "light" ? "light" : "dark";
 
@@ -2633,7 +2635,7 @@ function renderRuntimeChartWidget(title, result, widget, elementId, options = {}
     <article class="runtime-widget-card runtime-chart-card">
       <div class="runtime-widget-heading">
         <h3>${escapeHtml(title)}</h3>
-        <button class="runtime-copy-chart" data-copy-chart="${escapeHtml(elementId)}" type="button" title="Chụp ảnh biểu đồ">Chụp ảnh</button>
+        <button class="runtime-copy-chart" data-copy-chart="${escapeHtml(elementId)}" type="button" title="Chụp đúng giao diện biểu đồ">Chụp ảnh</button>
       </div>
       <div class="runtime-chart-box" style="--chart-height:${chartHeight}px"><canvas id="${escapeHtml(elementId)}"></canvas></div>
     </article>
@@ -2695,9 +2697,46 @@ async function copyDashboardChartImage(canvasId) {
   const chartCanvas = document.getElementById(canvasId);
   const card = chartCanvas?.closest(".runtime-widget-card");
   const title = card?.querySelector("h3")?.textContent?.trim() || "Biểu đồ";
-  const theme = dashboardChartTheme();
   if (!chartCanvas || !card) throw new Error("Không tìm thấy biểu đồ để sao chép.");
 
+  let blob = null;
+  try {
+    blob = await captureDashboardCardBlob(card);
+  } catch {
+    blob = await renderDashboardChartCardBlob(chartCanvas, card, title);
+  }
+  if (navigator.clipboard?.write && window.ClipboardItem) {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      return "clipboard";
+    } catch {
+      // Some browsers render the PNG correctly but block image clipboard writes.
+    }
+  }
+  downloadDashboardChartImage(blob, title);
+  return "download";
+}
+
+async function captureDashboardCardBlob(card) {
+  const html2canvas = await ensureHtml2CanvasLoaded();
+  const actionButton = card.querySelector(".runtime-copy-chart");
+  const previousVisibility = actionButton?.style.visibility || "";
+  if (actionButton) actionButton.style.visibility = "hidden";
+  try {
+    const canvas = await html2canvas(card, {
+      backgroundColor: null,
+      scale: Math.max(2, Math.min(3, window.devicePixelRatio || 1.5)),
+      useCORS: true,
+      logging: false,
+    });
+    return canvasToPngBlob(canvas);
+  } finally {
+    if (actionButton) actionButton.style.visibility = previousVisibility;
+  }
+}
+
+async function renderDashboardChartCardBlob(chartCanvas, card, title) {
+  const theme = dashboardChartTheme();
   const scale = Math.max(3, Math.min(4, (window.devicePixelRatio || 1) * 2));
   const cardRect = card.getBoundingClientRect();
   const chartRect = chartCanvas.getBoundingClientRect();
@@ -2730,19 +2769,13 @@ async function copyDashboardChartImage(canvasId) {
   );
   highResolutionChart?.chart.destroy();
 
-  const blob = await new Promise((resolve, reject) => {
-    output.toBlob((item) => item ? resolve(item) : reject(new Error("Không tạo được ảnh biểu đồ.")), "image/png");
+  return canvasToPngBlob(output);
+}
+
+function canvasToPngBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((item) => item ? resolve(item) : reject(new Error("Không tạo được ảnh biểu đồ.")), "image/png");
   });
-  if (navigator.clipboard?.write && window.ClipboardItem) {
-    try {
-      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-      return "clipboard";
-    } catch {
-      // Some browsers render the PNG correctly but block image clipboard writes.
-    }
-  }
-  downloadDashboardChartImage(blob, title);
-  return "download";
 }
 
 function downloadDashboardChartImage(blob, title) {
@@ -2921,6 +2954,23 @@ function ensureChartJsLoaded() {
     document.head.appendChild(script);
   });
   return chartJsLoadPromise;
+}
+
+function ensureHtml2CanvasLoaded() {
+  if (window.html2canvas) return Promise.resolve(window.html2canvas);
+  if (html2CanvasLoadPromise) return html2CanvasLoadPromise;
+  html2CanvasLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = html2CanvasSource;
+    script.async = true;
+    script.onload = () => resolve(window.html2canvas);
+    script.onerror = () => {
+      html2CanvasLoadPromise = null;
+      reject(new Error("Không tải được công cụ chụp ảnh biểu đồ."));
+    };
+    document.head.appendChild(script);
+  });
+  return html2CanvasLoadPromise;
 }
 
 function schedulePendingDashboardCharts() {
