@@ -789,6 +789,7 @@ if (role === "admin") {
     const button = event.target.closest("[data-viewer-tab]");
     if (button) switchDashboardViewerTab(button.dataset.viewerTab);
   });
+  $("#dashboard-viewer-workspace")?.addEventListener("click", handleDashboardRuntimeAction);
   $("#refresh-dashboard-viewer-tab")?.addEventListener("click", () => loadDashboardViewerTab(dashboardViewerActiveTabId, { force: true }));
   $("#dashboard-layout-pages")?.addEventListener("click", handleDashboardPageAction);
   $("#dashboard-builder-tabs")?.addEventListener("click", handleDashboardBuilderTabClick);
@@ -798,6 +799,7 @@ if (role === "admin") {
   $("#dashboard-builder-tabs")?.addEventListener("drop", handleDashboardTabDrop);
   $("#dashboard-builder-tabs")?.addEventListener("dragend", handleDashboardTabDragEnd);
   $("#dashboard-preview-tabs")?.addEventListener("click", handleDashboardPreviewTabClick);
+  $("#dashboard-preview-workspace")?.addEventListener("click", handleDashboardRuntimeAction);
   $("#dashboard-builder-workspace")?.addEventListener("click", handleDashboardWorkspaceClick);
   $("#dashboard-builder-workspace")?.addEventListener("change", handleDashboardWorkspaceChange);
   $("#dashboard-builder-workspace")?.addEventListener("input", handleDashboardWorkspaceInput);
@@ -2543,11 +2545,87 @@ function renderRuntimeChartWidget(title, result, widget, elementId, options = {}
   const chartHeight = Math.max(dashboardChartHeight(widget.type, chartData), Number(options.chartHeight) || 0);
   pendingDashboardCharts.push({ elementId, widgetType: widget.type, chartData, chartConfig: widget.chart_config || {} });
   return `
-    <article class="runtime-widget-card">
-      <h3>${escapeHtml(title)}</h3>
+    <article class="runtime-widget-card runtime-chart-card">
+      <div class="runtime-widget-heading">
+        <h3>${escapeHtml(title)}</h3>
+        <button class="runtime-copy-chart" data-copy-chart="${escapeHtml(elementId)}" type="button" title="Sao chép ảnh biểu đồ">Sao chép ảnh</button>
+      </div>
       <div class="runtime-chart-box" style="--chart-height:${chartHeight}px"><canvas id="${escapeHtml(elementId)}"></canvas></div>
     </article>
   `;
+}
+
+function roundedRectPath(context, x, y, width, height, radius) {
+  const safeRadius = Math.min(radius, width / 2, height / 2);
+  context.beginPath();
+  context.moveTo(x + safeRadius, y);
+  context.lineTo(x + width - safeRadius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+  context.lineTo(x + width, y + height - safeRadius);
+  context.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height);
+  context.lineTo(x + safeRadius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+  context.lineTo(x, y + safeRadius);
+  context.quadraticCurveTo(x, y, x + safeRadius, y);
+  context.closePath();
+}
+
+async function copyDashboardChartImage(canvasId) {
+  const chartCanvas = document.getElementById(canvasId);
+  const card = chartCanvas?.closest(".runtime-widget-card");
+  const title = card?.querySelector("h3")?.textContent?.trim() || "Biểu đồ";
+  if (!chartCanvas || !card) throw new Error("Không tìm thấy biểu đồ để sao chép.");
+  if (!navigator.clipboard?.write || !window.ClipboardItem) {
+    throw new Error("Trình duyệt chưa hỗ trợ sao chép ảnh trực tiếp. Hãy dùng Chrome/Edge trên HTTPS.");
+  }
+
+  const scale = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  const cardRect = card.getBoundingClientRect();
+  const chartRect = chartCanvas.getBoundingClientRect();
+  const output = document.createElement("canvas");
+  output.width = Math.round(cardRect.width * scale);
+  output.height = Math.round(cardRect.height * scale);
+  const context = output.getContext("2d");
+  context.scale(scale, scale);
+
+  roundedRectPath(context, 0, 0, cardRect.width, cardRect.height, 18);
+  context.fillStyle = "#041931";
+  context.fill();
+  context.lineWidth = 1;
+  context.strokeStyle = "rgba(125, 211, 252, .72)";
+  context.stroke();
+
+  context.fillStyle = "#ffffff";
+  context.font = "900 14px Inter, system-ui, sans-serif";
+  context.textBaseline = "top";
+  context.fillText(title, 12, 12);
+
+  context.drawImage(
+    chartCanvas,
+    chartRect.left - cardRect.left,
+    chartRect.top - cardRect.top,
+    chartRect.width,
+    chartRect.height,
+  );
+
+  const blob = await new Promise((resolve, reject) => {
+    output.toBlob((item) => item ? resolve(item) : reject(new Error("Không tạo được ảnh biểu đồ.")), "image/png");
+  });
+  await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+}
+
+async function handleDashboardRuntimeAction(event) {
+  const copyButton = event.target.closest("[data-copy-chart]");
+  if (!copyButton) return;
+  try {
+    copyButton.disabled = true;
+    await copyDashboardChartImage(copyButton.dataset.copyChart);
+    showToast("Đã sao chép ảnh biểu đồ.");
+  } catch (error) {
+    showToast(error.message, "error");
+  } finally {
+    copyButton.disabled = false;
+  }
 }
 
 function extractDashboardChartData(result, chartConfig = {}) {
