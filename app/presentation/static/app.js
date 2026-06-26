@@ -517,7 +517,7 @@ async function loadDashboardViewer() {
   if (!$("#dashboard-designed-section")) return;
   try {
     if (!dashboardViewerLayoutsLoaded) {
-      const data = await api("/api/admin/dashboard-layouts");
+      const data = await api("/api/dashboard-layouts");
       applyDashboardLayoutList(data.layouts || []);
     }
     if (!dashboardViewerLayouts.length) {
@@ -534,7 +534,7 @@ async function loadDashboardViewer() {
 }
 
 async function openDashboardViewerLayout(pageId) {
-  const data = await api(`/api/admin/dashboard-layouts/${encodeURIComponent(pageId)}`);
+  const data = await api(`/api/dashboard-layouts/${encodeURIComponent(pageId)}`);
   dashboardViewerLayout = normalizeDashboardViewerLayout(data.layout || {}, data.page_name || "");
   dashboardViewerLayout.page_name = data.page_name || dashboardViewerLayout.page_name;
   dashboardViewerActiveTabId = dashboardViewerLayout.tabs[0]?.tab_id || "";
@@ -588,7 +588,7 @@ async function loadDashboardViewerTab(tabId, { force = false } = {}) {
   const button = $("#refresh-dashboard-viewer-tab");
   if (button) setButtonLoading(button, true);
   try {
-    const response = await api(`/api/admin/dashboard-layouts/${encodeURIComponent(dashboardViewerLayout.page_id)}/tabs/${encodeURIComponent(tabId)}/data`);
+    const response = await api(`/api/dashboard-layouts/${encodeURIComponent(dashboardViewerLayout.page_id)}/tabs/${encodeURIComponent(tabId)}/data`);
     dashboardViewerLoadedTabs[key] = { ...response, loaded_at: new Date().toISOString() };
     renderDashboardViewer();
     $("#dashboard-viewer-message")?.classList.add("hidden");

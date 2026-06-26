@@ -139,6 +139,13 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
         assert "quantriweb" not in feature_codes
         assert [layout["page_id"] for layout in payload["dashboard_layouts"]] == ["DASHBOARD_VIEWER_CHILD"]
 
+        detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
+        assert detail.status_code == 200
+        assert detail.json()["feature_code"] == feature_code
+        tab_data = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD/tabs/tab_a/data")
+        assert tab_data.status_code == 200
+        assert client.get("/api/dashboard-layouts/DASHBOARD_KINH_DOANH").status_code == 403
+
 
 def test_five_failed_logins_send_telegram_alert(monkeypatch) -> None:
     sent_messages = []

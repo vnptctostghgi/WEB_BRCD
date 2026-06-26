@@ -462,6 +462,37 @@ def visible_dashboard_layouts_for_user(layouts: list[dict], user: dict) -> list[
     return visible_layouts
 
 
+def user_can_view_dashboard_page(user: dict, page_id: str, features: list[dict]) -> bool:
+    if user.get("role") == "admin":
+        return True
+    feature_code, _ = feature_parent_code_for_page(features, page_id)
+    allowed_codes = {str(code) for code in user.get("permissions", []) if str(code)}
+    normalized_allowed_codes = {normalize_feature_code(code) for code in allowed_codes}
+    return feature_code in allowed_codes or normalize_feature_code(feature_code) in normalized_allowed_codes
+
+
+def require_dashboard_page_access(request: Request, page_id: str, features: list[dict]) -> dict:
+    user = current_user(request)
+    if not user_can_view_dashboard_page(user, page_id, features):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bạn chưa được cấp quyền sử dụng chức năng này.")
+    return user
+
+
+def dashboard_layout_response(repository: AppRepository, page_id: str, features: list[dict]) -> dict:
+    try:
+        layout = repository.get_dashboard_layout(page_id)
+    except RuntimeError as error:
+        raise_dashboard_layout_schema_error(error)
+    if not layout:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy trang dashboard.")
+    feature_code, parent_code = feature_parent_code_for_page(features, page_id)
+    layout["feature_code"] = feature_code
+    layout["parent_code"] = parent_code
+    if isinstance(layout.get("layout"), dict):
+        layout["layout"]["parent_code"] = parent_code
+    return layout
+
+
 def build_dashboard_layout_pages(features: list[dict], layouts: list[dict]) -> list[dict]:
     parent_by_code = {str(feature.get("code") or ""): feature.get("parent_code") for feature in features}
     layout_by_id = {str(layout.get("page_id") or ""): layout for layout in layouts if layout.get("page_id")}
@@ -1047,6 +1078,16 @@ def list_dashboard_layouts(request: Request) -> dict:
     return {"layouts": layouts}
 
 
+@router.get("/api/dashboard-layouts")
+def list_visible_dashboard_layouts(request: Request) -> dict:
+    user = current_user(request)
+    try:
+        layouts = build_app_repository().list_dashboard_layouts()
+    except RuntimeError as error:
+        raise_dashboard_layout_schema_error(error)
+    return {"layouts": visible_dashboard_layouts_for_user(layouts, user)}
+
+
 @router.get("/api/admin/dashboard-layout-pages")
 def list_dashboard_layout_pages(request: Request) -> dict:
     admin_user(request)
@@ -1079,19 +1120,17 @@ def get_dashboard_layout(request: Request, page_id: str) -> dict:
     admin_user(request)
     repository = build_app_repository()
     safe_page_id = normalize_dashboard_code(page_id, "Mã trang")
-    try:
-        layout = repository.get_dashboard_layout(safe_page_id)
-    except RuntimeError as error:
-        raise_dashboard_layout_schema_error(error)
-    if not layout:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy trang dashboard.")
     features = repository.list_features()
-    feature_code, parent_code = feature_parent_code_for_page(features, safe_page_id)
-    layout["feature_code"] = feature_code
-    layout["parent_code"] = parent_code
-    if isinstance(layout.get("layout"), dict):
-        layout["layout"]["parent_code"] = parent_code
-    return layout
+    return dashboard_layout_response(repository, safe_page_id, features)
+
+
+@router.get("/api/dashboard-layouts/{page_id}")
+def get_visible_dashboard_layout(request: Request, page_id: str) -> dict:
+    repository = build_app_repository()
+    safe_page_id = normalize_dashboard_code(page_id, "Mã trang")
+    features = repository.list_features()
+    require_dashboard_page_access(request, safe_page_id, features)
+    return dashboard_layout_response(repository, safe_page_id, features)
 
 
 @router.post("/api/admin/dashboard-layouts")
@@ -1157,6 +1196,19 @@ def purge_unsaved_dashboard_layout_page(request: Request, feature_code: str) -> 
 def load_dashboard_layout_tab_data(request: Request, page_id: str, tab_id: str) -> dict:
     admin_user(request)
     safe_page_id = normalize_dashboard_code(page_id, "Mã trang")
+    safe_tab_id = normalize_dashboard_code(tab_id, "Mã Tab", uppercase=False)
+    try:
+        return build_database_service().run_dashboard_layout_tab(page_id=safe_page_id, tab_id=safe_tab_id)
+    except RuntimeError as error:
+        raise_dashboard_layout_schema_error(error)
+
+
+@router.get("/api/dashboard-layouts/{page_id}/tabs/{tab_id}/data")
+def load_visible_dashboard_layout_tab_data(request: Request, page_id: str, tab_id: str) -> dict:
+    repository = build_app_repository()
+    features = repository.list_features()
+    safe_page_id = normalize_dashboard_code(page_id, "Mã trang")
+    require_dashboard_page_access(request, safe_page_id, features)
     safe_tab_id = normalize_dashboard_code(tab_id, "Mã Tab", uppercase=False)
     try:
         return build_database_service().run_dashboard_layout_tab(page_id=safe_page_id, tab_id=safe_tab_id)
