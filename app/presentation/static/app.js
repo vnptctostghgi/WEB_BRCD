@@ -767,19 +767,10 @@ if (role === "admin") {
   $("#dashboard-row-type") && ($("#dashboard-row-type").innerHTML = dashboardLayoutTypeOptions("2_columns"));
   $("#add-dashboard-row")?.addEventListener("click", () => addDashboardRow($("#dashboard-row-type")?.value || "2_columns"));
   $("#refresh-dashboard-preview")?.addEventListener("click", () => loadDashboardPreviewTab(dashboardBuilderActiveTabId, { force: true }));
-  $("#dashboard-viewer-page")?.addEventListener("change", (event) => {
-    if (event.currentTarget.value) openDashboardViewerLayout(event.currentTarget.value);
-  });
   $("#dashboard-parent-code")?.addEventListener("change", () => {
     collectDashboardBuilderStateFromDom();
     renderDashboardPages();
   });
-  $("#dashboard-viewer-tabs")?.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-viewer-tab]");
-    if (button) switchDashboardViewerTab(button.dataset.viewerTab);
-  });
-  $("#dashboard-viewer-workspace")?.addEventListener("click", handleDashboardRuntimeAction);
-  $("#refresh-dashboard-viewer-tab")?.addEventListener("click", () => loadDashboardViewerTab(dashboardViewerActiveTabId, { force: true }));
   $("#dashboard-layout-pages")?.addEventListener("click", handleDashboardPageAction);
   $("#dashboard-builder-tabs")?.addEventListener("click", handleDashboardBuilderTabClick);
   $("#dashboard-builder-tabs")?.addEventListener("dblclick", handleDashboardBuilderTabRename);
@@ -822,6 +813,16 @@ if (role === "admin") {
   $("#save-bulk-permissions")?.addEventListener("click", saveBulkPermissions);
   $("#save-data-permissions")?.addEventListener("click", saveDataPermissions);
 }
+
+$("#dashboard-viewer-page")?.addEventListener("change", (event) => {
+  if (event.currentTarget.value) openDashboardViewerLayout(event.currentTarget.value);
+});
+$("#dashboard-viewer-tabs")?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-viewer-tab]");
+  if (button) switchDashboardViewerTab(button.dataset.viewerTab);
+});
+$("#dashboard-viewer-workspace")?.addEventListener("click", handleDashboardRuntimeAction);
+$("#refresh-dashboard-viewer-tab")?.addEventListener("click", () => loadDashboardViewerTab(dashboardViewerActiveTabId, { force: true }));
 
 async function importUserFile(event) {
   const file = event.target.files?.[0];
@@ -2570,7 +2571,7 @@ function renderRuntimeChartWidget(title, result, widget, elementId, options = {}
     <article class="runtime-widget-card runtime-chart-card">
       <div class="runtime-widget-heading">
         <h3>${escapeHtml(title)}</h3>
-        <button class="runtime-copy-chart" data-copy-chart="${escapeHtml(elementId)}" type="button" title="Sao chép ảnh biểu đồ">Sao chép ảnh</button>
+        <button class="runtime-copy-chart" data-copy-chart="${escapeHtml(elementId)}" type="button" title="Chụp ảnh biểu đồ">Chụp ảnh</button>
       </div>
       <div class="runtime-chart-box" style="--chart-height:${chartHeight}px"><canvas id="${escapeHtml(elementId)}"></canvas></div>
     </article>
@@ -2633,9 +2634,6 @@ async function copyDashboardChartImage(canvasId) {
   const card = chartCanvas?.closest(".runtime-widget-card");
   const title = card?.querySelector("h3")?.textContent?.trim() || "Biểu đồ";
   if (!chartCanvas || !card) throw new Error("Không tìm thấy biểu đồ để sao chép.");
-  if (!navigator.clipboard?.write || !window.ClipboardItem) {
-    throw new Error("Trình duyệt chưa hỗ trợ sao chép ảnh trực tiếp. Hãy dùng Chrome/Edge trên HTTPS.");
-  }
 
   const scale = Math.max(3, Math.min(4, (window.devicePixelRatio || 1) * 2));
   const cardRect = card.getBoundingClientRect();
@@ -2672,7 +2670,33 @@ async function copyDashboardChartImage(canvasId) {
   const blob = await new Promise((resolve, reject) => {
     output.toBlob((item) => item ? resolve(item) : reject(new Error("Không tạo được ảnh biểu đồ.")), "image/png");
   });
-  await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+  if (navigator.clipboard?.write && window.ClipboardItem) {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      return "clipboard";
+    } catch {
+      // Some browsers render the PNG correctly but block image clipboard writes.
+    }
+  }
+  downloadDashboardChartImage(blob, title);
+  return "download";
+}
+
+function downloadDashboardChartImage(blob, title) {
+  const safeName = String(title || "bieu-do")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase() || "bieu-do";
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${safeName}.png`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 async function handleDashboardRuntimeAction(event) {
@@ -2680,8 +2704,8 @@ async function handleDashboardRuntimeAction(event) {
   if (!copyButton) return;
   try {
     copyButton.disabled = true;
-    await copyDashboardChartImage(copyButton.dataset.copyChart);
-    showToast("Đã sao chép ảnh biểu đồ.");
+    const mode = await copyDashboardChartImage(copyButton.dataset.copyChart);
+    showToast(mode === "clipboard" ? "Đã sao chép ảnh biểu đồ." : "Trình duyệt chặn clipboard, đã tải ảnh PNG.");
   } catch (error) {
     showToast(error.message, "error");
   } finally {
