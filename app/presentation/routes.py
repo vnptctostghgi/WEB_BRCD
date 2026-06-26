@@ -432,6 +432,36 @@ def feature_parent_code_for_page(features: list[dict], page_id: str) -> tuple[st
     return (str(feature.get("code") or feature_code) if feature else feature_code, feature.get("parent_code") if feature else None)
 
 
+def visible_features_for_user(features: list[dict], user: dict) -> list[dict]:
+    if user.get("role") == "admin":
+        return features
+    allowed_codes = {str(code) for code in user.get("permissions", []) if str(code)}
+    by_code = {str(feature.get("code") or ""): feature for feature in features if feature.get("code")}
+    visible_codes: set[str] = set()
+    for code in allowed_codes:
+        current_code = code
+        visited: set[str] = set()
+        while current_code and current_code in by_code and current_code not in visited:
+            visited.add(current_code)
+            visible_codes.add(current_code)
+            current_code = str(by_code[current_code].get("parent_code") or "")
+    return [feature for feature in features if str(feature.get("code") or "") in visible_codes]
+
+
+def visible_dashboard_layouts_for_user(layouts: list[dict], user: dict) -> list[dict]:
+    if user.get("role") == "admin":
+        return layouts
+    allowed_codes = {str(code) for code in user.get("permissions", []) if str(code)}
+    normalized_allowed_codes = {normalize_feature_code(code) for code in allowed_codes}
+    visible_layouts: list[dict] = []
+    for layout in layouts:
+        page_id = str(layout.get("page_id") or "")
+        feature_code = dashboard_feature_code_for_page(page_id)
+        if feature_code in allowed_codes or normalize_feature_code(feature_code) in normalized_allowed_codes:
+            visible_layouts.append(layout)
+    return visible_layouts
+
+
 def build_dashboard_layout_pages(features: list[dict], layouts: list[dict]) -> list[dict]:
     parent_by_code = {str(feature.get("code") or ""): feature.get("parent_code") for feature in features}
     layout_by_id = {str(layout.get("page_id") or ""): layout for layout in layouts if layout.get("page_id")}
@@ -1031,14 +1061,17 @@ def list_dashboard_layout_pages(request: Request) -> dict:
 
 @router.get("/api/navigation")
 def navigation(request: Request) -> dict:
-    admin_user(request)
+    user = current_user(request)
     repository = build_app_repository()
     features = repository.list_features()
     try:
         layouts = repository.list_dashboard_layouts()
     except RuntimeError:
         layouts = []
-    return {"features": features, "dashboard_layouts": layouts}
+    return {
+        "features": visible_features_for_user(features, user),
+        "dashboard_layouts": visible_dashboard_layouts_for_user(layouts, user),
+    }
 
 
 @router.get("/api/admin/dashboard-layouts/{page_id}")

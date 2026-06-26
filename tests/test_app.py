@@ -76,6 +76,70 @@ def test_admin_navigation_payload_combines_features_and_layouts() -> None:
         assert any(layout["page_id"] == "DASHBOARD_KINH_DOANH" for layout in payload["dashboard_layouts"])
 
 
+def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None:
+    with TestClient(app) as client:
+        login(client)
+        saved = client.post(
+            "/api/admin/dashboard-layouts",
+            json={
+                "page_id": "DASHBOARD_VIEWER_CHILD",
+                "page_name": "Dashboard Viewer Child",
+                "parent_code": "baocaomoi",
+                "layout": {
+                    "tabs": [
+                        {
+                            "tab_id": "tab_a",
+                            "tab_name": "Tab A",
+                            "order": 1,
+                            "grid_layout": [
+                                {
+                                    "row_id": 1,
+                                    "layout_type": "1_column",
+                                    "widgets": [
+                                        {
+                                            "position": 1,
+                                            "type": "text_title",
+                                            "title": "Viewer dashboard",
+                                            "text_content": "Only granted viewer can see this item.",
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                },
+            },
+        )
+        assert saved.status_code == 200
+        feature_code = saved.json()["feature_code"]
+        created = client.post(
+            "/api/admin/users",
+            json={
+                "username": "viewer_navigation",
+                "full_name": "Viewer Navigation",
+                "password": "Viewer@Navigation123",
+                "role": "viewer",
+            },
+        )
+        assert created.status_code == 200
+        viewer_id = created.json()["user"]["id"]
+        assert client.put(
+            f"/api/admin/users/{viewer_id}/permissions",
+            json={"feature_codes": [feature_code]},
+        ).status_code == 200
+
+        client.post("/api/auth/logout")
+        login(client, "viewer_navigation", "Viewer@Navigation123")
+        response = client.get("/api/navigation")
+        assert response.status_code == 200
+        payload = response.json()
+        feature_codes = {feature["code"] for feature in payload["features"]}
+        assert "baocaomoi" in feature_codes
+        assert feature_code in feature_codes
+        assert "quantriweb" not in feature_codes
+        assert [layout["page_id"] for layout in payload["dashboard_layouts"]] == ["DASHBOARD_VIEWER_CHILD"]
+
+
 def test_five_failed_logins_send_telegram_alert(monkeypatch) -> None:
     sent_messages = []
     routes.FAILED_LOGIN_COUNTS.clear()
