@@ -2772,12 +2772,12 @@ function extractDashboardMultiSeriesChartData(result, chartConfig = {}) {
 function dashboardChartHeight(widgetType, chartData) {
   const count = Math.max(1, chartData.labels?.length || 1);
   const horizontal = widgetType === "horizontal_multi_bar_chart" || widgetType === "bar_chart" && chartData.orientation === "horizontal";
-  if (horizontal) return Math.min(1040, Math.max(260, count * 34 + 70));
-  if (widgetType === "combo_chart") return Math.min(860, Math.max(320, count * 24 + 140));
-  if (widgetType === "multi_bar_chart" || widgetType === "multi_line_chart") return Math.min(980, Math.max(340, count * 26 + 150));
-  if (widgetType === "line_chart") return Math.min(780, Math.max(320, count * 18 + 120));
-  if (widgetType === "bar_chart") return Math.min(900, Math.max(320, count * 24 + 130));
-  return 320;
+  if (horizontal) return Math.min(760, Math.max(220, count * 28 + 56));
+  if (widgetType === "combo_chart") return Math.min(620, Math.max(260, count * 18 + 112));
+  if (widgetType === "multi_bar_chart" || widgetType === "multi_line_chart") return Math.min(700, Math.max(270, count * 20 + 118));
+  if (widgetType === "line_chart") return Math.min(560, Math.max(250, count * 14 + 96));
+  if (widgetType === "bar_chart") return Math.min(640, Math.max(260, count * 18 + 104));
+  return 260;
 }
 
 function dashboardChartPrimaryValues(chartData) {
@@ -2949,21 +2949,25 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
     }];
     const isHorizontalAxis = widgetType === "horizontal_multi_bar_chart" || widgetType === "bar_chart" && chartData.orientation === "horizontal";
     const primaryAxisMax = dashboardAxisMax(dashboardChartPrimaryValues(chartData));
+    const axisTickStyle = { color: "#f8fafc", font: { size: 13, weight: "850" } };
+    const axisGridStyle = { color: "rgba(186, 230, 253, .24)" };
     const scales = isPie ? {} : isCombo ? {
-      x: { ticks: { color: "#e0f2fe", autoSkip: false, maxRotation: 55, minRotation: 0, font: { weight: "700" } }, grid: { color: "rgba(125, 211, 252, .18)" } },
-      y: { beginAtZero: true, max: dashboardAxisMax(chartData.barValues), ticks: { color: "#e0f2fe", font: { weight: "700" } }, grid: { color: "rgba(125, 211, 252, .2)" } },
-      y1: { beginAtZero: true, max: dashboardAxisMax(chartData.lineValues), position: "right", ticks: { color: "#fde68a" }, grid: { drawOnChartArea: false } },
+      x: { ticks: { ...axisTickStyle, autoSkip: false, maxRotation: 55, minRotation: 0 }, grid: axisGridStyle },
+      y: { beginAtZero: true, max: dashboardAxisMax(chartData.barValues), ticks: axisTickStyle, grid: axisGridStyle },
+      y1: { beginAtZero: true, max: dashboardAxisMax(chartData.lineValues), position: "right", ticks: { color: "#fef3c7", font: { size: 13, weight: "850" } }, grid: { drawOnChartArea: false } },
     } : {
-      x: { beginAtZero: isHorizontalAxis, max: isHorizontalAxis ? primaryAxisMax : undefined, ticks: { color: "#e0f2fe", autoSkip: false, maxRotation: 55, minRotation: 0, font: { weight: "700" } }, grid: { color: "rgba(125, 211, 252, .18)" } },
-      y: { beginAtZero: true, max: isHorizontalAxis ? undefined : primaryAxisMax, ticks: { color: "#e0f2fe", autoSkip: false, font: { weight: "700" } }, grid: { color: "rgba(125, 211, 252, .2)" } },
+      x: { beginAtZero: isHorizontalAxis, max: isHorizontalAxis ? primaryAxisMax : undefined, ticks: { ...axisTickStyle, autoSkip: false, maxRotation: 55, minRotation: 0 }, grid: axisGridStyle },
+      y: { beginAtZero: true, max: isHorizontalAxis ? undefined : primaryAxisMax, ticks: { ...axisTickStyle, autoSkip: false }, grid: axisGridStyle },
     };
     const valueLabelPlugin = {
       id: `dashboardValueLabels-${elementId}`,
       afterDatasetsDraw(chart) {
         const { ctx } = chart;
         ctx.save();
-        ctx.font = "800 12px Inter, system-ui, sans-serif";
-        ctx.fillStyle = "#f8fafc";
+        ctx.font = "900 14px Inter, system-ui, sans-serif";
+        ctx.fillStyle = "#ffffff";
+        ctx.shadowColor = "rgba(2, 6, 23, .65)";
+        ctx.shadowBlur = 3;
         chart.data.datasets.forEach((dataset, datasetIndex) => {
           const meta = chart.getDatasetMeta(datasetIndex);
           if (meta.hidden) return;
@@ -2987,7 +2991,7 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { display: isPie || isCombo || isMulti, labels: { color: "#e0f2fe" } },
+          legend: { display: isPie || isCombo || isMulti, labels: { color: "#ffffff", font: { size: 13, weight: "850" } } },
         },
         scales,
       },
