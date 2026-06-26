@@ -69,9 +69,40 @@ const dashboardPiePalette = [
   "#84cc16",
   "#8b5cf6",
 ];
+const dashboardRuntimeThemes = {
+  dark: {
+    cardBackground: "#041931",
+    cardBorder: "rgba(125, 211, 252, .72)",
+    textColor: "#ffffff",
+    axisColor: "#f8fafc",
+    secondaryAxisColor: "#fef3c7",
+    gridColor: "rgba(186, 230, 253, .24)",
+    valueShadow: "rgba(2, 6, 23, .65)",
+    lineColor: "#2563eb",
+    lineFill: "rgba(37, 99, 235, .22)",
+    pieBorder: "#082f49",
+    seriesPalette: ["#38bdf8", "#f59e0b", "#22c55e", "#ef4444", "#a78bfa", "#14b8a6", "#f97316", "#60a5fa"],
+    piePalette: dashboardPiePalette,
+  },
+  light: {
+    cardBackground: "#ffffff",
+    cardBorder: "rgba(14, 116, 144, .34)",
+    textColor: "#0f172a",
+    axisColor: "#111827",
+    secondaryAxisColor: "#92400e",
+    gridColor: "rgba(15, 23, 42, .14)",
+    valueShadow: "rgba(255, 255, 255, .9)",
+    lineColor: "#1d4ed8",
+    lineFill: "rgba(29, 78, 216, .14)",
+    pieBorder: "#ffffff",
+    seriesPalette: ["#2563eb", "#f97316", "#16a34a", "#dc2626", "#7c3aed", "#0891b2", "#ca8a04", "#db2777"],
+    piePalette: ["#2563eb", "#f97316", "#16a34a", "#7c3aed", "#dc2626", "#0891b2", "#ca8a04", "#db2777", "#0284c7", "#ea580c", "#65a30d", "#9333ea"],
+  },
+};
 const chartJsSource = "https://cdn.jsdelivr.net/npm/chart.js";
 let chartJsLoadPromise = null;
 let dashboardChartRenderToken = 0;
+let dashboardRuntimeTheme = localStorage.getItem("dashboardRuntimeTheme") === "light" ? "light" : "dark";
 
 const navFeatureConfig = {
   quanlycongviec: { view: "work-tasks", icon: "list", keywords: "quan ly cong viec task lich telegram nhac viec" },
@@ -549,6 +580,7 @@ function renderDashboardViewerPageOptions() {
 }
 
 function renderDashboardViewerEmpty(title, description) {
+  applyDashboardRuntimeTheme();
   renderDashboardViewerPageOptions();
   const tabs = $("#dashboard-viewer-tabs");
   const workspace = $("#dashboard-viewer-workspace");
@@ -562,6 +594,33 @@ function renderDashboardViewerEmpty(title, description) {
       </div>
     `;
   }
+}
+
+function dashboardChartTheme() {
+  return dashboardRuntimeThemes[dashboardRuntimeTheme] || dashboardRuntimeThemes.dark;
+}
+
+function applyDashboardRuntimeTheme() {
+  const section = $("#dashboard-designed-section");
+  if (!section) return;
+  const isLight = dashboardRuntimeTheme === "light";
+  section.classList.toggle("dashboard-theme-light", isLight);
+  section.classList.toggle("dashboard-theme-dark", !isLight);
+  const button = $("#dashboard-theme-toggle");
+  if (!button) return;
+  button.setAttribute("aria-pressed", String(isLight));
+  button.title = isLight ? "Chuyển nền tối" : "Chuyển nền sáng";
+  const label = button.querySelector("span");
+  if (label) label.textContent = isLight ? "Tối" : "Sáng";
+  const icon = button.querySelector("use");
+  if (icon) icon.setAttribute("href", isLight ? "#icon-moon" : "#icon-sun");
+}
+
+function toggleDashboardRuntimeTheme() {
+  dashboardRuntimeTheme = dashboardRuntimeTheme === "light" ? "dark" : "light";
+  localStorage.setItem("dashboardRuntimeTheme", dashboardRuntimeTheme);
+  applyDashboardRuntimeTheme();
+  if (dashboardViewerLayout) renderDashboardViewer();
 }
 
 function switchDashboardViewerTab(tabId) {
@@ -597,6 +656,7 @@ async function loadDashboardViewerTab(tabId, { force = false } = {}) {
 
 function renderDashboardViewer() {
   if (!dashboardViewerLayout) return;
+  applyDashboardRuntimeTheme();
   renderDashboardViewerPageOptions();
   const title = $("#dashboard-viewer-title");
   const loadedAt = $("#dashboard-viewer-loaded-at");
@@ -823,6 +883,8 @@ $("#dashboard-viewer-tabs")?.addEventListener("click", (event) => {
 });
 $("#dashboard-viewer-workspace")?.addEventListener("click", handleDashboardRuntimeAction);
 $("#refresh-dashboard-viewer-tab")?.addEventListener("click", () => loadDashboardViewerTab(dashboardViewerActiveTabId, { force: true }));
+$("#dashboard-theme-toggle")?.addEventListener("click", toggleDashboardRuntimeTheme);
+applyDashboardRuntimeTheme();
 
 async function importUserFile(event) {
   const file = event.target.files?.[0];
@@ -2633,6 +2695,7 @@ async function copyDashboardChartImage(canvasId) {
   const chartCanvas = document.getElementById(canvasId);
   const card = chartCanvas?.closest(".runtime-widget-card");
   const title = card?.querySelector("h3")?.textContent?.trim() || "Biểu đồ";
+  const theme = dashboardChartTheme();
   if (!chartCanvas || !card) throw new Error("Không tìm thấy biểu đồ để sao chép.");
 
   const scale = Math.max(3, Math.min(4, (window.devicePixelRatio || 1) * 2));
@@ -2647,13 +2710,13 @@ async function copyDashboardChartImage(canvasId) {
   context.scale(scale, scale);
 
   roundedRectPath(context, 0, 0, cardRect.width, cardRect.height, 18);
-  context.fillStyle = "#041931";
+  context.fillStyle = theme.cardBackground;
   context.fill();
   context.lineWidth = 1;
-  context.strokeStyle = "rgba(125, 211, 252, .72)";
+  context.strokeStyle = theme.cardBorder;
   context.stroke();
 
-  context.fillStyle = "#ffffff";
+  context.fillStyle = theme.textColor;
   context.font = "900 14px Inter, system-ui, sans-serif";
   context.textBaseline = "top";
   context.fillText(title, 12, 12);
@@ -2890,19 +2953,20 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
   jobs.forEach(({ elementId, widgetType, chartData }) => {
     const canvas = document.getElementById(elementId);
     if (!canvas || !window.Chart) return;
+    const theme = dashboardChartTheme();
     const useColorScale = Boolean(chartData.colorScale);
     const isPie = widgetType === "pie_chart";
     const palette = isPie
-      ? dashboardCategoryColors(chartData.labels.length)
+      ? Array.from({ length: chartData.labels.length }, (_, index) => theme.piePalette[index % theme.piePalette.length])
       : useColorScale
         ? dashboardValueColors(dashboardChartPrimaryValues(chartData))
-        : ["#38bdf8", "#0ea5e9", "#22c55e", "#f59e0b", "#ef4444", "#a78bfa", "#14b8a6", "#f97316"];
+        : theme.seriesPalette;
     const isLine = widgetType === "line_chart";
     const isCombo = widgetType === "combo_chart";
     const isMulti = widgetType === "multi_bar_chart" || widgetType === "horizontal_multi_bar_chart" || widgetType === "multi_line_chart";
     const isMultiLine = widgetType === "multi_line_chart";
     const chartType = isCombo || isMulti && !isMultiLine ? "bar" : isPie ? "pie" : (isLine || isMultiLine) ? "line" : "bar";
-    const seriesPalette = ["#38bdf8", "#f59e0b", "#22c55e", "#ef4444", "#a78bfa", "#14b8a6", "#f97316", "#60a5fa"];
+    const seriesPalette = theme.seriesPalette;
     const datasets = isMulti ? chartData.series.map((series, seriesIndex) => ({
       label: series.label,
       data: series.values,
@@ -2917,8 +2981,8 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
         type: "bar",
         label: chartData.barLabel,
         data: chartData.barValues,
-        backgroundColor: useColorScale ? dashboardValueColors(chartData.barValues, .96) : "rgba(56, 189, 248, .96)",
-        borderColor: "#e0f2fe",
+        backgroundColor: useColorScale ? dashboardValueColors(chartData.barValues, .96) : theme.seriesPalette[0],
+        borderColor: theme.textColor,
         borderWidth: 1.5,
         yAxisID: "y",
       },
@@ -2926,10 +2990,10 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
         type: "line",
         label: chartData.lineLabel,
         data: chartData.lineValues,
-        borderColor: useColorScale ? (context) => dashboardLineGradient(context, 1) : "#2563eb",
-        backgroundColor: useColorScale ? (context) => dashboardLineGradient(context, .24) : "rgba(37, 99, 235, .22)",
-        pointBackgroundColor: useColorScale ? dashboardValueColors(chartData.lineValues) : "#2563eb",
-        pointBorderColor: "#e0f2fe",
+        borderColor: useColorScale ? (context) => dashboardLineGradient(context, 1) : theme.lineColor,
+        backgroundColor: useColorScale ? (context) => dashboardLineGradient(context, .24) : theme.lineFill,
+        pointBackgroundColor: useColorScale ? dashboardValueColors(chartData.lineValues) : theme.lineColor,
+        pointBorderColor: theme.textColor,
         pointRadius: 4,
         borderWidth: 4,
         tension: .35,
@@ -2938,10 +3002,10 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
     ] : [{
       label: "Giá trị",
       data: chartData.values,
-      backgroundColor: isPie ? palette : isLine ? (useColorScale ? (context) => dashboardLineGradient(context, .24) : "rgba(37, 99, 235, .22)") : (useColorScale ? palette : "rgba(56, 189, 248, .96)"),
-      borderColor: isPie ? "#082f49" : isLine && useColorScale ? (context) => dashboardLineGradient(context, 1) : "#2563eb",
-      pointBackgroundColor: isLine ? (useColorScale ? palette : "#2563eb") : undefined,
-      pointBorderColor: isLine ? "#e0f2fe" : undefined,
+      backgroundColor: isPie ? palette : isLine ? (useColorScale ? (context) => dashboardLineGradient(context, .24) : theme.lineFill) : (useColorScale ? palette : theme.seriesPalette[0]),
+      borderColor: isPie ? theme.pieBorder : isLine && useColorScale ? (context) => dashboardLineGradient(context, 1) : theme.lineColor,
+      pointBackgroundColor: isLine ? (useColorScale ? palette : theme.lineColor) : undefined,
+      pointBorderColor: isLine ? theme.textColor : undefined,
       pointRadius: isLine ? 4.5 : undefined,
       borderWidth: isPie ? 2 : isLine ? 4 : 1.5,
       tension: .35,
@@ -2949,12 +3013,12 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
     }];
     const isHorizontalAxis = widgetType === "horizontal_multi_bar_chart" || widgetType === "bar_chart" && chartData.orientation === "horizontal";
     const primaryAxisMax = dashboardAxisMax(dashboardChartPrimaryValues(chartData));
-    const axisTickStyle = { color: "#f8fafc", font: { size: 13, weight: "850" } };
-    const axisGridStyle = { color: "rgba(186, 230, 253, .24)" };
+    const axisTickStyle = { color: theme.axisColor, font: { size: 13, weight: "850" } };
+    const axisGridStyle = { color: theme.gridColor };
     const scales = isPie ? {} : isCombo ? {
       x: { ticks: { ...axisTickStyle, autoSkip: false, maxRotation: 55, minRotation: 0 }, grid: axisGridStyle },
       y: { beginAtZero: true, max: dashboardAxisMax(chartData.barValues), ticks: axisTickStyle, grid: axisGridStyle },
-      y1: { beginAtZero: true, max: dashboardAxisMax(chartData.lineValues), position: "right", ticks: { color: "#fef3c7", font: { size: 13, weight: "850" } }, grid: { drawOnChartArea: false } },
+      y1: { beginAtZero: true, max: dashboardAxisMax(chartData.lineValues), position: "right", ticks: { color: theme.secondaryAxisColor, font: { size: 13, weight: "850" } }, grid: { drawOnChartArea: false } },
     } : {
       x: { beginAtZero: isHorizontalAxis, max: isHorizontalAxis ? primaryAxisMax : undefined, ticks: { ...axisTickStyle, autoSkip: false, maxRotation: 55, minRotation: 0 }, grid: axisGridStyle },
       y: { beginAtZero: true, max: isHorizontalAxis ? undefined : primaryAxisMax, ticks: { ...axisTickStyle, autoSkip: false }, grid: axisGridStyle },
@@ -2965,8 +3029,8 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
         const { ctx } = chart;
         ctx.save();
         ctx.font = "900 14px Inter, system-ui, sans-serif";
-        ctx.fillStyle = "#ffffff";
-        ctx.shadowColor = "rgba(2, 6, 23, .65)";
+        ctx.fillStyle = theme.textColor;
+        ctx.shadowColor = theme.valueShadow;
         ctx.shadowBlur = 3;
         chart.data.datasets.forEach((dataset, datasetIndex) => {
           const meta = chart.getDatasetMeta(datasetIndex);
@@ -2991,7 +3055,7 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { display: isPie || isCombo || isMulti, labels: { color: "#ffffff", font: { size: 13, weight: "850" } } },
+          legend: { display: isPie || isCombo || isMulti, labels: { color: theme.textColor, font: { size: 13, weight: "850" } } },
         },
         scales,
       },
