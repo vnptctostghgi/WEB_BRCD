@@ -1571,6 +1571,13 @@ p {
   min-width: 0;
 }
 
+.dashboard-title-row {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  min-width: 0;
+}
+
 .dashboard-linked-tools {
   border: 1px solid rgba(125, 211, 252, .22);
   border-radius: 18px;
@@ -1878,18 +1885,19 @@ p {
 
 .dashboard-theme-toggle {
   display: inline-flex;
-  min-height: 42px;
+  width: 38px;
+  min-width: 38px;
+  min-height: 38px;
   align-items: center;
   justify-content: center;
-  gap: .45rem;
   border: 1px solid rgba(125, 211, 252, .46);
-  border-radius: 999px;
+  border-radius: 12px;
   background: rgba(14, 165, 233, .16);
   color: #fff;
   cursor: pointer;
   font-size: .82rem;
   font-weight: 950;
-  padding: .52rem .78rem;
+  padding: 0;
 }
 
 .dashboard-theme-toggle:hover {
