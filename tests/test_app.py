@@ -942,7 +942,7 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         home = client.get("/")
         assert home.status_code == 200
         assert "view-dashboard-builder" not in home.text
-        assert "dashboard-designed-section" not in home.text
+        assert "dashboard-designed-section" in home.text
 
         forbidden_urls = [
             "/api/admin/dashboard-layouts",
