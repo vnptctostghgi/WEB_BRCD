@@ -2570,6 +2570,42 @@ function roundedRectPath(context, x, y, width, height, radius) {
   context.closePath();
 }
 
+function cloneChartConfigValue(value) {
+  if (Array.isArray(value)) return value.map((item) => cloneChartConfigValue(item));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, cloneChartConfigValue(item)]));
+  }
+  return value;
+}
+
+function renderHighResolutionChart(canvasId, width, height, scale) {
+  const sourceChart = dashboardChartInstances.get(canvasId);
+  if (!sourceChart || !window.Chart) return null;
+  const output = document.createElement("canvas");
+  output.style.width = `${width}px`;
+  output.style.height = `${height}px`;
+  output.width = Math.round(width * scale);
+  output.height = Math.round(height * scale);
+  const config = sourceChart.config?._config || sourceChart.config || {};
+  const options = cloneChartConfigValue(config.options || {});
+  options.responsive = false;
+  options.maintainAspectRatio = false;
+  options.animation = false;
+  options.devicePixelRatio = scale;
+  options.plugins = {
+    ...(options.plugins || {}),
+    tooltip: { enabled: false },
+  };
+  const highChart = new Chart(output, {
+    type: config.type || sourceChart.config.type,
+    data: cloneChartConfigValue(config.data || sourceChart.data),
+    options,
+    plugins: config.plugins || [],
+  });
+  highChart.update();
+  return { canvas: output, chart: highChart };
+}
+
 async function copyDashboardChartImage(canvasId) {
   const chartCanvas = document.getElementById(canvasId);
   const card = chartCanvas?.closest(".runtime-widget-card");
@@ -2579,9 +2615,11 @@ async function copyDashboardChartImage(canvasId) {
     throw new Error("Trình duyệt chưa hỗ trợ sao chép ảnh trực tiếp. Hãy dùng Chrome/Edge trên HTTPS.");
   }
 
-  const scale = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  const scale = Math.max(3, Math.min(4, (window.devicePixelRatio || 1) * 2));
   const cardRect = card.getBoundingClientRect();
   const chartRect = chartCanvas.getBoundingClientRect();
+  const highResolutionChart = renderHighResolutionChart(canvasId, chartRect.width, chartRect.height, scale);
+  const chartSource = highResolutionChart?.canvas || chartCanvas;
   const output = document.createElement("canvas");
   output.width = Math.round(cardRect.width * scale);
   output.height = Math.round(cardRect.height * scale);
@@ -2601,12 +2639,13 @@ async function copyDashboardChartImage(canvasId) {
   context.fillText(title, 12, 12);
 
   context.drawImage(
-    chartCanvas,
+    chartSource,
     chartRect.left - cardRect.left,
     chartRect.top - cardRect.top,
     chartRect.width,
     chartRect.height,
   );
+  highResolutionChart?.chart.destroy();
 
   const blob = await new Promise((resolve, reject) => {
     output.toBlob((item) => item ? resolve(item) : reject(new Error("Không tạo được ảnh biểu đồ.")), "image/png");
