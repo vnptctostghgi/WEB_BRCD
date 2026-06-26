@@ -330,11 +330,7 @@ if (mustChangePassword) {
   }
 }
 
-if (role === "admin") {
-  syncNavigationFromFeatures();
-} else {
-  activateNavForCurrentPath();
-}
+syncNavigationFromFeatures();
 
 window.addEventListener("popstate", () => {
   activateNavForCurrentPath();
@@ -718,14 +714,7 @@ async function openEditUser(id) {
       <input type="checkbox" value="${escapeHtml(feature.code)}" ${granted.has(feature.code) ? "checked" : ""} />
       <span>${escapeHtml(feature.name)}</span>
     </label>`).join("");
-  $("#permission-tree").querySelectorAll(".permission-item.parent input").forEach((parent) => {
-    parent.addEventListener("change", () => {
-      features.filter((feature) => feature.parent_code === parent.value).forEach((feature) => {
-        const child = $("#permission-tree").querySelector(`input[value="${feature.code}"]`);
-        if (child) child.checked = parent.checked;
-      });
-    });
-  });
+  bindPermissionCascade("#permission-tree");
   $("#edit-user-dialog").showModal();
 }
 
@@ -935,6 +924,7 @@ async function loadPermissionManager() {
       <input type="checkbox" value="${escapeHtml(feature.code)}" />
       <span>${escapeHtml(feature.name)}</span>
     </label>`).join("");
+  bindPermissionCascade("#permission-features");
 }
 
 async function saveBulkPermissions() {
@@ -1068,6 +1058,38 @@ function flattenFeatureTree(nodes, level = 0, rows = []) {
     flattenFeatureTree(node.children, level + 1, rows);
   });
   return rows;
+}
+
+function descendantFeatureCodes(sourceFeatures, parentCode) {
+  const childrenByParent = new Map();
+  (sourceFeatures || []).forEach((feature) => {
+    const parent = feature.parent_code || "";
+    if (!parent) return;
+    if (!childrenByParent.has(parent)) childrenByParent.set(parent, []);
+    childrenByParent.get(parent).push(feature.code);
+  });
+  const result = [];
+  const visit = (code) => {
+    (childrenByParent.get(code) || []).forEach((childCode) => {
+      result.push(childCode);
+      visit(childCode);
+    });
+  };
+  visit(parentCode);
+  return result;
+}
+
+function bindPermissionCascade(containerSelector) {
+  const container = $(containerSelector);
+  if (!container) return;
+  container.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      descendantFeatureCodes(features, checkbox.value).forEach((code) => {
+        const child = [...container.querySelectorAll("input[type='checkbox']")].find((input) => input.value === code);
+        if (child) child.checked = checkbox.checked;
+      });
+    });
+  });
 }
 
 const dashboardParentExcludedFeatureCodes = new Set(["dashboard", "quanlycongviec", "truyvansql", "reports", "new_reports"]);
