@@ -618,6 +618,10 @@ function applyDashboardRuntimeTheme() {
   if (label) label.textContent = isLight ? "Tối" : "Sáng";
   const icon = button.querySelector("use");
   if (icon) icon.setAttribute("href", isLight ? "#icon-moon" : "#icon-sun");
+  const visibleIcon = button.querySelector(".theme-toggle-icon");
+  if (visibleIcon) visibleIcon.textContent = isLight ? "☾" : "☀";
+  const visibleLabel = button.querySelector(".theme-toggle-text");
+  if (visibleLabel) visibleLabel.textContent = isLight ? "Tối" : "Sáng";
 }
 
 function toggleDashboardRuntimeTheme() {
