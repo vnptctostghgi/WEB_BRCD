@@ -49,7 +49,7 @@ DASHBOARD_LAYOUT_TYPES = {
     "6_columns_2_4": 2,
     "6_columns_4_2": 2,
 }
-DASHBOARD_WIDGET_TYPES = {"bar_chart", "pie_chart", "line_chart", "combo_chart", "multi_bar_chart", "multi_line_chart", "data_table", "metric", "data_card", "text_title"}
+DASHBOARD_WIDGET_TYPES = {"bar_chart", "pie_chart", "line_chart", "combo_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "multi_line_chart", "data_table", "metric", "data_card", "text_title"}
 DASHBOARD_LAYOUT_EXCLUDED_FEATURE_CODES = {
     "dashboard",
     "truyvansql",

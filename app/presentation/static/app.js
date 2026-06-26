@@ -49,7 +49,7 @@ const dashboardLayoutDefinitions = {
   "6_columns_4_2": { total: 6, spans: [4, 2], label: "6 cột: 4 + 2" },
 };
 const dashboardLayoutColumns = Object.fromEntries(Object.entries(dashboardLayoutDefinitions).map(([key, definition]) => [key, definition.spans.length]));
-const dashboardDataWidgetTypes = new Set(["bar_chart", "pie_chart", "line_chart", "combo_chart", "multi_bar_chart", "multi_line_chart", "data_table", "metric", "data_card"]);
+const dashboardDataWidgetTypes = new Set(["bar_chart", "pie_chart", "line_chart", "combo_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "multi_line_chart", "data_table", "metric", "data_card"]);
 const dashboardColorScaleStops = [
   { ratio: 0, rgb: [239, 68, 68] },
   { ratio: .5, rgb: [245, 158, 11] },
@@ -1543,6 +1543,7 @@ function dashboardLayoutColumnCount(layoutType) {
 function dashboardWidgetTypeLabel(type) {
   const extraLabels = {
     multi_bar_chart: "Biểu đồ cột nhiều đơn vị",
+    horizontal_multi_bar_chart: "Bi\u1ec3u \u0111\u1ed3 c\u1ed9t ngang nhi\u1ec1u \u0111\u01a1n v\u1ecb",
     multi_line_chart: "Biểu đồ đường nhiều đơn vị",
   };
   if (extraLabels[type]) return extraLabels[type];
@@ -1559,7 +1560,7 @@ function dashboardWidgetTypeLabel(type) {
 }
 
 function dashboardWidgetTypeOptions(selectedType) {
-  return ["bar_chart", "multi_bar_chart", "pie_chart", "line_chart", "multi_line_chart", "combo_chart", "data_table", "metric", "data_card", "text_title"].map((type) => (
+  return ["bar_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "pie_chart", "line_chart", "multi_line_chart", "combo_chart", "data_table", "metric", "data_card", "text_title"].map((type) => (
     `<option value="${type}" ${selectedType === type ? "selected" : ""}>${dashboardWidgetTypeLabel(type)}</option>`
   )).join("");
 }
@@ -2015,7 +2016,7 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
       const filters = parseDashboardFilters(card.querySelector("[name='filters']")?.value || "", strictFilters);
       const activeConfig = card.querySelector(".dashboard-widget-config.active");
       const chartConfig = {
-        orientation: activeConfig?.querySelector("[name='chart_orientation']")?.value || "vertical",
+        orientation: type === "horizontal_multi_bar_chart" ? "horizontal" : activeConfig?.querySelector("[name='chart_orientation']")?.value || "vertical",
         label_column: activeConfig?.querySelector("[name='label_column']")?.value.trim() || "",
         value_column: activeConfig?.querySelector("[name='value_column']")?.value.trim() || "",
         bar_column: activeConfig?.querySelector("[name='bar_column']")?.value.trim() || "",
@@ -2103,7 +2104,7 @@ function renderDashboardWidgetAdvancedConfig(widget) {
       </div>
       ${dashboardColorScaleOption(widget)}
     </div>
-    <div class="dashboard-widget-config ${type === "multi_bar_chart" ? "active" : ""}" data-config-for="multi_bar_chart">
+    <div class="dashboard-widget-config ${type === "multi_bar_chart" || type === "horizontal_multi_bar_chart" ? "active" : ""}" data-config-for="multi_bar_chart,horizontal_multi_bar_chart">
       <div class="grid gap-2 md:grid-cols-2">
         <label>Cột nhãn<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="Ví dụ: ten_don_vi" /></label>
         <label>Các cột dữ liệu<input class="form-control" name="series_columns" value="${dashboardConfigValue(widget, "series_columns")}" placeholder="fiber,mytv,cam,mesh" /></label>
@@ -2500,7 +2501,7 @@ function renderRuntimeDataCardWidget(widget, result) {
 function renderRuntimeChartWidget(title, result, widget, elementId) {
   const chartData = widget.type === "combo_chart"
     ? extractDashboardComboChartData(result, widget.chart_config || {})
-    : (widget.type === "multi_bar_chart" || widget.type === "multi_line_chart")
+    : (widget.type === "multi_bar_chart" || widget.type === "horizontal_multi_bar_chart" || widget.type === "multi_line_chart")
       ? extractDashboardMultiSeriesChartData(result, widget.chart_config || {})
       : extractDashboardChartData(result, widget.chart_config || {});
   if (!chartData.labels.length || (Array.isArray(chartData.series) && !chartData.series.length)) {
@@ -2567,13 +2568,14 @@ function extractDashboardMultiSeriesChartData(result, chartConfig = {}) {
       label: configuredLabels[index] || column,
       values: rows.map((row) => parseDashboardNumber(row[column]) || 0),
     })),
+    orientation: chartConfig.orientation || "vertical",
     colorScale: Boolean(chartConfig.color_scale),
   };
 }
 
 function dashboardChartHeight(widgetType, chartData) {
   const count = Math.max(1, chartData.labels?.length || 1);
-  const horizontal = widgetType === "bar_chart" && chartData.orientation === "horizontal";
+  const horizontal = widgetType === "horizontal_multi_bar_chart" || widgetType === "bar_chart" && chartData.orientation === "horizontal";
   if (horizontal) return Math.min(1200, Math.max(280, count * 42 + 90));
   if (widgetType === "combo_chart") return Math.min(860, Math.max(320, count * 24 + 140));
   if (widgetType === "multi_bar_chart" || widgetType === "multi_line_chart") return Math.min(980, Math.max(340, count * 26 + 150));
@@ -2685,7 +2687,7 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
     const isPie = widgetType === "pie_chart";
     const isLine = widgetType === "line_chart";
     const isCombo = widgetType === "combo_chart";
-    const isMulti = widgetType === "multi_bar_chart" || widgetType === "multi_line_chart";
+    const isMulti = widgetType === "multi_bar_chart" || widgetType === "horizontal_multi_bar_chart" || widgetType === "multi_line_chart";
     const isMultiLine = widgetType === "multi_line_chart";
     const chartType = isCombo || isMulti && !isMultiLine ? "bar" : isPie ? "pie" : (isLine || isMultiLine) ? "line" : "bar";
     const seriesPalette = ["#38bdf8", "#f59e0b", "#22c55e", "#ef4444", "#a78bfa", "#14b8a6", "#f97316", "#60a5fa"];
@@ -2767,7 +2769,7 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
       type: chartType,
       data: { labels: chartData.labels, datasets },
       options: {
-        indexAxis: widgetType === "bar_chart" && chartData.orientation === "horizontal" ? "y" : "x",
+        indexAxis: widgetType === "horizontal_multi_bar_chart" || widgetType === "bar_chart" && chartData.orientation === "horizontal" ? "y" : "x",
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
