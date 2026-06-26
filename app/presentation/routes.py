@@ -967,6 +967,7 @@ def list_sql_reports(request: Request) -> dict:
 def save_sql_report(request: Request, payload: SqlReportPayload) -> dict:
     actor = admin_user(request)
     repository = build_app_repository()
+    existing_report = repository.get_sql_report_by_id(payload.id) if payload.id else None
     ten_bao_cao = payload.ten_bao_cao.strip()
     ma_bao_cao = payload.ma_bao_cao.strip().upper()
     cau_lenh_sql = validate_report_sql(payload.cau_lenh_sql)
@@ -980,6 +981,11 @@ def save_sql_report(request: Request, payload: SqlReportPayload) -> dict:
     except RuntimeError as error:
         raise_sql_report_schema_error(error)
     repository.add_audit_log(actor["username"], "sql_report_saved", f"Lưu cấu hình SQL {ma_bao_cao}")
+    if hasattr(repository, "delete_dashboard_chart_cache_for_sql_report"):
+        repository.delete_dashboard_chart_cache_for_sql_report(
+            report_id=report_id,
+            report_codes=[ma_bao_cao, (existing_report or {}).get("ma_bao_cao")],
+        )
     return {"ok": True, "id": report_id}
 
 
@@ -987,6 +993,12 @@ def save_sql_report(request: Request, payload: SqlReportPayload) -> dict:
 def delete_sql_report(request: Request, report_id: int) -> dict:
     actor = admin_user(request)
     repository = build_app_repository()
+    existing_report = repository.get_sql_report_by_id(report_id)
+    if hasattr(repository, "delete_dashboard_chart_cache_for_sql_report"):
+        repository.delete_dashboard_chart_cache_for_sql_report(
+            report_id=report_id,
+            report_codes=[(existing_report or {}).get("ma_bao_cao")],
+        )
     try:
         repository.delete_sql_report(report_id)
     except RuntimeError as error:

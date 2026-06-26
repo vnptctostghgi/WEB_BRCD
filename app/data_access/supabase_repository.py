@@ -643,6 +643,15 @@ class SupabaseRepository:
     def delete_dashboard_chart_cache(self, chart_key: str) -> None:
         self._delete("dashboard_chart_cache", {"chart_key": f"eq.{chart_key}"})
 
+    def delete_dashboard_chart_cache_for_sql_report(self, report_id: int | None = None, report_codes: list[str] | None = None) -> int:
+        if report_id:
+            self._delete("dashboard_chart_cache", {"report_id": f"eq.{report_id}"})
+        codes = sorted({str(code or "").strip().upper() for code in (report_codes or []) if str(code or "").strip()})
+        for code in codes:
+            self._delete("dashboard_chart_cache", {"report_code": f"eq.{code}"})
+            self._delete("dashboard_chart_cache", {"sql_code": f"eq.{code}"})
+        return 0
+
     def _ensure_default_dashboard_layout(self) -> None:
         rows = self._get("dashboard_layouts", {"page_id": f"eq.{DEFAULT_DASHBOARD_PAGE_ID}", "select": "page_id", "limit": "1"})
         if rows:

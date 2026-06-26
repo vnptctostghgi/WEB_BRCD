@@ -427,7 +427,9 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data(monkeypatch) -
             "cau_lenh_sql": "SELECT job_name, status FROM css_cto.check_job;",
             "cac_tham_so": [],
         }
-        assert client.post("/api/admin/sql-reports", json=inverted_report_payload).status_code == 200
+        inverted_created = client.post("/api/admin/sql-reports", json=inverted_report_payload)
+        assert inverted_created.status_code == 200
+        inverted_report_id = inverted_created.json()["id"]
         table_layout_payload = {
             "page_id": "DASHBOARD_CHECK_JOB",
             "page_name": "CHECK_JOB",
@@ -473,6 +475,16 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data(monkeypatch) -
         assert cached_data["ok"] is True
         assert cached_data["details"]["dashboard_cache"]["hit"] is True
         assert len(api_calls) == calls_after_cache_fill
+        updated_inverted_report_payload = {
+            **inverted_report_payload,
+            "id": inverted_report_id,
+            "cau_lenh_sql": "SELECT job_name, status, run_time FROM css_cto.check_job;",
+        }
+        assert client.post("/api/admin/sql-reports", json=updated_inverted_report_payload).status_code == 200
+        tab_check_after_sql_update = client.get("/api/admin/dashboard-layouts/DASHBOARD_CHECK_JOB/tabs/tab_check/data")
+        assert tab_check_after_sql_update.status_code == 200
+        assert len(api_calls) == calls_after_cache_fill + 1
+        assert "dashboard_cache" not in tab_check_after_sql_update.json()["widgets"][0]["data"].get("details", {})
         refresh_result = DatabaseService(routes.InternalApiClient(routes.get_settings()), routes.build_app_repository()).refresh_dashboard_chart_cache(page_id="DASHBOARD_CHECK_JOB")
         assert refresh_result["deleted_stale"] == 0
 

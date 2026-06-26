@@ -1064,6 +1064,27 @@ class AppRepository:
         with self.connect() as connection:
             connection.execute("DELETE FROM dashboard_chart_cache WHERE chart_key=?", (chart_key,))
 
+    def delete_dashboard_chart_cache_for_sql_report(self, report_id: int | None = None, report_codes: list[str] | None = None) -> int:
+        conditions: list[str] = []
+        params: list[Any] = []
+        if report_id:
+            conditions.append("report_id=?")
+            params.append(report_id)
+        codes = sorted({str(code or "").strip().upper() for code in (report_codes or []) if str(code or "").strip()})
+        if codes:
+            placeholders = ",".join("?" for _ in codes)
+            conditions.append(f"(UPPER(report_code) IN ({placeholders}) OR UPPER(sql_code) IN ({placeholders}))")
+            params.extend(codes)
+            params.extend(codes)
+        if not conditions:
+            return 0
+        with self.connect() as connection:
+            cursor = connection.execute(
+                f"DELETE FROM dashboard_chart_cache WHERE {' OR '.join(conditions)}",
+                params,
+            )
+            return int(cursor.rowcount or 0)
+
     def list_work_tasks(self, include_completed: bool = False) -> list[dict[str, Any]]:
         query = "SELECT * FROM work_tasks"
         if not include_completed:
