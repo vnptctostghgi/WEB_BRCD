@@ -55,6 +55,20 @@ const dashboardColorScaleStops = [
   { ratio: .5, rgb: [245, 158, 11] },
   { ratio: 1, rgb: [59, 130, 246] },
 ];
+const dashboardPiePalette = [
+  "#2563eb",
+  "#f59e0b",
+  "#22c55e",
+  "#a855f7",
+  "#ef4444",
+  "#14b8a6",
+  "#eab308",
+  "#ec4899",
+  "#06b6d4",
+  "#f97316",
+  "#84cc16",
+  "#8b5cf6",
+];
 const chartJsSource = "https://cdn.jsdelivr.net/npm/chart.js";
 let chartJsLoadPromise = null;
 let dashboardChartRenderToken = 0;
@@ -2642,6 +2656,10 @@ function dashboardValueColors(values, alpha = .86) {
   });
 }
 
+function dashboardCategoryColors(count) {
+  return Array.from({ length: Math.max(0, count) }, (_, index) => dashboardPiePalette[index % dashboardPiePalette.length]);
+}
+
 function dashboardLineGradient(context, alpha = 1) {
   const chart = context.chart;
   const area = chart.chartArea;
@@ -2710,8 +2728,12 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
     const canvas = document.getElementById(elementId);
     if (!canvas || !window.Chart) return;
     const useColorScale = Boolean(chartData.colorScale);
-    const palette = useColorScale ? dashboardValueColors(dashboardChartPrimaryValues(chartData)) : ["#38bdf8", "#0ea5e9", "#22c55e", "#f59e0b", "#ef4444", "#a78bfa", "#14b8a6", "#f97316"];
     const isPie = widgetType === "pie_chart";
+    const palette = isPie
+      ? dashboardCategoryColors(chartData.labels.length)
+      : useColorScale
+        ? dashboardValueColors(dashboardChartPrimaryValues(chartData))
+        : ["#38bdf8", "#0ea5e9", "#22c55e", "#f59e0b", "#ef4444", "#a78bfa", "#14b8a6", "#f97316"];
     const isLine = widgetType === "line_chart";
     const isCombo = widgetType === "combo_chart";
     const isMulti = widgetType === "multi_bar_chart" || widgetType === "horizontal_multi_bar_chart" || widgetType === "multi_line_chart";
@@ -2754,11 +2776,11 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
       label: "Giá trị",
       data: chartData.values,
       backgroundColor: isPie ? palette : isLine ? (useColorScale ? (context) => dashboardLineGradient(context, .18) : "rgba(37, 99, 235, .14)") : (useColorScale ? palette : "rgba(56, 189, 248, .72)"),
-      borderColor: isPie ? "#061d38" : isLine && useColorScale ? (context) => dashboardLineGradient(context, 1) : "#2563eb",
+      borderColor: isPie ? "#082f49" : isLine && useColorScale ? (context) => dashboardLineGradient(context, 1) : "#2563eb",
       pointBackgroundColor: isLine ? (useColorScale ? palette : "#2563eb") : undefined,
       pointBorderColor: isLine ? "#e0f2fe" : undefined,
       pointRadius: isLine ? 4 : undefined,
-      borderWidth: isLine ? 3 : 1,
+      borderWidth: isPie ? 2 : isLine ? 3 : 1,
       tension: .35,
       fill: isLine,
     }];
