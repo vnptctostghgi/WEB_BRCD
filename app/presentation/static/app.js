@@ -2694,10 +2694,11 @@ function renderChartLoadError(jobs, message) {
 }
 
 async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
+  // A stale render pass must not clear jobs queued by the newly active tab.
+  if (token !== dashboardChartRenderToken) return;
   const jobs = pendingDashboardCharts;
   pendingDashboardCharts = [];
   if (!jobs.length) return;
-  if (token !== dashboardChartRenderToken) return;
   try {
     await ensureChartJsLoaded();
   } catch (error) {
