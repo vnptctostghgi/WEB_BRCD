@@ -1775,9 +1775,9 @@ p {
 .builder-widget-card,
 .runtime-widget-card {
   min-width: 0;
-  border: 1px solid rgba(125, 211, 252, .44);
+  border: 1px solid rgba(125, 211, 252, .58);
   border-radius: 18px;
-  background: rgba(6, 29, 56, .84);
+  background: rgba(4, 25, 49, .96);
   padding: .9rem;
 }
 

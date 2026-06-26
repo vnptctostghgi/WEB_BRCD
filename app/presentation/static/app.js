@@ -2642,15 +2642,15 @@ function dashboardColorFromScaleRatio(ratio, alpha = .86) {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
-function dashboardValueColors(values, alpha = .86) {
+function dashboardValueColors(values, alpha = .96) {
   const numericValues = values.map((value) => Number(value));
   const finiteValues = numericValues.filter(Number.isFinite);
-  if (!finiteValues.length) return values.map(() => "rgba(148, 163, 184, .72)");
+  if (!finiteValues.length) return values.map(() => "rgba(148, 163, 184, .92)");
   const min = Math.min(...finiteValues);
   const max = Math.max(...finiteValues);
   const range = max - min;
   return numericValues.map((value) => {
-    if (!Number.isFinite(value)) return "rgba(148, 163, 184, .72)";
+    if (!Number.isFinite(value)) return "rgba(148, 163, 184, .92)";
     const ratio = range === 0 ? .5 : (value - min) / range;
     return dashboardColorFromScaleRatio(ratio, alpha);
   });
@@ -2743,10 +2743,10 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
     const datasets = isMulti ? chartData.series.map((series, seriesIndex) => ({
       label: series.label,
       data: series.values,
-      backgroundColor: isMultiLine ? (useColorScale ? (context) => dashboardLineGradient(context, .16) : `${seriesPalette[seriesIndex % seriesPalette.length]}33`) : (useColorScale ? dashboardValueColors(series.values, .82) : `${seriesPalette[seriesIndex % seriesPalette.length]}cc`),
+      backgroundColor: isMultiLine ? (useColorScale ? (context) => dashboardLineGradient(context, .24) : `${seriesPalette[seriesIndex % seriesPalette.length]}4d`) : (useColorScale ? dashboardValueColors(series.values, .96) : seriesPalette[seriesIndex % seriesPalette.length]),
       borderColor: isMultiLine && useColorScale ? (context) => dashboardLineGradient(context, 1) : seriesPalette[seriesIndex % seriesPalette.length],
       pointBackgroundColor: isMultiLine ? seriesPalette[seriesIndex % seriesPalette.length] : undefined,
-      borderWidth: isMultiLine ? 3 : 1,
+      borderWidth: isMultiLine ? 4 : 1.5,
       tension: .35,
       fill: isMultiLine,
     })) : isCombo ? [
@@ -2754,9 +2754,9 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
         type: "bar",
         label: chartData.barLabel,
         data: chartData.barValues,
-        backgroundColor: useColorScale ? dashboardValueColors(chartData.barValues) : "rgba(56, 189, 248, .72)",
+        backgroundColor: useColorScale ? dashboardValueColors(chartData.barValues, .96) : "rgba(56, 189, 248, .96)",
         borderColor: "#e0f2fe",
-        borderWidth: 1,
+        borderWidth: 1.5,
         yAxisID: "y",
       },
       {
@@ -2764,43 +2764,43 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
         label: chartData.lineLabel,
         data: chartData.lineValues,
         borderColor: useColorScale ? (context) => dashboardLineGradient(context, 1) : "#2563eb",
-        backgroundColor: useColorScale ? (context) => dashboardLineGradient(context, .18) : "rgba(37, 99, 235, .14)",
+        backgroundColor: useColorScale ? (context) => dashboardLineGradient(context, .24) : "rgba(37, 99, 235, .22)",
         pointBackgroundColor: useColorScale ? dashboardValueColors(chartData.lineValues) : "#2563eb",
         pointBorderColor: "#e0f2fe",
         pointRadius: 4,
-        borderWidth: 3,
+        borderWidth: 4,
         tension: .35,
         yAxisID: "y1",
       },
     ] : [{
       label: "Giá trị",
       data: chartData.values,
-      backgroundColor: isPie ? palette : isLine ? (useColorScale ? (context) => dashboardLineGradient(context, .18) : "rgba(37, 99, 235, .14)") : (useColorScale ? palette : "rgba(56, 189, 248, .72)"),
+      backgroundColor: isPie ? palette : isLine ? (useColorScale ? (context) => dashboardLineGradient(context, .24) : "rgba(37, 99, 235, .22)") : (useColorScale ? palette : "rgba(56, 189, 248, .96)"),
       borderColor: isPie ? "#082f49" : isLine && useColorScale ? (context) => dashboardLineGradient(context, 1) : "#2563eb",
       pointBackgroundColor: isLine ? (useColorScale ? palette : "#2563eb") : undefined,
       pointBorderColor: isLine ? "#e0f2fe" : undefined,
-      pointRadius: isLine ? 4 : undefined,
-      borderWidth: isPie ? 2 : isLine ? 3 : 1,
+      pointRadius: isLine ? 4.5 : undefined,
+      borderWidth: isPie ? 2 : isLine ? 4 : 1.5,
       tension: .35,
       fill: isLine,
     }];
     const isHorizontalAxis = widgetType === "horizontal_multi_bar_chart" || widgetType === "bar_chart" && chartData.orientation === "horizontal";
     const primaryAxisMax = dashboardAxisMax(dashboardChartPrimaryValues(chartData));
     const scales = isPie ? {} : isCombo ? {
-      x: { ticks: { color: "#bae6fd", autoSkip: false, maxRotation: 55, minRotation: 0 }, grid: { color: "rgba(125, 211, 252, .1)" } },
-      y: { beginAtZero: true, max: dashboardAxisMax(chartData.barValues), ticks: { color: "#bae6fd" }, grid: { color: "rgba(125, 211, 252, .12)" } },
+      x: { ticks: { color: "#e0f2fe", autoSkip: false, maxRotation: 55, minRotation: 0, font: { weight: "700" } }, grid: { color: "rgba(125, 211, 252, .18)" } },
+      y: { beginAtZero: true, max: dashboardAxisMax(chartData.barValues), ticks: { color: "#e0f2fe", font: { weight: "700" } }, grid: { color: "rgba(125, 211, 252, .2)" } },
       y1: { beginAtZero: true, max: dashboardAxisMax(chartData.lineValues), position: "right", ticks: { color: "#fde68a" }, grid: { drawOnChartArea: false } },
     } : {
-      x: { beginAtZero: isHorizontalAxis, max: isHorizontalAxis ? primaryAxisMax : undefined, ticks: { color: "#bae6fd", autoSkip: false, maxRotation: 55, minRotation: 0 }, grid: { color: "rgba(125, 211, 252, .1)" } },
-      y: { beginAtZero: true, max: isHorizontalAxis ? undefined : primaryAxisMax, ticks: { color: "#bae6fd", autoSkip: false }, grid: { color: "rgba(125, 211, 252, .12)" } },
+      x: { beginAtZero: isHorizontalAxis, max: isHorizontalAxis ? primaryAxisMax : undefined, ticks: { color: "#e0f2fe", autoSkip: false, maxRotation: 55, minRotation: 0, font: { weight: "700" } }, grid: { color: "rgba(125, 211, 252, .18)" } },
+      y: { beginAtZero: true, max: isHorizontalAxis ? undefined : primaryAxisMax, ticks: { color: "#e0f2fe", autoSkip: false, font: { weight: "700" } }, grid: { color: "rgba(125, 211, 252, .2)" } },
     };
     const valueLabelPlugin = {
       id: `dashboardValueLabels-${elementId}`,
       afterDatasetsDraw(chart) {
         const { ctx } = chart;
         ctx.save();
-        ctx.font = "700 11px Inter, system-ui, sans-serif";
-        ctx.fillStyle = "#e0f2fe";
+        ctx.font = "800 12px Inter, system-ui, sans-serif";
+        ctx.fillStyle = "#f8fafc";
         chart.data.datasets.forEach((dataset, datasetIndex) => {
           const meta = chart.getDatasetMeta(datasetIndex);
           if (meta.hidden) return;
