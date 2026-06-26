@@ -1830,7 +1830,7 @@ p {
 
 .runtime-widget-card:has(.metric-preview),
 .runtime-widget-card.runtime-data-card {
-  min-height: 132px;
+  min-height: 128px;
   display: grid;
   align-items: center;
 }
@@ -2038,15 +2038,16 @@ p {
 
 .runtime-data-card-value {
   color: #fff;
-  font-size: clamp(1.4rem, 2.8vw, 2.15rem);
+  font-size: clamp(1.75rem, 3vw, 2.5rem);
   font-weight: 950;
   line-height: 1;
 }
 
 .runtime-data-card-note {
-  margin-top: .3rem;
+  margin-top: .4rem;
   color: #e0f2fe;
-  font-size: .88rem;
+  font-size: .95rem;
+  font-weight: 850;
 }
 
 .runtime-chart-box {
@@ -2094,31 +2095,32 @@ p {
 
 .metric-preview {
   display: grid;
-  min-height: 104px;
+  min-height: 108px;
   align-content: center;
   justify-items: center;
-  gap: .4rem;
+  gap: .48rem;
   text-align: center;
 }
 
 .metric-preview span {
   color: #bae6fd;
-  font-size: .78rem;
+  font-size: clamp(.88rem, 1.1vw, 1rem);
   font-weight: 900;
-  letter-spacing: .08em;
+  letter-spacing: .06em;
   text-transform: uppercase;
 }
 
 .metric-preview strong {
   color: #fff;
-  font-size: 2rem;
+  font-size: clamp(2.35rem, 3.4vw, 3rem);
   font-weight: 900;
-  line-height: 1.1;
+  line-height: .95;
 }
 
 .metric-preview small {
   color: #e0f2fe;
-  font-weight: 800;
+  font-size: clamp(.82rem, .95vw, .95rem);
+  font-weight: 850;
 }
 
 @media (max-width: 640px) {
