@@ -1651,10 +1651,10 @@ p {
 }
 
 .runtime-tab {
-  min-height: 48px;
-  font-size: clamp(.95rem, 1vw, 1.08rem);
+  min-height: 52px;
+  font-size: clamp(1.08rem, 1.2vw, 1.22rem);
   letter-spacing: .02em;
-  padding: .7rem 1rem;
+  padding: .78rem 1.1rem;
 }
 
 .builder-tab.active,
