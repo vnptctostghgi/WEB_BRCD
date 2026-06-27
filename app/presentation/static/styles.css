@@ -1650,6 +1650,13 @@ p {
   cursor: pointer;
 }
 
+.runtime-tab {
+  min-height: 48px;
+  font-size: clamp(.95rem, 1vw, 1.08rem);
+  letter-spacing: .02em;
+  padding: .7rem 1rem;
+}
+
 .builder-tab.active,
 .runtime-tab.active,
 .builder-tab:hover,
