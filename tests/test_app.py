@@ -1030,3 +1030,57 @@ def test_viewer_needs_feature_permission_for_vault() -> None:
         client.post("/api/auth/logout")
         login(client, "viewer_test", "Viewer@Test123")
         assert client.get("/api/credentials").status_code == 200
+
+
+def test_dashboard_layout_preserves_google_sheet_embed_without_sql() -> None:
+    with TestClient(app) as client:
+        login(client)
+        layout_payload = {
+            "page_id": "DASHBOARD_GOOGLE_SHEET",
+            "page_name": "Google Sheet Dashboard",
+            "layout": {
+                "page_id": "DASHBOARD_GOOGLE_SHEET",
+                "tabs": [
+                    {
+                        "tab_id": "tab_sheet",
+                        "tab_name": "Sheet",
+                        "order": 1,
+                        "grid_layout": [
+                            {
+                                "row_id": 1,
+                                "layout_type": "1_column",
+                                "widgets": [
+                                    {
+                                        "position": 1,
+                                        "type": "google_sheet_embed",
+                                        "title": "Published Sheet",
+                                        "chart_config": {
+                                            "embed_url": "https://docs.google.com/spreadsheets/d/e/2PACX-test/pubhtml",
+                                            "embed_height": "560",
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+        }
+
+        saved = client.post("/api/admin/dashboard-layouts", json=layout_payload)
+        assert saved.status_code == 200
+        widget = saved.json()["layout"]["tabs"][0]["grid_layout"][0]["widgets"][0]
+        assert widget["type"] == "google_sheet_embed"
+        assert widget["sql_code"] == ""
+        assert widget["chart_config"]["embed_url"].startswith("https://docs.google.com/spreadsheets/")
+
+        reopened = client.get("/api/admin/dashboard-layouts/DASHBOARD_GOOGLE_SHEET")
+        assert reopened.status_code == 200
+        reopened_widget = reopened.json()["layout"]["tabs"][0]["grid_layout"][0]["widgets"][0]
+        assert reopened_widget["type"] == "google_sheet_embed"
+        assert reopened_widget["chart_config"]["embed_height"] == "560"
+
+        tab_data = client.get("/api/admin/dashboard-layouts/DASHBOARD_GOOGLE_SHEET/tabs/tab_sheet/data")
+        assert tab_data.status_code == 200
+        assert tab_data.json()["ok"] is True
+        assert tab_data.json()["widgets"] == []

@@ -49,7 +49,8 @@ DASHBOARD_LAYOUT_TYPES = {
     "6_columns_2_4": 2,
     "6_columns_4_2": 2,
 }
-DASHBOARD_WIDGET_TYPES = {"bar_chart", "pie_chart", "line_chart", "combo_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "multi_line_chart", "data_table", "metric", "data_card", "text_title"}
+DASHBOARD_WIDGET_TYPES = {"bar_chart", "pie_chart", "line_chart", "combo_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "multi_line_chart", "data_table", "metric", "data_card", "google_sheet_embed", "text_title"}
+DASHBOARD_NON_SQL_WIDGET_TYPES = {"google_sheet_embed", "text_title"}
 DASHBOARD_LAYOUT_EXCLUDED_FEATURE_CODES = {
     "dashboard",
     "truyvansql",
@@ -316,8 +317,13 @@ def normalize_dashboard_layout(payload: DashboardLayoutPayload) -> tuple[str, st
                 sql_code = str(widget.get("sql_code") or "").strip()
                 title = str(widget.get("title") or "").strip()
                 text_content = str(widget.get("text_content") or "").strip()
+                raw_chart_config = widget.get("chart_config") if isinstance(widget.get("chart_config"), dict) else {}
+                chart_config = {str(key).strip(): value for key, value in raw_chart_config.items() if str(key).strip()}
                 if widget_type == "text_title":
                     if not title and not text_content:
+                        continue
+                elif widget_type == "google_sheet_embed":
+                    if not str(chart_config.get("embed_url") or "").strip():
                         continue
                 elif not sql_code:
                     continue
@@ -328,8 +334,6 @@ def normalize_dashboard_layout(payload: DashboardLayoutPayload) -> tuple[str, st
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Vị trí hiển thị không khớp số cột Layout.")
                 raw_filters = widget.get("filters") if isinstance(widget.get("filters"), dict) else {}
                 filters = {str(key).strip(): value for key, value in raw_filters.items() if str(key).strip()}
-                raw_chart_config = widget.get("chart_config") if isinstance(widget.get("chart_config"), dict) else {}
-                chart_config = {str(key).strip(): value for key, value in raw_chart_config.items() if str(key).strip()}
                 raw_report_id = widget.get("report_id")
                 try:
                     report_id = int(raw_report_id) if raw_report_id not in (None, "") else None
