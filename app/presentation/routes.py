@@ -1,10 +1,13 @@
 from pathlib import Path
+from html import escape as html_escape
+from html.parser import HTMLParser
 import re
 import sqlite3
 from io import BytesIO
 from typing import Any, Literal
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
+import httpx
 import openpyxl
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
@@ -67,6 +70,75 @@ DASHBOARD_LAYOUT_PARENT_EXCLUDED_FEATURE_CODES = {
     "reports",
     "new_reports",
 }
+
+
+class GoogleSheetTableExtractor(HTMLParser):
+    allowed_tags = {"table", "thead", "tbody", "tfoot", "tr", "td", "th", "colgroup", "col"}
+    allowed_attrs = {"class", "style", "colspan", "rowspan", "width", "height"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.capture_table = False
+        self.table_depth = 0
+        self.table_chunks: list[str] = []
+        self.capture_style = False
+        self.style_chunks: list[str] = []
+        self.found_table = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag == "style":
+            self.capture_style = True
+            return
+        if tag == "table" and not self.found_table:
+            self.capture_table = True
+            self.found_table = True
+        if not self.capture_table or tag not in self.allowed_tags:
+            return
+        if tag == "table":
+            self.table_depth += 1
+        safe_attrs = []
+        for name, value in attrs:
+            name = (name or "").lower()
+            if name in self.allowed_attrs and value is not None:
+                safe_attrs.append(f'{name}="{html_escape(value, quote=True)}"')
+        suffix = f" {' '.join(safe_attrs)}" if safe_attrs else ""
+        self.table_chunks.append(f"<{tag}{suffix}>")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag == "style":
+            self.capture_style = False
+            return
+        if not self.capture_table or tag not in self.allowed_tags:
+            return
+        self.table_chunks.append(f"</{tag}>")
+        if tag == "table":
+            self.table_depth -= 1
+            if self.table_depth <= 0:
+                self.capture_table = False
+
+    def handle_data(self, data: str) -> None:
+        if self.capture_style:
+            self.style_chunks.append(data)
+        elif self.capture_table:
+            self.table_chunks.append(html_escape(data))
+
+    def handle_entityref(self, name: str) -> None:
+        if self.capture_table:
+            self.table_chunks.append(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        if self.capture_table:
+            self.table_chunks.append(f"&#{name};")
+
+    def sanitized_html(self) -> str:
+        table = "".join(self.table_chunks).strip()
+        if not table:
+            return ""
+        style = "\n".join(self.style_chunks).strip()
+        style_html = f"<style>{style}</style>" if style else ""
+        return f'{style_html}<div class="google-sheet-table-source">{table}</div>'
 
 
 class LoginPayload(BaseModel):
@@ -720,6 +792,17 @@ def require_feature(request: Request, feature_code: str) -> dict:
     return user
 
 
+def normalize_google_sheet_public_url(raw_url: str) -> str:
+    parsed = urlparse(str(raw_url or "").strip())
+    if parsed.scheme != "https" or parsed.netloc != "docs.google.com" or not parsed.path.startswith("/spreadsheets/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Link Google Sheet không hợp lệ.")
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query["headers"] = "false"
+    query["widget"] = "false"
+    query.setdefault("single", "true")
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, urlencode(query), parsed.fragment))
+
+
 @router.get("/login", response_class=HTMLResponse)
 def login_page(request: Request) -> Response:
     next_path = request.query_params.get("next") or "/"
@@ -1218,6 +1301,27 @@ def load_visible_dashboard_layout_tab_data(request: Request, page_id: str, tab_i
         return build_database_service().run_dashboard_layout_tab(page_id=safe_page_id, tab_id=safe_tab_id)
     except RuntimeError as error:
         raise_dashboard_layout_schema_error(error)
+
+
+@router.get("/api/google-sheet-table")
+def load_google_sheet_table(request: Request, url: str) -> dict:
+    current_user(request)
+    safe_url = normalize_google_sheet_public_url(url)
+    try:
+        with httpx.Client(timeout=20, follow_redirects=True) as client:
+            response = client.get(safe_url)
+            response.raise_for_status()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Google Sheet phản hồi quá lâu.")
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Không tải được Google Sheet: {error}")
+
+    extractor = GoogleSheetTableExtractor()
+    extractor.feed(response.text)
+    table_html = extractor.sanitized_html()
+    if not table_html:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Không tìm thấy bảng trong link Google Sheet.")
+    return {"ok": True, "html": table_html}
 
 
 @router.get("/api/reports/configs")

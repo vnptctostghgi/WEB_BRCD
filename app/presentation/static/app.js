@@ -30,6 +30,7 @@ let draggedDashboardTabId = "";
 let draggedDashboardRowId = "";
 const dashboardChartInstances = new Map();
 let pendingDashboardCharts = [];
+let pendingDashboardSheets = [];
 const dashboardLayoutDefinitions = {
   "1_column": { total: 1, spans: [1], label: "1 cột" },
   "2_columns": { total: 2, spans: [1, 1], label: "2 cột" },
@@ -706,6 +707,7 @@ function renderDashboardViewer() {
     </div>
   `;
   schedulePendingDashboardCharts();
+  schedulePendingDashboardSheets();
 }
 
 function formatDashboardNumber(value) {
@@ -2251,11 +2253,7 @@ function renderDashboardWidgetAdvancedConfig(widget) {
     </div>
     <div class="dashboard-widget-config ${type === "google_sheet_embed" ? "active" : ""}" data-config-for="google_sheet_embed">
       <label>Link Google Sheet xuất bản lên web<input class="form-control" name="embed_url" value="${dashboardConfigValue(widget, "embed_url")}" placeholder="https://docs.google.com/spreadsheets/d/e/.../pubhtml" /></label>
-      <div class="grid gap-2 md:grid-cols-2">
-        <label>Chiều cao khung<input class="form-control" name="embed_height" value="${dashboardConfigValue(widget, "embed_height", "520")}" placeholder="520" /></label>
-        <label>Chiều rộng bảng<input class="form-control" name="embed_width" value="${dashboardConfigValue(widget, "embed_width", "1280")}" placeholder="1280" /></label>
-      </div>
-      <small>Chỉ dùng link Google Sheet public hoặc Xuất bản lên web. Link bị khóa quyền có thể không hiển thị.</small>
+      <small>Chỉ dùng link Google Sheet public hoặc Xuất bản lên web. Hệ thống sẽ tự lấy đúng bảng và co chiều cao theo nội dung.</small>
     </div>
     <div class="dashboard-widget-config ${type === "text_title" ? "active" : ""}" data-config-for="text_title">
       <label>Nội dung text<textarea class="form-control" name="text_content" rows="3" placeholder="Nhập mô tả hoặc tiêu đề phụ">${escapeHtml(widget.text_content || "")}</textarea></label>
@@ -2524,6 +2522,7 @@ function renderDashboardPreview() {
     </div>
   `;
   schedulePendingDashboardCharts();
+  schedulePendingDashboardSheets();
 }
 
 function renderRuntimeWidget(widget, widgetData, elementId, options = {}) {
@@ -2553,13 +2552,10 @@ function renderRuntimeWidget(widget, widgetData, elementId, options = {}) {
 function dashboardTrustedGoogleSheetUrl(rawUrl) {
   try {
     const url = new URL(String(rawUrl || "").trim());
-    if (url.protocol !== "https:") return "";
-    if (url.hostname !== "docs.google.com") return "";
-    if (!url.pathname.startsWith("/spreadsheets/")) return "";
-    url.searchParams.set("headers", "false");
-    url.searchParams.set("widget", "false");
-    if (!url.searchParams.has("single")) url.searchParams.set("single", "true");
-    return url.href;
+  if (url.protocol !== "https:") return "";
+  if (url.hostname !== "docs.google.com") return "";
+  if (!url.pathname.startsWith("/spreadsheets/")) return "";
+  return url.href;
   } catch {
     return "";
   }
@@ -2578,15 +2574,15 @@ function dashboardEmbedWidth(value) {
 function renderRuntimeGoogleSheetWidget(widget) {
   const title = widget.title || "Google Sheet";
   const embedUrl = dashboardTrustedGoogleSheetUrl(widget.chart_config?.embed_url || "");
-  const height = dashboardEmbedHeight(widget.chart_config?.embed_height);
-  const width = dashboardEmbedWidth(widget.chart_config?.embed_width);
   if (!embedUrl) {
     return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Nhập link Google Sheet đã xuất bản lên web.</div></article>`;
   }
+  const elementId = `google-sheet-${Math.random().toString(36).slice(2, 10)}`;
+  pendingDashboardSheets.push({ elementId, url: embedUrl });
   return `
     <article class="runtime-widget-card runtime-embed-card">
-      <div class="runtime-embed-frame" style="--embed-height:${height}px;--embed-width:${width}px">
-        <iframe title="${escapeHtml(title)}" src="${escapeHtml(embedUrl)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+      <div class="runtime-sheet-table" id="${escapeHtml(elementId)}">
+        <div class="runtime-widget-empty">Đang tải bảng Google Sheet...</div>
       </div>
     </article>
   `;
@@ -3039,6 +3035,22 @@ function schedulePendingDashboardCharts() {
   if (!pendingDashboardCharts.length) return;
   const token = dashboardChartRenderToken;
   window.requestAnimationFrame(() => renderPendingDashboardCharts(token));
+}
+
+function schedulePendingDashboardSheets() {
+  const jobs = pendingDashboardSheets;
+  pendingDashboardSheets = [];
+  if (!jobs.length) return;
+  jobs.forEach(async ({ elementId, url }) => {
+    const target = document.getElementById(elementId);
+    if (!target) return;
+    try {
+      const response = await api(`/api/google-sheet-table?url=${encodeURIComponent(url)}`);
+      target.innerHTML = response.html || `<div class="runtime-widget-empty">Không tìm thấy bảng trong Google Sheet.</div>`;
+    } catch (error) {
+      target.innerHTML = `<div class="runtime-widget-error">${escapeHtml(error.message || "Không tải được bảng Google Sheet.")}</div>`;
+    }
+  });
 }
 
 function renderChartLoadError(jobs, message) {

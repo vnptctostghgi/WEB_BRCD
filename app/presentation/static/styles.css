@@ -2079,6 +2079,34 @@ p {
   box-shadow: none;
 }
 
+.runtime-sheet-table {
+  width: 100%;
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid rgba(125, 211, 252, .32);
+  border-radius: 14px;
+  background: #ffffff;
+  scrollbar-color: #94a3b8 #e2e8f0;
+}
+
+.runtime-sheet-table .runtime-widget-empty,
+.runtime-sheet-table .runtime-widget-error {
+  min-height: 160px;
+}
+
+.runtime-sheet-table .google-sheet-table-source {
+  display: inline-block;
+  min-width: 100%;
+  vertical-align: top;
+}
+
+.runtime-sheet-table table {
+  border-collapse: collapse;
+  table-layout: auto;
+  width: auto;
+  min-width: max-content;
+}
+
 .runtime-embed-frame {
   width: 100%;
   height: var(--embed-height, 520px);
