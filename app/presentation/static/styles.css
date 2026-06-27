@@ -2107,6 +2107,17 @@ p {
   min-width: max-content;
 }
 
+.runtime-sheet-table .google-sheet-table-source table :where(td, th) {
+  color: #000;
+}
+
+.runtime-sheet-table .google-sheet-table-source .row-headers-background,
+.runtime-sheet-table .google-sheet-table-source .column-headers-background,
+.runtime-sheet-table .google-sheet-table-source .row-header-wrapper,
+.runtime-sheet-table .google-sheet-table-source .column-header-wrapper {
+  display: none !important;
+}
+
 .runtime-embed-frame {
   width: 100%;
   height: var(--embed-height, 520px);

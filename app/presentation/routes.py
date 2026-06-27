@@ -79,6 +79,7 @@ class GoogleSheetTableExtractor(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=False)
         self.capture_table = False
+        self.skip_table_node_depth = 0
         self.table_depth = 0
         self.table_chunks: list[str] = []
         self.capture_style = False
@@ -95,6 +96,20 @@ class GoogleSheetTableExtractor(HTMLParser):
             self.found_table = True
         if not self.capture_table or tag not in self.allowed_tags:
             return
+        if self.skip_table_node_depth:
+            self.skip_table_node_depth += 1
+            return
+        class_value = " ".join(value or "" for name, value in attrs if (name or "").lower() == "class").lower()
+        if tag in {"td", "th", "col"} and (
+            "row-header" in class_value
+            or "row-headers" in class_value
+            or "column-header" in class_value
+            or "column-headers" in class_value
+            or "freezebar" in class_value
+        ):
+            if tag != "col":
+                self.skip_table_node_depth = 1
+            return
         if tag == "table":
             self.table_depth += 1
         safe_attrs = []
@@ -110,6 +125,9 @@ class GoogleSheetTableExtractor(HTMLParser):
         if tag == "style":
             self.capture_style = False
             return
+        if self.skip_table_node_depth:
+            self.skip_table_node_depth -= 1
+            return
         if not self.capture_table or tag not in self.allowed_tags:
             return
         self.table_chunks.append(f"</{tag}>")
@@ -121,15 +139,15 @@ class GoogleSheetTableExtractor(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self.capture_style:
             self.style_chunks.append(data)
-        elif self.capture_table:
+        elif self.capture_table and not self.skip_table_node_depth:
             self.table_chunks.append(html_escape(data))
 
     def handle_entityref(self, name: str) -> None:
-        if self.capture_table:
+        if self.capture_table and not self.skip_table_node_depth:
             self.table_chunks.append(f"&{name};")
 
     def handle_charref(self, name: str) -> None:
-        if self.capture_table:
+        if self.capture_table and not self.skip_table_node_depth:
             self.table_chunks.append(f"&#{name};")
 
     def sanitized_html(self) -> str:

@@ -1084,3 +1084,24 @@ def test_dashboard_layout_preserves_google_sheet_embed_without_sql() -> None:
         assert tab_data.status_code == 200
         assert tab_data.json()["ok"] is True
         assert tab_data.json()["widgets"] == []
+
+
+def test_google_sheet_table_extractor_removes_sheet_headers() -> None:
+    extractor = routes.GoogleSheetTableExtractor()
+    extractor.feed(
+        """
+        <style>.s0{background:#fee;color:#111}.row-headers-background{background:#073763;color:#fff}</style>
+        <table class="waffle">
+          <tbody>
+            <tr><th class="row-headers-background">1</th><td class="s0">A</td></tr>
+            <tr><th class="row-headers-background">2</th><td class="s0">B</td></tr>
+          </tbody>
+        </table>
+        """
+    )
+    html = extractor.sanitized_html()
+    assert '<th class="row-headers-background"' not in html
+    assert ">1<" not in html
+    assert ">2<" not in html
+    assert ">A<" in html
+    assert ">B<" in html
