@@ -156,7 +156,7 @@ class GoogleSheetTableExtractor(HTMLParser):
             return ""
         style = "\n".join(self.style_chunks).strip()
         style_html = f"<style>{style}</style>" if style else ""
-        return f'{style_html}<div class="google-sheet-table-source">{table}</div>'
+        return f'{style_html}<div class="google-sheet-table-source ritz grid-container" dir="ltr">{table}</div>'
 
 
 class LoginPayload(BaseModel):

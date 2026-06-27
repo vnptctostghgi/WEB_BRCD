@@ -1100,6 +1100,7 @@ def test_google_sheet_table_extractor_removes_sheet_headers() -> None:
         """
     )
     html = extractor.sanitized_html()
+    assert 'class="google-sheet-table-source ritz grid-container"' in html
     assert '<th class="row-headers-background"' not in html
     assert ">1<" not in html
     assert ">2<" not in html

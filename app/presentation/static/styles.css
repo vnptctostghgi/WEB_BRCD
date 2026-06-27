@@ -2101,14 +2101,9 @@ p {
 }
 
 .runtime-sheet-table table {
-  border-collapse: collapse;
   table-layout: auto;
   width: auto;
   min-width: max-content;
-}
-
-.runtime-sheet-table .google-sheet-table-source table :where(td, th) {
-  color: #000;
 }
 
 .runtime-sheet-table .google-sheet-table-source .row-headers-background,
