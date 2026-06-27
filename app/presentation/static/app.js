@@ -2139,6 +2139,7 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
         series_labels: activeConfig?.querySelector("[name='series_labels']")?.value.trim() || "",
         embed_url: activeConfig?.querySelector("[name='embed_url']")?.value.trim() || "",
         embed_height: activeConfig?.querySelector("[name='embed_height']")?.value.trim() || "",
+        embed_width: activeConfig?.querySelector("[name='embed_width']")?.value.trim() || "",
         color_scale: Boolean(activeConfig?.querySelector("[name='color_scale']")?.checked),
       };
       const hasDisplayConfig = title || textContent || iconUrl || sqlCode || chartConfig.embed_url;
@@ -2250,7 +2251,10 @@ function renderDashboardWidgetAdvancedConfig(widget) {
     </div>
     <div class="dashboard-widget-config ${type === "google_sheet_embed" ? "active" : ""}" data-config-for="google_sheet_embed">
       <label>Link Google Sheet xuất bản lên web<input class="form-control" name="embed_url" value="${dashboardConfigValue(widget, "embed_url")}" placeholder="https://docs.google.com/spreadsheets/d/e/.../pubhtml" /></label>
-      <label>Chiều cao khung<input class="form-control" name="embed_height" value="${dashboardConfigValue(widget, "embed_height", "520")}" placeholder="520" /></label>
+      <div class="grid gap-2 md:grid-cols-2">
+        <label>Chiều cao khung<input class="form-control" name="embed_height" value="${dashboardConfigValue(widget, "embed_height", "520")}" placeholder="520" /></label>
+        <label>Chiều rộng bảng<input class="form-control" name="embed_width" value="${dashboardConfigValue(widget, "embed_width", "1280")}" placeholder="1280" /></label>
+      </div>
       <small>Chỉ dùng link Google Sheet public hoặc Xuất bản lên web. Link bị khóa quyền có thể không hiển thị.</small>
     </div>
     <div class="dashboard-widget-config ${type === "text_title" ? "active" : ""}" data-config-for="text_title">
@@ -2552,6 +2556,9 @@ function dashboardTrustedGoogleSheetUrl(rawUrl) {
     if (url.protocol !== "https:") return "";
     if (url.hostname !== "docs.google.com") return "";
     if (!url.pathname.startsWith("/spreadsheets/")) return "";
+    url.searchParams.set("headers", "false");
+    url.searchParams.set("widget", "false");
+    if (!url.searchParams.has("single")) url.searchParams.set("single", "true");
     return url.href;
   } catch {
     return "";
@@ -2563,17 +2570,22 @@ function dashboardEmbedHeight(value) {
   return Math.min(1400, Math.max(260, Number.isFinite(height) ? height : 520));
 }
 
+function dashboardEmbedWidth(value) {
+  const width = Number.parseInt(value, 10);
+  return Math.min(2600, Math.max(640, Number.isFinite(width) ? width : 1280));
+}
+
 function renderRuntimeGoogleSheetWidget(widget) {
   const title = widget.title || "Google Sheet";
   const embedUrl = dashboardTrustedGoogleSheetUrl(widget.chart_config?.embed_url || "");
   const height = dashboardEmbedHeight(widget.chart_config?.embed_height);
+  const width = dashboardEmbedWidth(widget.chart_config?.embed_width);
   if (!embedUrl) {
     return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Nhập link Google Sheet đã xuất bản lên web.</div></article>`;
   }
   return `
     <article class="runtime-widget-card runtime-embed-card">
-      <h3>${escapeHtml(title)}</h3>
-      <div class="runtime-embed-frame" style="--embed-height:${height}px">
+      <div class="runtime-embed-frame" style="--embed-height:${height}px;--embed-width:${width}px">
         <iframe title="${escapeHtml(title)}" src="${escapeHtml(embedUrl)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
       </div>
     </article>
