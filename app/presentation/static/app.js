@@ -50,6 +50,7 @@ const dashboardLayoutDefinitions = {
 };
 const dashboardLayoutColumns = Object.fromEntries(Object.entries(dashboardLayoutDefinitions).map(([key, definition]) => [key, definition.spans.length]));
 const dashboardDataWidgetTypes = new Set(["bar_chart", "pie_chart", "line_chart", "combo_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "multi_line_chart", "data_table", "metric", "data_card"]);
+const dashboardNonSqlWidgetTypes = new Set(["text_title", "google_sheet_embed"]);
 const dashboardColorScaleStops = [
   { ratio: 0, rgb: [239, 68, 68] },
   { ratio: .5, rgb: [245, 158, 11] },
@@ -1590,7 +1591,7 @@ function normalizeDashboardLayoutData(layout, pageName = "") {
           chart_config: widget.chart_config && typeof widget.chart_config === "object" && !Array.isArray(widget.chart_config) ? widget.chart_config : {},
           text_content: repairTextEncoding(String(widget.text_content || "")),
           icon_url: String(widget.icon_url || ""),
-        })).filter((widget) => widget.sql_code || widget.type === "text_title") : [],
+        })).filter((widget) => widget.sql_code || dashboardNonSqlWidgetTypes.has(widget.type)) : [],
       })) : [],
     })) : [],
   };
@@ -1651,6 +1652,7 @@ function dashboardLayoutColumnCount(layoutType) {
 }
 
 function dashboardWidgetTypeLabel(type) {
+  if (type === "google_sheet_embed") return "Nhúng Google Sheet";
   const extraLabels = {
     multi_bar_chart: "Biểu đồ cột nhiều đơn vị",
     horizontal_multi_bar_chart: "Bi\u1ec3u \u0111\u1ed3 c\u1ed9t ngang nhi\u1ec1u \u0111\u01a1n v\u1ecb",
@@ -1670,7 +1672,7 @@ function dashboardWidgetTypeLabel(type) {
 }
 
 function dashboardWidgetTypeOptions(selectedType) {
-  return ["bar_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "pie_chart", "line_chart", "multi_line_chart", "combo_chart", "data_table", "metric", "data_card", "text_title"].map((type) => (
+  return ["bar_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "pie_chart", "line_chart", "multi_line_chart", "combo_chart", "data_table", "metric", "data_card", "google_sheet_embed", "text_title"].map((type) => (
     `<option value="${type}" ${selectedType === type ? "selected" : ""}>${dashboardWidgetTypeLabel(type)}</option>`
   )).join("");
 }
@@ -2135,9 +2137,11 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
         line_label: activeConfig?.querySelector("[name='line_label']")?.value.trim() || "",
         series_columns: activeConfig?.querySelector("[name='series_columns']")?.value.trim() || "",
         series_labels: activeConfig?.querySelector("[name='series_labels']")?.value.trim() || "",
+        embed_url: activeConfig?.querySelector("[name='embed_url']")?.value.trim() || "",
+        embed_height: activeConfig?.querySelector("[name='embed_height']")?.value.trim() || "",
         color_scale: Boolean(activeConfig?.querySelector("[name='color_scale']")?.checked),
       };
-      const hasDisplayConfig = title || textContent || iconUrl || sqlCode;
+      const hasDisplayConfig = title || textContent || iconUrl || sqlCode || chartConfig.embed_url;
       if (!hasDisplayConfig) return null;
       return {
         position,
@@ -2244,6 +2248,11 @@ function renderDashboardWidgetAdvancedConfig(widget) {
       <label>Ảnh biểu tượng<input class="form-control" name="icon_url" value="${escapeHtml(widget.icon_url || "")}" placeholder="https://.../icon.png" /></label>
       <label>Ghi chú thẻ<textarea class="form-control" name="text_content" rows="2" placeholder="Dòng ghi chú dưới số liệu">${escapeHtml(widget.text_content || "")}</textarea></label>
     </div>
+    <div class="dashboard-widget-config ${type === "google_sheet_embed" ? "active" : ""}" data-config-for="google_sheet_embed">
+      <label>Link Google Sheet xuất bản lên web<input class="form-control" name="embed_url" value="${dashboardConfigValue(widget, "embed_url")}" placeholder="https://docs.google.com/spreadsheets/d/e/.../pubhtml" /></label>
+      <label>Chiều cao khung<input class="form-control" name="embed_height" value="${dashboardConfigValue(widget, "embed_height", "520")}" placeholder="520" /></label>
+      <small>Chỉ dùng link Google Sheet public hoặc Xuất bản lên web. Link bị khóa quyền có thể không hiển thị.</small>
+    </div>
     <div class="dashboard-widget-config ${type === "text_title" ? "active" : ""}" data-config-for="text_title">
       <label>Nội dung text<textarea class="form-control" name="text_content" rows="3" placeholder="Nhập mô tả hoặc tiêu đề phụ">${escapeHtml(widget.text_content || "")}</textarea></label>
     </div>
@@ -2256,18 +2265,18 @@ function renderDashboardBuilderRow(row, index) {
   const cells = Array.from({ length: columns }, (_, cellIndex) => {
     const position = cellIndex + 1;
     const widget = widgetsByPosition.get(position) || { position, type: "bar_chart", title: "", sql_code: "", report_id: null, chart_config: {}, filters: {} };
-    const isTextWidget = widget.type === "text_title";
+    const requiresSql = !dashboardNonSqlWidgetTypes.has(widget.type);
     const report = dashboardReportByCode(widget.sql_code || "");
     const params = dashboardReportParams(report);
     const existingFilters = widget.filters && typeof widget.filters === "object" && !Array.isArray(widget.filters) ? widget.filters : {};
     const filterText = Object.keys(existingFilters).length ? dashboardFiltersToText(existingFilters) : dashboardParamFiltersToText(params);
-    const showFilterField = !isTextWidget && (params.length || Object.keys(existingFilters).length);
+    const showFilterField = requiresSql && (params.length || Object.keys(existingFilters).length);
     return `
       <div class="builder-widget-card dashboard-layout-cell" style="${dashboardCellStyle(row.layout_type, cellIndex)}" data-position="${position}">
         <small>Ô ${position}</small>
         <label>Tiêu đề<input class="form-control" name="title" value="${escapeHtml(widget.title || "")}" placeholder="Tên biểu đồ, thẻ hoặc tiêu đề" /></label>
         <label>Loại hiển thị<select class="form-control" name="type">${dashboardWidgetTypeOptions(widget.type)}</select></label>
-        <label class="dashboard-sql-field ${isTextWidget ? "hidden" : ""}">Mã SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "", widget.report_id)}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
+        <label class="dashboard-sql-field ${requiresSql ? "" : "hidden"}">Mã SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "", widget.report_id)}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
         <label class="dashboard-filter-field ${showFilterField ? "" : "hidden"}">Bộ lọc mặc định<textarea class="form-control dashboard-filter-json" name="filters" rows="3" placeholder='{"LOAIHINH":""}'>${escapeHtml(filterText)}</textarea></label>
         ${renderDashboardWidgetAdvancedConfig(widget)}
       </div>
@@ -2519,6 +2528,7 @@ function renderRuntimeWidget(widget, widgetData, elementId, options = {}) {
   }
   const title = widget.title || widget.sql_code || "Tiêu đề";
   if (widget.type === "text_title") return renderRuntimeTextTitleWidget(widget);
+  if (widget.type === "google_sheet_embed") return renderRuntimeGoogleSheetWidget(widget);
   if (!widget.sql_code) {
     return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Chưa chọn mã SQL cho ô này.</div></article>`;
   }
@@ -2534,6 +2544,40 @@ function renderRuntimeWidget(widget, widgetData, elementId, options = {}) {
   if (widget.type === "metric") return renderRuntimeMetricWidget(title, result, widget.sql_code);
   if (widget.type === "data_card") return renderRuntimeDataCardWidget(widget, result);
   return renderRuntimeChartWidget(title, result, widget, elementId, options);
+}
+
+function dashboardTrustedGoogleSheetUrl(rawUrl) {
+  try {
+    const url = new URL(String(rawUrl || "").trim());
+    if (url.protocol !== "https:") return "";
+    if (url.hostname !== "docs.google.com") return "";
+    if (!url.pathname.startsWith("/spreadsheets/")) return "";
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
+function dashboardEmbedHeight(value) {
+  const height = Number.parseInt(value, 10);
+  return Math.min(1400, Math.max(260, Number.isFinite(height) ? height : 520));
+}
+
+function renderRuntimeGoogleSheetWidget(widget) {
+  const title = widget.title || "Google Sheet";
+  const embedUrl = dashboardTrustedGoogleSheetUrl(widget.chart_config?.embed_url || "");
+  const height = dashboardEmbedHeight(widget.chart_config?.embed_height);
+  if (!embedUrl) {
+    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Nhập link Google Sheet đã xuất bản lên web.</div></article>`;
+  }
+  return `
+    <article class="runtime-widget-card runtime-embed-card">
+      <h3>${escapeHtml(title)}</h3>
+      <div class="runtime-embed-frame" style="--embed-height:${height}px">
+        <iframe title="${escapeHtml(title)}" src="${escapeHtml(embedUrl)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+      </div>
+    </article>
+  `;
 }
 
 function renderRuntimeTextTitleWidget(widget) {
