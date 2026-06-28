@@ -19,6 +19,7 @@ from app.application.database_service import DatabaseService
 from app.application.vault_service import VaultService
 from app.application.connection_service import ConnectionService
 from app.application.telegram_notifier import TelegramNotifier
+from app.application.zalo_bot import ZaloBotClient
 from app.data_access.app_repository import (
     AppRepository,
     DEFAULT_DASHBOARD_PAGE_ID,
@@ -1414,6 +1415,46 @@ def test_telegram_alert() -> dict:
             detail="Không gửi được Telegram. Kiểm tra token, chat ID và log Render.",
         )
     return {"ok": True, "message": "Đã gửi tin nhắn test Telegram."}
+
+
+@router.post("/api/admin/zalo/webhook/setup")
+def setup_zalo_webhook(request: Request) -> dict:
+    actor = admin_user(request)
+    result = ZaloBotClient(get_settings()).configure_webhook()
+    build_app_repository().add_audit_log(
+        actor["username"],
+        "zalo_webhook_setup" if result.get("ok") else "zalo_webhook_setup_failed",
+        f"Cai webhook Zalo: {result.get('message')}",
+    )
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result.get("message") or "Khong cai dat duoc webhook Zalo.",
+        )
+    return result
+
+
+@router.post("/api/zalo/webhook")
+async def zalo_webhook(request: Request) -> dict:
+    client = ZaloBotClient(get_settings())
+    if not client.webhook_secret:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Zalo webhook chua duoc cau hinh.")
+    if not client.has_valid_webhook_secret(request.headers.get("X-Bot-Api-Secret-Token")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Zalo webhook secret khong hop le.")
+    try:
+        payload = await request.json()
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payload Zalo khong hop le.") from error
+    result = client.handle_webhook(payload)
+    try:
+        build_app_repository().add_audit_log(
+            "zalo_bot",
+            "zalo_webhook_received",
+            f"{result.get('event_name') or 'unknown'} auto_replied={result.get('auto_replied')}",
+        )
+    except Exception:
+        pass
+    return result
 
 
 @router.get("/api/admin/work-tasks")

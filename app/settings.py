@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     bot_token: SecretStr = Field(default=SecretStr(""))
     my_telegram_id: int = 0
     bot_username: str = ""
+    zalo_bot_token: SecretStr = Field(default=SecretStr(""))
+    zalo_webhook_url: str = ""
+    zalo_webhook_secret: SecretStr = Field(default=SecretStr(""))
+    zalo_auto_reply_enabled: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
 

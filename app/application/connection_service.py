@@ -4,6 +4,7 @@ import httpx
 
 from app.application.database_service import DatabaseService
 from app.application.telegram_notifier import TelegramNotifier
+from app.application.zalo_bot import ZaloBotClient
 from app.data_access.internal_api_client import InternalApiClient
 from app.settings import Settings
 
@@ -66,6 +67,23 @@ class ConnectionService:
             },
             is_active=bool(self.settings.telegram_token.get_secret_value() and self.settings.my_telegram_id),
         )
+        self.repository.upsert_system_connection(
+            code="zalo_bot",
+            name="Zalo Bot",
+            connection_type="zalo",
+            description="Nhan va gui thong bao qua Zalo Bot Platform bang webhook HTTPS.",
+            config={
+                "webhook_url": self.settings.zalo_webhook_url,
+                "webhook_path": "/api/zalo/webhook",
+                "token_ref": "ZALO_BOT_TOKEN",
+                "secret_ref": "ZALO_WEBHOOK_SECRET",
+            },
+            is_active=bool(
+                self.settings.zalo_bot_token.get_secret_value()
+                and self.settings.zalo_webhook_url
+                and self.settings.zalo_webhook_secret.get_secret_value()
+            ),
+        )
 
     def test_connection(self, code: str) -> dict[str, Any]:
         connection = self.repository.get_system_connection_by_code(code)
@@ -81,6 +99,9 @@ class ConnectionService:
 
         if connection["connection_type"] == "telegram":
             return self._with_connection(TelegramNotifier(self.settings).test(), connection)
+
+        if connection["connection_type"] == "zalo":
+            return self._with_connection(ZaloBotClient(self.settings).test(), connection)
 
         return self._with_connection(
             {

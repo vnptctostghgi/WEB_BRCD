@@ -117,7 +117,7 @@ const navFeatureConfig = {
   quantringuoidung: { view: "users", icon: "users", keywords: "quan tri nguoi dung user" },
   quantrimenu: { view: "menu-admin", icon: "list", keywords: "quan tri menu sap xep di chuyen module" },
   quantridanhmuc: { view: "catalogs", icon: "list", keywords: "quan tri danh muc phan vung vai tro bien" },
-  quantriketnoi: { view: "system", icon: "plug", keywords: "quan tri ket noi api db ftp drive telegram" },
+  quantriketnoi: { view: "system", icon: "plug", keywords: "quan tri ket noi api db ftp drive telegram zalo" },
   phanquyennguoidung: { view: "permissions", icon: "shield", keywords: "phan quyen nguoi dung chuc nang" },
   phanquyendulieunguoidung: { view: "data-permissions", icon: "database", keywords: "phan quyen du lieu phan vung" },
   nhatkyhoatdong: { view: "audit", icon: "audit", keywords: "nhat ky audit log" },
@@ -3413,7 +3413,7 @@ function renderConnectionRow(connection) {
       <td><code>${escapeHtml(connection.code)}</code></td>
       <td>
         <select class="form-control inline-admin-input" data-inline-connection-field="connection_type">
-          ${["internal_api", "supabase", "ftp", "drive", "telegram"].map((type) => `<option value="${type}" ${connection.connection_type === type ? "selected" : ""}>${type}</option>`).join("")}
+          ${["internal_api", "supabase", "ftp", "drive", "telegram", "zalo"].map((type) => `<option value="${type}" ${connection.connection_type === type ? "selected" : ""}>${type}</option>`).join("")}
         </select>
       </td>
       <td><label class="checkbox-label inline-checkbox"><input type="checkbox" data-inline-connection-active ${connection.is_active ? "checked" : ""} /> Đang dùng</label></td>
@@ -3797,6 +3797,22 @@ $("#telegram-test-message")?.addEventListener("click", async () => {
   try {
     const response = await api("/api/admin/telegram/test-message", { method: "POST" });
     showMessage(resultBox, response.message);
+  } catch (error) {
+    showMessage(resultBox, error.message, "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+});
+
+$("#zalo-set-webhook")?.addEventListener("click", async () => {
+  const button = $("#zalo-set-webhook");
+  const resultBox = $("#zalo-webhook-result");
+  setButtonLoading(button, true);
+  try {
+    const response = await api("/api/admin/zalo/webhook/setup", { method: "POST" });
+    const webhookUrl = response.details?.webhook_url ? ` ${response.details.webhook_url}` : "";
+    showMessage(resultBox, `${response.message}${webhookUrl}`);
+    await loadConnections();
   } catch (error) {
     showMessage(resultBox, error.message, "error");
   } finally {

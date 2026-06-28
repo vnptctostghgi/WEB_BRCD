@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from app.application.database_service import DatabaseService
 from app.main import app
 from app.presentation import routes
+from app.settings import get_settings
 
 
 def login(client: TestClient, username: str = "admin", password: str = "Admin@Brcd2026!") -> None:
@@ -184,6 +185,76 @@ def test_public_telegram_alert_test_route(monkeypatch) -> None:
         assert response.json()["ok"] is True
         assert sent_messages[0][0] == "TEST Telegram"
         assert "[TEST]" in sent_messages[0][1]
+
+
+def test_zalo_webhook_rejects_invalid_secret(monkeypatch) -> None:
+    monkeypatch.setenv("ZALO_WEBHOOK_SECRET", "zalo-secret-123")
+    get_settings.cache_clear()
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/zalo/webhook",
+                headers={"X-Bot-Api-Secret-Token": "wrong-secret"},
+                json={"ok": True, "result": {"event_name": "message.text.received"}},
+            )
+            assert response.status_code == 403
+    finally:
+        get_settings.cache_clear()
+
+
+def test_zalo_webhook_accepts_text_and_auto_replies(monkeypatch) -> None:
+    sent_messages = []
+
+    def fake_send_message(self, chat_id, text, parse_mode=None):
+        sent_messages.append((chat_id, text, parse_mode))
+        return True
+
+    monkeypatch.setenv("ZALO_WEBHOOK_SECRET", "zalo-secret-123")
+    monkeypatch.setenv("ZALO_BOT_TOKEN", "123456:test-token")
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.presentation.routes.ZaloBotClient.send_message", fake_send_message)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/zalo/webhook",
+                headers={"X-Bot-Api-Secret-Token": "zalo-secret-123"},
+                json={
+                    "ok": True,
+                    "result": {
+                        "event_name": "message.text.received",
+                        "message": {
+                            "chat": {"id": "chat-001", "chat_type": "PRIVATE"},
+                            "text": "ping",
+                        },
+                    },
+                },
+            )
+            assert response.status_code == 200
+            assert response.json()["auto_replied"] is True
+            assert sent_messages == [("chat-001", "pong", None)]
+    finally:
+        get_settings.cache_clear()
+
+
+def test_admin_can_setup_zalo_webhook(monkeypatch) -> None:
+    def fake_configure_webhook(self):
+        return {"ok": True, "message": "Da cai dat webhook Zalo Bot.", "details": {"webhook_url": "https://vnptcto.com/api/zalo/webhook"}}
+
+    monkeypatch.setattr("app.presentation.routes.ZaloBotClient.configure_webhook", fake_configure_webhook)
+    with TestClient(app) as client:
+        login(client)
+        response = client.post("/api/admin/zalo/webhook/setup")
+        assert response.status_code == 200
+        assert response.json()["details"]["webhook_url"] == "https://vnptcto.com/api/zalo/webhook"
+
+
+def test_system_connections_include_zalo_bot() -> None:
+    with TestClient(app) as client:
+        login(client)
+        response = client.get("/api/admin/connections")
+        assert response.status_code == 200
+        codes = {connection["code"] for connection in response.json()["connections"]}
+        assert "zalo_bot" in codes
 
 
 def test_admin_can_manage_work_tasks() -> None:
