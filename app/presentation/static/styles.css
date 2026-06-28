@@ -2732,7 +2732,9 @@ legend {
 }
 
 .inline-admin-table {
-  min-width: 1080px;
+  width: 100%;
+  min-width: 1120px;
+  table-layout: fixed;
 }
 
 .inline-admin-table th,
@@ -2741,29 +2743,40 @@ legend {
 }
 
 .inline-admin-table .table-action-cell {
-  min-width: 150px;
+  width: 112px;
 }
 
 .inline-admin-input {
-  min-width: 180px;
+  width: 100%;
+  min-width: 0;
 }
 
 .inline-admin-code {
-  min-height: 124px;
+  width: 100%;
+  min-height: 88px;
+  max-height: 148px;
   resize: vertical;
+  overflow: auto;
   font-family: "Cascadia Mono", "Consolas", monospace;
   font-size: .78rem;
   line-height: 1.45;
+  white-space: pre;
 }
 
 .inline-admin-sql {
-  min-width: 420px;
+  min-width: 0;
 }
 
 .inline-admin-note {
   margin-top: .45rem;
-  min-width: 220px;
+  width: 100%;
+  min-width: 0;
+  max-height: 96px;
   resize: vertical;
+}
+
+.inline-admin-params {
+  min-height: 44px;
 }
 
 .inline-checkbox {
@@ -2772,7 +2785,67 @@ legend {
 }
 
 .inline-sql-command-column {
-  min-width: 430px;
+  width: 30%;
+}
+
+.sql-admin-table th:nth-child(1),
+.sql-admin-table td:nth-child(1) {
+  width: 23%;
+}
+
+.sql-admin-table th:nth-child(2),
+.sql-admin-table td:nth-child(2) {
+  width: 22%;
+}
+
+.sql-admin-table th:nth-child(3),
+.sql-admin-table td:nth-child(3) {
+  width: 30%;
+}
+
+.sql-admin-table th:nth-child(4),
+.sql-admin-table td:nth-child(4) {
+  width: 20%;
+}
+
+.sql-admin-table th:nth-child(5),
+.sql-admin-table td:nth-child(5) {
+  width: 92px;
+}
+
+.system-admin-table th:nth-child(1),
+.system-admin-table td:nth-child(1) {
+  width: 18%;
+}
+
+.system-admin-table th:nth-child(2),
+.system-admin-table td:nth-child(2) {
+  width: 13%;
+}
+
+.system-admin-table th:nth-child(3),
+.system-admin-table td:nth-child(3) {
+  width: 13%;
+}
+
+.system-admin-table th:nth-child(4),
+.system-admin-table td:nth-child(4) {
+  width: 12%;
+}
+
+.system-admin-table th:nth-child(5),
+.system-admin-table td:nth-child(5) {
+  width: 28%;
+}
+
+.system-admin-table th:nth-child(6),
+.system-admin-table td:nth-child(6) {
+  width: 16%;
+}
+
+.system-admin-table th:nth-child(7),
+.system-admin-table td:nth-child(7) {
+  width: 112px;
 }
 
 @media (prefers-reduced-motion: reduce) {

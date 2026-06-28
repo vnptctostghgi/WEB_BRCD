@@ -3573,8 +3573,8 @@ function renderSqlReportRow(report) {
     <tr data-sql-row="${escapeHtml(rowKey)}" data-sql-report-id="${escapeHtml(report.id || "")}">
       <td><input class="form-control inline-admin-input" data-inline-sql-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="Tên báo cáo" /></td>
       <td><input class="form-control inline-admin-input" data-inline-sql-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="VD: BC_THUE_BAO" /></td>
-      <td class="compact-code-cell"><textarea class="form-control inline-admin-code inline-admin-sql" data-inline-sql-field="cau_lenh_sql" rows="7" placeholder="SELECT ...;">${escapeHtml(report.cau_lenh_sql || "")}</textarea></td>
-      <td><textarea class="form-control inline-admin-note" data-inline-sql-field="cac_tham_so" rows="3" placeholder="LOAIHINH, MONTH, DONVI">${escapeHtml(params)}</textarea><small class="cell-note">Mỗi biến cách nhau bằng dấu phẩy.</small></td>
+      <td class="compact-code-cell"><textarea class="form-control inline-admin-code inline-admin-sql" data-inline-sql-field="cau_lenh_sql" rows="4" placeholder="SELECT ...;">${escapeHtml(report.cau_lenh_sql || "")}</textarea></td>
+      <td><input class="form-control inline-admin-input inline-admin-params" data-inline-sql-field="cac_tham_so" value="${escapeHtml(params)}" placeholder="LOAIHINH, MONTH, DONVI" /><small class="cell-note">Mỗi biến cách nhau bằng dấu phẩy.</small></td>
       <td class="table-action-cell"><div class="action-group"><button class="table-action ${report._draft ? "" : "hidden"}" data-save-sql-report-inline="${escapeHtml(rowKey)}">Lưu</button><button class="table-action danger" data-delete-sql-report="${escapeHtml(rowKey)}">Xóa</button></div></td>
     </tr>`;
 }
