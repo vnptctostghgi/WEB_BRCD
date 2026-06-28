@@ -11,6 +11,7 @@ let connections = [];
 let systemRoles = [];
 let workTasks = [];
 let sqlReports = [];
+let sqlReportDrafts = [];
 let dynamicReportPage = 1;
 let dynamicReportTotal = 0;
 let menuLayoutState = [];
@@ -827,6 +828,9 @@ if (role === "admin") {
   $("#save-work-task-button")?.addEventListener("click", () => $("#work-task-form")?.requestSubmit());
   $("#connection-form")?.addEventListener("submit", saveConnection);
   $("#sql-report-form")?.addEventListener("submit", saveSqlReport);
+  $("#add-inline-sql-report")?.addEventListener("click", addInlineSqlReport);
+  $("#sql-report-search")?.addEventListener("input", renderSqlReports);
+  $("#sql-report-picker")?.addEventListener("change", renderSqlReports);
   $("#create-menu")?.addEventListener("click", createMenu);
   $("#new-menu-name")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") createMenu();
@@ -3378,24 +3382,78 @@ async function loadSystem() {
 }
 
 async function loadConnections() {
-  setTableLoading("#connections-table", 6, "Đang tải kết nối hệ thống...");
+  setTableLoading("#connections-table", 7, "Đang tải kết nối hệ thống...");
   const data = await api("/api/admin/connections");
   connections = data.connections;
-  $("#connections-table").innerHTML = connections.length ? connections.map((connection) => `
-    <tr>
-      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-connection="${escapeHtml(connection.code)}">Cấu hình</button><button class="table-action" data-test-connection="${escapeHtml(connection.code)}"><span class="button-label">Kiểm tra</span><span class="spinner"></span></button></div><div class="cell-note" id="connection-result-${escapeHtml(connection.code)}"></div></td>
-      <td><strong>${escapeHtml(connection.name)}</strong><small class="cell-note">${escapeHtml(connection.description)}</small></td>
-      <td><span class="status viewer">${escapeHtml(connection.connection_type)}</span></td>
-      <td><span class="status ${connection.is_active ? "active" : "inactive"}">${connection.is_active ? "Đang dùng" : "Chưa cấu hình"}</span></td>
-      <td class="compact-code-cell">${renderCompactCode(connection.config || {})}</td>
-      <td>${escapeHtml(connection.secret_ref || "Không có")}</td>
-    </tr>`).join("") : emptyRow(6, "Chưa có kết nối", "Hãy cấu hình kết nối trong phần quản trị hệ thống.");
-  document.querySelectorAll("[data-edit-connection]").forEach((button) => {
-    button.addEventListener("click", () => openConnection(button.dataset.editConnection));
+  $("#connections-table").innerHTML = connections.length
+    ? connections.map((connection) => renderConnectionRow(connection)).join("")
+    : emptyRow(7, "Chưa có kết nối", "Hãy cấu hình kết nối trong phần quản trị hệ thống.");
+  document.querySelectorAll("[data-inline-connection-field]").forEach((field) => {
+    field.addEventListener("input", () => markConnectionDirty(field.closest("tr")));
+    field.addEventListener("change", () => markConnectionDirty(field.closest("tr")));
+  });
+  document.querySelectorAll("[data-inline-connection-active]").forEach((field) => {
+    field.addEventListener("change", () => markConnectionDirty(field.closest("tr")));
+  });
+  document.querySelectorAll("[data-save-connection-inline]").forEach((button) => {
+    button.addEventListener("click", () => saveInlineConnection(button.dataset.saveConnectionInline, button));
   });
   document.querySelectorAll("[data-test-connection]").forEach((button) => {
     button.addEventListener("click", () => testConnection(button.dataset.testConnection, button));
   });
+}
+
+function renderConnectionRow(connection) {
+  const configText = JSON.stringify(connection.config || {}, null, 2);
+  const configKeys = Object.keys(connection.config || {});
+  const variables = [connection.secret_ref, ...configKeys].filter(Boolean);
+  return `
+    <tr data-connection-row="${escapeHtml(connection.code)}">
+      <td><input class="form-control inline-admin-input" data-inline-connection-field="name" value="${escapeHtml(connection.name || "")}" /><small class="cell-note">Mô tả bên dưới cấu hình</small></td>
+      <td><code>${escapeHtml(connection.code)}</code></td>
+      <td>
+        <select class="form-control inline-admin-input" data-inline-connection-field="connection_type">
+          ${["internal_api", "supabase", "ftp", "drive", "telegram"].map((type) => `<option value="${type}" ${connection.connection_type === type ? "selected" : ""}>${type}</option>`).join("")}
+        </select>
+      </td>
+      <td><label class="checkbox-label inline-checkbox"><input type="checkbox" data-inline-connection-active ${connection.is_active ? "checked" : ""} /> Đang dùng</label></td>
+      <td class="compact-code-cell"><textarea class="form-control inline-admin-code" data-inline-connection-field="config_json" rows="6">${escapeHtml(configText)}</textarea><textarea class="form-control inline-admin-note" data-inline-connection-field="description" rows="2" placeholder="Mô tả">${escapeHtml(connection.description || "")}</textarea></td>
+      <td>${variables.length ? variables.map((item) => `<span class="status viewer">${escapeHtml(item)}</span>`).join(" ") : "Không có"}</td>
+      <td class="table-action-cell"><div class="action-group"><button class="table-action hidden" data-save-connection-inline="${escapeHtml(connection.code)}">Lưu</button><button class="table-action" data-test-connection="${escapeHtml(connection.code)}"><span class="button-label">Kiểm tra</span><span class="spinner"></span></button></div><div class="cell-note" id="connection-result-${escapeHtml(connection.code)}"></div></td>
+    </tr>`;
+}
+
+function markConnectionDirty(row) {
+  row?.querySelector("[data-save-connection-inline]")?.classList.remove("hidden");
+}
+
+async function saveInlineConnection(code, button) {
+  const row = document.querySelector(`[data-connection-row="${CSS.escape(code)}"]`);
+  if (!row) return;
+  let config = {};
+  try {
+    config = JSON.parse(row.querySelector('[data-inline-connection-field="config_json"]')?.value || "{}");
+  } catch {
+    showToast("Cấu hình JSON chưa đúng định dạng.", "error");
+    return;
+  }
+  setButtonLoading(button, true);
+  try {
+    await api(`/api/admin/connections/${encodeURIComponent(code)}`, { method: "PUT", body: JSON.stringify({
+      name: row.querySelector('[data-inline-connection-field="name"]')?.value.trim() || code,
+      connection_type: row.querySelector('[data-inline-connection-field="connection_type"]')?.value || "internal_api",
+      description: row.querySelector('[data-inline-connection-field="description"]')?.value || "",
+      config,
+      is_active: Boolean(row.querySelector("[data-inline-connection-active]")?.checked),
+    })});
+    button.classList.add("hidden");
+    showToast("Đã lưu kết nối hệ thống.");
+    await loadConnections();
+  } catch (error) {
+    showToast(error.message, "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
 }
 
 function openConnection(code) {
@@ -3475,17 +3533,114 @@ async function loadSqlReports() {
 function renderSqlReports() {
   const table = $("#sql-reports-table");
   if (!table) return;
-  table.innerHTML = sqlReports.length ? sqlReports.map((report) => `
-    <tr>
-      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-sql-report="${escapeHtml(report.id)}">Sửa</button><button class="table-action danger" data-delete-sql-report="${escapeHtml(report.id)}">Xóa</button></div></td>
-      <td><strong>${escapeHtml(report.ten_bao_cao)}</strong></td>
-      <td><code>${escapeHtml(report.ma_bao_cao)}</code></td>
-      <td>${(report.cac_tham_so || []).map((item) => `<span class="status viewer">${escapeHtml(item)}</span>`).join(" ") || "Không có"}</td>
-      <td class="compact-code-cell">${renderCompactCode(report.cau_lenh_sql || "")}</td>
-    </tr>
-  `).join("") : emptyRow(5, "Chưa có cấu hình SQL", "Bấm Thêm SQL để tạo báo cáo động đầu tiên.");
-  document.querySelectorAll("[data-edit-sql-report]").forEach((button) => button.addEventListener("click", () => openSqlReport(button.dataset.editSqlReport)));
-  document.querySelectorAll("[data-delete-sql-report]").forEach((button) => button.addEventListener("click", () => deleteSqlReport(button.dataset.deleteSqlReport)));
+  refreshSqlReportPicker();
+  const search = ($("#sql-report-search")?.value || "").trim().toLowerCase();
+  const pickedCode = $("#sql-report-picker")?.value || "";
+  const rows = [...sqlReportDrafts, ...sqlReports]
+    .map((report) => ({ ...report, _rowKey: report._rowKey || `sql-${report.id}` }))
+    .filter((report) => {
+      if (pickedCode && report.ma_bao_cao !== pickedCode) return false;
+      if (!search) return true;
+      const text = [report.ten_bao_cao, report.ma_bao_cao, report.cau_lenh_sql, ...(report.cac_tham_so || [])].join(" ").toLowerCase();
+      return text.includes(search);
+    });
+  table.innerHTML = rows.length
+    ? rows.map((report) => renderSqlReportRow(report)).join("")
+    : emptyRow(5, "Chưa có cấu hình SQL", "Bấm Thêm SQL để tạo báo cáo động đầu tiên.");
+  document.querySelectorAll("[data-inline-sql-field]").forEach((field) => {
+    field.addEventListener("input", () => markSqlReportDirty(field.closest("tr")));
+  });
+  document.querySelectorAll("[data-save-sql-report-inline]").forEach((button) => {
+    button.addEventListener("click", () => saveInlineSqlReport(button.dataset.saveSqlReportInline, button));
+  });
+  document.querySelectorAll("[data-delete-sql-report]").forEach((button) => {
+    button.addEventListener("click", () => deleteInlineSqlReport(button.dataset.deleteSqlReport));
+  });
+}
+
+function refreshSqlReportPicker() {
+  const picker = $("#sql-report-picker");
+  if (!picker) return;
+  const current = picker.value;
+  picker.innerHTML = `<option value="">Tất cả SQL</option>${sqlReports.map((report) => `<option value="${escapeHtml(report.ma_bao_cao)}">${escapeHtml(report.ten_bao_cao)} (${escapeHtml(report.ma_bao_cao)})</option>`).join("")}`;
+  if (current && sqlReports.some((report) => report.ma_bao_cao === current)) picker.value = current;
+}
+
+function renderSqlReportRow(report) {
+  const rowKey = report._rowKey || `sql-${report.id}`;
+  const params = (report.cac_tham_so || []).join(", ");
+  return `
+    <tr data-sql-row="${escapeHtml(rowKey)}" data-sql-report-id="${escapeHtml(report.id || "")}">
+      <td><input class="form-control inline-admin-input" data-inline-sql-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="Tên báo cáo" /></td>
+      <td><input class="form-control inline-admin-input" data-inline-sql-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="VD: BC_THUE_BAO" /></td>
+      <td class="compact-code-cell"><textarea class="form-control inline-admin-code inline-admin-sql" data-inline-sql-field="cau_lenh_sql" rows="7" placeholder="SELECT ...;">${escapeHtml(report.cau_lenh_sql || "")}</textarea></td>
+      <td><textarea class="form-control inline-admin-note" data-inline-sql-field="cac_tham_so" rows="3" placeholder="LOAIHINH, MONTH, DONVI">${escapeHtml(params)}</textarea><small class="cell-note">Mỗi biến cách nhau bằng dấu phẩy.</small></td>
+      <td class="table-action-cell"><div class="action-group"><button class="table-action ${report._draft ? "" : "hidden"}" data-save-sql-report-inline="${escapeHtml(rowKey)}">Lưu</button><button class="table-action danger" data-delete-sql-report="${escapeHtml(rowKey)}">Xóa</button></div></td>
+    </tr>`;
+}
+
+function markSqlReportDirty(row) {
+  row?.querySelector("[data-save-sql-report-inline]")?.classList.remove("hidden");
+}
+
+function addInlineSqlReport() {
+  const rowKey = `draft-${Date.now()}`;
+  sqlReportDrafts.unshift({
+    _draft: true,
+    _rowKey: rowKey,
+    id: "",
+    ten_bao_cao: "",
+    ma_bao_cao: "",
+    cau_lenh_sql: "SELECT 1 AS GIA_TRI;",
+    cac_tham_so: [],
+  });
+  if ($("#sql-report-picker")) $("#sql-report-picker").value = "";
+  renderSqlReports();
+  document.querySelector(`[data-sql-row="${CSS.escape(rowKey)}"]`)?.querySelector("input")?.focus();
+}
+
+async function saveInlineSqlReport(rowKey, button) {
+  const row = document.querySelector(`[data-sql-row="${CSS.escape(rowKey)}"]`);
+  if (!row) return;
+  const params = (row.querySelector('[data-inline-sql-field="cac_tham_so"]')?.value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const payload = {
+    id: row.dataset.sqlReportId ? Number(row.dataset.sqlReportId) : null,
+    ten_bao_cao: row.querySelector('[data-inline-sql-field="ten_bao_cao"]')?.value.trim() || "",
+    ma_bao_cao: row.querySelector('[data-inline-sql-field="ma_bao_cao"]')?.value.trim() || "",
+    cau_lenh_sql: row.querySelector('[data-inline-sql-field="cau_lenh_sql"]')?.value || "",
+    cac_tham_so: params,
+  };
+  if (!payload.ten_bao_cao || !payload.ma_bao_cao || !payload.cau_lenh_sql.trim()) {
+    showToast("Vui lòng nhập đủ tên, mã và bảng lệnh SQL.", "error");
+    return;
+  }
+  setButtonLoading(button, true);
+  try {
+    await api("/api/admin/sql-reports", { method: "POST", body: JSON.stringify(payload) });
+    sqlReportDrafts = sqlReportDrafts.filter((item) => item._rowKey !== rowKey);
+    showMessage($("#sql-reports-message"), "Đã lưu cấu hình SQL.");
+    showToast("Đã lưu cấu hình SQL.");
+    await loadSqlReports();
+  } catch (error) {
+    showMessage($("#sql-reports-message"), error.message, "error");
+    showToast(error.message, "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+async function deleteInlineSqlReport(rowKey) {
+  if (rowKey.startsWith("draft-")) {
+    sqlReportDrafts = sqlReportDrafts.filter((item) => item._rowKey !== rowKey);
+    renderSqlReports();
+    return;
+  }
+  const row = document.querySelector(`[data-sql-row="${CSS.escape(rowKey)}"]`);
+  const reportId = row?.dataset.sqlReportId;
+  if (reportId) await deleteSqlReport(reportId);
 }
 
 function openSqlReport(reportId) {

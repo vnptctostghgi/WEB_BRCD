@@ -25,7 +25,7 @@
       };
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=61" />
+    <link rel="stylesheet" href="/static/styles.css?v=62" />
   </head>
   <body class="app-dark min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'themvasuataikhoan' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'xemmatkhaudaluu' in user.permissions }}">
     <svg class="icon-sprite" aria-hidden="true">
@@ -339,18 +339,34 @@
           <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" id="system-cards"></section>
           <section class="data-card mt-4">
             <div class="section-heading">
-              <div><p class="eyebrow">Quản trị SQL</p><h2>Cấu hình báo cáo động</h2><p>Lưu câu SQL và danh sách tham số. Web sẽ gửi cấu hình này sang API nội bộ khi xuất báo cáo.</p></div>
-              <button class="btn-primary" data-open-dialog="sql-report-dialog" type="button">Thêm SQL</button>
+              <div><p class="eyebrow">Quản trị SQL</p><h2>Danh sách lệnh SQL</h2><p>Tìm, chọn và chỉnh trực tiếp trong bảng. Nút lưu chỉ hiện khi dòng có thay đổi.</p></div>
+              <button class="btn-primary" id="add-inline-sql-report" type="button">Thêm SQL</button>
+            </div>
+            <div class="admin-inline-toolbar">
+              <label>Tìm SQL<input class="form-control" id="sql-report-search" placeholder="Nhập tên, mã, biến hoặc nội dung lệnh..." /></label>
+              <label>Chọn SQL<select class="form-control" id="sql-report-picker"><option value="">Tất cả SQL</option></select></label>
             </div>
             <div id="sql-reports-message" class="result hidden mb-4"></div>
             <div class="table-scroll">
-              <table class="compact-admin-table">
-                <thead><tr><th class="table-action-column">Thao tác</th><th>Tên báo cáo</th><th>Mã báo cáo</th><th>Tham số</th><th class="compact-code-column">Câu SQL</th></tr></thead>
+              <table class="compact-admin-table inline-admin-table">
+                <thead><tr><th>Tên</th><th>Mã</th><th class="inline-sql-command-column">Bảng lệnh</th><th>Danh sách biến</th><th class="table-action-column">Chức năng</th></tr></thead>
                 <tbody id="sql-reports-table"></tbody>
               </table>
             </div>
           </section>
-          <section class="data-card mt-4"><div class="section-heading"><div><p class="eyebrow">Kết nối hệ thống</p><h2>DB, FTP, Drive và Telegram</h2><p>Secret được lưu trong biến môi trường, không hiển thị trên trình duyệt.</p></div><button class="btn-secondary" id="telegram-test-message" type="button"><span class="button-label">Gửi thử Telegram</span><span class="spinner"></span></button></div><div id="telegram-test-result" class="result hidden mb-4"></div><div class="table-scroll"><table class="compact-admin-table"><thead><tr><th class="table-action-column">Thao tác</th><th>Tên kết nối</th><th>Loại</th><th>Trạng thái</th><th class="compact-code-column">Cấu hình</th><th>Secret</th></tr></thead><tbody id="connections-table"></tbody></table></div></section>
+          <section class="data-card mt-4">
+            <div class="section-heading">
+              <div><p class="eyebrow">Kết nối hệ thống</p><h2>DB, FTP, Drive và Telegram</h2><p>Chỉnh trực tiếp cấu hình hiển thị. Secret vẫn lưu trong biến môi trường và không hiển thị trên trình duyệt.</p></div>
+              <button class="btn-secondary" id="telegram-test-message" type="button"><span class="button-label">Gửi thử Telegram</span><span class="spinner"></span></button>
+            </div>
+            <div id="telegram-test-result" class="result hidden mb-4"></div>
+            <div class="table-scroll">
+              <table class="compact-admin-table inline-admin-table">
+                <thead><tr><th>Tên</th><th>Mã</th><th>Loại</th><th>Trạng thái</th><th class="compact-code-column">Bảng lệnh / Cấu hình</th><th>Danh sách biến</th><th class="table-action-column">Chức năng</th></tr></thead>
+                <tbody id="connections-table"></tbody>
+              </table>
+            </div>
+          </section>
           <section class="data-card mt-4"><h2>Kiểm tra vận hành</h2><div class="mt-4 grid gap-3 md:grid-cols-2"><p class="check-item">Mật khẩu được băm, không lưu dạng rõ.</p><p class="check-item">Cookie phiên không đọc được bằng JavaScript.</p><p class="check-item">DB cơ quan chỉ được truy cập qua API nội bộ.</p><p class="check-item">Route quản trị yêu cầu vai trò admin.</p></div></section>
         </section>
 
@@ -395,6 +411,6 @@
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script src="/static/app.js?v=82"></script>
+    <script src="/static/app.js?v=83"></script>
   </body>
 </html>

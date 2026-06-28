@@ -2718,6 +2718,63 @@ legend {
   margin-left: 1.35rem;
 }
 
+.admin-inline-toolbar {
+  display: grid;
+  gap: .85rem;
+  margin: 1rem 0;
+}
+
+@media (min-width: 768px) {
+  .admin-inline-toolbar {
+    grid-template-columns: minmax(280px, 1fr) minmax(260px, .55fr);
+    align-items: end;
+  }
+}
+
+.inline-admin-table {
+  min-width: 1080px;
+}
+
+.inline-admin-table th,
+.inline-admin-table td {
+  vertical-align: top;
+}
+
+.inline-admin-table .table-action-cell {
+  min-width: 150px;
+}
+
+.inline-admin-input {
+  min-width: 180px;
+}
+
+.inline-admin-code {
+  min-height: 124px;
+  resize: vertical;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: .78rem;
+  line-height: 1.45;
+}
+
+.inline-admin-sql {
+  min-width: 420px;
+}
+
+.inline-admin-note {
+  margin-top: .45rem;
+  min-width: 220px;
+  resize: vertical;
+}
+
+.inline-checkbox {
+  min-height: 38px;
+  white-space: nowrap;
+}
+
+.inline-sql-command-column {
+  min-width: 430px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
