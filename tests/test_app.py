@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 
 os.environ["DB_MOCK_MODE"] = "true"
@@ -270,6 +271,45 @@ def test_zalo_webhook_understands_mentioned_ping(monkeypatch) -> None:
         get_settings.cache_clear()
 
 
+def test_zalo_webhook_accepts_result_json_string(monkeypatch) -> None:
+    sent_messages = []
+
+    def fake_send_message(self, chat_id, text, parse_mode=None):
+        sent_messages.append((chat_id, text, parse_mode))
+        return True
+
+    monkeypatch.setenv("ZALO_WEBHOOK_SECRET", "zalo-secret-123")
+    monkeypatch.setenv("ZALO_BOT_TOKEN", "123456:test-token")
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.presentation.routes.ZaloBotClient.send_message", fake_send_message)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/zalo/webhook",
+                headers={"X-Bot-Api-Secret-Token": "zalo-secret-123"},
+                json={
+                    "ok": True,
+                    "result": json.dumps({
+                        "event_name": "message.text.received",
+                        "message": {
+                            "from": {"id": "user-json-001", "display_name": "Json User"},
+                            "chat": {"id": "chat-json-001", "chat_type": "PRIVATE"},
+                            "text": "ping",
+                            "message_id": "msg-json-001",
+                        },
+                    }),
+                },
+            )
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["chat_id"] == "chat-json-001"
+            assert payload["text"] == "ping"
+            assert payload["message_id"] == "msg-json-001"
+            assert sent_messages == [("chat-json-001", "pong", None)]
+    finally:
+        get_settings.cache_clear()
+
+
 def test_admin_can_view_zalo_message_logs(monkeypatch) -> None:
     def fake_send_message(self, chat_id, text, parse_mode=None):
         return True
@@ -303,6 +343,45 @@ def test_admin_can_view_zalo_message_logs(monkeypatch) -> None:
             logs = logs_response.json()["logs"]
             assert any(log["direction"] == "in" and log["chat_id"] == "group-log-001" and "ghi log" in log["text"] for log in logs)
             assert any(log["direction"] == "out" and log["chat_id"] == "group-log-001" and log["ok"] is True for log in logs)
+    finally:
+        get_settings.cache_clear()
+
+
+def test_admin_can_send_zalo_test_message_to_latest_chat(monkeypatch) -> None:
+    sent_messages = []
+
+    def fake_send_message(self, chat_id, text, parse_mode=None):
+        sent_messages.append((chat_id, text, parse_mode))
+        return True
+
+    monkeypatch.setenv("ZALO_WEBHOOK_SECRET", "zalo-secret-123")
+    monkeypatch.setenv("ZALO_BOT_TOKEN", "123456:test-token")
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.presentation.routes.ZaloBotClient.send_message", fake_send_message)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/zalo/webhook",
+                headers={"X-Bot-Api-Secret-Token": "zalo-secret-123"},
+                json={
+                    "ok": True,
+                    "result": {
+                        "event_name": "message.text.received",
+                        "message": {
+                            "from": {"id": "user-manual-001", "display_name": "Manual User"},
+                            "chat": {"id": "chat-manual-001", "chat_type": "PRIVATE"},
+                            "message_id": "msg-manual-001",
+                            "text": "hello",
+                        },
+                    },
+                },
+            )
+            assert response.status_code == 200
+            login(client)
+            response = client.post("/api/admin/zalo/send-test-message", json={})
+            assert response.status_code == 200
+            assert response.json()["chat_id"] == "chat-manual-001"
+            assert sent_messages[-1] == ("chat-manual-001", "Tin nhan test tu Bot VNPT Can Tho.", None)
     finally:
         get_settings.cache_clear()
 

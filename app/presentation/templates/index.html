@@ -371,8 +371,9 @@
           <section class="data-card mt-4">
             <div class="section-heading">
               <div><p class="eyebrow">Zalo Bot</p><h2>Nhật ký tin nhắn</h2><p>Ghi lại tin nhắn bot nhận được qua webhook và tin nhắn bot gửi phản hồi.</p></div>
-              <button class="btn-secondary" id="refresh-zalo-message-logs" type="button">Làm mới</button>
+              <div class="action-group"><button class="btn-secondary" id="zalo-send-test-message" type="button"><span class="button-label">Gửi test Zalo</span><span class="spinner"></span></button><button class="btn-secondary" id="refresh-zalo-message-logs" type="button">Làm mới</button></div>
             </div>
+            <div id="zalo-send-test-result" class="result hidden mb-4"></div>
             <div class="table-scroll">
               <table class="compact-admin-table inline-admin-table">
                 <thead><tr><th>Thời gian</th><th>Chiều</th><th>Hội thoại</th><th>Nội dung</th><th>Trạng thái</th></tr></thead>
@@ -424,6 +425,6 @@
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script src="/static/app.js?v=86"></script>
+    <script src="/static/app.js?v=87"></script>
   </body>
 </html>

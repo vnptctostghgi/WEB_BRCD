@@ -822,6 +822,7 @@ if (role === "admin") {
 
   $("#refresh-audit")?.addEventListener("click", loadAudit);
   $("#refresh-zalo-message-logs")?.addEventListener("click", loadZaloMessageLogs);
+  $("#zalo-send-test-message")?.addEventListener("click", (event) => sendZaloTestMessage(event.currentTarget));
   $("#website-form")?.addEventListener("submit", saveWebsite);
   $("#region-form")?.addEventListener("submit", saveRegion);
   $("#role-form")?.addEventListener("submit", saveRole);
@@ -3535,14 +3536,33 @@ function renderZaloMessageLog(log) {
   const chatParts = [log.chat_type, log.chat_id].filter(Boolean);
   const sender = log.sender_name || log.sender_id || "";
   const chatText = chatParts.length ? chatParts.join(" · ") : "-";
+  const bodyText = log.text || log.raw_preview || "-";
+  const keyNote = [log.raw_keys?.length ? `root: ${log.raw_keys.join(", ")}` : "", log.result_keys?.length ? `result: ${log.result_keys.join(", ")}` : "", log.message_keys?.length ? `message: ${log.message_keys.join(", ")}` : ""].filter(Boolean).join(" | ");
   return `
     <tr>
       <td>${log.created_at ? new Date(log.created_at).toLocaleString("vi-VN") : "-"}</td>
       <td><span class="status ${directionClass}">${directionLabel}</span></td>
       <td><code>${escapeHtml(chatText)}</code>${sender ? `<small class="cell-note">${escapeHtml(sender)}</small>` : ""}</td>
-      <td class="compact-code-cell"><pre class="compact-code">${escapeHtml(log.text || "-")}</pre></td>
+      <td class="compact-code-cell"><pre class="compact-code">${escapeHtml(bodyText)}</pre>${keyNote ? `<small class="cell-note">${escapeHtml(keyNote)}</small>` : ""}</td>
       <td><span class="status ${log.ok ? "viewer" : "inactive"}">${log.ok ? "OK" : "Lỗi"}</span></td>
     </tr>`;
+}
+
+async function sendZaloTestMessage(button) {
+  const resultBox = $("#zalo-send-test-result");
+  setButtonLoading(button, true);
+  try {
+    const response = await api("/api/admin/zalo/send-test-message", {
+      method: "POST",
+      body: JSON.stringify({ text: "Tin nhan test tu Bot VNPT Can Tho." }),
+    });
+    showMessage(resultBox, `${response.message} Chat ID: ${response.chat_id}`);
+    await loadZaloMessageLogs();
+  } catch (error) {
+    showMessage(resultBox, error.message, "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
 }
 
 async function loadSqlReports() {

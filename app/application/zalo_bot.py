@@ -1,4 +1,5 @@
 import hmac
+import json
 import logging
 from typing import Any
 
@@ -134,15 +135,21 @@ class ZaloBotClient:
         return hmac.compare_digest(str(header_value or "").strip(), self.webhook_secret)
 
     def handle_webhook(self, payload: dict[str, Any]) -> dict[str, Any]:
-        result = payload.get("result") if isinstance(payload, dict) else {}
-        result = result if isinstance(result, dict) else {}
-        event_name = str(result.get("event_name") or "")
-        message = result.get("message") if isinstance(result.get("message"), dict) else {}
-        sender = message.get("from") if isinstance(message.get("from"), dict) else {}
-        chat = message.get("chat") if isinstance(message.get("chat"), dict) else {}
-        chat_id = str(chat.get("id") or "")
-        chat_type = str(chat.get("chat_type") or "")
-        text = str(message.get("text") or "").strip()
+        body = self._as_dict(payload)
+        result = self._as_dict(body.get("result"))
+        raw_message = result.get("message") or body.get("message")
+        message = self._as_dict(raw_message)
+        if not message:
+            message = self._find_nested_dict(result, {"chat", "from", "text", "message_id", "caption", "photo", "voice_url"})
+        if not message:
+            message = self._find_nested_dict(body, {"chat", "from", "text", "message_id", "caption", "photo", "voice_url"})
+
+        event_name = self._first_string("event_name", "eventName", "event", sources=(result, body))
+        sender = self._as_dict(message.get("from") or message.get("sender") or message.get("user"))
+        chat = self._as_dict(message.get("chat") or result.get("chat") or body.get("chat"))
+        chat_id = self._first_string("id", "chat_id", "chatId", "conversation_id", "conversationId", "group_id", "groupId", "user_id", sources=(chat, message, result, body))
+        chat_type = self._first_string("chat_type", "chatType", "type", sources=(chat, message, result, body))
+        text = self._message_text(raw_message, message, result, body)
         reply_text = ""
         auto_replied = False
 
@@ -157,9 +164,13 @@ class ZaloBotClient:
             "chat_type": chat_type,
             "from_id": str(sender.get("id") or ""),
             "from_name": str(sender.get("display_name") or sender.get("name") or ""),
-            "message_id": str(message.get("message_id") or ""),
+            "message_id": self._first_string("message_id", "messageId", "id", sources=(message, result, body)),
             "text": text,
             "reply_text": reply_text,
+            "raw_keys": sorted(body.keys()),
+            "result_keys": sorted(result.keys()),
+            "message_keys": sorted(message.keys()),
+            "raw_preview": self._payload_preview(body),
             "auto_replied": auto_replied,
         }
 
@@ -177,3 +188,74 @@ class ZaloBotClient:
         safe = dict(data)
         safe.pop("token", None)
         return safe
+
+    @staticmethod
+    def _as_dict(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+        return {}
+
+    @classmethod
+    def _find_nested_dict(cls, value: Any, wanted_keys: set[str]) -> dict[str, Any]:
+        if isinstance(value, str):
+            value = cls._as_dict(value)
+        if isinstance(value, dict):
+            if wanted_keys.intersection(value.keys()):
+                return value
+            for child in value.values():
+                found = cls._find_nested_dict(child, wanted_keys)
+                if found:
+                    return found
+        if isinstance(value, list):
+            for child in value:
+                found = cls._find_nested_dict(child, wanted_keys)
+                if found:
+                    return found
+        return {}
+
+    @staticmethod
+    def _first_string(*keys: str, sources: tuple[dict[str, Any], ...]) -> str:
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            for key in keys:
+                value = source.get(key)
+                if value is not None and not isinstance(value, (dict, list)):
+                    return str(value).strip()
+        return ""
+
+    @classmethod
+    def _message_text(cls, raw_message: Any, *sources: dict[str, Any]) -> str:
+        for key in ("text", "message_text", "content", "caption"):
+            value = cls._first_string(key, sources=sources)
+            if value:
+                return value
+        if isinstance(raw_message, str):
+            parsed = cls._as_dict(raw_message)
+            if not parsed:
+                return raw_message.strip()
+        return ""
+
+    @classmethod
+    def _payload_preview(cls, payload: dict[str, Any], limit: int = 1800) -> str:
+        try:
+            text = json.dumps(cls._sanitize_for_log(payload), ensure_ascii=False, separators=(",", ":"))
+        except (TypeError, ValueError):
+            text = str(payload)
+        return text if len(text) <= limit else f"{text[:limit]}..."
+
+    @classmethod
+    def _sanitize_for_log(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {str(key): cls._sanitize_for_log(child) for key, child in value.items() if str(key).lower() not in {"token", "secret", "secret_token"}}
+        if isinstance(value, list):
+            return [cls._sanitize_for_log(child) for child in value[:10]]
+        if isinstance(value, str):
+            return value if len(value) <= 500 else f"{value[:500]}..."
+        return value

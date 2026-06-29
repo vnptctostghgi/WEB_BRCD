@@ -289,6 +289,11 @@ class WorkTaskPayload(BaseModel):
     check: bool = False
 
 
+class ZaloSendMessagePayload(BaseModel):
+    chat_id: str = ""
+    text: str = "Tin nhan test tu Bot VNPT Can Tho."
+
+
 def build_app_repository() -> AppRepository:
     return build_repository(get_settings())
 
@@ -342,6 +347,10 @@ def add_zalo_message_log(
     message_id: str = "",
     text: str = "",
     ok: bool = True,
+    raw_preview: str = "",
+    raw_keys: list[str] | None = None,
+    result_keys: list[str] | None = None,
+    message_keys: list[str] | None = None,
 ) -> None:
     action = "zalo_message_received" if direction == "in" else "zalo_message_sent"
     if direction == "out" and not ok:
@@ -356,6 +365,10 @@ def add_zalo_message_log(
         "message_id": message_id,
         "text": compact_log_text(text),
         "ok": ok,
+        "raw_preview": compact_log_text(raw_preview, 1800),
+        "raw_keys": raw_keys or [],
+        "result_keys": result_keys or [],
+        "message_keys": message_keys or [],
     }
     repository.add_audit_log("zalo_bot", action, json.dumps(details, ensure_ascii=False))
 
@@ -379,8 +392,20 @@ def parse_zalo_message_log(row: dict[str, Any]) -> dict[str, Any] | None:
         "sender_name": details.get("sender_name") or "",
         "message_id": details.get("message_id") or "",
         "text": details.get("text") or "",
+        "raw_preview": details.get("raw_preview") or "",
+        "raw_keys": details.get("raw_keys") or [],
+        "result_keys": details.get("result_keys") or [],
+        "message_keys": details.get("message_keys") or [],
         "ok": bool(details.get("ok", row.get("action") != "zalo_message_send_failed")),
     }
+
+
+def latest_zalo_chat_id(repository: AppRepository) -> str:
+    for row in repository.list_audit_logs(limit=500):
+        parsed = parse_zalo_message_log(row)
+        if parsed and parsed.get("direction") == "in" and parsed.get("chat_id"):
+            return str(parsed["chat_id"])
+    return ""
 
 
 def raise_work_task_schema_error(error: RuntimeError) -> None:
@@ -1519,6 +1544,10 @@ async def zalo_webhook(request: Request) -> dict:
             sender_name=result.get("from_name") or "",
             message_id=result.get("message_id") or "",
             text=result.get("text") or "",
+            raw_preview=result.get("raw_preview") or "",
+            raw_keys=result.get("raw_keys") or [],
+            result_keys=result.get("result_keys") or [],
+            message_keys=result.get("message_keys") or [],
         )
         if result.get("reply_text"):
             add_zalo_message_log(
@@ -1548,6 +1577,32 @@ def list_zalo_message_logs(request: Request, limit: int = 100) -> dict:
         if len(logs) >= safe_limit:
             break
     return {"logs": logs}
+
+
+@router.post("/api/admin/zalo/send-test-message")
+def send_zalo_test_message(request: Request, payload: ZaloSendMessagePayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    chat_id = payload.chat_id.strip() or latest_zalo_chat_id(repository)
+    text = payload.text.strip() or "Tin nhan test tu Bot VNPT Can Tho."
+    if not chat_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Chua co chat_id Zalo. Hay nhan tin rieng hoac mention bot trong nhom truoc, roi bam lam moi log.",
+        )
+    sent = ZaloBotClient(get_settings()).send_message(chat_id, text)
+    add_zalo_message_log(
+        repository,
+        direction="out",
+        event_name="manual_test",
+        chat_id=chat_id,
+        text=text,
+        ok=sent,
+    )
+    repository.add_audit_log(actor["username"], "zalo_manual_test_sent" if sent else "zalo_manual_test_failed", f"Gui test Zalo toi {chat_id}: {sent}")
+    if not sent:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Khong gui duoc tin nhan Zalo test.")
+    return {"ok": True, "message": "Da gui tin nhan test Zalo.", "chat_id": chat_id}
 
 
 @router.get("/api/admin/work-tasks")
