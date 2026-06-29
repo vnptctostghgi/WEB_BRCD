@@ -821,6 +821,7 @@ if (role === "admin") {
   });
 
   $("#refresh-audit")?.addEventListener("click", loadAudit);
+  $("#refresh-zalo-message-logs")?.addEventListener("click", loadZaloMessageLogs);
   $("#website-form")?.addEventListener("submit", saveWebsite);
   $("#region-form")?.addEventListener("submit", saveRegion);
   $("#role-form")?.addEventListener("submit", saveRole);
@@ -3372,6 +3373,7 @@ async function loadSystem() {
   $("#system-cards").innerHTML = loadingRow(1, "Đang tải thông tin hệ thống...");
   const data = await api("/api/admin/system");
   await loadConnections();
+  await loadZaloMessageLogs();
   await loadSqlReports();
   $("#system-cards").innerHTML = [
     ["APP", "Môi trường", data.environment],
@@ -3510,6 +3512,37 @@ async function testConnection(code, button) {
   } finally {
     setButtonLoading(button, false);
   }
+}
+
+async function loadZaloMessageLogs() {
+  const table = $("#zalo-message-logs-table");
+  if (!table) return;
+  setTableLoading("#zalo-message-logs-table", 5, "Đang tải nhật ký Zalo Bot...");
+  try {
+    const data = await api("/api/admin/zalo/message-logs?limit=100");
+    const logs = data.logs || [];
+    table.innerHTML = logs.length
+      ? logs.map((log) => renderZaloMessageLog(log)).join("")
+      : emptyRow(5, "Chưa có tin nhắn Zalo", "Khi người dùng mention hoặc trả lời bot trong nhóm, log sẽ xuất hiện ở đây.");
+  } catch (error) {
+    table.innerHTML = emptyRow(5, "Không tải được nhật ký Zalo", error.message);
+  }
+}
+
+function renderZaloMessageLog(log) {
+  const directionLabel = log.direction === "out" ? "Bot gửi" : "Bot nhận";
+  const directionClass = log.direction === "out" ? "admin" : "viewer";
+  const chatParts = [log.chat_type, log.chat_id].filter(Boolean);
+  const sender = log.sender_name || log.sender_id || "";
+  const chatText = chatParts.length ? chatParts.join(" · ") : "-";
+  return `
+    <tr>
+      <td>${log.created_at ? new Date(log.created_at).toLocaleString("vi-VN") : "-"}</td>
+      <td><span class="status ${directionClass}">${directionLabel}</span></td>
+      <td><code>${escapeHtml(chatText)}</code>${sender ? `<small class="cell-note">${escapeHtml(sender)}</small>` : ""}</td>
+      <td class="compact-code-cell"><pre class="compact-code">${escapeHtml(log.text || "-")}</pre></td>
+      <td><span class="status ${log.ok ? "viewer" : "inactive"}">${log.ok ? "OK" : "Lỗi"}</span></td>
+    </tr>`;
 }
 
 async function loadSqlReports() {

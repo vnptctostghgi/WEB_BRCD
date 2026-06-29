@@ -270,6 +270,43 @@ def test_zalo_webhook_understands_mentioned_ping(monkeypatch) -> None:
         get_settings.cache_clear()
 
 
+def test_admin_can_view_zalo_message_logs(monkeypatch) -> None:
+    def fake_send_message(self, chat_id, text, parse_mode=None):
+        return True
+
+    monkeypatch.setenv("ZALO_WEBHOOK_SECRET", "zalo-secret-123")
+    monkeypatch.setenv("ZALO_BOT_TOKEN", "123456:test-token")
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.presentation.routes.ZaloBotClient.send_message", fake_send_message)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/zalo/webhook",
+                headers={"X-Bot-Api-Secret-Token": "zalo-secret-123"},
+                json={
+                    "ok": True,
+                    "result": {
+                        "event_name": "message.text.received",
+                        "message": {
+                            "from": {"id": "user-log-001", "display_name": "Nguoi test log"},
+                            "chat": {"id": "group-log-001", "chat_type": "GROUP"},
+                            "message_id": "msg-log-001",
+                            "text": "@Bot VNPT Can Tho ghi log",
+                        },
+                    },
+                },
+            )
+            assert response.status_code == 200
+            login(client)
+            logs_response = client.get("/api/admin/zalo/message-logs?limit=20")
+            assert logs_response.status_code == 200
+            logs = logs_response.json()["logs"]
+            assert any(log["direction"] == "in" and log["chat_id"] == "group-log-001" and "ghi log" in log["text"] for log in logs)
+            assert any(log["direction"] == "out" and log["chat_id"] == "group-log-001" and log["ok"] is True for log in logs)
+    finally:
+        get_settings.cache_clear()
+
+
 def test_admin_can_setup_zalo_webhook(monkeypatch) -> None:
     def fake_configure_webhook(self):
         return {"ok": True, "message": "Da cai dat webhook Zalo Bot.", "details": {"webhook_url": "https://vnptcto.com/api/zalo/webhook"}}

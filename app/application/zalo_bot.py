@@ -138,18 +138,28 @@ class ZaloBotClient:
         result = result if isinstance(result, dict) else {}
         event_name = str(result.get("event_name") or "")
         message = result.get("message") if isinstance(result.get("message"), dict) else {}
+        sender = message.get("from") if isinstance(message.get("from"), dict) else {}
         chat = message.get("chat") if isinstance(message.get("chat"), dict) else {}
         chat_id = str(chat.get("id") or "")
+        chat_type = str(chat.get("chat_type") or "")
         text = str(message.get("text") or "").strip()
+        reply_text = ""
         auto_replied = False
 
         if self.auto_reply_enabled and event_name == "message.text.received" and chat_id:
-            auto_replied = self.send_message(chat_id, self.reply_text(text))
+            reply_text = self.reply_text(text)
+            auto_replied = self.send_message(chat_id, reply_text)
 
         return {
             "ok": True,
             "event_name": event_name,
             "chat_id": chat_id,
+            "chat_type": chat_type,
+            "from_id": str(sender.get("id") or ""),
+            "from_name": str(sender.get("display_name") or sender.get("name") or ""),
+            "message_id": str(message.get("message_id") or ""),
+            "text": text,
+            "reply_text": reply_text,
             "auto_replied": auto_replied,
         }
 

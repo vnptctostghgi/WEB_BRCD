@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 from html import escape as html_escape
 from html.parser import HTMLParser
 import re
@@ -320,6 +321,66 @@ def notify_if_failed(title: str, result: dict, extra: dict | None = None) -> Non
     if connection_name:
         details = {**details, "ket_noi": connection_name}
     TelegramNotifier(settings).send_message(title, result.get("message", "Không rõ lỗi."), details or None)
+
+
+def compact_log_text(value: Any, limit: int = 1000) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}..."
+
+
+def add_zalo_message_log(
+    repository: AppRepository,
+    *,
+    direction: str,
+    event_name: str = "",
+    chat_id: str = "",
+    chat_type: str = "",
+    sender_id: str = "",
+    sender_name: str = "",
+    message_id: str = "",
+    text: str = "",
+    ok: bool = True,
+) -> None:
+    action = "zalo_message_received" if direction == "in" else "zalo_message_sent"
+    if direction == "out" and not ok:
+        action = "zalo_message_send_failed"
+    details = {
+        "direction": direction,
+        "event_name": event_name,
+        "chat_id": chat_id,
+        "chat_type": chat_type,
+        "sender_id": sender_id,
+        "sender_name": sender_name,
+        "message_id": message_id,
+        "text": compact_log_text(text),
+        "ok": ok,
+    }
+    repository.add_audit_log("zalo_bot", action, json.dumps(details, ensure_ascii=False))
+
+
+def parse_zalo_message_log(row: dict[str, Any]) -> dict[str, Any] | None:
+    if row.get("action") not in {"zalo_message_received", "zalo_message_sent", "zalo_message_send_failed"}:
+        return None
+    try:
+        details = json.loads(row.get("details") or "{}")
+    except json.JSONDecodeError:
+        details = {"text": row.get("details") or ""}
+    return {
+        "id": row.get("id"),
+        "created_at": row.get("created_at"),
+        "action": row.get("action"),
+        "direction": details.get("direction") or ("out" if row.get("action") != "zalo_message_received" else "in"),
+        "event_name": details.get("event_name") or "",
+        "chat_id": details.get("chat_id") or "",
+        "chat_type": details.get("chat_type") or "",
+        "sender_id": details.get("sender_id") or "",
+        "sender_name": details.get("sender_name") or "",
+        "message_id": details.get("message_id") or "",
+        "text": details.get("text") or "",
+        "ok": bool(details.get("ok", row.get("action") != "zalo_message_send_failed")),
+    }
 
 
 def raise_work_task_schema_error(error: RuntimeError) -> None:
@@ -1447,14 +1508,46 @@ async def zalo_webhook(request: Request) -> dict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payload Zalo khong hop le.") from error
     result = client.handle_webhook(payload)
     try:
-        build_app_repository().add_audit_log(
-            "zalo_bot",
-            "zalo_webhook_received",
-            f"{result.get('event_name') or 'unknown'} auto_replied={result.get('auto_replied')}",
+        repository = build_app_repository()
+        add_zalo_message_log(
+            repository,
+            direction="in",
+            event_name=result.get("event_name") or "",
+            chat_id=result.get("chat_id") or "",
+            chat_type=result.get("chat_type") or "",
+            sender_id=result.get("from_id") or "",
+            sender_name=result.get("from_name") or "",
+            message_id=result.get("message_id") or "",
+            text=result.get("text") or "",
         )
+        if result.get("reply_text"):
+            add_zalo_message_log(
+                repository,
+                direction="out",
+                event_name=result.get("event_name") or "",
+                chat_id=result.get("chat_id") or "",
+                chat_type=result.get("chat_type") or "",
+                text=result.get("reply_text") or "",
+                ok=bool(result.get("auto_replied")),
+            )
     except Exception:
         pass
     return result
+
+
+@router.get("/api/admin/zalo/message-logs")
+def list_zalo_message_logs(request: Request, limit: int = 100) -> dict:
+    admin_user(request)
+    safe_limit = min(max(int(limit or 100), 1), 500)
+    rows = build_app_repository().list_audit_logs(limit=min(max(safe_limit * 4, 100), 500))
+    logs = []
+    for row in rows:
+        parsed = parse_zalo_message_log(row)
+        if parsed:
+            logs.append(parsed)
+        if len(logs) >= safe_limit:
+            break
+    return {"logs": logs}
 
 
 @router.get("/api/admin/work-tasks")
