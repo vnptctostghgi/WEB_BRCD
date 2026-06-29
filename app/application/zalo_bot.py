@@ -131,7 +131,7 @@ class ZaloBotClient:
     def has_valid_webhook_secret(self, header_value: str | None) -> bool:
         if not self.webhook_secret:
             return False
-        return hmac.compare_digest(str(header_value or ""), self.webhook_secret)
+        return hmac.compare_digest(str(header_value or "").strip(), self.webhook_secret)
 
     def handle_webhook(self, payload: dict[str, Any]) -> dict[str, Any]:
         result = payload.get("result") if isinstance(payload, dict) else {}
@@ -156,9 +156,9 @@ class ZaloBotClient:
     @staticmethod
     def reply_text(text: str) -> str:
         normalized = text.strip().lower()
-        if normalized in {"/start", "start", "/help", "help", "tro giup", "trợ giúp"}:
+        if any(command in normalized for command in ("/start", "/help", "help", "tro giup", "trợ giúp")):
             return "Bot VNPT CTO da ket noi. Hay gui tin nhan de kiem tra kenh Zalo Bot."
-        if normalized == "ping":
+        if "ping" in normalized:
             return "pong"
         return "Bot VNPT CTO da nhan tin nhan cua ban."
 

@@ -236,6 +236,40 @@ def test_zalo_webhook_accepts_text_and_auto_replies(monkeypatch) -> None:
         get_settings.cache_clear()
 
 
+def test_zalo_webhook_understands_mentioned_ping(monkeypatch) -> None:
+    sent_messages = []
+
+    def fake_send_message(self, chat_id, text, parse_mode=None):
+        sent_messages.append((chat_id, text, parse_mode))
+        return True
+
+    monkeypatch.setenv("ZALO_WEBHOOK_SECRET", "zalo-secret-123")
+    monkeypatch.setenv("ZALO_BOT_TOKEN", "123456:test-token")
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.presentation.routes.ZaloBotClient.send_message", fake_send_message)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/zalo/webhook",
+                headers={"X-Bot-Api-Secret-Token": " zalo-secret-123 "},
+                json={
+                    "ok": True,
+                    "result": {
+                        "event_name": "message.text.received",
+                        "message": {
+                            "chat": {"id": "group-001", "chat_type": "GROUP"},
+                            "text": "@Bot VNPT Can Tho ping",
+                        },
+                    },
+                },
+            )
+            assert response.status_code == 200
+            assert response.json()["auto_replied"] is True
+            assert sent_messages == [("group-001", "pong", None)]
+    finally:
+        get_settings.cache_clear()
+
+
 def test_admin_can_setup_zalo_webhook(monkeypatch) -> None:
     def fake_configure_webhook(self):
         return {"ok": True, "message": "Da cai dat webhook Zalo Bot.", "details": {"webhook_url": "https://vnptcto.com/api/zalo/webhook"}}
