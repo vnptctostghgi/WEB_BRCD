@@ -988,6 +988,7 @@ $("#dashboard-viewer-tabs")?.addEventListener("click", (event) => {
 $("#dashboard-viewer-workspace")?.addEventListener("click", handleDashboardRuntimeAction);
 $("#refresh-dashboard-viewer-tab")?.addEventListener("click", () => loadDashboardViewerTab(dashboardViewerActiveTabId, { force: true }));
 $("#dashboard-theme-toggle")?.addEventListener("click", toggleDashboardRuntimeTheme);
+$("#capture-dashboard-viewer")?.addEventListener("click", captureDashboardViewerPageImage);
 applyDashboardRuntimeTheme();
 
 async function importUserFile(event) {
@@ -3165,6 +3166,95 @@ function downloadDashboardChartImage(blob, title) {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function waitAnimationFrames(count = 2) {
+  return new Promise((resolve) => {
+    const step = () => {
+      count -= 1;
+      if (count <= 0) resolve();
+      else requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+}
+
+function resizeDashboardCharts() {
+  dashboardChartInstances.forEach((chart) => chart?.resize?.());
+}
+
+function dashboardCaptureFileName() {
+  const title = dashboardViewerLayout?.page_name || $("#dashboard-viewer-title")?.textContent || "dashboard";
+  const activeTab = dashboardViewerLayout?.tabs?.find((tab) => tab.tab_id === dashboardViewerActiveTabId)?.tab_name || "tab";
+  return `${title}-${activeTab}`;
+}
+
+async function captureDashboardViewerAreaBlob(area) {
+  const html2canvas = await ensureHtml2CanvasLoaded();
+  const section = $("#dashboard-designed-section");
+  const previousAreaStyle = area.getAttribute("style") || "";
+  const previousScrollLeft = area.scrollLeft;
+  const backgroundColor = getComputedStyle(section || area).backgroundColor || null;
+  area.classList.add("dashboard-capture-rendering");
+  area.style.width = "1920px";
+  area.style.minWidth = "1920px";
+  area.style.maxWidth = "none";
+  area.scrollLeft = 0;
+  resizeDashboardCharts();
+  if (document.fonts?.ready) await document.fonts.ready;
+  await waitAnimationFrames(3);
+  try {
+    const captureHeight = Math.max(Math.ceil(area.scrollHeight), Math.ceil(area.getBoundingClientRect().height), 1);
+    const maxPixels = 70000000;
+    const scale = Math.max(2, Math.min(3, Math.sqrt(maxPixels / (1920 * captureHeight))));
+    const canvas = await html2canvas(area, {
+      backgroundColor,
+      width: 1920,
+      height: captureHeight,
+      windowWidth: 1920,
+      windowHeight: 1080,
+      scale,
+      useCORS: true,
+      logging: false,
+      scrollX: 0,
+      scrollY: 0,
+    });
+    return canvasToPngBlob(canvas);
+  } finally {
+    if (previousAreaStyle) area.setAttribute("style", previousAreaStyle);
+    else area.removeAttribute("style");
+    area.scrollLeft = previousScrollLeft;
+    area.classList.remove("dashboard-capture-rendering");
+    resizeDashboardCharts();
+  }
+}
+
+async function captureDashboardViewerPageImage() {
+  const button = $("#capture-dashboard-viewer");
+  const area = $("#dashboard-viewer-capture-area");
+  if (!area || !area.querySelector("#dashboard-viewer-workspace")) {
+    showToast("Không tìm thấy vùng Dashboard để chụp.", "error");
+    return;
+  }
+  setButtonLoading(button, true);
+  try {
+    const blob = await captureDashboardViewerAreaBlob(area);
+    if (navigator.clipboard?.write && window.ClipboardItem) {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        showToast("Đã sao chép ảnh toàn bộ Dashboard.");
+        return;
+      } catch {
+        // Some browsers block image clipboard writes, so fall back to download.
+      }
+    }
+    downloadDashboardChartImage(blob, dashboardCaptureFileName());
+    showToast("Trình duyệt chặn clipboard, đã tải ảnh Dashboard PNG.");
+  } catch (error) {
+    showToast(error.message || "Không chụp được Dashboard.", "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
 }
 
 async function handleDashboardRuntimeAction(event) {

@@ -1971,6 +1971,22 @@ body.view-loading .app-view.active {
   background: rgba(14, 165, 233, .28);
 }
 
+.dashboard-capture-button {
+  min-width: 86px;
+}
+
+.dashboard-capture-area {
+  min-width: 0;
+}
+
+.dashboard-capture-rendering {
+  padding: .1px;
+}
+
+.dashboard-capture-rendering .runtime-copy-chart {
+  visibility: hidden;
+}
+
 .dashboard-theme-light .runtime-widget-card h3,
 .dashboard-theme-light .runtime-text-widget h2,
 .dashboard-theme-light .runtime-data-card-value,
