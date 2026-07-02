@@ -23,6 +23,26 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+body::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 120;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(90deg, #38bdf8, #22c55e, #f59e0b);
+  opacity: 0;
+  pointer-events: none;
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+body.view-loading::before {
+  opacity: 1;
+  animation: app-progress 1.05s ease-in-out infinite;
+}
+
 @media (min-width: 1024px) {
   body {
     font-size: .875rem;
@@ -790,17 +810,47 @@ p {
 
 .app-view {
   display: none;
+  opacity: 0;
 }
 
 .app-view.active {
   display: block;
-  animation: reveal .2s ease-out;
+  opacity: 1;
+  animation: view-reveal .16s ease-out both;
+  will-change: opacity, transform;
+}
+
+body.view-loading .app-view.active {
+  cursor: progress;
 }
 
 @keyframes reveal {
   from {
     opacity: 0;
     transform: translateY(6px);
+  }
+}
+
+@keyframes view-reveal {
+  from {
+    opacity: .001;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes app-progress {
+  0% {
+    transform: translateX(-35%) scaleX(.2);
+  }
+  55% {
+    transform: translateX(25%) scaleX(.58);
+  }
+  100% {
+    transform: translateX(100%) scaleX(.18);
   }
 }
 

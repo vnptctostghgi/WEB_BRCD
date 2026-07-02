@@ -5,6 +5,8 @@ const canManageVault = document.body.dataset.canManageVault === "True";
 const canRevealVault = document.body.dataset.canRevealVault === "True";
 let users = [];
 let websites = [];
+let credentialWebsites = [];
+let credentials = [];
 let features = [];
 let regions = [];
 let connections = [];
@@ -14,7 +16,9 @@ let sqlReports = [];
 let sqlReportDrafts = [];
 let dynamicReportPage = 1;
 let dynamicReportTotal = 0;
+let dynamicReportLoaded = false;
 let menuLayoutState = [];
+let auditLogs = [];
 let dashboardFiberLoaded = false;
 let dashboardViewerLayouts = [];
 let dashboardViewerLayoutsLoaded = false;
@@ -109,7 +113,49 @@ const html2CanvasSource = "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/h
 let chartJsLoadPromise = null;
 let html2CanvasLoadPromise = null;
 let dashboardChartRenderToken = 0;
+let dashboardSheetRenderToken = 0;
 let dashboardRuntimeTheme = localStorage.getItem("dashboardRuntimeTheme") === "light" ? "light" : "dark";
+let activeViewLoadToken = 0;
+const dataCacheTimestamps = new Map();
+const dashboardViewerLayoutCache = new Map();
+const dashboardBuilderLayoutCache = new Map();
+const DATA_CACHE_TTL_MS = 2 * 60 * 1000;
+
+function markDataFresh(key) {
+  dataCacheTimestamps.set(key, Date.now());
+}
+
+function markDataStale(...keys) {
+  keys.forEach((key) => dataCacheTimestamps.delete(key));
+}
+
+function isDataFresh(key) {
+  const timestamp = dataCacheTimestamps.get(key);
+  return Boolean(timestamp && Date.now() - timestamp < DATA_CACHE_TTL_MS);
+}
+
+function cloneDashboardLayout(layout) {
+  return JSON.parse(JSON.stringify(layout || {}));
+}
+
+function nextPaint() {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+  });
+}
+
+async function runActiveViewLoader(token, loader) {
+  await nextPaint();
+  if (token !== activeViewLoadToken) return;
+  document.body.classList.add("view-loading");
+  try {
+    await loader();
+  } catch (error) {
+    if (token === activeViewLoadToken) showToast(error.message || "Không tải được dữ liệu.", "error");
+  } finally {
+    if (token === activeViewLoadToken) document.body.classList.remove("view-loading");
+  }
+}
 
 const navFeatureConfig = {
   quanlycongviec: { view: "work-tasks", icon: "list", keywords: "quan ly cong viec task lich telegram nhac viec" },
@@ -254,15 +300,29 @@ function updateFeatureUrl(code, { replace = false } = {}) {
   }
 }
 
+function viewLoaderForNav(nextView, dashboardPageId) {
+  if (nextView === "dashboard") return () => (dashboardPageId ? openDashboardViewerLayout(dashboardPageId) : loadDashboardViewer());
+  if (nextView === "users") return () => loadUsers();
+  if (nextView === "vault") return () => loadCredentials();
+  if (nextView === "websites") return () => loadAdminWebsites();
+  if (nextView === "system") return () => loadSystem();
+  if (nextView === "reports") return () => loadDynamicReports();
+  if (nextView === "dashboard-builder") return () => loadDashboardBuilder();
+  if (nextView === "menu-admin") return () => loadMenuLayout();
+  if (nextView === "work-tasks") return () => loadWorkTasks();
+  if (nextView === "permissions") return () => loadPermissionManager();
+  if (nextView === "data-permissions") return () => loadDataPermissionManager();
+  if (nextView === "catalogs") return () => loadCatalogs();
+  if (nextView === "audit") return () => loadAudit();
+  return null;
+}
+
 async function activateNavItem(item, options = {}) {
   const { updateUrl = true, replaceUrl = false } = options;
+  const loadToken = ++activeViewLoadToken;
   const nextView = item.dataset.view || "";
   const dashboardPageId = item.dataset.dashboardPageId || "";
   $("#view-dashboard")?.classList.toggle("dashboard-dynamic-mode", Boolean(dashboardPageId));
-  if (nextView !== "dashboard") dashboardViewerLoadedTabs = {};
-  if (nextView !== "dashboard-builder") {
-    dashboardBuilderLoadedTabs = {};
-  }
   document.querySelectorAll(".nav-item, .app-view").forEach((element) => element.classList.remove("active"));
   item.classList.add("active");
   openNavParents(item);
@@ -272,21 +332,9 @@ async function activateNavItem(item, options = {}) {
   $("#sidebar").classList.remove("menu-open");
   $("#menu-button")?.setAttribute("aria-expanded", "false");
   if (updateUrl) updateFeatureUrl(item.dataset.featureCode, { replace: replaceUrl });
-  if (nextView === "dashboard" && dashboardPageId) {
-    await openDashboardViewerLayout(dashboardPageId);
-  }
-  if (nextView === "users") await loadUsers();
-  if (nextView === "vault") await loadCredentials();
-  if (nextView === "websites") await loadAdminWebsites();
-  if (nextView === "system") await loadSystem();
-  if (nextView === "reports") await loadDynamicReports();
-  if (nextView === "dashboard-builder") await loadDashboardBuilder();
-  if (nextView === "menu-admin") await loadMenuLayout();
-  if (nextView === "work-tasks") await loadWorkTasks();
-  if (nextView === "permissions") await loadPermissionManager();
-  if (nextView === "data-permissions") await loadDataPermissionManager();
-  if (nextView === "catalogs") await loadCatalogs();
-  if (nextView === "audit") await loadAudit();
+  const loader = viewLoaderForNav(nextView, dashboardPageId);
+  if (loader) runActiveViewLoader(loadToken, loader);
+  else document.body.classList.remove("view-loading");
 }
 
 $("#nav-tree")?.addEventListener("click", async (event) => {
@@ -296,6 +344,10 @@ $("#nav-tree")?.addEventListener("click", async (event) => {
 });
 
 document.querySelectorAll("[data-open-dialog]").forEach((button) => button.addEventListener("click", () => {
+  if (button.dataset.openDialog === "credential-dialog") {
+    openCredential("").catch((error) => showToast(error.message, "error"));
+    return;
+  }
   if (button.dataset.openDialog === "website-dialog") {
     openWebsite("");
     return;
@@ -408,6 +460,9 @@ toggleTopDropdown("#user-menu-toggle", "#user-menu");
 document.addEventListener("click", (event) => {
   if (!event.target.closest(".dropdown-wrap")) closeTopDropdowns();
 });
+
+$("#credential-form")?.addEventListener("submit", saveCredential);
+$("#credential-website")?.addEventListener("change", updateCredentialWebsiteInfo);
 
 document.querySelectorAll("[data-logout]").forEach((button) => button.addEventListener("click", async () => {
   await api("/api/auth/logout", { method: "POST" });
@@ -535,6 +590,7 @@ function renderDashboardFiberChart(selector, rows) {
 function applyDashboardLayoutList(layouts = []) {
   dashboardViewerLayouts = Array.isArray(layouts) ? layouts : [];
   dashboardViewerLayoutsLoaded = true;
+  markDataFresh("dashboardViewerLayouts");
   const pageEntries = [];
   dashboardViewerLayouts.forEach((layout) => {
     const pageId = layout.page_id || "";
@@ -568,11 +624,29 @@ async function loadDashboardViewer() {
 }
 
 async function openDashboardViewerLayout(pageId) {
-  const data = await api(`/api/dashboard-layouts/${encodeURIComponent(pageId)}`);
+  const normalizedPageId = String(pageId || "").trim();
+  if (!normalizedPageId) return;
+  const preferredTabId = dashboardViewerLayout?.page_id === normalizedPageId ? dashboardViewerActiveTabId : "";
+  const cachedLayout = dashboardViewerLayoutCache.get(normalizedPageId);
+  if (cachedLayout) {
+    dashboardViewerActiveTabId = preferredTabId;
+    dashboardViewerLayout = normalizeDashboardViewerLayout(cloneDashboardLayout(cachedLayout), cachedLayout.page_name || "");
+    dashboardViewerLayout.page_name = cachedLayout.page_name || dashboardViewerLayout.page_name;
+    if (!dashboardViewerLayout.tabs.some((tab) => tab.tab_id === dashboardViewerActiveTabId)) {
+      dashboardViewerActiveTabId = dashboardViewerLayout.tabs[0]?.tab_id || "";
+    }
+    renderDashboardViewer();
+    await loadDashboardViewerTab(dashboardViewerActiveTabId);
+    return;
+  }
+  const data = await api(`/api/dashboard-layouts/${encodeURIComponent(normalizedPageId)}`);
+  dashboardViewerActiveTabId = preferredTabId;
   dashboardViewerLayout = normalizeDashboardViewerLayout(data.layout || {}, data.page_name || "");
   dashboardViewerLayout.page_name = data.page_name || dashboardViewerLayout.page_name;
-  dashboardViewerActiveTabId = dashboardViewerLayout.tabs[0]?.tab_id || "";
-  dashboardViewerLoadedTabs = {};
+  if (!dashboardViewerLayout.tabs.some((tab) => tab.tab_id === dashboardViewerActiveTabId)) {
+    dashboardViewerActiveTabId = dashboardViewerLayout.tabs[0]?.tab_id || "";
+  }
+  dashboardViewerLayoutCache.set(normalizedPageId, cloneDashboardLayout(dashboardViewerLayout));
   renderDashboardViewer();
   await loadDashboardViewerTab(dashboardViewerActiveTabId);
 }
@@ -646,6 +720,7 @@ function dashboardViewerTabCacheKey(tabId) {
 
 async function loadDashboardViewerTab(tabId, { force = false } = {}) {
   if (!dashboardViewerLayout || !tabId) return;
+  const pageId = dashboardViewerLayout.page_id;
   const key = dashboardViewerTabCacheKey(tabId);
   if (dashboardViewerLoadedTabs[key] && !force) {
     renderDashboardViewer();
@@ -654,12 +729,16 @@ async function loadDashboardViewerTab(tabId, { force = false } = {}) {
   const button = $("#refresh-dashboard-viewer-tab");
   if (button) setButtonLoading(button, true);
   try {
-    const response = await api(`/api/dashboard-layouts/${encodeURIComponent(dashboardViewerLayout.page_id)}/tabs/${encodeURIComponent(tabId)}/data`);
+    const response = await api(`/api/dashboard-layouts/${encodeURIComponent(pageId)}/tabs/${encodeURIComponent(tabId)}/data`);
     dashboardViewerLoadedTabs[key] = { ...response, loaded_at: new Date().toISOString() };
-    renderDashboardViewer();
-    $("#dashboard-viewer-message")?.classList.add("hidden");
+    if (dashboardViewerLayout?.page_id === pageId && dashboardViewerActiveTabId === tabId) {
+      renderDashboardViewer();
+      $("#dashboard-viewer-message")?.classList.add("hidden");
+    }
   } catch (error) {
-    showMessage($("#dashboard-viewer-message"), error.message, "error");
+    if (dashboardViewerLayout?.page_id === pageId && dashboardViewerActiveTabId === tabId) {
+      showMessage($("#dashboard-viewer-message"), error.message, "error");
+    }
   } finally {
     if (button) setButtonLoading(button, false);
   }
@@ -732,9 +811,17 @@ $("#password-form")?.addEventListener("submit", async (event) => {
   }
 });
 
-async function loadUsers() {
-  setTableLoading("#users-table", 5, "Đang tải danh sách người dùng...");
+async function loadUsers({ force = false } = {}) {
+  if (!force && isDataFresh("users")) {
+    renderUsersTable();
+    return;
+  }
+  if (users.length && !force) {
+    renderUsersTable();
+  }
+  if (!users.length || force) setTableLoading("#users-table", 5, "Đang tải danh sách người dùng...");
   users = (await api("/api/admin/users")).users;
+  markDataFresh("users");
   renderUsersTable();
 }
 
@@ -766,7 +853,7 @@ function renderUsersTable() {
 async function deleteUser(id) {
   if (!confirm("Xóa người dùng này?")) return;
   await api(`/api/admin/users/${id}`, { method: "DELETE" });
-  await loadUsers();
+  await loadUsers({ force: true });
 }
 
 async function openEditUser(id) {
@@ -798,7 +885,7 @@ if (role === "admin") {
       await api("/api/admin/users", { method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(form))) });
       form.reset();
       $("#create-user-dialog").close();
-      await loadUsers();
+      await loadUsers({ force: true });
     } catch (error) {
       showMessage(form.querySelector(".result"), error.message, "error");
     }
@@ -814,13 +901,13 @@ if (role === "admin") {
       const feature_codes = [...$("#permission-tree").querySelectorAll("input:checked")].map((input) => input.value);
       await api(`/api/admin/users/${data.id}/permissions`, { method: "PUT", body: JSON.stringify({ feature_codes }) });
       $("#edit-user-dialog").close();
-      await loadUsers();
+      await loadUsers({ force: true });
     } catch (error) {
       showMessage(form.querySelector(".result"), error.message, "error");
     }
   });
 
-  $("#refresh-audit")?.addEventListener("click", loadAudit);
+  $("#refresh-audit")?.addEventListener("click", () => loadAudit({ force: true }));
   $("#refresh-zalo-message-logs")?.addEventListener("click", loadZaloMessageLogs);
   $("#zalo-send-test-message")?.addEventListener("click", (event) => sendZaloTestMessage(event.currentTarget));
   $("#website-form")?.addEventListener("submit", saveWebsite);
@@ -911,7 +998,7 @@ async function importUserFile(event) {
   try {
     const result = await api("/api/admin/users/import", { method: "POST", body: data });
     showMessage($("#users-message"), `Đã thêm ${result.created_count} người dùng, bỏ qua ${result.skipped_count} dòng.`);
-    await loadUsers();
+    await loadUsers({ force: true });
   } catch (error) {
     showMessage($("#users-message"), error.message, "error");
   } finally {
@@ -937,9 +1024,151 @@ function renderUserSelection(selector) {
   `).join("");
 }
 
-async function loadAdminWebsites() {
-  setTableLoading("#websites-table", 5, "Đang tải danh mục website...");
+async function loadCredentialWebsites({ force = false } = {}) {
+  if (!force && isDataFresh("credentialWebsites")) {
+    fillCredentialWebsiteOptions();
+    return;
+  }
+  const data = await api("/api/websites");
+  credentialWebsites = data.websites || [];
+  markDataFresh("credentialWebsites");
+  fillCredentialWebsiteOptions();
+}
+
+async function loadCredentials({ force = false } = {}) {
+  if (!force && isDataFresh("credentials")) {
+    renderCredentialsTable();
+    return;
+  }
+  if (credentials.length && !force) {
+    renderCredentialsTable();
+  }
+  if (!credentials.length || force) setTableLoading("#credentials-table", 5, "Đang tải tài khoản website...");
+  const [credentialData] = await Promise.all([
+    api("/api/credentials"),
+    canManageVault ? loadCredentialWebsites({ force: false }) : Promise.resolve(),
+  ]);
+  credentials = credentialData.credentials || [];
+  markDataFresh("credentials");
+  renderCredentialsTable();
+}
+
+function renderCredentialsTable() {
+  const table = $("#credentials-table");
+  if (!table) return;
+  table.innerHTML = credentials.length ? credentials.map((credential) => {
+    const actions = [];
+    if (canManageVault) actions.push(`<button class="table-action" data-edit-credential="${escapeHtml(credential.id)}" type="button">Sửa</button>`);
+    if (canRevealVault) actions.push(`<button class="table-action" data-reveal-credential="${escapeHtml(credential.id)}" type="button">Xem mật khẩu</button>`);
+    if (canManageVault) actions.push(`<button class="table-action danger" data-delete-credential="${escapeHtml(credential.id)}" type="button">Xóa</button>`);
+    return `
+      <tr>
+        <td class="table-action-cell"><div class="action-group">${actions.join("") || "<span class=\"status viewer\">Xem</span>"}</div></td>
+        <td><strong>${escapeHtml(credential.website_name || "")}</strong></td>
+        <td><a class="text-sky-200 hover:underline" href="${escapeHtml(credential.url || "#")}" target="_blank" rel="noopener noreferrer">${escapeHtml(credential.url || "-")}</a></td>
+        <td>${escapeHtml(credential.login_username || "")}${credential.notes ? `<small class="cell-note">${escapeHtml(credential.notes)}</small>` : ""}</td>
+        <td><span class="status ${Number(credential.requires_otp) ? "pending" : "viewer"}">${Number(credential.requires_otp) ? "Có OTP" : "Không"}</span></td>
+      </tr>
+    `;
+  }).join("") : emptyRow(5, "Chưa có tài khoản website", "Bấm Thêm tài khoản để lưu tài khoản dùng cho công việc.");
+  document.querySelectorAll("[data-edit-credential]").forEach((button) => {
+    button.addEventListener("click", () => openCredential(Number(button.dataset.editCredential)).catch((error) => showToast(error.message, "error")));
+  });
+  document.querySelectorAll("[data-reveal-credential]").forEach((button) => {
+    button.addEventListener("click", () => revealCredential(Number(button.dataset.revealCredential)));
+  });
+  document.querySelectorAll("[data-delete-credential]").forEach((button) => {
+    button.addEventListener("click", () => deleteCredential(Number(button.dataset.deleteCredential)));
+  });
+}
+
+function fillCredentialWebsiteOptions() {
+  const select = $("#credential-website");
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = credentialWebsites.length
+    ? credentialWebsites.map((website) => `<option value="${escapeHtml(website.id)}">${escapeHtml(website.name)} (${escapeHtml(website.url)})</option>`).join("")
+    : `<option value="">Chưa có website</option>`;
+  if (current && credentialWebsites.some((website) => String(website.id) === String(current))) select.value = current;
+  updateCredentialWebsiteInfo();
+}
+
+function updateCredentialWebsiteInfo() {
+  const select = $("#credential-website");
+  const url = $("#credential-url");
+  const otp = $("#credential-otp");
+  const website = credentialWebsites.find((item) => String(item.id) === String(select?.value || ""));
+  if (url) url.value = website?.url || "";
+  if (otp) otp.textContent = website ? (Number(website.requires_otp) ? "Website này có OTP." : "Website này không yêu cầu OTP.") : "Chọn website để xem thông tin OTP.";
+}
+
+async function openCredential(id = "") {
+  if (canManageVault) await loadCredentialWebsites();
+  const credential = credentials.find((item) => Number(item.id) === Number(id));
+  const form = $("#credential-form");
+  if (!form) return;
+  form.reset();
+  form.elements.namedItem("id").value = credential?.id || "";
+  form.elements.namedItem("website_id").value = credential?.website_id || credentialWebsites[0]?.id || "";
+  form.elements.namedItem("login_username").value = credential?.login_username || "";
+  form.elements.namedItem("password").value = "";
+  form.elements.namedItem("notes").value = credential?.notes || "";
+  form.querySelector(".result").className = "result hidden";
+  updateCredentialWebsiteInfo();
+  $("#credential-dialog")?.showModal();
+}
+
+async function saveCredential(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  try {
+    await api("/api/credentials", { method: "POST", body: JSON.stringify({
+      id: data.id ? Number(data.id) : null,
+      website_id: Number(data.website_id),
+      login_username: data.login_username,
+      password: data.password,
+      notes: data.notes || "",
+    })});
+    $("#credential-dialog")?.close();
+    showToast("Đã lưu tài khoản website.");
+    await loadCredentials({ force: true });
+  } catch (error) {
+    showMessage(form.querySelector(".result"), error.message, "error");
+  }
+}
+
+async function revealCredential(id) {
+  try {
+    const response = await api(`/api/credentials/${id}/reveal`, { method: "POST" });
+    window.prompt("Mật khẩu", response.password || "");
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
+async function deleteCredential(id) {
+  if (!confirm("Xóa tài khoản website này?")) return;
+  try {
+    await api(`/api/credentials/${id}`, { method: "DELETE" });
+    showToast("Đã xóa tài khoản website.");
+    await loadCredentials({ force: true });
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
+async function loadAdminWebsites({ force = false } = {}) {
+  if (!force && isDataFresh("websites")) {
+    renderWebsitesTable();
+    return;
+  }
+  if (websites.length && !force) {
+    renderWebsitesTable();
+  }
+  if (!websites.length || force) setTableLoading("#websites-table", 5, "Đang tải danh mục website...");
   websites = (await api("/api/admin/websites")).websites;
+  markDataFresh("websites");
   renderWebsitesTable();
 }
 
@@ -988,15 +1217,22 @@ async function saveWebsite(event) {
     })});
     $("#website-dialog")?.close();
     showToast("Đã lưu danh mục website.");
-    await loadAdminWebsites();
+    markDataStale("credentialWebsites");
+    await loadAdminWebsites({ force: true });
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
   }
 }
 
 async function loadPermissionManager() {
-  if (!users.length) users = (await api("/api/admin/users")).users;
-  if (!features.length) features = (await api("/api/admin/features")).features;
+  if (!isDataFresh("users")) {
+    users = (await api("/api/admin/users")).users;
+    markDataFresh("users");
+  }
+  if (!isDataFresh("features")) {
+    features = (await api("/api/admin/features")).features;
+    markDataFresh("features");
+  }
   renderUserSelection("#permission-users");
   const orderedFeatures = flattenFeatureTree(buildFeatureTree(features)).map((row) => row.feature);
   $("#permission-features").innerHTML = orderedFeatures.map((feature) => `
@@ -1015,9 +1251,15 @@ async function saveBulkPermissions() {
 }
 
 async function loadDataPermissionManager() {
-  if (!users.length) users = (await api("/api/admin/users")).users;
+  if (!isDataFresh("users")) {
+    users = (await api("/api/admin/users")).users;
+    markDataFresh("users");
+  }
   renderUserSelection("#data-permission-users");
-  regions = (await api("/api/admin/regions")).regions;
+  if (!regions.length || !isDataFresh("regions")) {
+    regions = (await api("/api/admin/regions")).regions;
+    markDataFresh("regions");
+  }
   $("#data-region-options").innerHTML = regions.map((region) => `
     <label class="selection-item">
       <input type="checkbox" value="${escapeHtml(region.code)}" />
@@ -1032,9 +1274,21 @@ async function saveDataPermissions() {
   alert("Đã lưu phân quyền dữ liệu.");
 }
 
-async function loadRoles() {
-  setTableLoading("#roles-table", 6, "Đang tải vai trò người dùng...");
+async function loadRoles({ force = false } = {}) {
+  if (!force && isDataFresh("roles")) {
+    renderRolesTable();
+    return;
+  }
+  if (systemRoles.length && !force) {
+    renderRolesTable();
+  }
+  if (!systemRoles.length || force) setTableLoading("#roles-table", 6, "Đang tải vai trò người dùng...");
   systemRoles = (await api("/api/admin/roles")).roles;
+  markDataFresh("roles");
+  renderRolesTable();
+}
+
+function renderRolesTable() {
   $("#roles-table").innerHTML = systemRoles.length ? systemRoles.map((roleItem) => `
     <tr>
       <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-role="${escapeHtml(roleItem.code)}">Sửa</button> <button class="table-action danger" data-delete-role="${escapeHtml(roleItem.code)}">Xóa</button></div></td>
@@ -1049,8 +1303,8 @@ async function loadRoles() {
   document.querySelectorAll("[data-delete-role]").forEach((button) => button.addEventListener("click", () => deleteRole(button.dataset.deleteRole)));
 }
 
-async function loadCatalogs() {
-  await Promise.all([loadRegions(), loadRoles()]);
+async function loadCatalogs({ force = false } = {}) {
+  await Promise.all([loadRegions({ force }), loadRoles({ force })]);
 }
 
 function openRole(code = "") {
@@ -1083,7 +1337,7 @@ async function saveRole(event) {
     form.is_active.checked = true;
     $("#role-dialog").close();
     showMessage($("#roles-message"), "Đã lưu vai trò.");
-    await loadRoles();
+    await loadRoles({ force: true });
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
   }
@@ -1094,7 +1348,7 @@ async function deleteRole(code) {
   try {
     await api(`/api/admin/roles/${encodeURIComponent(code)}`, { method: "DELETE" });
     showMessage($("#roles-message"), `Đã xóa vai trò ${code}.`);
-    await loadRoles();
+    await loadRoles({ force: true });
   } catch (error) {
     showMessage($("#roles-message"), error.message, "error");
   }
@@ -1346,9 +1600,11 @@ async function syncNavigationFromFeatures() {
     try {
       const navigationData = await api("/api/navigation");
       features = navigationData.features || [];
+      markDataFresh("features");
       applyDashboardLayoutList(navigationData.dashboard_layouts || []);
     } catch {
       features = (await api("/api/admin/features")).features;
+      markDataFresh("features");
       try {
         const layoutsData = await api("/api/admin/dashboard-layouts");
         applyDashboardLayoutList(layoutsData.layouts || []);
@@ -1523,6 +1779,7 @@ async function createMenu() {
 
 async function loadMenuLayout() {
   features = (await api("/api/admin/features")).features;
+  markDataFresh("features");
   menuLayoutState = features.map((feature) => ({ ...feature }));
   renderMenuLayout();
 }
@@ -1805,14 +2062,21 @@ function dashboardBuilderPageIsSaved(page) {
 async function loadDashboardLayoutPages() {
   const pagesData = await api("/api/admin/dashboard-layout-pages");
   dashboardLayouts = pagesData.pages || [];
+  markDataFresh("dashboardLayoutPages");
   return dashboardLayouts;
 }
 
-async function loadDashboardBuilder() {
+async function loadDashboardBuilder({ force = false } = {}) {
   const message = $("#dashboard-builder-message");
   const pageList = $("#dashboard-layout-pages");
+  if (!force && dashboardBuilderLayout) {
+    renderDashboardBuilder();
+    if (message) message.className = "result hidden";
+    return;
+  }
   if (pageList) pageList.innerHTML = `<div class="dashboard-empty"><p>Đang tải danh sách trang báo cáo...</p></div>`;
   try {
+    const preferredPageId = dashboardBuilderLayout?.page_id || "";
     const [pagesData, reportsData, featuresData] = await Promise.all([
       api("/api/admin/dashboard-layout-pages"),
       api("/api/admin/sql-reports"),
@@ -1821,8 +2085,13 @@ async function loadDashboardBuilder() {
     dashboardLayouts = pagesData.pages || [];
     sqlReports = reportsData.reports || [];
     features = featuresData.features || features;
+    markDataFresh("dashboardBuilder");
+    markDataFresh("dashboardLayoutPages");
+    markDataFresh("sqlReports");
+    markDataFresh("features");
     if (dashboardLayouts.length) {
-      await openDashboardPage(dashboardLayouts[0].page_id);
+      const preferredPage = dashboardLayouts.find((page) => page.page_id === preferredPageId) || dashboardLayouts[0];
+      await openDashboardPage(preferredPage.page_id);
     } else {
       dashboardBuilderLayout = dashboardLayoutTemplate();
       dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0].tab_id;
@@ -1841,6 +2110,7 @@ async function refreshDashboardSqlReports(button = null) {
   try {
     const reportsData = await api("/api/admin/sql-reports");
     sqlReports = reportsData.reports || [];
+    markDataFresh("sqlReports");
     fillDynamicReportSelect();
     if (dashboardBuilderLayout) {
       collectDashboardBuilderStateFromDom();
@@ -1860,7 +2130,6 @@ async function openDashboardPage(pageId) {
   if (page && !dashboardBuilderPageIsSaved(page)) {
     dashboardBuilderLayout = dashboardLayoutTemplate(page.page_name || page.feature_name || page.page_id, page.page_id, { parentCode: page.parent_code || dashboardDefaultParentCode() });
     dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0]?.tab_id || "";
-    dashboardBuilderLoadedTabs = {};
     renderDashboardBuilder();
     renderDashboardPreview();
     return;
@@ -1869,13 +2138,32 @@ async function openDashboardPage(pageId) {
 }
 
 async function openDashboardLayout(pageId) {
-  const data = await api(`/api/admin/dashboard-layouts/${encodeURIComponent(pageId)}`);
+  const normalizedPageId = String(pageId || "").trim();
+  if (!normalizedPageId) return;
+  const preferredTabId = dashboardBuilderLayout?.page_id === normalizedPageId ? dashboardBuilderActiveTabId : "";
   const page = dashboardBuilderPageById(pageId);
+  const cachedLayout = dashboardBuilderLayoutCache.get(normalizedPageId);
+  if (cachedLayout) {
+    dashboardBuilderActiveTabId = preferredTabId;
+    dashboardBuilderLayout = normalizeDashboardBuilderLayout(cloneDashboardLayout(cachedLayout), cachedLayout.page_name || "");
+    dashboardBuilderLayout.page_name = repairTextEncoding(page?.page_name || cachedLayout.page_name || dashboardBuilderLayout.page_name);
+    dashboardBuilderLayout.parent_code = page?.parent_code || cachedLayout.parent_code || dashboardBuilderLayout.parent_code || dashboardDefaultParentCode();
+    if (!dashboardBuilderLayout.tabs.some((tab) => tab.tab_id === dashboardBuilderActiveTabId)) {
+      dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0]?.tab_id || "";
+    }
+    renderDashboardBuilder();
+    await loadDashboardPreviewTab(dashboardBuilderActiveTabId);
+    return;
+  }
+  const data = await api(`/api/admin/dashboard-layouts/${encodeURIComponent(normalizedPageId)}`);
+  dashboardBuilderActiveTabId = preferredTabId;
   dashboardBuilderLayout = normalizeDashboardBuilderLayout(data.layout || {}, data.page_name || "");
   dashboardBuilderLayout.page_name = repairTextEncoding(page?.page_name || data.page_name || dashboardBuilderLayout.page_name);
   dashboardBuilderLayout.parent_code = page?.parent_code || data.parent_code || data.layout?.parent_code || dashboardBuilderLayout.parent_code || dashboardDefaultParentCode();
-  dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0]?.tab_id || "";
-  dashboardBuilderLoadedTabs = {};
+  if (!dashboardBuilderLayout.tabs.some((tab) => tab.tab_id === dashboardBuilderActiveTabId)) {
+    dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0]?.tab_id || "";
+  }
+  dashboardBuilderLayoutCache.set(normalizedPageId, cloneDashboardLayout(dashboardBuilderLayout));
   renderDashboardBuilder();
   await loadDashboardPreviewTab(dashboardBuilderActiveTabId);
 }
@@ -1886,7 +2174,6 @@ function createDashboardPage() {
   const cleanedName = pageName.trim() || "Dashboard mới";
   dashboardBuilderLayout = dashboardLayoutTemplate(cleanedName, dashboardPageIdFromName(cleanedName), { parentCode: $("#dashboard-parent-code")?.value || dashboardDefaultParentCode() });
   dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0].tab_id;
-  dashboardBuilderLoadedTabs = {};
   renderDashboardBuilder();
 }
 
@@ -1969,6 +2256,15 @@ async function deleteDashboardPage(pageId) {
       ? dashboardBuilderLayout.page_name
       : (dashboardLayouts.find((page) => page.page_id === pageId)?.page_name || pageId);
     await api(`/api/admin/dashboard-layouts/${encodeURIComponent(pageId)}`, { method: "DELETE" });
+    dashboardBuilderLayoutCache.delete(pageId);
+    dashboardViewerLayoutCache.delete(pageId);
+    Object.keys(dashboardBuilderLoadedTabs).forEach((key) => {
+      if (key.startsWith(`${pageId}:`)) delete dashboardBuilderLoadedTabs[key];
+    });
+    Object.keys(dashboardViewerLoadedTabs).forEach((key) => {
+      if (key.startsWith(`${pageId}:`)) delete dashboardViewerLoadedTabs[key];
+    });
+    markDataStale("dashboardBuilder", "dashboardLayoutPages", "dashboardViewerLayouts");
     showMessage($("#dashboard-builder-message"), "Đã xóa trang báo cáo.");
     await loadDashboardLayoutPages();
     let deletedPage = dashboardLayouts.find((page) => page.page_id === pageId);
@@ -2011,6 +2307,7 @@ async function purgeUnsavedDashboardPage(featureCode) {
   if (!featureCode || !confirm("Xóa hẳn mục Dashboard chưa lưu này khỏi cây chức năng?")) return;
   try {
     await api(`/api/admin/dashboard-layout-pages/${encodeURIComponent(featureCode)}`, { method: "DELETE" });
+    markDataStale("dashboardBuilder", "dashboardLayoutPages", "dashboardViewerLayouts");
     showMessage($("#dashboard-builder-message"), "Đã xóa hẳn mục Dashboard chưa lưu.");
     await loadDashboardLayoutPages();
     if (dashboardLayouts.length) {
@@ -2442,6 +2739,12 @@ async function saveDashboardLayout(button = null) {
     const response = await api("/api/admin/dashboard-layouts", { method: "POST", body: JSON.stringify(payload) });
     dashboardBuilderLayout = normalizeDashboardBuilderLayout({ ...(response.layout || payload.layout), parent_code: response.parent_code || parentCode }, payload.page_name);
     dashboardBuilderLayout.parent_code = response.parent_code || parentCode;
+    dashboardBuilderLayoutCache.set(dashboardBuilderLayout.page_id, cloneDashboardLayout(dashboardBuilderLayout));
+    dashboardViewerLayoutCache.delete(dashboardBuilderLayout.page_id);
+    Object.keys(dashboardViewerLoadedTabs).forEach((key) => {
+      if (key.startsWith(`${dashboardBuilderLayout.page_id}:`)) delete dashboardViewerLoadedTabs[key];
+    });
+    markDataStale("dashboardViewerLayouts");
     await loadDashboardLayoutPages();
     features = [];
     await syncNavigationFromFeatures();
@@ -2473,7 +2776,8 @@ function dashboardPageIsSaved() {
 
 async function loadDashboardPreviewTab(tabId, { force = false } = {}) {
   if (!dashboardBuilderLayout || !tabId) return;
-  const key = dashboardTabCacheKey(tabId);
+  const pageId = dashboardBuilderLayout.page_id;
+  const key = `${pageId}:${tabId}`;
   if (dashboardBuilderLoadedTabs[key] && !force) {
     renderDashboardPreview();
     return;
@@ -2485,13 +2789,17 @@ async function loadDashboardPreviewTab(tabId, { force = false } = {}) {
   const button = $("#refresh-dashboard-preview");
   if (button) setButtonLoading(button, true);
   try {
-    const response = await api(`/api/admin/dashboard-layouts/${encodeURIComponent(dashboardBuilderLayout.page_id)}/tabs/${encodeURIComponent(tabId)}/data`);
+    const response = await api(`/api/admin/dashboard-layouts/${encodeURIComponent(pageId)}/tabs/${encodeURIComponent(tabId)}/data`);
     dashboardBuilderLoadedTabs[key] = response;
-    renderDashboardPreview();
-    if (response.ok) showMessage($("#dashboard-preview-message"), response.message || "Đã tải dữ liệu Tab dashboard.", "success");
-    else $("#dashboard-preview-message")?.classList.add("hidden");
+    if (dashboardBuilderLayout?.page_id === pageId && dashboardBuilderActiveTabId === tabId) {
+      renderDashboardPreview();
+      if (response.ok) showMessage($("#dashboard-preview-message"), response.message || "Đã tải dữ liệu Tab dashboard.", "success");
+      else $("#dashboard-preview-message")?.classList.add("hidden");
+    }
   } catch (error) {
-    showMessage($("#dashboard-preview-message"), error.message, "error");
+    if (dashboardBuilderLayout?.page_id === pageId && dashboardBuilderActiveTabId === tabId) {
+      showMessage($("#dashboard-preview-message"), error.message, "error");
+    }
   } finally {
     if (button) setButtonLoading(button, false);
   }
@@ -3045,15 +3353,19 @@ function schedulePendingDashboardCharts() {
 
 function schedulePendingDashboardSheets() {
   const jobs = pendingDashboardSheets;
+  const token = dashboardSheetRenderToken;
   pendingDashboardSheets = [];
   if (!jobs.length) return;
   jobs.forEach(async ({ elementId, url }) => {
+    if (token !== dashboardSheetRenderToken) return;
     const target = document.getElementById(elementId);
     if (!target) return;
     try {
       const response = await api(`/api/google-sheet-table?url=${encodeURIComponent(url)}`);
+      if (token !== dashboardSheetRenderToken) return;
       target.innerHTML = response.html || `<div class="runtime-widget-empty">Không tìm thấy bảng trong Google Sheet.</div>`;
     } catch (error) {
+      if (token !== dashboardSheetRenderToken) return;
       target.innerHTML = `<div class="runtime-widget-error">${escapeHtml(error.message || "Không tải được bảng Google Sheet.")}</div>`;
     }
   });
@@ -3204,13 +3516,27 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
 
 function destroyDashboardCharts() {
   dashboardChartRenderToken += 1;
+  dashboardSheetRenderToken += 1;
   dashboardChartInstances.forEach((chart) => chart.destroy());
   dashboardChartInstances.clear();
   pendingDashboardCharts = [];
+  pendingDashboardSheets = [];
 }
 
-async function loadRegions() {
+async function loadRegions({ force = false } = {}) {
+  if (!force && isDataFresh("regions")) {
+    renderRegionsTable();
+    return;
+  }
+  if (regions.length && !force) {
+    renderRegionsTable();
+  }
   regions = (await api("/api/admin/regions")).regions;
+  markDataFresh("regions");
+  renderRegionsTable();
+}
+
+function renderRegionsTable() {
   $("#regions-table").innerHTML = regions.length ? regions.map((region) => `
     <tr>
       <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-region="${escapeHtml(region.code)}">Sửa</button> <button class="table-action danger" data-delete-region="${escapeHtml(region.code)}">Xóa</button></div></td>
@@ -3252,7 +3578,7 @@ async function saveRegion(event) {
     form.is_active.checked = true;
     $("#region-dialog").close();
     showMessage($("#regions-message"), "Đã lưu phân vùng.");
-    await loadRegions();
+    await loadRegions({ force: true });
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
   }
@@ -3263,15 +3589,23 @@ async function deleteRegion(code) {
   try {
     await api(`/api/admin/regions/${encodeURIComponent(code)}`, { method: "DELETE" });
     showMessage($("#regions-message"), `Đã xóa phân vùng ${code}.`);
-    await loadRegions();
+    await loadRegions({ force: true });
   } catch (error) {
     showMessage($("#regions-message"), error.message, "error");
   }
 }
 
-async function loadWorkTasks() {
-  setTableLoading("#work-tasks-table", 9, "Đang tải lịch công việc...");
+async function loadWorkTasks({ force = false } = {}) {
+  if (!force && isDataFresh("workTasks")) {
+    renderWorkTasks();
+    return;
+  }
+  if (workTasks.length && !force) {
+    renderWorkTasks();
+  }
+  if (!workTasks.length || force) setTableLoading("#work-tasks-table", 9, "Đang tải lịch công việc...");
   workTasks = (await api("/api/admin/work-tasks")).tasks;
+  markDataFresh("workTasks");
   renderWorkTasks();
 }
 
@@ -3341,7 +3675,7 @@ async function saveWorkTask(event) {
     $("#work-task-dialog").close();
     showMessage($("#work-tasks-message"), "Đã lưu công việc.");
     showToast("Đã lưu lịch công việc.");
-    await loadWorkTasks();
+    await loadWorkTasks({ force: true });
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
     showToast(error.message, "error");
@@ -3353,7 +3687,7 @@ async function completeWorkTask(taskId) {
   try {
     const result = await api(`/api/admin/work-tasks/${encodeURIComponent(taskId)}/complete`, { method: "POST" });
     showMessage($("#work-tasks-message"), result.message || "Đã hoàn thành công việc.");
-    await loadWorkTasks();
+    await loadWorkTasks({ force: true });
   } catch (error) {
     showMessage($("#work-tasks-message"), error.message, "error");
   }
@@ -3364,18 +3698,22 @@ async function deleteWorkTask(taskId) {
   try {
     await api(`/api/admin/work-tasks/${encodeURIComponent(taskId)}`, { method: "DELETE" });
     showMessage($("#work-tasks-message"), `Đã xóa lịch ${taskId}.`);
-    await loadWorkTasks();
+    await loadWorkTasks({ force: true });
   } catch (error) {
     showMessage($("#work-tasks-message"), error.message, "error");
   }
 }
 
-async function loadSystem() {
+async function loadSystem({ force = false } = {}) {
+  if (!force && isDataFresh("system") && isDataFresh("connections") && isDataFresh("sqlReports")) return;
   $("#system-cards").innerHTML = loadingRow(1, "Đang tải thông tin hệ thống...");
-  const data = await api("/api/admin/system");
-  await loadConnections();
-  await loadZaloMessageLogs();
-  await loadSqlReports();
+  const [data] = await Promise.all([
+    api("/api/admin/system"),
+    loadConnections({ force }),
+    loadZaloMessageLogs({ force }),
+    loadSqlReports({ force }),
+  ]);
+  markDataFresh("system");
   $("#system-cards").innerHTML = [
     ["APP", "Môi trường", data.environment],
     ["STO", "Database chính", data.storage_backend],
@@ -3384,10 +3722,22 @@ async function loadSystem() {
   ].map(([icon, label, value]) => `<article class="metric-card"><div class="metric-icon">${icon}</div><div><span>${label}</span><strong>${escapeHtml(value)}</strong></div></article>`).join("");
 }
 
-async function loadConnections() {
-  setTableLoading("#connections-table", 7, "Đang tải kết nối hệ thống...");
+async function loadConnections({ force = false } = {}) {
+  if (!force && isDataFresh("connections")) {
+    renderConnectionsTable();
+    return;
+  }
+  if (connections.length && !force) {
+    renderConnectionsTable();
+  }
+  if (!connections.length || force) setTableLoading("#connections-table", 7, "Đang tải kết nối hệ thống...");
   const data = await api("/api/admin/connections");
   connections = data.connections;
+  markDataFresh("connections");
+  renderConnectionsTable();
+}
+
+function renderConnectionsTable() {
   $("#connections-table").innerHTML = connections.length
     ? connections.map((connection) => renderConnectionRow(connection)).join("")
     : emptyRow(7, "Chưa có kết nối", "Hãy cấu hình kết nối trong phần quản trị hệ thống.");
@@ -3451,7 +3801,7 @@ async function saveInlineConnection(code, button) {
     })});
     button.classList.add("hidden");
     showToast("Đã lưu kết nối hệ thống.");
-    await loadConnections();
+    await loadConnections({ force: true });
   } catch (error) {
     showToast(error.message, "error");
   } finally {
@@ -3492,7 +3842,7 @@ async function saveConnection(event) {
       is_active: form.is_active.checked,
     })});
     $("#connection-dialog").close();
-    await loadConnections();
+    await loadConnections({ force: true });
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
   }
@@ -3565,11 +3915,21 @@ async function sendZaloTestMessage(button) {
   }
 }
 
-async function loadSqlReports() {
-  setTableLoading("#sql-reports-table", 5, "Đang tải cấu hình SQL...");
+async function loadSqlReports({ force = false } = {}) {
+  if (!force && isDataFresh("sqlReports")) {
+    renderSqlReports();
+    fillDynamicReportSelect();
+    return;
+  }
+  if (sqlReports.length && !force) {
+    renderSqlReports();
+    fillDynamicReportSelect();
+  }
+  if (!sqlReports.length || force) setTableLoading("#sql-reports-table", 5, "Đang tải cấu hình SQL...");
   try {
     const data = await api("/api/admin/sql-reports");
     sqlReports = data.reports || [];
+    markDataFresh("sqlReports");
     renderSqlReports();
     fillDynamicReportSelect();
     if (dashboardBuilderLayout) {
@@ -3676,7 +4036,7 @@ async function saveInlineSqlReport(rowKey, button) {
     sqlReportDrafts = sqlReportDrafts.filter((item) => item._rowKey !== rowKey);
     showMessage($("#sql-reports-message"), "Đã lưu cấu hình SQL.");
     showToast("Đã lưu cấu hình SQL.");
-    await loadSqlReports();
+    await loadSqlReports({ force: true });
   } catch (error) {
     showMessage($("#sql-reports-message"), error.message, "error");
     showToast(error.message, "error");
@@ -3726,7 +4086,7 @@ async function saveSqlReport(event) {
     $("#sql-report-dialog")?.close();
     showMessage($("#sql-reports-message"), "Đã lưu cấu hình SQL.");
     showToast("Đã lưu cấu hình SQL.");
-    await loadSqlReports();
+    await loadSqlReports({ force: true });
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
   }
@@ -3737,7 +4097,7 @@ async function deleteSqlReport(reportId) {
   try {
     await api(`/api/admin/sql-reports/${reportId}`, { method: "DELETE" });
     showMessage($("#sql-reports-message"), "Đã xóa cấu hình SQL.");
-    await loadSqlReports();
+    await loadSqlReports({ force: true });
   } catch (error) {
     showMessage($("#sql-reports-message"), error.message, "error");
   }
@@ -3748,6 +4108,7 @@ async function loadDynamicReports() {
     try {
       const data = await api("/api/reports/configs");
       sqlReports = data.reports || [];
+      markDataFresh("reportConfigs");
     } catch (error) {
       showMessage($("#dynamic-report-message"), error.message, "error");
       return;
@@ -3755,6 +4116,7 @@ async function loadDynamicReports() {
   }
   fillDynamicReportSelect();
   renderDynamicReportFilters();
+  if (dynamicReportLoaded) return;
   if (sqlReports.length) await runDynamicReport();
 }
 
@@ -3830,6 +4192,7 @@ async function runDynamicReport() {
 function renderDynamicReportTable(response) {
   const columns = response.columns || [];
   const rows = response.rows || [];
+  dynamicReportLoaded = true;
   dynamicReportTotal = response.pagination?.total || rows.length;
   $("#dynamic-report-head").innerHTML = columns.length ? `<tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>` : "";
   $("#dynamic-report-body").innerHTML = rows.length
@@ -3865,7 +4228,7 @@ $("#zalo-set-webhook")?.addEventListener("click", async () => {
     const response = await api("/api/admin/zalo/webhook/setup", { method: "POST" });
     const webhookUrl = response.details?.webhook_url ? ` ${response.details.webhook_url}` : "";
     showMessage(resultBox, `${response.message}${webhookUrl}`);
-    await loadConnections();
+    await loadConnections({ force: true });
   } catch (error) {
     showMessage(resultBox, error.message, "error");
   } finally {
@@ -3873,8 +4236,20 @@ $("#zalo-set-webhook")?.addEventListener("click", async () => {
   }
 });
 
-async function loadAudit() {
-  setTableLoading("#audit-table", 4, "Đang tải nhật ký hoạt động...");
-  const logs = (await api("/api/admin/audit-logs")).logs;
-  $("#audit-table").innerHTML = logs.length ? logs.map((log) => `<tr><td>${new Date(log.created_at).toLocaleString("vi-VN")}</td><td><strong>${escapeHtml(log.actor)}</strong></td><td>${escapeHtml(log.action)}</td><td>${escapeHtml(log.details)}</td></tr>`).join("") : emptyRow(4, "Chưa có nhật ký", "Các thao tác quan trọng sẽ xuất hiện tại đây.");
+async function loadAudit({ force = false } = {}) {
+  if (!force && isDataFresh("auditLogs")) {
+    renderAuditLogs();
+    return;
+  }
+  if (auditLogs.length && !force) {
+    renderAuditLogs();
+  }
+  if (!auditLogs.length || force) setTableLoading("#audit-table", 4, "Đang tải nhật ký hoạt động...");
+  auditLogs = (await api("/api/admin/audit-logs")).logs;
+  markDataFresh("auditLogs");
+  renderAuditLogs();
+}
+
+function renderAuditLogs() {
+  $("#audit-table").innerHTML = auditLogs.length ? auditLogs.map((log) => `<tr><td>${new Date(log.created_at).toLocaleString("vi-VN")}</td><td><strong>${escapeHtml(log.actor)}</strong></td><td>${escapeHtml(log.action)}</td><td>${escapeHtml(log.details)}</td></tr>`).join("") : emptyRow(4, "Chưa có nhật ký", "Các thao tác quan trọng sẽ xuất hiện tại đây.");
 }
