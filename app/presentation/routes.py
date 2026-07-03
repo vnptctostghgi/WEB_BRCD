@@ -23,7 +23,7 @@ from app.application.database_service import DatabaseService
 from app.application.vault_service import VaultService
 from app.application.connection_service import ConnectionService
 from app.application.telegram_notifier import TelegramNotifier
-from app.application.zalo_auto_message_service import capture_public_url, send_zalo_auto_message
+from app.application.zalo_auto_message_service import capture_page_screenshot_bytes, capture_public_url, send_zalo_auto_message
 from app.application.zalo_bot import ZaloBotClient
 from app.data_access.app_repository import (
     AppRepository,
@@ -320,6 +320,10 @@ class ZaloCapturePayload(BaseModel):
     image_base64: str
     mime_type: str = "image/png"
     page_url: str = ""
+
+
+class PageCapturePayload(BaseModel):
+    page_url: str = "/"
 
 
 def build_app_repository() -> AppRepository:
@@ -1808,6 +1812,23 @@ def upload_zalo_auto_message_capture(request: Request, schedule_id: str, payload
         raise_zalo_auto_message_schema_error(error)
     repository.add_audit_log(actor["username"], "zalo_auto_message_capture_saved", f"Luu anh chup cho lich {schedule_id}")
     return {"ok": True, "capture": capture, "capture_url": capture_public_url(get_settings(), capture)}
+
+
+@router.post("/api/admin/dashboard/capture")
+def capture_dashboard_page(request: Request, payload: PageCapturePayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    page_url = normalize_zalo_page_url(payload.page_url or "/")
+    try:
+        image_bytes = capture_page_screenshot_bytes(repository, get_settings(), page_url)
+    except Exception as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)[:500]) from error
+    repository.add_audit_log(actor["username"], "dashboard_capture_generated", f"Chup anh Dashboard {page_url}")
+    return {
+        "ok": True,
+        "mime_type": "image/png",
+        "image_base64": base64.b64encode(image_bytes).decode("ascii"),
+    }
 
 
 @router.post("/api/admin/zalo/auto-messages/{schedule_id}/send-now")

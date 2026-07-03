@@ -309,6 +309,66 @@ def capture_schedule_page_image(repository: Any, settings: Settings, schedule: d
     return {"ok": True, "message": "Da chup anh moi.", "capture": capture, "capture_url": capture_url, "page_url": target_url}
 
 
+def capture_page_screenshot_bytes(repository: Any, settings: Settings, page_url: str, selector: str = "#dashboard-viewer-capture-area") -> bytes:
+    schedule = {"page_url": page_url or "/"}
+    target_url, _path = schedule_page_url(settings, schedule)
+    if not target_url:
+        raise RuntimeError("Chua cau hinh APP_PUBLIC_URL/ZALO_WEBHOOK_URL hop le de chup anh.")
+    admin_user = capture_admin_user(repository, settings)
+    if not admin_user:
+        raise RuntimeError("Chua co tai khoan admin hoat dong de chup anh.")
+    try:
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+        from playwright.sync_api import sync_playwright
+    except ImportError as error:
+        raise RuntimeError("May chu chua cai Playwright de chup anh.") from error
+
+    base_url = public_base_url(settings)
+    cookie_value = signed_capture_session_cookie(settings, admin_user)
+
+    def run_capture(install_retry: bool = False) -> bytes:
+        try:
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+                try:
+                    context = browser.new_context(viewport={"width": 1920, "height": 1080}, device_scale_factor=2, locale="vi-VN")
+                    context.add_cookies([
+                        {
+                            "name": SESSION_COOKIE_NAME,
+                            "value": cookie_value,
+                            "url": base_url,
+                            "path": "/",
+                            "httpOnly": True,
+                            "secure": urlparse(base_url).scheme == "https",
+                            "sameSite": "Lax",
+                        }
+                    ])
+                    page = context.new_page()
+                    page.goto(target_url, wait_until="networkidle", timeout=90000)
+                    try:
+                        page.wait_for_selector(selector, state="visible", timeout=30000)
+                        page.wait_for_function(
+                            "() => document.querySelectorAll('[data-dashboard-sheet-state=\"loading\"]').length === 0",
+                            timeout=30000,
+                        )
+                    except PlaywrightTimeoutError:
+                        logger.warning("Timed out waiting for capture selector %s at %s", selector, target_url)
+                    page.wait_for_timeout(1800)
+                    locator = page.locator(selector).first
+                    if locator.count():
+                        return locator.screenshot(type="png")
+                    return page.screenshot(full_page=True, type="png")
+                finally:
+                    browser.close()
+        except Exception as error:
+            if not install_retry and playwright_needs_browser_install(error):
+                install_playwright_chromium()
+                return run_capture(install_retry=True)
+            raise
+
+    return run_capture()
+
+
 def send_zalo_auto_message(repository: Any, settings: Settings, schedule: dict[str, Any]) -> dict[str, Any]:
     chat_id = str(schedule.get("chat_id") or "").strip() or latest_zalo_chat_id_from_logs(repository)
     if not chat_id:

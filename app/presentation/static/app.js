@@ -2904,7 +2904,7 @@ function renderRuntimeGoogleSheetWidget(widget) {
   pendingDashboardSheets.push({ elementId, url: embedUrl });
   return `
     <article class="runtime-widget-card runtime-embed-card">
-      <div class="runtime-sheet-table" id="${escapeHtml(elementId)}">
+      <div class="runtime-sheet-table" id="${escapeHtml(elementId)}" data-dashboard-sheet-state="loading">
         <div class="runtime-widget-empty">Đang tải bảng Google Sheet...</div>
       </div>
     </article>
@@ -3159,6 +3159,13 @@ function canvasToPngBlob(canvas) {
   });
 }
 
+function base64ToBlob(base64, mimeType = "image/png") {
+  const binary = atob(String(base64 || ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: mimeType });
+}
+
 function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -3200,10 +3207,29 @@ function resizeDashboardCharts() {
   dashboardChartInstances.forEach((chart) => chart?.resize?.());
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function dashboardCaptureFileName() {
   const title = dashboardViewerLayout?.page_name || $("#dashboard-viewer-title")?.textContent || "dashboard";
   const activeTab = dashboardViewerLayout?.tabs?.find((tab) => tab.tab_id === dashboardViewerActiveTabId)?.tab_name || "tab";
   return `${title}-${activeTab}`;
+}
+
+async function waitDashboardEmbedsReady(area, timeoutMs = 10000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const loadingSheets = Array.from(area.querySelectorAll("[data-dashboard-sheet-state='loading']"));
+    const pendingImages = Array.from(area.querySelectorAll("img")).filter((image) => !image.complete);
+    if (!loadingSheets.length && !pendingImages.length) return true;
+    await sleep(180);
+  }
+  return false;
+}
+
+function dashboardHasExternalIframes(area) {
+  return Boolean(area.querySelector("iframe"));
 }
 
 async function captureDashboardViewerAreaBlob(area) {
@@ -3218,6 +3244,13 @@ async function captureDashboardViewerAreaBlob(area) {
   area.style.maxWidth = "none";
   area.scrollLeft = 0;
   resizeDashboardCharts();
+  const embedsReady = await waitDashboardEmbedsReady(area);
+  if (!embedsReady) {
+    throw new Error("Trang nhúng chưa tải xong, vui lòng đợi vài giây rồi chụp lại.");
+  }
+  if (dashboardHasExternalIframes(area)) {
+    throw new Error("IFRAME_CAPTURE_REQUIRED");
+  }
   if (document.fonts?.ready) await document.fonts.ready;
   await waitAnimationFrames(3);
   try {
@@ -3246,6 +3279,15 @@ async function captureDashboardViewerAreaBlob(area) {
   }
 }
 
+async function captureDashboardViewerServerBlob() {
+  const pageUrl = `${window.location.pathname}${window.location.search || ""}`;
+  const response = await api("/api/admin/dashboard/capture", {
+    method: "POST",
+    body: JSON.stringify({ page_url: pageUrl || "/" }),
+  });
+  return base64ToBlob(response.image_base64, response.mime_type || "image/png");
+}
+
 async function captureDashboardViewerPageImage() {
   const button = $("#capture-dashboard-viewer");
   const area = $("#dashboard-viewer-capture-area");
@@ -3255,7 +3297,15 @@ async function captureDashboardViewerPageImage() {
   }
   setButtonLoading(button, true);
   try {
-    const blob = await captureDashboardViewerAreaBlob(area);
+    let blob = null;
+    try {
+      blob = dashboardHasExternalIframes(area)
+        ? await captureDashboardViewerServerBlob()
+        : await captureDashboardViewerAreaBlob(area);
+    } catch (error) {
+      if (error.message === "IFRAME_CAPTURE_REQUIRED") blob = await captureDashboardViewerServerBlob();
+      else throw error;
+    }
     if (navigator.clipboard?.write && window.ClipboardItem) {
       try {
         await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
@@ -3288,7 +3338,15 @@ async function saveDashboardCaptureToZalo(button) {
   }
   setButtonLoading(button, true);
   try {
-    const blob = await captureDashboardViewerAreaBlob(area);
+    let blob = null;
+    try {
+      blob = dashboardHasExternalIframes(area)
+        ? await captureDashboardViewerServerBlob()
+        : await captureDashboardViewerAreaBlob(area);
+    } catch (error) {
+      if (error.message === "IFRAME_CAPTURE_REQUIRED") blob = await captureDashboardViewerServerBlob();
+      else throw error;
+    }
     const response = await uploadZaloAutoMessageCapture(picker.value, blob, window.location.pathname);
     showToast(response.capture_url ? "Đã lưu ảnh chụp cho lịch Zalo." : "Đã lưu ảnh chụp.");
     await loadZaloAutoMessages({ force: true });
@@ -3496,9 +3554,11 @@ function schedulePendingDashboardSheets() {
       const response = await api(`/api/google-sheet-table?url=${encodeURIComponent(url)}`);
       if (token !== dashboardSheetRenderToken) return;
       target.innerHTML = response.html || `<div class="runtime-widget-empty">Không tìm thấy bảng trong Google Sheet.</div>`;
+      target.dataset.dashboardSheetState = response.html ? "loaded" : "empty";
     } catch (error) {
       if (token !== dashboardSheetRenderToken) return;
       target.innerHTML = `<div class="runtime-widget-error">${escapeHtml(error.message || "Không tải được bảng Google Sheet.")}</div>`;
+      target.dataset.dashboardSheetState = "error";
     }
   });
 }
