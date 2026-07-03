@@ -3232,6 +3232,10 @@ function dashboardHasExternalIframes(area) {
   return Boolean(area.querySelector("iframe"));
 }
 
+function dashboardHasEmbeddedContent(area) {
+  return Boolean(area.querySelector(".runtime-embed-card, .runtime-sheet-table, iframe"));
+}
+
 async function captureDashboardViewerAreaBlob(area) {
   const html2canvas = await ensureHtml2CanvasLoaded();
   const section = $("#dashboard-designed-section");
@@ -3299,12 +3303,10 @@ async function captureDashboardViewerPageImage() {
   try {
     let blob = null;
     try {
-      blob = dashboardHasExternalIframes(area)
-        ? await captureDashboardViewerServerBlob()
-        : await captureDashboardViewerAreaBlob(area);
+      blob = await captureDashboardViewerServerBlob();
     } catch (error) {
-      if (error.message === "IFRAME_CAPTURE_REQUIRED") blob = await captureDashboardViewerServerBlob();
-      else throw error;
+      if (dashboardHasEmbeddedContent(area)) throw error;
+      blob = await captureDashboardViewerAreaBlob(area);
     }
     if (navigator.clipboard?.write && window.ClipboardItem) {
       try {
@@ -3340,12 +3342,10 @@ async function saveDashboardCaptureToZalo(button) {
   try {
     let blob = null;
     try {
-      blob = dashboardHasExternalIframes(area)
-        ? await captureDashboardViewerServerBlob()
-        : await captureDashboardViewerAreaBlob(area);
+      blob = await captureDashboardViewerServerBlob();
     } catch (error) {
-      if (error.message === "IFRAME_CAPTURE_REQUIRED") blob = await captureDashboardViewerServerBlob();
-      else throw error;
+      if (dashboardHasEmbeddedContent(area)) throw error;
+      blob = await captureDashboardViewerAreaBlob(area);
     }
     const response = await uploadZaloAutoMessageCapture(picker.value, blob, window.location.pathname);
     showToast(response.capture_url ? "Đã lưu ảnh chụp cho lịch Zalo." : "Đã lưu ảnh chụp.");
