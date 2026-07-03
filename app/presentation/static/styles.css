@@ -2883,6 +2883,44 @@ legend {
   font-size: .86rem;
 }
 
+.connection-editor {
+  margin-top: 1rem;
+}
+
+.connection-editor-card {
+  display: grid;
+  gap: .85rem;
+  border: 1px solid rgba(125, 211, 252, .26);
+  border-radius: 18px;
+  background: rgba(2, 6, 23, .18);
+  padding: 1rem;
+}
+
+.connection-editor-card h3 {
+  margin: .15rem 0 0;
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+
+.connection-editor-code {
+  min-height: 280px;
+  max-height: min(58vh, 560px);
+  font-size: .86rem;
+}
+
+.connection-description {
+  max-height: 140px;
+}
+
+.connection-variable-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  min-height: 42px;
+  align-items: center;
+}
+
 .inline-checkbox {
   min-height: 38px;
   white-space: nowrap;

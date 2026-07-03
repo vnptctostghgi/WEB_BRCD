@@ -925,6 +925,8 @@ if (role === "admin") {
   $("#add-inline-sql-report")?.addEventListener("click", addInlineSqlReport);
   $("#sql-report-search")?.addEventListener("input", renderSqlReports);
   $("#sql-report-picker")?.addEventListener("change", renderSqlReports);
+  $("#connection-search")?.addEventListener("input", renderConnectionsTable);
+  $("#connection-picker")?.addEventListener("change", renderConnectionsTable);
   $("#create-menu")?.addEventListener("click", createMenu);
   $("#new-menu-name")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") createMenu();
@@ -3861,7 +3863,7 @@ async function loadConnections({ force = false } = {}) {
   if (connections.length && !force) {
     renderConnectionsTable();
   }
-  if (!connections.length || force) setTableLoading("#connections-table", 7, "Đang tải kết nối hệ thống...");
+  if (!connections.length || force) renderConnectionEditorLoading("Đang tải kết nối hệ thống...");
   const data = await api("/api/admin/connections");
   connections = data.connections;
   markDataFresh("connections");
@@ -3869,15 +3871,22 @@ async function loadConnections({ force = false } = {}) {
 }
 
 function renderConnectionsTable() {
-  $("#connections-table").innerHTML = connections.length
-    ? connections.map((connection) => renderConnectionRow(connection)).join("")
-    : emptyRow(7, "Chưa có kết nối", "Hãy cấu hình kết nối trong phần quản trị hệ thống.");
+  const editor = $("#connection-editor");
+  if (!editor) return;
+  refreshConnectionPicker();
+  const selectedCode = $("#connection-picker")?.value || "";
+  const selectedConnection = selectedCode ? connections.find((connection) => connection.code === selectedCode) : null;
+  if (!selectedConnection) {
+    editor.innerHTML = `<div class="empty-state"><div><strong>Chưa chọn kết nối</strong><p>Hãy tìm hoặc chọn một kết nối hệ thống để chỉnh cấu hình.</p></div></div>`;
+    return;
+  }
+  editor.innerHTML = renderConnectionEditor(selectedConnection);
   document.querySelectorAll("[data-inline-connection-field]").forEach((field) => {
-    field.addEventListener("input", () => markConnectionDirty(field.closest("tr")));
-    field.addEventListener("change", () => markConnectionDirty(field.closest("tr")));
+    field.addEventListener("input", () => markConnectionDirty(field.closest("[data-connection-row]")));
+    field.addEventListener("change", () => markConnectionDirty(field.closest("[data-connection-row]")));
   });
   document.querySelectorAll("[data-inline-connection-active]").forEach((field) => {
-    field.addEventListener("change", () => markConnectionDirty(field.closest("tr")));
+    field.addEventListener("change", () => markConnectionDirty(field.closest("[data-connection-row]")));
   });
   document.querySelectorAll("[data-save-connection-inline]").forEach((button) => {
     button.addEventListener("click", () => saveInlineConnection(button.dataset.saveConnectionInline, button));
@@ -3887,24 +3896,49 @@ function renderConnectionsTable() {
   });
 }
 
-function renderConnectionRow(connection) {
+function renderConnectionEditorLoading(text) {
+  const editor = $("#connection-editor");
+  if (editor) editor.innerHTML = `<div class="loading-row">${escapeHtml(text)}</div>`;
+}
+
+function refreshConnectionPicker() {
+  const picker = $("#connection-picker");
+  if (!picker) return;
+  const search = ($("#connection-search")?.value || "").trim().toLowerCase();
+  const current = picker.value;
+  const filteredConnections = connections.filter((connection) => {
+    if (!search) return true;
+    const configKeys = Object.keys(connection.config || {});
+    const text = [connection.name, connection.code, connection.connection_type, connection.description, connection.secret_ref, ...configKeys].join(" ").toLowerCase();
+    return text.includes(search);
+  });
+  picker.innerHTML = `<option value="">Chọn kết nối cần cấu hình</option>${filteredConnections.map((connection) => `<option value="${escapeHtml(connection.code)}">${escapeHtml(connection.name || connection.code)} (${escapeHtml(connection.code)})</option>`).join("")}`;
+  if (current && filteredConnections.some((connection) => connection.code === current)) picker.value = current;
+}
+
+function renderConnectionEditor(connection) {
   const configText = JSON.stringify(connection.config || {}, null, 2);
   const configKeys = Object.keys(connection.config || {});
   const variables = [connection.secret_ref, ...configKeys].filter(Boolean);
   return `
-    <tr data-connection-row="${escapeHtml(connection.code)}">
-      <td><input class="form-control inline-admin-input" data-inline-connection-field="name" value="${escapeHtml(connection.name || "")}" /><small class="cell-note">Mô tả bên dưới cấu hình</small></td>
-      <td><code>${escapeHtml(connection.code)}</code></td>
-      <td>
+    <div class="connection-editor-card" data-connection-row="${escapeHtml(connection.code)}">
+      <div class="section-heading">
+        <div><p class="eyebrow">Chỉnh kết nối</p><h3>${escapeHtml(connection.name || connection.code)}</h3><p>${escapeHtml(connection.code)}</p></div>
+        <div class="action-group"><button class="table-action hidden" data-save-connection-inline="${escapeHtml(connection.code)}">Lưu</button><button class="table-action" data-test-connection="${escapeHtml(connection.code)}"><span class="button-label">Kiểm tra</span><span class="spinner"></span></button></div>
+      </div>
+      <label>Tên<input class="form-control inline-admin-input" data-inline-connection-field="name" value="${escapeHtml(connection.name || "")}" /></label>
+      <label>Mã<code class="compact-code">${escapeHtml(connection.code)}</code></label>
+      <label>Loại
         <select class="form-control inline-admin-input" data-inline-connection-field="connection_type">
           ${["internal_api", "supabase", "ftp", "drive", "telegram", "zalo"].map((type) => `<option value="${type}" ${connection.connection_type === type ? "selected" : ""}>${type}</option>`).join("")}
         </select>
-      </td>
-      <td><label class="checkbox-label inline-checkbox"><input type="checkbox" data-inline-connection-active ${connection.is_active ? "checked" : ""} /> Đang dùng</label></td>
-      <td class="compact-code-cell"><textarea class="form-control inline-admin-code" data-inline-connection-field="config_json" rows="6">${escapeHtml(configText)}</textarea><textarea class="form-control inline-admin-note" data-inline-connection-field="description" rows="2" placeholder="Mô tả">${escapeHtml(connection.description || "")}</textarea></td>
-      <td>${variables.length ? variables.map((item) => `<span class="status viewer">${escapeHtml(item)}</span>`).join(" ") : "Không có"}</td>
-      <td class="table-action-cell"><div class="action-group"><button class="table-action hidden" data-save-connection-inline="${escapeHtml(connection.code)}">Lưu</button><button class="table-action" data-test-connection="${escapeHtml(connection.code)}"><span class="button-label">Kiểm tra</span><span class="spinner"></span></button></div><div class="cell-note" id="connection-result-${escapeHtml(connection.code)}"></div></td>
-    </tr>`;
+      </label>
+      <label class="checkbox-label inline-checkbox"><input type="checkbox" data-inline-connection-active ${connection.is_active ? "checked" : ""} /> Đang dùng</label>
+      <label>Danh sách biến<div class="connection-variable-list">${variables.length ? variables.map((item) => `<span class="status viewer">${escapeHtml(item)}</span>`).join(" ") : "Không có"}</div></label>
+      <label>Mô tả<textarea class="form-control inline-admin-note connection-description" data-inline-connection-field="description" rows="3" placeholder="Mô tả">${escapeHtml(connection.description || "")}</textarea></label>
+      <label>Bảng lệnh / Cấu hình<textarea class="form-control inline-admin-code connection-editor-code" data-inline-connection-field="config_json" rows="14">${escapeHtml(configText)}</textarea></label>
+      <div class="cell-note" id="connection-result-${escapeHtml(connection.code)}"></div>
+    </div>`;
 }
 
 function markConnectionDirty(row) {
