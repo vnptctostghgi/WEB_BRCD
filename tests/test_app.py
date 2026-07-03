@@ -455,18 +455,48 @@ def test_admin_can_manage_zalo_auto_messages_and_captures(monkeypatch) -> None:
         get_settings.cache_clear()
 
 
+def test_zalo_auto_capture_session_cookie_opens_authenticated_page() -> None:
+    from app.application.zalo_auto_message_service import signed_capture_session_cookie
+
+    with TestClient(app) as client:
+        repository = routes.build_app_repository()
+        user = repository.get_user_by_username(get_settings().initial_admin_username)
+        assert user is not None
+        client.cookies.set("brcd_session", signed_capture_session_cookie(get_settings(), user))
+
+        response = client.get("/api/auth/me")
+        assert response.status_code == 200
+        assert response.json()["user"]["username"] == user["username"]
+
+
 def test_zalo_auto_message_scheduler_sends_due_photo(monkeypatch) -> None:
     from app.application.task_scheduler import LOCAL_TIMEZONE, ZaloAutoMessageScheduler
 
+    events = []
     sent_messages = []
 
     def fake_send_photo(self, chat_id, photo_url, caption=""):
+        events.append(("send", photo_url))
         sent_messages.append((chat_id, photo_url, caption))
         return True
+
+    def fake_refresh_schedule_data(repository, settings, schedule):
+        events.append(("refresh", schedule.get("page_url")))
+        return {"ok": True, "page_id": "DASHBOARD_KINH_DOANH"}
+
+    def fake_capture_schedule_page_image(repository, settings, schedule):
+        events.append(("capture", schedule.get("page_url")))
+        return {
+            "ok": True,
+            "capture": {"capture_id": "CAPTEST", "public_token": "token"},
+            "capture_url": "https://vnptcto.com/api/zalo/auto-message-captures/CAPTEST?token=token",
+        }
 
     monkeypatch.setenv("ZALO_BOT_TOKEN", "123456:test-token")
     get_settings.cache_clear()
     monkeypatch.setattr("app.application.zalo_auto_message_service.ZaloBotClient.send_photo", fake_send_photo)
+    monkeypatch.setattr("app.application.zalo_auto_message_service.refresh_schedule_data", fake_refresh_schedule_data)
+    monkeypatch.setattr("app.application.zalo_auto_message_service.capture_schedule_page_image", fake_capture_schedule_page_image)
     try:
         with TestClient(app) as client:
             login(client)
@@ -476,7 +506,7 @@ def test_zalo_auto_message_scheduler_sends_due_photo(monkeypatch) -> None:
                     "name": "Bao cao sang",
                     "page_url": "/dashboard",
                     "schedule_type": "Daily",
-                    "run_time": "07:00",
+                    "run_time": "07:05",
                     "target_type": "person",
                     "chat_id": "chat-auto-001",
                     "caption": "Bao cao sang",
@@ -488,9 +518,14 @@ def test_zalo_auto_message_scheduler_sends_due_photo(monkeypatch) -> None:
 
             scheduler = ZaloAutoMessageScheduler()
             scheduler.configure(routes.build_app_repository(), get_settings())
-            now = datetime(2026, 1, 5, 7, 0, tzinfo=LOCAL_TIMEZONE)
+            now = datetime(2026, 1, 5, 7, 5, tzinfo=LOCAL_TIMEZONE)
             assert scheduler.check_due_messages(now) == 1
-            assert sent_messages[-1] == ("chat-auto-001", "https://example.com/dashboard.png", "Bao cao sang")
+            assert [event[0] for event in events] == ["refresh", "capture", "send"]
+            assert sent_messages[-1] == (
+                "chat-auto-001",
+                "https://vnptcto.com/api/zalo/auto-message-captures/CAPTEST?token=token",
+                "Bao cao sang",
+            )
             assert scheduler.check_due_messages(now) == 0
     finally:
         get_settings.cache_clear()

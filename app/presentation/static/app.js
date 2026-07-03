@@ -4049,7 +4049,7 @@ function renderZaloAutoMessages() {
 
 function renderZaloAutoMessageRow(schedule) {
   const targetText = [schedule.target_type === "person" ? "Cá nhân" : "Nhóm", schedule.chat_name, schedule.chat_id].filter(Boolean).join(" · ") || "Dùng chat mới nhất";
-  const imageText = schedule.latest_capture_url ? "Ảnh chụp đã lưu" : (schedule.photo_url ? "URL ảnh dự phòng" : "Chưa có ảnh");
+  const imageText = schedule.latest_capture_url ? "Lần chụp gần nhất" : "Tự chụp mới khi gửi";
   const lastSent = schedule.last_sent_at ? new Date(schedule.last_sent_at).toLocaleString("vi-VN") : "";
   return `
     <tr>
