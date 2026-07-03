@@ -4219,7 +4219,7 @@ async function loadSqlReports({ force = false } = {}) {
     renderSqlReports();
     fillDynamicReportSelect();
   }
-  if (!sqlReports.length || force) setTableLoading("#sql-reports-table", 5, "Đang tải cấu hình SQL...");
+  if (!sqlReports.length || force) renderSqlReportEditorLoading("Đang tải cấu hình SQL...");
   try {
     const data = await api("/api/admin/sql-reports");
     sqlReports = data.reports || [];
@@ -4233,29 +4233,21 @@ async function loadSqlReports({ force = false } = {}) {
     if (dashboardViewerLayout) renderDashboardViewer();
   } catch (error) {
     showMessage($("#sql-reports-message"), error.message, "error");
-    $("#sql-reports-table").innerHTML = emptyRow(5, "Không tải được cấu hình SQL", error.message);
+    const editor = $("#sql-report-editor");
+    if (editor) editor.innerHTML = `<div class="empty-state"><div><strong>Không tải được cấu hình SQL</strong><p>${escapeHtml(error.message)}</p></div></div>`;
   }
 }
 
 function renderSqlReports() {
-  const table = $("#sql-reports-table");
-  if (!table) return;
+  const editor = $("#sql-report-editor");
+  if (!editor) return;
   refreshSqlReportPicker();
-  const search = ($("#sql-report-search")?.value || "").trim().toLowerCase();
   const pickedCode = $("#sql-report-picker")?.value || "";
-  const rows = [...sqlReportDrafts, ...sqlReports]
-    .map((report) => ({ ...report, _rowKey: report._rowKey || `sql-${report.id}` }))
-    .filter((report) => {
-      if (pickedCode && report.ma_bao_cao !== pickedCode) return false;
-      if (!search) return true;
-      const text = [report.ten_bao_cao, report.ma_bao_cao, report.cau_lenh_sql, ...(report.cac_tham_so || [])].join(" ").toLowerCase();
-      return text.includes(search);
-    });
-  table.innerHTML = rows.length
-    ? rows.map((report) => renderSqlReportRow(report)).join("")
-    : emptyRow(5, "Chưa có cấu hình SQL", "Bấm Thêm SQL để tạo báo cáo động đầu tiên.");
+  const selectedReport = pickedCode ? sqlReports.find((report) => report.ma_bao_cao === pickedCode) : null;
+  const draft = sqlReportDrafts[0] || createSqlReportDraft();
+  editor.innerHTML = renderSqlReportEditor(selectedReport || draft, !selectedReport);
   document.querySelectorAll("[data-inline-sql-field]").forEach((field) => {
-    field.addEventListener("input", () => markSqlReportDirty(field.closest("tr")));
+    field.addEventListener("input", () => markSqlReportDirty(field.closest("[data-sql-row]")));
   });
   document.querySelectorAll("[data-save-sql-report-inline]").forEach((button) => {
     button.addEventListener("click", () => saveInlineSqlReport(button.dataset.saveSqlReportInline, button));
@@ -4265,25 +4257,53 @@ function renderSqlReports() {
   });
 }
 
+function renderSqlReportEditorLoading(text) {
+  const editor = $("#sql-report-editor");
+  if (editor) editor.innerHTML = `<div class="loading-row">${escapeHtml(text)}</div>`;
+}
+
 function refreshSqlReportPicker() {
   const picker = $("#sql-report-picker");
   if (!picker) return;
+  const search = ($("#sql-report-search")?.value || "").trim().toLowerCase();
   const current = picker.value;
-  picker.innerHTML = `<option value="">Tất cả SQL</option>${sqlReports.map((report) => `<option value="${escapeHtml(report.ma_bao_cao)}">${escapeHtml(report.ten_bao_cao)} (${escapeHtml(report.ma_bao_cao)})</option>`).join("")}`;
-  if (current && sqlReports.some((report) => report.ma_bao_cao === current)) picker.value = current;
+  const filteredReports = sqlReports.filter((report) => {
+    if (!search) return true;
+    const text = [report.ten_bao_cao, report.ma_bao_cao, ...(report.cac_tham_so || [])].join(" ").toLowerCase();
+    return text.includes(search);
+  });
+  picker.innerHTML = `<option value="">Thêm SQL mới / chưa chọn SQL</option>${filteredReports.map((report) => `<option value="${escapeHtml(report.ma_bao_cao)}">${escapeHtml(report.ten_bao_cao)} (${escapeHtml(report.ma_bao_cao)})</option>`).join("")}`;
+  if (current && filteredReports.some((report) => report.ma_bao_cao === current)) picker.value = current;
 }
 
-function renderSqlReportRow(report) {
+function createSqlReportDraft() {
+  const draft = {
+    _draft: true,
+    _rowKey: "draft-new-sql-report",
+    id: "",
+    ten_bao_cao: "",
+    ma_bao_cao: "",
+    cau_lenh_sql: "SELECT 1 AS GIA_TRI;",
+    cac_tham_so: [],
+  };
+  sqlReportDrafts = [draft];
+  return draft;
+}
+
+function renderSqlReportEditor(report, isDraft = false) {
   const rowKey = report._rowKey || `sql-${report.id}`;
   const params = (report.cac_tham_so || []).join(", ");
   return `
-    <tr data-sql-row="${escapeHtml(rowKey)}" data-sql-report-id="${escapeHtml(report.id || "")}">
-      <td><input class="form-control inline-admin-input" data-inline-sql-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="Tên báo cáo" /></td>
-      <td><input class="form-control inline-admin-input" data-inline-sql-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="VD: BC_THUE_BAO" /></td>
-      <td class="compact-code-cell"><textarea class="form-control inline-admin-code inline-admin-sql" data-inline-sql-field="cau_lenh_sql" rows="4" placeholder="SELECT ...;">${escapeHtml(report.cau_lenh_sql || "")}</textarea></td>
-      <td><input class="form-control inline-admin-input inline-admin-params" data-inline-sql-field="cac_tham_so" value="${escapeHtml(params)}" placeholder="LOAIHINH, MONTH, DONVI" /><small class="cell-note">Mỗi biến cách nhau bằng dấu phẩy.</small></td>
-      <td class="table-action-cell"><div class="action-group"><button class="table-action ${report._draft ? "" : "hidden"}" data-save-sql-report-inline="${escapeHtml(rowKey)}">Lưu</button><button class="table-action danger" data-delete-sql-report="${escapeHtml(rowKey)}">Xóa</button></div></td>
-    </tr>`;
+    <div class="sql-report-editor-card" data-sql-row="${escapeHtml(rowKey)}" data-sql-report-id="${escapeHtml(report.id || "")}">
+      <div class="section-heading">
+        <div><p class="eyebrow">${isDraft ? "Thêm SQL" : "Chỉnh SQL"}</p><h3>${isDraft ? "Tạo lệnh SQL mới" : escapeHtml(report.ten_bao_cao || report.ma_bao_cao)}</h3></div>
+        <div class="action-group"><button class="table-action ${isDraft ? "" : "hidden"}" data-save-sql-report-inline="${escapeHtml(rowKey)}">Lưu</button>${isDraft ? "" : `<button class="table-action danger" data-delete-sql-report="${escapeHtml(rowKey)}">Xóa</button>`}</div>
+      </div>
+      <label>Tên<input class="form-control inline-admin-input" data-inline-sql-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="Tên báo cáo" /></label>
+      <label>Mã<input class="form-control inline-admin-input" data-inline-sql-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="VD: BC_THUE_BAO" /></label>
+      <label>Danh sách biến<input class="form-control inline-admin-input inline-admin-params" data-inline-sql-field="cac_tham_so" value="${escapeHtml(params)}" placeholder="LOAIHINH, MONTH, DONVI" /><small class="cell-note">Mỗi biến cách nhau bằng dấu phẩy.</small></label>
+      <label>Bảng lệnh<textarea class="form-control inline-admin-code sql-report-editor-code" data-inline-sql-field="cau_lenh_sql" rows="16" placeholder="SELECT ...;">${escapeHtml(report.cau_lenh_sql || "")}</textarea></label>
+    </div>`;
 }
 
 function markSqlReportDirty(row) {
@@ -4291,19 +4311,11 @@ function markSqlReportDirty(row) {
 }
 
 function addInlineSqlReport() {
-  const rowKey = `draft-${Date.now()}`;
-  sqlReportDrafts.unshift({
-    _draft: true,
-    _rowKey: rowKey,
-    id: "",
-    ten_bao_cao: "",
-    ma_bao_cao: "",
-    cau_lenh_sql: "SELECT 1 AS GIA_TRI;",
-    cac_tham_so: [],
-  });
+  sqlReportDrafts = [createSqlReportDraft()];
   if ($("#sql-report-picker")) $("#sql-report-picker").value = "";
+  if ($("#sql-report-search")) $("#sql-report-search").value = "";
   renderSqlReports();
-  document.querySelector(`[data-sql-row="${CSS.escape(rowKey)}"]`)?.querySelector("input")?.focus();
+  document.querySelector('[data-sql-row="draft-new-sql-report"]')?.querySelector("input")?.focus();
 }
 
 async function saveInlineSqlReport(rowKey, button) {
@@ -4331,6 +4343,11 @@ async function saveInlineSqlReport(rowKey, button) {
     showMessage($("#sql-reports-message"), "Đã lưu cấu hình SQL.");
     showToast("Đã lưu cấu hình SQL.");
     await loadSqlReports({ force: true });
+    const picker = $("#sql-report-picker");
+    if (picker && sqlReports.some((report) => report.ma_bao_cao === payload.ma_bao_cao)) {
+      picker.value = payload.ma_bao_cao;
+      renderSqlReports();
+    }
   } catch (error) {
     showMessage($("#sql-reports-message"), error.message, "error");
     showToast(error.message, "error");

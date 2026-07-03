@@ -2857,6 +2857,32 @@ legend {
   min-height: 44px;
 }
 
+.sql-report-editor {
+  margin-top: 1rem;
+}
+
+.sql-report-editor-card {
+  display: grid;
+  gap: .85rem;
+  border: 1px solid rgba(125, 211, 252, .26);
+  border-radius: 18px;
+  background: rgba(2, 6, 23, .18);
+  padding: 1rem;
+}
+
+.sql-report-editor-card h3 {
+  margin: .15rem 0 0;
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+
+.sql-report-editor-code {
+  min-height: 320px;
+  max-height: min(62vh, 620px);
+  font-size: .86rem;
+}
+
 .inline-checkbox {
   min-height: 38px;
   white-space: nowrap;
