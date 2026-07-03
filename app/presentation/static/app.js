@@ -117,6 +117,7 @@ let dashboardChartRenderToken = 0;
 let dashboardSheetRenderToken = 0;
 let dashboardRuntimeTheme = localStorage.getItem("dashboardRuntimeTheme") === "light" ? "light" : "dark";
 let activeViewLoadToken = 0;
+let viewTransitionTimer = 0;
 const dataCacheTimestamps = new Map();
 const dashboardViewerLayoutCache = new Map();
 const dashboardBuilderLayoutCache = new Map();
@@ -148,14 +149,51 @@ function nextPaint() {
 async function runActiveViewLoader(token, loader) {
   await nextPaint();
   if (token !== activeViewLoadToken) return;
-  document.body.classList.add("view-loading");
+  const loadingTimer = window.setTimeout(() => {
+    if (token === activeViewLoadToken) document.body.classList.add("view-loading");
+  }, 120);
   try {
     await loader();
   } catch (error) {
     if (token === activeViewLoadToken) showToast(error.message || "Không tải được dữ liệu.", "error");
   } finally {
+    window.clearTimeout(loadingTimer);
     if (token === activeViewLoadToken) document.body.classList.remove("view-loading");
   }
+}
+
+function setActiveAppView(viewName) {
+  const nextView = $(`#view-${viewName}`);
+  if (!nextView) return;
+  const main = $(".app-main");
+  const currentView = document.querySelector(".app-view.active");
+  window.clearTimeout(viewTransitionTimer);
+  document.querySelectorAll(".app-view.view-exiting, .app-view.view-entering").forEach((view) => {
+    view.classList.remove("view-exiting", "view-entering");
+  });
+  document.querySelectorAll(".app-view.active").forEach((view) => {
+    if (view !== currentView && view !== nextView) view.classList.remove("active");
+  });
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+  if (!currentView || currentView === nextView || reduceMotion) {
+    document.querySelectorAll(".app-view").forEach((view) => view.classList.remove("active", "view-exiting", "view-entering"));
+    nextView.classList.add("active");
+    main?.classList.remove("view-transitioning");
+    main?.style.removeProperty("--view-transition-min-height");
+    return;
+  }
+  const currentHeight = Math.ceil(currentView.getBoundingClientRect().height || 0);
+  main?.style.setProperty("--view-transition-min-height", `${Math.max(currentHeight, 320)}px`);
+  main?.classList.add("view-transitioning");
+  currentView.classList.remove("active");
+  currentView.classList.add("view-exiting");
+  nextView.classList.add("active", "view-entering");
+  viewTransitionTimer = window.setTimeout(() => {
+    currentView.classList.remove("view-exiting");
+    nextView.classList.remove("view-entering");
+    main?.classList.remove("view-transitioning");
+    main?.style.removeProperty("--view-transition-min-height");
+  }, 260);
 }
 
 const navFeatureConfig = {
@@ -324,10 +362,10 @@ async function activateNavItem(item, options = {}) {
   const nextView = item.dataset.view || "";
   const dashboardPageId = item.dataset.dashboardPageId || "";
   $("#view-dashboard")?.classList.toggle("dashboard-dynamic-mode", Boolean(dashboardPageId));
-  document.querySelectorAll(".nav-item, .app-view").forEach((element) => element.classList.remove("active"));
+  document.querySelectorAll(".nav-item").forEach((element) => element.classList.remove("active"));
   item.classList.add("active");
   openNavParents(item);
-  $(`#view-${item.dataset.view}`)?.classList.add("active");
+  setActiveAppView(nextView);
   const moduleTitle = $("#module-title");
   if (moduleTitle) moduleTitle.textContent = item.dataset.title || item.textContent.trim();
   $("#sidebar").classList.remove("menu-open");

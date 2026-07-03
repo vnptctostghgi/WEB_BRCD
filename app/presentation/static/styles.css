@@ -190,7 +190,15 @@ p {
 .app-main {
   width: 100%;
   min-width: 0;
+  position: relative;
+  isolation: isolate;
   transition: padding .18s ease;
+}
+
+.app-main.view-transitioning {
+  min-height: var(--view-transition-min-height, 320px);
+  overflow: hidden;
+  overflow: clip;
 }
 
 .app-dark,
@@ -811,13 +819,33 @@ p {
 .app-view {
   display: none;
   opacity: 0;
+  transform: translate3d(0, 6px, 0);
+}
+
+.app-view.active,
+.app-view.view-exiting {
+  display: block;
 }
 
 .app-view.active {
-  display: block;
   opacity: 1;
-  animation: view-reveal .16s ease-out both;
+  transform: translate3d(0, 0, 0);
   will-change: opacity, transform;
+}
+
+.app-view.view-entering {
+  position: relative;
+  z-index: 2;
+  animation: view-enter .24s cubic-bezier(.2, .8, .2, 1) both;
+}
+
+.app-view.view-exiting {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  pointer-events: none;
+  animation: view-exit .18s cubic-bezier(.4, 0, .2, 1) both;
 }
 
 body.view-loading .app-view.active {
@@ -831,14 +859,25 @@ body.view-loading .app-view.active {
   }
 }
 
-@keyframes view-reveal {
+@keyframes view-enter {
   from {
-    opacity: .001;
-    transform: translateY(4px);
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(.998);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes view-exit {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate3d(0, -4px, 0) scale(.998);
   }
 }
 
