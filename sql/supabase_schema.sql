@@ -240,6 +240,44 @@ create table if not exists public.work_tasks (
   updated_at timestamptz not null
 );
 
+create table if not exists public.zalo_auto_messages (
+  schedule_id text primary key,
+  name text not null,
+  page_url text not null default '/',
+  page_label text not null default '',
+  schedule_type text not null default 'Daily',
+  time_slots jsonb not null default '[]'::jsonb,
+  run_time text not null default '07:00',
+  weekday text not null default '',
+  month_day integer not null default 1,
+  target_type text not null default 'group',
+  chat_id text not null default '',
+  chat_name text not null default '',
+  caption text not null default '',
+  photo_url text not null default '',
+  is_active boolean not null default true,
+  last_run_key text not null default '',
+  last_sent_key text not null default '',
+  last_sent_at timestamptz,
+  last_error text not null default '',
+  created_at timestamptz not null,
+  updated_at timestamptz not null
+);
+
+create table if not exists public.zalo_message_captures (
+  capture_id text primary key,
+  schedule_id text not null references public.zalo_auto_messages(schedule_id) on delete cascade,
+  mime_type text not null default 'image/png',
+  image_base64 text not null,
+  public_token text not null unique,
+  page_url text not null default '',
+  created_by text not null default '',
+  created_at timestamptz not null
+);
+
+create index if not exists zalo_message_captures_schedule_idx
+on public.zalo_message_captures (schedule_id, created_at desc);
+
 create table if not exists public.login_attempts (
   username text primary key,
   fail_count integer not null default 0,
@@ -262,12 +300,16 @@ alter table public.system_connections enable row level security;
 alter table public.data_regions enable row level security;
 alter table public.user_data_permissions enable row level security;
 alter table public.work_tasks enable row level security;
+alter table public.zalo_auto_messages enable row level security;
+alter table public.zalo_message_captures enable row level security;
 alter table public.login_attempts enable row level security;
 alter table public.sql_reports enable row level security;
 alter table public.dashboard_layouts enable row level security;
 alter table public.dashboard_chart_cache enable row level security;
 
 grant select, insert, update, delete on public.work_tasks to anon, authenticated, service_role;
+grant select, insert, update, delete on public.zalo_auto_messages to service_role;
+grant select, insert, update, delete on public.zalo_message_captures to service_role;
 grant select, insert, update, delete on public.login_attempts to anon, authenticated, service_role;
 grant select, insert, update, delete on public.sql_reports to anon, authenticated, service_role;
 grant usage, select on sequence public.sql_reports_id_seq to anon, authenticated, service_role;
@@ -277,6 +319,34 @@ grant select on public.dashboard_chart_cache to anon, authenticated;
 
 do $$
 begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'zalo_auto_messages'
+      and policyname = 'backend service can manage zalo auto messages'
+  ) then
+    create policy "backend service can manage zalo auto messages"
+    on public.zalo_auto_messages
+    for all
+    to service_role
+    using (true)
+    with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'zalo_message_captures'
+      and policyname = 'backend service can manage zalo message captures'
+  ) then
+    create policy "backend service can manage zalo message captures"
+    on public.zalo_message_captures
+    for all
+    to service_role
+    using (true)
+    with check (true);
+  end if;
+
   if not exists (
     select 1 from pg_policies
     where schemaname = 'public'

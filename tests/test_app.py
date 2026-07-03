@@ -1,5 +1,6 @@
 import os
 import json
+from datetime import datetime
 from pathlib import Path
 
 os.environ["DB_MOCK_MODE"] = "true"
@@ -405,6 +406,94 @@ def test_system_connections_include_zalo_bot() -> None:
         assert response.status_code == 200
         codes = {connection["code"] for connection in response.json()["connections"]}
         assert "zalo_bot" in codes
+
+
+def test_admin_can_manage_zalo_auto_messages_and_captures(monkeypatch) -> None:
+    monkeypatch.setenv("APP_PUBLIC_URL", "https://vnptcto.com")
+    get_settings.cache_clear()
+    tiny_png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+    try:
+        with TestClient(app) as client:
+            login(client)
+            created = client.post(
+                "/api/admin/zalo/auto-messages",
+                json={
+                    "name": "Dashboard 7h",
+                    "page_url": "/dashboard",
+                    "page_label": "Dashboard kinh doanh",
+                    "schedule_type": "Daily",
+                    "run_time": "07:00",
+                    "target_type": "group",
+                    "chat_id": "group-auto-001",
+                    "caption": "Anh chup dashboard",
+                    "is_active": True,
+                },
+            )
+            assert created.status_code == 200
+            schedule = created.json()["schedule"]
+            assert schedule["schedule_id"].startswith("ZALO")
+
+            listed = client.get("/api/admin/zalo/auto-messages")
+            assert listed.status_code == 200
+            assert any(item["schedule_id"] == schedule["schedule_id"] for item in listed.json()["schedules"])
+
+            uploaded = client.post(
+                f"/api/admin/zalo/auto-messages/{schedule['schedule_id']}/captures",
+                json={"image_base64": f"data:image/png;base64,{tiny_png}", "mime_type": "image/png", "page_url": "/dashboard"},
+            )
+            assert uploaded.status_code == 200
+            capture = uploaded.json()["capture"]
+            assert uploaded.json()["capture_url"].startswith("https://vnptcto.com/api/zalo/auto-message-captures/")
+
+            denied = client.get(f"/api/zalo/auto-message-captures/{capture['capture_id']}?token=wrong")
+            assert denied.status_code == 404
+            image = client.get(f"/api/zalo/auto-message-captures/{capture['capture_id']}?token={capture['public_token']}")
+            assert image.status_code == 200
+            assert image.headers["content-type"].startswith("image/png")
+            assert image.content.startswith(b"\x89PNG")
+    finally:
+        get_settings.cache_clear()
+
+
+def test_zalo_auto_message_scheduler_sends_due_photo(monkeypatch) -> None:
+    from app.application.task_scheduler import LOCAL_TIMEZONE, ZaloAutoMessageScheduler
+
+    sent_messages = []
+
+    def fake_send_photo(self, chat_id, photo_url, caption=""):
+        sent_messages.append((chat_id, photo_url, caption))
+        return True
+
+    monkeypatch.setenv("ZALO_BOT_TOKEN", "123456:test-token")
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.application.zalo_auto_message_service.ZaloBotClient.send_photo", fake_send_photo)
+    try:
+        with TestClient(app) as client:
+            login(client)
+            created = client.post(
+                "/api/admin/zalo/auto-messages",
+                json={
+                    "name": "Bao cao sang",
+                    "page_url": "/dashboard",
+                    "schedule_type": "Daily",
+                    "run_time": "07:00",
+                    "target_type": "person",
+                    "chat_id": "chat-auto-001",
+                    "caption": "Bao cao sang",
+                    "photo_url": "https://example.com/dashboard.png",
+                    "is_active": True,
+                },
+            )
+            assert created.status_code == 200
+
+            scheduler = ZaloAutoMessageScheduler()
+            scheduler.configure(routes.build_app_repository(), get_settings())
+            now = datetime(2026, 1, 5, 7, 0, tzinfo=LOCAL_TIMEZONE)
+            assert scheduler.check_due_messages(now) == 1
+            assert sent_messages[-1] == ("chat-auto-001", "https://example.com/dashboard.png", "Bao cao sang")
+            assert scheduler.check_due_messages(now) == 0
+    finally:
+        get_settings.cache_clear()
 
 
 def test_admin_can_manage_work_tasks() -> None:

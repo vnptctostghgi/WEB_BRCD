@@ -1975,6 +1975,18 @@ body.view-loading .app-view.active {
   min-width: 86px;
 }
 
+.dashboard-zalo-picker {
+  min-height: 38px;
+  max-width: 180px;
+  border: 1px solid rgba(125, 211, 252, .46);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, .72);
+  color: #fff;
+  font-size: .82rem;
+  font-weight: 800;
+  padding: 0 .65rem;
+}
+
 .dashboard-capture-area {
   min-width: 0;
 }
@@ -2912,6 +2924,36 @@ legend {
 .system-admin-table th:nth-child(7),
 .system-admin-table td:nth-child(7) {
   width: 112px;
+}
+
+.zalo-auto-table th:nth-child(1),
+.zalo-auto-table td:nth-child(1) {
+  width: 22%;
+}
+
+.zalo-auto-table th:nth-child(2),
+.zalo-auto-table td:nth-child(2) {
+  width: 18%;
+}
+
+.zalo-auto-table th:nth-child(3),
+.zalo-auto-table td:nth-child(3) {
+  width: 20%;
+}
+
+.zalo-auto-table th:nth-child(4),
+.zalo-auto-table td:nth-child(4) {
+  width: 15%;
+}
+
+.zalo-auto-table th:nth-child(5),
+.zalo-auto-table td:nth-child(5) {
+  width: 15%;
+}
+
+.zalo-auto-table th:nth-child(6),
+.zalo-auto-table td:nth-child(6) {
+  width: 140px;
 }
 
 @media (prefers-reduced-motion: reduce) {

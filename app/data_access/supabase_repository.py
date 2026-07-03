@@ -1,5 +1,7 @@
 import sqlite3
 import json
+import secrets
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -721,6 +723,93 @@ class SupabaseRepository:
             "updated_at": self._now(),
         })
 
+    def list_zalo_auto_messages(self, active_only: bool = False) -> list[dict[str, Any]]:
+        params = {"order": "run_time.asc,schedule_id.asc"}
+        if active_only:
+            params["is_active"] = "eq.true"
+        rows = self._get("zalo_auto_messages", params)
+        return [self._decode_zalo_auto_message(row) for row in rows]
+
+    def get_zalo_auto_message(self, schedule_id: str) -> dict[str, Any] | None:
+        rows = self._get("zalo_auto_messages", {"schedule_id": f"eq.{schedule_id}", "limit": "1"})
+        return self._decode_zalo_auto_message(rows[0]) if rows else None
+
+    def generate_zalo_auto_message_id(self) -> str:
+        rows = self._get("zalo_auto_messages", {"select": "schedule_id", "schedule_id": "like.ZALO%", "order": "schedule_id.desc"})
+        max_number = 0
+        for row in rows:
+            suffix = str(row.get("schedule_id", ""))[4:]
+            if suffix.isdigit():
+                max_number = max(max_number, int(suffix))
+        return f"ZALO{max_number + 1:04d}"
+
+    def save_zalo_auto_message(self, payload: dict[str, Any]) -> None:
+        now = self._now()
+        row = {
+            "schedule_id": str(payload["schedule_id"]).strip(),
+            "name": str(payload.get("name", "")).strip(),
+            "page_url": str(payload.get("page_url", "/")).strip() or "/",
+            "page_label": str(payload.get("page_label", "")).strip(),
+            "schedule_type": str(payload.get("schedule_type", "Daily")).strip() or "Daily",
+            "time_slots": payload.get("time_slots") if isinstance(payload.get("time_slots"), list) else [],
+            "run_time": str(payload.get("run_time", "07:00")).strip() or "07:00",
+            "weekday": str(payload.get("weekday", "")).strip(),
+            "month_day": int(payload.get("month_day") or 1),
+            "target_type": str(payload.get("target_type", "group")).strip() or "group",
+            "chat_id": str(payload.get("chat_id", "")).strip(),
+            "chat_name": str(payload.get("chat_name", "")).strip(),
+            "caption": str(payload.get("caption", "")).strip(),
+            "photo_url": str(payload.get("photo_url", "")).strip(),
+            "is_active": bool(payload.get("is_active", True)),
+            "created_at": now,
+            "updated_at": now,
+        }
+        self._upsert("zalo_auto_messages", row, "schedule_id")
+
+    def delete_zalo_auto_message(self, schedule_id: str) -> None:
+        self._delete("zalo_message_captures", {"schedule_id": f"eq.{schedule_id}"})
+        self._delete("zalo_auto_messages", {"schedule_id": f"eq.{schedule_id}"})
+
+    def mark_zalo_auto_message_run(self, schedule_id: str, run_key: str, ok: bool, error_message: str = "") -> None:
+        now = self._now()
+        payload = {
+            "last_run_key": run_key,
+            "last_error": str(error_message or "")[:500],
+            "updated_at": now,
+        }
+        if ok:
+            payload.update({"last_sent_key": run_key, "last_sent_at": now})
+        self._patch("zalo_auto_messages", {"schedule_id": f"eq.{schedule_id}"}, payload)
+
+    def save_zalo_message_capture(self, schedule_id: str, image_base64: str, mime_type: str, page_url: str = "", created_by: str = "") -> dict[str, Any]:
+        now = self._now()
+        row = {
+            "capture_id": f"CAP{uuid.uuid4().hex[:16].upper()}",
+            "schedule_id": schedule_id,
+            "mime_type": mime_type or "image/png",
+            "image_base64": image_base64,
+            "public_token": secrets.token_urlsafe(24),
+            "page_url": page_url or "",
+            "created_by": created_by or "",
+            "created_at": now,
+        }
+        self._insert("zalo_message_captures", row)
+        return self._decode_zalo_capture(row, include_image=False)
+
+    def get_latest_zalo_message_capture(self, schedule_id: str, include_image: bool = False) -> dict[str, Any] | None:
+        select = "*" if include_image else "capture_id,schedule_id,mime_type,public_token,page_url,created_by,created_at"
+        rows = self._get("zalo_message_captures", {
+            "schedule_id": f"eq.{schedule_id}",
+            "select": select,
+            "order": "created_at.desc",
+            "limit": "1",
+        })
+        return self._decode_zalo_capture(rows[0], include_image=include_image) if rows else None
+
+    def get_zalo_message_capture(self, capture_id: str) -> dict[str, Any] | None:
+        rows = self._get("zalo_message_captures", {"capture_id": f"eq.{capture_id}", "limit": "1"})
+        return self._decode_zalo_capture(rows[0], include_image=True) if rows else None
+
     def health_check(self) -> dict[str, Any]:
         rows = self._get("features", {"select": "code", "limit": "1"})
         return {"ok": True, "backend": "supabase", "feature_rows_seen": len(rows)}
@@ -772,6 +861,53 @@ class SupabaseRepository:
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
         }
+
+    @staticmethod
+    def _decode_zalo_auto_message(row: dict[str, Any]) -> dict[str, Any]:
+        time_slots = row.get("time_slots") or []
+        if isinstance(time_slots, str):
+            try:
+                time_slots = json.loads(time_slots)
+            except json.JSONDecodeError:
+                time_slots = []
+        return {
+            "schedule_id": row.get("schedule_id"),
+            "name": row.get("name") or "",
+            "page_url": row.get("page_url") or "/",
+            "page_label": row.get("page_label") or "",
+            "schedule_type": row.get("schedule_type") or "Daily",
+            "time_slots": time_slots if isinstance(time_slots, list) else [],
+            "run_time": row.get("run_time") or "07:00",
+            "weekday": row.get("weekday") or "",
+            "month_day": int(row.get("month_day") or 1),
+            "target_type": row.get("target_type") or "group",
+            "chat_id": row.get("chat_id") or "",
+            "chat_name": row.get("chat_name") or "",
+            "caption": row.get("caption") or "",
+            "photo_url": row.get("photo_url") or "",
+            "is_active": bool(row.get("is_active")),
+            "last_run_key": row.get("last_run_key") or "",
+            "last_sent_key": row.get("last_sent_key") or "",
+            "last_sent_at": row.get("last_sent_at") or "",
+            "last_error": row.get("last_error") or "",
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        }
+
+    @staticmethod
+    def _decode_zalo_capture(row: dict[str, Any], include_image: bool = False) -> dict[str, Any]:
+        payload = {
+            "capture_id": row.get("capture_id"),
+            "schedule_id": row.get("schedule_id"),
+            "mime_type": row.get("mime_type") or "image/png",
+            "public_token": row.get("public_token") or "",
+            "page_url": row.get("page_url") or "",
+            "created_by": row.get("created_by") or "",
+            "created_at": row.get("created_at"),
+        }
+        if include_image:
+            payload["image_base64"] = row.get("image_base64") or ""
+        return payload
 
     def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         headers = {"apikey": self.secret_key, "Content-Type": "application/json"}

@@ -4,7 +4,9 @@ import os
 import sqlite3
 import json
 import re
+import secrets
 import unicodedata
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -324,6 +326,45 @@ class AppRepository:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS zalo_auto_messages (
+                    schedule_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    page_url TEXT NOT NULL DEFAULT '/',
+                    page_label TEXT NOT NULL DEFAULT '',
+                    schedule_type TEXT NOT NULL DEFAULT 'Daily',
+                    time_slots_json TEXT NOT NULL DEFAULT '[]',
+                    run_time TEXT NOT NULL DEFAULT '07:00',
+                    weekday TEXT NOT NULL DEFAULT '',
+                    month_day INTEGER NOT NULL DEFAULT 1,
+                    target_type TEXT NOT NULL DEFAULT 'group',
+                    chat_id TEXT NOT NULL DEFAULT '',
+                    chat_name TEXT NOT NULL DEFAULT '',
+                    caption TEXT NOT NULL DEFAULT '',
+                    photo_url TEXT NOT NULL DEFAULT '',
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    last_run_key TEXT NOT NULL DEFAULT '',
+                    last_sent_key TEXT NOT NULL DEFAULT '',
+                    last_sent_at TEXT NOT NULL DEFAULT '',
+                    last_error TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS zalo_message_captures (
+                    capture_id TEXT PRIMARY KEY,
+                    schedule_id TEXT NOT NULL,
+                    mime_type TEXT NOT NULL DEFAULT 'image/png',
+                    image_base64 TEXT NOT NULL,
+                    public_token TEXT NOT NULL UNIQUE,
+                    page_url TEXT NOT NULL DEFAULT '',
+                    created_by TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(schedule_id) REFERENCES zalo_auto_messages(schedule_id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS zalo_message_captures_schedule_idx
+                ON zalo_message_captures (schedule_id, created_at DESC);
 
                 CREATE TABLE IF NOT EXISTS login_attempts (
                     username TEXT PRIMARY KEY COLLATE NOCASE,
@@ -1175,6 +1216,148 @@ class AppRepository:
                 (notified_date, now, now, task_id),
             )
 
+    def list_zalo_auto_messages(self, active_only: bool = False) -> list[dict[str, Any]]:
+        query = "SELECT * FROM zalo_auto_messages"
+        if active_only:
+            query += " WHERE is_active = 1"
+        query += " ORDER BY run_time, schedule_id"
+        with self.connect() as connection:
+            rows = connection.execute(query).fetchall()
+            return [self._decode_zalo_auto_message(dict(row)) for row in rows]
+
+    def get_zalo_auto_message(self, schedule_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM zalo_auto_messages WHERE schedule_id=?", (schedule_id,)).fetchone()
+            return self._decode_zalo_auto_message(dict(row)) if row else None
+
+    def generate_zalo_auto_message_id(self) -> str:
+        with self.connect() as connection:
+            rows = connection.execute("SELECT schedule_id FROM zalo_auto_messages WHERE schedule_id LIKE 'ZALO%'").fetchall()
+        max_number = 0
+        for row in rows:
+            suffix = str(row["schedule_id"])[4:]
+            if suffix.isdigit():
+                max_number = max(max_number, int(suffix))
+        return f"ZALO{max_number + 1:04d}"
+
+    def save_zalo_auto_message(self, payload: dict[str, Any]) -> None:
+        now = self._now()
+        schedule_id = str(payload["schedule_id"]).strip()
+        time_slots = payload.get("time_slots") if isinstance(payload.get("time_slots"), list) else []
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO zalo_auto_messages
+                (schedule_id, name, page_url, page_label, schedule_type, time_slots_json, run_time,
+                 weekday, month_day, target_type, chat_id, chat_name, caption, photo_url,
+                 is_active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(schedule_id) DO UPDATE SET
+                  name=excluded.name,
+                  page_url=excluded.page_url,
+                  page_label=excluded.page_label,
+                  schedule_type=excluded.schedule_type,
+                  time_slots_json=excluded.time_slots_json,
+                  run_time=excluded.run_time,
+                  weekday=excluded.weekday,
+                  month_day=excluded.month_day,
+                  target_type=excluded.target_type,
+                  chat_id=excluded.chat_id,
+                  chat_name=excluded.chat_name,
+                  caption=excluded.caption,
+                  photo_url=excluded.photo_url,
+                  is_active=excluded.is_active,
+                  updated_at=excluded.updated_at
+                """,
+                (
+                    schedule_id,
+                    str(payload.get("name", "")).strip(),
+                    str(payload.get("page_url", "/")).strip() or "/",
+                    str(payload.get("page_label", "")).strip(),
+                    str(payload.get("schedule_type", "Daily")).strip() or "Daily",
+                    json.dumps(time_slots, ensure_ascii=False),
+                    str(payload.get("run_time", "07:00")).strip() or "07:00",
+                    str(payload.get("weekday", "")).strip(),
+                    int(payload.get("month_day") or 1),
+                    str(payload.get("target_type", "group")).strip() or "group",
+                    str(payload.get("chat_id", "")).strip(),
+                    str(payload.get("chat_name", "")).strip(),
+                    str(payload.get("caption", "")).strip(),
+                    str(payload.get("photo_url", "")).strip(),
+                    int(bool(payload.get("is_active", True))),
+                    now,
+                    now,
+                ),
+            )
+
+    def delete_zalo_auto_message(self, schedule_id: str) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM zalo_auto_messages WHERE schedule_id=?", (schedule_id,))
+
+    def mark_zalo_auto_message_run(self, schedule_id: str, run_key: str, ok: bool, error_message: str = "") -> None:
+        now = self._now()
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE zalo_auto_messages
+                SET last_run_key=?,
+                    last_sent_key=CASE WHEN ? THEN ? ELSE last_sent_key END,
+                    last_sent_at=CASE WHEN ? THEN ? ELSE last_sent_at END,
+                    last_error=?,
+                    updated_at=?
+                WHERE schedule_id=?
+                """,
+                (run_key, int(ok), run_key, int(ok), now, str(error_message or "")[:500], now, schedule_id),
+            )
+
+    def save_zalo_message_capture(self, schedule_id: str, image_base64: str, mime_type: str, page_url: str = "", created_by: str = "") -> dict[str, Any]:
+        capture_id = f"CAP{uuid.uuid4().hex[:16].upper()}"
+        now = self._now()
+        public_token = secrets.token_urlsafe(24)
+        row = {
+            "capture_id": capture_id,
+            "schedule_id": schedule_id,
+            "mime_type": mime_type or "image/png",
+            "image_base64": image_base64,
+            "public_token": public_token,
+            "page_url": page_url or "",
+            "created_by": created_by or "",
+            "created_at": now,
+        }
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO zalo_message_captures
+                (capture_id, schedule_id, mime_type, image_base64, public_token, page_url, created_by, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row["capture_id"],
+                    row["schedule_id"],
+                    row["mime_type"],
+                    row["image_base64"],
+                    row["public_token"],
+                    row["page_url"],
+                    row["created_by"],
+                    row["created_at"],
+                ),
+            )
+        return self._decode_zalo_capture(row, include_image=False)
+
+    def get_latest_zalo_message_capture(self, schedule_id: str, include_image: bool = False) -> dict[str, Any] | None:
+        columns = "*" if include_image else "capture_id, schedule_id, mime_type, public_token, page_url, created_by, created_at"
+        with self.connect() as connection:
+            row = connection.execute(
+                f"SELECT {columns} FROM zalo_message_captures WHERE schedule_id=? ORDER BY created_at DESC LIMIT 1",
+                (schedule_id,),
+            ).fetchone()
+            return self._decode_zalo_capture(dict(row), include_image=include_image) if row else None
+
+    def get_zalo_message_capture(self, capture_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM zalo_message_captures WHERE capture_id=?", (capture_id,)).fetchone()
+            return self._decode_zalo_capture(dict(row), include_image=True) if row else None
+
     @staticmethod
     def _decode_connection(row: dict[str, Any]) -> dict[str, Any]:
         row["config"] = json.loads(row.pop("config_json") or "{}")
@@ -1227,6 +1410,51 @@ class AppRepository:
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
         }
+
+    @staticmethod
+    def _decode_zalo_auto_message(row: dict[str, Any]) -> dict[str, Any]:
+        try:
+            time_slots = json.loads(row.get("time_slots_json") or "[]")
+        except json.JSONDecodeError:
+            time_slots = []
+        return {
+            "schedule_id": row.get("schedule_id"),
+            "name": row.get("name") or "",
+            "page_url": row.get("page_url") or "/",
+            "page_label": row.get("page_label") or "",
+            "schedule_type": row.get("schedule_type") or "Daily",
+            "time_slots": time_slots if isinstance(time_slots, list) else [],
+            "run_time": row.get("run_time") or "07:00",
+            "weekday": row.get("weekday") or "",
+            "month_day": int(row.get("month_day") or 1),
+            "target_type": row.get("target_type") or "group",
+            "chat_id": row.get("chat_id") or "",
+            "chat_name": row.get("chat_name") or "",
+            "caption": row.get("caption") or "",
+            "photo_url": row.get("photo_url") or "",
+            "is_active": bool(row.get("is_active")),
+            "last_run_key": row.get("last_run_key") or "",
+            "last_sent_key": row.get("last_sent_key") or "",
+            "last_sent_at": row.get("last_sent_at") or "",
+            "last_error": row.get("last_error") or "",
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        }
+
+    @staticmethod
+    def _decode_zalo_capture(row: dict[str, Any], include_image: bool = False) -> dict[str, Any]:
+        payload = {
+            "capture_id": row.get("capture_id"),
+            "schedule_id": row.get("schedule_id"),
+            "mime_type": row.get("mime_type") or "image/png",
+            "public_token": row.get("public_token") or "",
+            "page_url": row.get("page_url") or "",
+            "created_by": row.get("created_by") or "",
+            "created_at": row.get("created_at"),
+        }
+        if include_image:
+            payload["image_base64"] = row.get("image_base64") or ""
+        return payload
 
     @staticmethod
     def _now() -> str:

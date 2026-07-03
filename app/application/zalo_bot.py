@@ -97,6 +97,28 @@ class ZaloBotClient:
             return False
         return True
 
+    def send_chat_action(self, chat_id: str, action: str = "typing") -> bool:
+        if not self.enabled or not chat_id:
+            return False
+        result = self.call_api("sendChatAction", {"chat_id": str(chat_id), "action": action})
+        if result.get("ok") is False:
+            logger.warning("Zalo sendChatAction failed: %s", result)
+            return False
+        return True
+
+    def send_photo(self, chat_id: str, photo_url: str, caption: str = "") -> bool:
+        if not self.enabled or not chat_id or not photo_url:
+            return False
+        payload: dict[str, Any] = {"chat_id": str(chat_id), "photo": photo_url}
+        if caption:
+            payload["caption"] = caption[:2000]
+        self.send_chat_action(chat_id, "upload_photo")
+        result = self.call_api("sendPhoto", payload)
+        if result.get("ok") is False:
+            logger.warning("Zalo sendPhoto failed: %s", result)
+            return False
+        return True
+
     def test(self) -> dict[str, Any]:
         if not self.enabled:
             return {

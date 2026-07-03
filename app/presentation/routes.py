@@ -1,4 +1,7 @@
 from pathlib import Path
+import base64
+import binascii
+import hmac
 import json
 from html import escape as html_escape
 from html.parser import HTMLParser
@@ -20,6 +23,7 @@ from app.application.database_service import DatabaseService
 from app.application.vault_service import VaultService
 from app.application.connection_service import ConnectionService
 from app.application.telegram_notifier import TelegramNotifier
+from app.application.zalo_auto_message_service import capture_public_url, send_zalo_auto_message
 from app.application.zalo_bot import ZaloBotClient
 from app.data_access.app_repository import (
     AppRepository,
@@ -294,6 +298,30 @@ class ZaloSendMessagePayload(BaseModel):
     text: str = "Tin nhan test tu Bot VNPT Can Tho."
 
 
+class ZaloAutoMessagePayload(BaseModel):
+    schedule_id: str = ""
+    name: str
+    page_url: str = "/"
+    page_label: str = ""
+    schedule_type: Literal["TimeWindow", "Daily", "Weekly", "Monthly"] = "Daily"
+    time_slots: list[str] = Field(default_factory=list)
+    run_time: str = "07:00"
+    weekday: str = ""
+    month_day: int = 1
+    target_type: Literal["person", "group"] = "group"
+    chat_id: str = ""
+    chat_name: str = ""
+    caption: str = ""
+    photo_url: str = ""
+    is_active: bool = True
+
+
+class ZaloCapturePayload(BaseModel):
+    image_base64: str
+    mime_type: str = "image/png"
+    page_url: str = ""
+
+
 def build_app_repository() -> AppRepository:
     return build_repository(get_settings())
 
@@ -417,6 +445,15 @@ def raise_work_task_schema_error(error: RuntimeError) -> None:
     raise error
 
 
+def raise_zalo_auto_message_schema_error(error: RuntimeError) -> None:
+    if "zalo_auto_messages" in str(error) or "zalo_message_captures" in str(error):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Supabase chua co bang zalo_auto_messages/zalo_message_captures. Hay chay lai file sql/supabase_upgrade_admin_modules.sql.",
+        ) from error
+    raise error
+
+
 def raise_sql_report_schema_error(error: RuntimeError) -> None:
     if "sql_reports" in str(error):
         raise HTTPException(
@@ -433,6 +470,112 @@ def raise_dashboard_layout_schema_error(error: RuntimeError) -> None:
             detail="Supabase chưa có bảng dashboard_layouts. Hãy chạy lại file sql/supabase_upgrade_admin_modules.sql.",
         ) from error
     raise error
+
+
+TIME_PATTERN = re.compile(r"^\d{2}:\d{2}$")
+
+
+def normalize_clock_time(value: str, field_name: str) -> str:
+    text = str(value or "").strip()[:5]
+    if not TIME_PATTERN.match(text):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field_name} chua dung dinh dang HH:MM.")
+    hour, minute = [int(part) for part in text.split(":", 1)]
+    if hour > 23 or minute > 59:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field_name} chua dung dinh dang HH:MM.")
+    return f"{hour:02d}:{minute:02d}"
+
+
+def normalize_zalo_time_slots(values: list[str]) -> list[str]:
+    slots = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        for part in re.split(r"[\s,;]+", text):
+            if part:
+                slots.append(normalize_clock_time(part, "Khung gio"))
+    return sorted(set(slots))
+
+
+def normalize_zalo_page_url(value: str) -> str:
+    raw_value = str(value or "").strip() or "/"
+    parsed = urlparse(raw_value)
+    if parsed.scheme and parsed.scheme not in {"http", "https"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Duong dan trang chuc nang khong hop le.")
+    if not parsed.scheme and not raw_value.startswith("/"):
+        raw_value = f"/{raw_value}"
+    return raw_value
+
+
+def validate_zalo_photo_url(value: str) -> str:
+    photo_url = str(value or "").strip()
+    if not photo_url:
+        return ""
+    parsed = urlparse(photo_url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL anh gui Zalo phai la link HTTPS.")
+    return photo_url
+
+
+def normalize_zalo_auto_message_payload(payload: ZaloAutoMessagePayload, schedule_id: str) -> dict[str, Any]:
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ten lich gui Zalo khong duoc de trong.")
+    time_slots = normalize_zalo_time_slots(payload.time_slots)
+    run_time = normalize_clock_time(payload.run_time, "Gio gui")
+    if payload.schedule_type == "TimeWindow" and not time_slots:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Lich theo khung gio can nhap it nhat mot khung gio.")
+    if payload.schedule_type == "Weekly" and not payload.weekday.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Lich hang tuan can nhap thu trong tuan.")
+    return {
+        "schedule_id": schedule_id,
+        "name": name,
+        "page_url": normalize_zalo_page_url(payload.page_url),
+        "page_label": payload.page_label.strip(),
+        "schedule_type": payload.schedule_type,
+        "time_slots": time_slots,
+        "run_time": run_time,
+        "weekday": payload.weekday.strip(),
+        "month_day": min(max(int(payload.month_day or 1), 1), 31),
+        "target_type": payload.target_type,
+        "chat_id": payload.chat_id.strip(),
+        "chat_name": payload.chat_name.strip(),
+        "caption": payload.caption.strip(),
+        "photo_url": validate_zalo_photo_url(payload.photo_url),
+        "is_active": payload.is_active,
+    }
+
+
+def decode_capture_image(payload: ZaloCapturePayload) -> tuple[str, str]:
+    mime_type = payload.mime_type.strip().lower() or "image/png"
+    if mime_type not in {"image/png", "image/jpeg"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chi ho tro anh PNG hoac JPEG.")
+    raw_image = payload.image_base64.strip()
+    if raw_image.startswith("data:"):
+        header, _, body = raw_image.partition(",")
+        if "image/jpeg" in header:
+            mime_type = "image/jpeg"
+        elif "image/png" in header:
+            mime_type = "image/png"
+        raw_image = body
+    try:
+        image_bytes = base64.b64decode(raw_image, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Du lieu anh chup khong hop le.") from error
+    if len(image_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Anh chup qua lon, hay chup vung gon hon.")
+    if mime_type == "image/png" and not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File anh khong phai PNG hop le.")
+    if mime_type == "image/jpeg" and not image_bytes.startswith(b"\xff\xd8"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File anh khong phai JPEG hop le.")
+    return base64.b64encode(image_bytes).decode("ascii"), mime_type
+
+
+def enrich_zalo_auto_message(repository: AppRepository, schedule: dict[str, Any]) -> dict[str, Any]:
+    latest_capture = repository.get_latest_zalo_message_capture(str(schedule.get("schedule_id") or ""), include_image=False)
+    schedule["latest_capture"] = latest_capture
+    schedule["latest_capture_url"] = capture_public_url(get_settings(), latest_capture)
+    return schedule
 
 
 def normalize_dashboard_code(value: Any, label: str, *, uppercase: bool = True) -> str:
@@ -1603,6 +1746,105 @@ def send_zalo_test_message(request: Request, payload: ZaloSendMessagePayload) ->
     if not sent:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Khong gui duoc tin nhan Zalo test.")
     return {"ok": True, "message": "Da gui tin nhan test Zalo.", "chat_id": chat_id}
+
+
+@router.get("/api/admin/zalo/auto-messages")
+def list_zalo_auto_messages(request: Request) -> dict:
+    admin_user(request)
+    repository = build_app_repository()
+    try:
+        schedules = repository.list_zalo_auto_messages()
+        return {"schedules": [enrich_zalo_auto_message(repository, schedule) for schedule in schedules]}
+    except RuntimeError as error:
+        raise_zalo_auto_message_schema_error(error)
+
+
+@router.post("/api/admin/zalo/auto-messages")
+def save_zalo_auto_message(request: Request, payload: ZaloAutoMessagePayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    try:
+        schedule_id = payload.schedule_id.strip() or repository.generate_zalo_auto_message_id()
+        schedule_payload = normalize_zalo_auto_message_payload(payload, schedule_id)
+        repository.save_zalo_auto_message(schedule_payload)
+        schedule = repository.get_zalo_auto_message(schedule_id)
+    except RuntimeError as error:
+        raise_zalo_auto_message_schema_error(error)
+    repository.add_audit_log(actor["username"], "zalo_auto_message_saved", f"Luu lich gui Zalo {schedule_id}")
+    return {"ok": True, "schedule": enrich_zalo_auto_message(repository, schedule)}
+
+
+@router.delete("/api/admin/zalo/auto-messages/{schedule_id}")
+def delete_zalo_auto_message(request: Request, schedule_id: str) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    try:
+        if not repository.get_zalo_auto_message(schedule_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay lich gui Zalo.")
+        repository.delete_zalo_auto_message(schedule_id)
+    except RuntimeError as error:
+        raise_zalo_auto_message_schema_error(error)
+    repository.add_audit_log(actor["username"], "zalo_auto_message_deleted", f"Xoa lich gui Zalo {schedule_id}")
+    return {"ok": True}
+
+
+@router.post("/api/admin/zalo/auto-messages/{schedule_id}/captures")
+def upload_zalo_auto_message_capture(request: Request, schedule_id: str, payload: ZaloCapturePayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    try:
+        schedule = repository.get_zalo_auto_message(schedule_id)
+        if not schedule:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay lich gui Zalo.")
+        image_base64, mime_type = decode_capture_image(payload)
+        capture = repository.save_zalo_message_capture(
+            schedule_id,
+            image_base64,
+            mime_type,
+            normalize_zalo_page_url(payload.page_url or schedule.get("page_url") or "/"),
+            actor["username"],
+        )
+    except RuntimeError as error:
+        raise_zalo_auto_message_schema_error(error)
+    repository.add_audit_log(actor["username"], "zalo_auto_message_capture_saved", f"Luu anh chup cho lich {schedule_id}")
+    return {"ok": True, "capture": capture, "capture_url": capture_public_url(get_settings(), capture)}
+
+
+@router.post("/api/admin/zalo/auto-messages/{schedule_id}/send-now")
+def send_zalo_auto_message_now(request: Request, schedule_id: str) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    try:
+        schedule = repository.get_zalo_auto_message(schedule_id)
+        if not schedule:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay lich gui Zalo.")
+        result = send_zalo_auto_message(repository, get_settings(), schedule)
+    except RuntimeError as error:
+        raise_zalo_auto_message_schema_error(error)
+    repository.add_audit_log(actor["username"], "zalo_auto_message_manual_send", f"Gui thu lich Zalo {schedule_id}: {result.get('ok')}")
+    if not result.get("ok"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.get("message") or "Khong gui duoc lich Zalo.")
+    return result
+
+
+@router.get("/api/zalo/auto-message-captures/{capture_id}")
+def get_zalo_auto_message_capture(capture_id: str, token: str = "") -> Response:
+    repository = build_app_repository()
+    try:
+        capture = repository.get_zalo_message_capture(capture_id)
+    except RuntimeError as error:
+        raise_zalo_auto_message_schema_error(error)
+    if not capture or not hmac.compare_digest(str(token or ""), str(capture.get("public_token") or "")):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay anh.")
+    try:
+        image_bytes = base64.b64decode(str(capture.get("image_base64") or ""), validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anh khong hop le.") from error
+    return Response(
+        content=image_bytes,
+        media_type=str(capture.get("mime_type") or "image/png"),
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.get("/api/admin/work-tasks")
