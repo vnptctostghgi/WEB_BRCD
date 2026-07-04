@@ -21,6 +21,8 @@ from app.settings import Settings
 logger = logging.getLogger(__name__)
 
 SESSION_COOKIE_NAME = "brcd_session"
+DASHBOARD_CAPTURE_SELECTOR = "#dashboard-viewer-capture-area"
+DASHBOARD_SECTION_SELECTOR = "#dashboard-designed-section"
 PUBLIC_USER_KEYS = (
     "id",
     "username",
@@ -244,55 +246,13 @@ def capture_schedule_page_image(repository: Any, settings: Settings, schedule: d
     target_url, path = schedule_page_url(settings, schedule)
     if not target_url:
         return {"ok": False, "message": "Chua cau hinh APP_PUBLIC_URL/ZALO_WEBHOOK_URL hop le de tu chup anh."}
-    admin_user = capture_admin_user(repository, settings)
-    if not admin_user:
-        return {"ok": False, "message": "Chua co tai khoan admin hoat dong de tu chup anh."}
-
     try:
-        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-        from playwright.sync_api import sync_playwright
-    except ImportError as error:
-        return {"ok": False, "message": "May chu chua cai Playwright de chup anh tu dong.", "error": str(error)}
-
-    session_cookie = playwright_session_cookie(settings, admin_user)
-    screenshot_bytes: bytes
-
-    def run_capture(install_retry: bool = False) -> bytes:
-        try:
-            with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(
-                    headless=True,
-                    args=["--no-sandbox", "--disable-dev-shm-usage"],
-                )
-                try:
-                    context = browser.new_context(
-                        viewport={"width": 1920, "height": 1080},
-                        device_scale_factor=1,
-                        locale="vi-VN",
-                    )
-                    context.add_cookies([session_cookie])
-                    page = context.new_page()
-                    page.goto(target_url, wait_until="networkidle", timeout=90000)
-                    try:
-                        page.wait_for_selector("#dashboard-designed-section", state="visible", timeout=20000)
-                        page.wait_for_function(
-                            "() => !document.body.classList.contains('view-loading')",
-                            timeout=30000,
-                        )
-                    except PlaywrightTimeoutError:
-                        logger.warning("Zalo auto capture timed out waiting for dashboard UI at %s", target_url)
-                    page.wait_for_timeout(1500)
-                    return page.screenshot(full_page=True, type="png")
-                finally:
-                    browser.close()
-        except Exception as error:
-            if not install_retry and playwright_needs_browser_install(error):
-                install_playwright_chromium()
-                return run_capture(install_retry=True)
-            raise
-
-    try:
-        screenshot_bytes = run_capture()
+        screenshot_bytes = capture_page_screenshot_bytes(
+            repository,
+            settings,
+            str(schedule.get("page_url") or "/"),
+            selector=DASHBOARD_CAPTURE_SELECTOR,
+        )
     except Exception as error:
         logger.exception("Cannot capture Zalo auto message page %s", target_url)
         return {"ok": False, "message": "Khong chup duoc anh moi cua trang chuc nang.", "error": str(error)[:500]}
@@ -319,7 +279,7 @@ def capture_failure_message(capture_result: dict[str, Any]) -> str:
     return message
 
 
-def capture_page_screenshot_bytes(repository: Any, settings: Settings, page_url: str, selector: str = "#dashboard-viewer-capture-area") -> bytes:
+def capture_page_screenshot_bytes(repository: Any, settings: Settings, page_url: str, selector: str = DASHBOARD_CAPTURE_SELECTOR) -> bytes:
     schedule = {"page_url": page_url or "/"}
     target_url, _path = schedule_page_url(settings, schedule)
     if not target_url:
@@ -345,18 +305,37 @@ def capture_page_screenshot_bytes(repository: Any, settings: Settings, page_url:
                     page = context.new_page()
                     page.goto(target_url, wait_until="networkidle", timeout=90000)
                     try:
+                        page.wait_for_selector(DASHBOARD_SECTION_SELECTOR, state="visible", timeout=30000)
+                        page.wait_for_function(
+                            """
+                            () => {
+                              const loadedAt = document.querySelector('#dashboard-viewer-loaded-at')?.textContent || '';
+                              const tabs = document.querySelector('#dashboard-viewer-tabs');
+                              const workspace = document.querySelector('#dashboard-viewer-workspace');
+                              const bodyBusy = document.body.classList.contains('view-loading');
+                              const text = workspace?.innerText || '';
+                              return !bodyBusy
+                                && tabs && tabs.children.length > 0
+                                && workspace && workspace.children.length > 0
+                                && loadedAt && !loadedAt.includes('Chưa tải')
+                                && !text.includes('Chưa tải dữ liệu')
+                                && !text.includes('Đang tải');
+                            }
+                            """,
+                            timeout=90000,
+                        )
                         page.wait_for_selector(selector, state="visible", timeout=30000)
                         page.wait_for_function(
                             "() => document.querySelectorAll('[data-dashboard-sheet-state=\"loading\"]').length === 0",
                             timeout=30000,
                         )
                     except PlaywrightTimeoutError:
-                        logger.warning("Timed out waiting for capture selector %s at %s", selector, target_url)
+                        raise RuntimeError("Dashboard chua tai xong du lieu de chup anh.") from None
                     page.wait_for_timeout(1800)
                     locator = page.locator(selector).first
                     if locator.count():
                         return locator.screenshot(type="png")
-                    return page.screenshot(full_page=True, type="png")
+                    raise RuntimeError("Khong tim thay vung Dashboard de chup anh.")
                 finally:
                     browser.close()
         except Exception as error:

@@ -488,6 +488,43 @@ def test_zalo_auto_capture_playwright_cookie_uses_url_only(monkeypatch) -> None:
         get_settings.cache_clear()
 
 
+def test_zalo_auto_capture_uses_dashboard_area(monkeypatch) -> None:
+    from app.application import zalo_auto_message_service as service
+
+    calls = {}
+
+    class FakeRepository:
+        def save_zalo_message_capture(self, schedule_id, image_base64, mime_type, page_url="", created_by=""):
+            calls["saved"] = {
+                "schedule_id": schedule_id,
+                "image_base64": image_base64,
+                "mime_type": mime_type,
+                "page_url": page_url,
+                "created_by": created_by,
+            }
+            return {"capture_id": "CAPTEST", "public_token": "token"}
+
+    def fake_capture_page_screenshot_bytes(repository, settings, page_url, selector=service.DASHBOARD_CAPTURE_SELECTOR):
+        calls["capture"] = {"page_url": page_url, "selector": selector}
+        return b"\x89PNG\r\n"
+
+    monkeypatch.setenv("APP_PUBLIC_URL", "https://vnptcto.com")
+    get_settings.cache_clear()
+    monkeypatch.setattr(service, "capture_page_screenshot_bytes", fake_capture_page_screenshot_bytes)
+    try:
+        result = service.capture_schedule_page_image(
+            FakeRepository(),
+            get_settings(),
+            {"schedule_id": "ZALO0001", "page_url": "/dashboardtest"},
+        )
+        assert result["ok"] is True
+        assert calls["capture"] == {"page_url": "/dashboardtest", "selector": service.DASHBOARD_CAPTURE_SELECTOR}
+        assert calls["saved"]["image_base64"] == "iVBORw0K"
+        assert result["capture_url"] == "https://vnptcto.com/api/zalo/auto-message-captures/CAPTEST?token=token"
+    finally:
+        get_settings.cache_clear()
+
+
 def test_zalo_auto_message_scheduler_sends_due_photo(monkeypatch) -> None:
     from app.application.task_scheduler import LOCAL_TIMEZONE, ZaloAutoMessageScheduler
 
