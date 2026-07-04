@@ -469,6 +469,25 @@ def test_zalo_auto_capture_session_cookie_opens_authenticated_page() -> None:
         assert response.json()["user"]["username"] == user["username"]
 
 
+def test_zalo_auto_capture_playwright_cookie_uses_url_only(monkeypatch) -> None:
+    from app.application.zalo_auto_message_service import playwright_session_cookie
+
+    monkeypatch.setenv("APP_PUBLIC_URL", "https://vnptcto.com")
+    get_settings.cache_clear()
+    try:
+        with TestClient(app):
+            repository = routes.build_app_repository()
+            user = repository.get_user_by_username(get_settings().initial_admin_username)
+            assert user is not None
+
+            cookie = playwright_session_cookie(get_settings(), user)
+            assert cookie["url"] == "https://vnptcto.com"
+            assert "path" not in cookie
+            assert cookie["secure"] is True
+    finally:
+        get_settings.cache_clear()
+
+
 def test_zalo_auto_message_scheduler_sends_due_photo(monkeypatch) -> None:
     from app.application.task_scheduler import LOCAL_TIMEZONE, ZaloAutoMessageScheduler
 

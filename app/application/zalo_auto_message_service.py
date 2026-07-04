@@ -213,6 +213,19 @@ def signed_capture_session_cookie(settings: Settings, user: dict[str, Any]) -> s
     return signer.sign(data).decode("utf-8")
 
 
+def playwright_session_cookie(settings: Settings, user: dict[str, Any]) -> dict[str, Any]:
+    base_url = public_base_url(settings)
+    parsed_base = urlparse(base_url)
+    return {
+        "name": SESSION_COOKIE_NAME,
+        "value": signed_capture_session_cookie(settings, user),
+        "url": base_url,
+        "httpOnly": True,
+        "secure": parsed_base.scheme == "https",
+        "sameSite": "Lax",
+    }
+
+
 def playwright_needs_browser_install(error: Exception) -> bool:
     message = str(error).lower()
     return "executable doesn't exist" in message or "please run the following command" in message or "playwright install" in message
@@ -241,8 +254,7 @@ def capture_schedule_page_image(repository: Any, settings: Settings, schedule: d
     except ImportError as error:
         return {"ok": False, "message": "May chu chua cai Playwright de chup anh tu dong.", "error": str(error)}
 
-    base_url = public_base_url(settings)
-    cookie_value = signed_capture_session_cookie(settings, admin_user)
+    session_cookie = playwright_session_cookie(settings, admin_user)
     screenshot_bytes: bytes
 
     def run_capture(install_retry: bool = False) -> bytes:
@@ -258,17 +270,7 @@ def capture_schedule_page_image(repository: Any, settings: Settings, schedule: d
                         device_scale_factor=1,
                         locale="vi-VN",
                     )
-                    context.add_cookies([
-                        {
-                            "name": SESSION_COOKIE_NAME,
-                            "value": cookie_value,
-                            "url": base_url,
-                            "path": "/",
-                            "httpOnly": True,
-                            "secure": urlparse(base_url).scheme == "https",
-                            "sameSite": "Lax",
-                        }
-                    ])
+                    context.add_cookies([session_cookie])
                     page = context.new_page()
                     page.goto(target_url, wait_until="networkidle", timeout=90000)
                     try:
@@ -309,6 +311,14 @@ def capture_schedule_page_image(repository: Any, settings: Settings, schedule: d
     return {"ok": True, "message": "Da chup anh moi.", "capture": capture, "capture_url": capture_url, "page_url": target_url}
 
 
+def capture_failure_message(capture_result: dict[str, Any]) -> str:
+    message = str(capture_result.get("message") or "Chua chup duoc anh moi cho lich gui Zalo.").strip()
+    error = str(capture_result.get("error") or "").strip()
+    if error:
+        return f"{message} Chi tiet: {error[:240]}"
+    return message
+
+
 def capture_page_screenshot_bytes(repository: Any, settings: Settings, page_url: str, selector: str = "#dashboard-viewer-capture-area") -> bytes:
     schedule = {"page_url": page_url or "/"}
     target_url, _path = schedule_page_url(settings, schedule)
@@ -323,8 +333,7 @@ def capture_page_screenshot_bytes(repository: Any, settings: Settings, page_url:
     except ImportError as error:
         raise RuntimeError("May chu chua cai Playwright de chup anh.") from error
 
-    base_url = public_base_url(settings)
-    cookie_value = signed_capture_session_cookie(settings, admin_user)
+    session_cookie = playwright_session_cookie(settings, admin_user)
 
     def run_capture(install_retry: bool = False) -> bytes:
         try:
@@ -332,17 +341,7 @@ def capture_page_screenshot_bytes(repository: Any, settings: Settings, page_url:
                 browser = playwright.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
                 try:
                     context = browser.new_context(viewport={"width": 1920, "height": 1080}, device_scale_factor=2, locale="vi-VN")
-                    context.add_cookies([
-                        {
-                            "name": SESSION_COOKIE_NAME,
-                            "value": cookie_value,
-                            "url": base_url,
-                            "path": "/",
-                            "httpOnly": True,
-                            "secure": urlparse(base_url).scheme == "https",
-                            "sameSite": "Lax",
-                        }
-                    ])
+                    context.add_cookies([session_cookie])
                     page = context.new_page()
                     page.goto(target_url, wait_until="networkidle", timeout=90000)
                     try:
@@ -399,7 +398,7 @@ def send_zalo_auto_message(repository: Any, settings: Settings, schedule: dict[s
     if not photo_url:
         return {
             "ok": False,
-            "message": capture_result.get("message") or "Chua chup duoc anh moi cho lich gui Zalo.",
+            "message": capture_failure_message(capture_result),
             "chat_id": chat_id,
             "photo_url": "",
             "latest_capture": latest_capture,
