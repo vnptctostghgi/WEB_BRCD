@@ -196,6 +196,49 @@ create table if not exists public.zalo_message_captures (
 create index if not exists zalo_message_captures_schedule_idx
 on public.zalo_message_captures (schedule_id, created_at desc);
 
+create table if not exists public.data_mining_schedules (
+  schedule_id text primary key,
+  name text not null,
+  report_url text not null,
+  schedule_type text not null default 'Daily',
+  run_time text not null default '07:00',
+  weekday text not null default '',
+  month_day integer not null default 1,
+  storage_link text not null default '',
+  file_name_template text not null default '',
+  parameters jsonb not null default '{}'::jsonb,
+  is_active boolean not null default true,
+  last_run_key text not null default '',
+  last_success_key text not null default '',
+  last_run_at timestamptz,
+  last_success_at timestamptz,
+  last_status text not null default '',
+  last_error text not null default '',
+  last_file_name text not null default '',
+  last_file_path text not null default '',
+  created_at timestamptz not null,
+  updated_at timestamptz not null
+);
+
+create table if not exists public.data_mining_runs (
+  run_id text primary key,
+  schedule_id text not null references public.data_mining_schedules(schedule_id) on delete cascade,
+  status text not null default 'running',
+  message text not null default '',
+  file_name text not null default '',
+  file_path text not null default '',
+  storage_link text not null default '',
+  storage_status text not null default '',
+  parameters jsonb not null default '{}'::jsonb,
+  started_at timestamptz not null,
+  finished_at timestamptz,
+  duration_ms integer not null default 0,
+  created_by text not null default ''
+);
+
+create index if not exists data_mining_runs_schedule_idx
+on public.data_mining_runs (schedule_id, started_at desc);
+
 create table if not exists public.login_attempts (
   username text primary key,
   fail_count integer not null default 0,

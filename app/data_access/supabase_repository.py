@@ -810,6 +810,107 @@ class SupabaseRepository:
         rows = self._get("zalo_message_captures", {"capture_id": f"eq.{capture_id}", "limit": "1"})
         return self._decode_zalo_capture(rows[0], include_image=True) if rows else None
 
+    def list_data_mining_schedules(self, active_only: bool = False) -> list[dict[str, Any]]:
+        params = {"order": "run_time.asc,schedule_id.asc"}
+        if active_only:
+            params["is_active"] = "eq.true"
+        rows = self._get("data_mining_schedules", params)
+        return [self._decode_data_mining_schedule(row) for row in rows]
+
+    def get_data_mining_schedule(self, schedule_id: str) -> dict[str, Any] | None:
+        rows = self._get("data_mining_schedules", {"schedule_id": f"eq.{schedule_id}", "limit": "1"})
+        return self._decode_data_mining_schedule(rows[0]) if rows else None
+
+    def generate_data_mining_schedule_id(self) -> str:
+        rows = self._get("data_mining_schedules", {"select": "schedule_id", "schedule_id": "like.MINE%", "order": "schedule_id.desc"})
+        max_number = 0
+        for row in rows:
+            suffix = str(row.get("schedule_id", ""))[4:]
+            if suffix.isdigit():
+                max_number = max(max_number, int(suffix))
+        return f"MINE{max_number + 1:04d}"
+
+    def save_data_mining_schedule(self, payload: dict[str, Any]) -> None:
+        now = self._now()
+        row = {
+            "schedule_id": str(payload["schedule_id"]).strip(),
+            "name": str(payload.get("name", "")).strip(),
+            "report_url": str(payload.get("report_url", "")).strip(),
+            "schedule_type": str(payload.get("schedule_type", "Daily")).strip() or "Daily",
+            "run_time": str(payload.get("run_time", "07:00")).strip() or "07:00",
+            "weekday": str(payload.get("weekday", "")).strip(),
+            "month_day": int(payload.get("month_day") or 1),
+            "storage_link": str(payload.get("storage_link", "")).strip(),
+            "file_name_template": str(payload.get("file_name_template", "")).strip(),
+            "parameters": payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {},
+            "is_active": bool(payload.get("is_active", True)),
+            "created_at": now,
+            "updated_at": now,
+        }
+        self._upsert("data_mining_schedules", row, "schedule_id")
+
+    def delete_data_mining_schedule(self, schedule_id: str) -> None:
+        self._delete("data_mining_runs", {"schedule_id": f"eq.{schedule_id}"})
+        self._delete("data_mining_schedules", {"schedule_id": f"eq.{schedule_id}"})
+
+    def create_data_mining_run(self, schedule_id: str, parameters: dict[str, Any] | None = None, created_by: str = "") -> dict[str, Any]:
+        now = self._now()
+        row = {
+            "run_id": f"RUN{uuid.uuid4().hex[:16].upper()}",
+            "schedule_id": schedule_id,
+            "status": "running",
+            "message": "",
+            "file_name": "",
+            "file_path": "",
+            "storage_link": "",
+            "storage_status": "",
+            "parameters": parameters if isinstance(parameters, dict) else {},
+            "started_at": now,
+            "finished_at": None,
+            "duration_ms": 0,
+            "created_by": created_by or "",
+        }
+        self._insert("data_mining_runs", row)
+        return self._decode_data_mining_run(row)
+
+    def finish_data_mining_run(self, run_id: str, result: dict[str, Any]) -> None:
+        payload = {
+            "status": str(result.get("status") or ("success" if result.get("ok") else "failed"))[:50],
+            "message": str(result.get("message") or "")[:1000],
+            "file_name": str(result.get("file_name") or "")[:255],
+            "file_path": str(result.get("file_path") or "")[:1000],
+            "storage_link": str(result.get("storage_link") or "")[:1000],
+            "storage_status": str(result.get("storage_status") or "")[:255],
+            "finished_at": self._now(),
+            "duration_ms": int(result.get("duration_ms") or 0),
+        }
+        self._patch("data_mining_runs", {"run_id": f"eq.{run_id}"}, payload)
+
+    def mark_data_mining_schedule_run(self, schedule_id: str, run_key: str, ok: bool, result: dict[str, Any]) -> None:
+        now = self._now()
+        payload = {
+            "last_run_key": run_key,
+            "last_run_at": now,
+            "last_status": ("success" if ok else str(result.get("status") or "failed"))[:50],
+            "last_error": "" if ok else str(result.get("message") or result.get("error") or "")[:500],
+            "updated_at": now,
+        }
+        if ok:
+            payload.update({
+                "last_success_key": run_key,
+                "last_success_at": now,
+                "last_file_name": str(result.get("file_name") or "")[:255],
+                "last_file_path": str(result.get("file_path") or "")[:1000],
+            })
+        self._patch("data_mining_schedules", {"schedule_id": f"eq.{schedule_id}"}, payload)
+
+    def list_data_mining_runs(self, schedule_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+        params = {"order": "started_at.desc", "limit": str(min(max(int(limit or 50), 1), 200))}
+        if schedule_id:
+            params["schedule_id"] = f"eq.{schedule_id}"
+        rows = self._get("data_mining_runs", params)
+        return [self._decode_data_mining_run(row) for row in rows]
+
     def health_check(self) -> dict[str, Any]:
         rows = self._get("features", {"select": "code", "limit": "1"})
         return {"ok": True, "backend": "supabase", "feature_rows_seen": len(rows)}
@@ -908,6 +1009,62 @@ class SupabaseRepository:
         if include_image:
             payload["image_base64"] = row.get("image_base64") or ""
         return payload
+
+    @staticmethod
+    def _decode_data_mining_schedule(row: dict[str, Any]) -> dict[str, Any]:
+        parameters = row.get("parameters") or {}
+        if isinstance(parameters, str):
+            try:
+                parameters = json.loads(parameters)
+            except json.JSONDecodeError:
+                parameters = {}
+        return {
+            "schedule_id": row.get("schedule_id"),
+            "name": row.get("name") or "",
+            "report_url": row.get("report_url") or "",
+            "schedule_type": row.get("schedule_type") or "Daily",
+            "run_time": row.get("run_time") or "07:00",
+            "weekday": row.get("weekday") or "",
+            "month_day": int(row.get("month_day") or 1),
+            "storage_link": row.get("storage_link") or "",
+            "file_name_template": row.get("file_name_template") or "",
+            "parameters": parameters if isinstance(parameters, dict) else {},
+            "is_active": bool(row.get("is_active")),
+            "last_run_key": row.get("last_run_key") or "",
+            "last_success_key": row.get("last_success_key") or "",
+            "last_run_at": row.get("last_run_at") or "",
+            "last_success_at": row.get("last_success_at") or "",
+            "last_status": row.get("last_status") or "",
+            "last_error": row.get("last_error") or "",
+            "last_file_name": row.get("last_file_name") or "",
+            "last_file_path": row.get("last_file_path") or "",
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        }
+
+    @staticmethod
+    def _decode_data_mining_run(row: dict[str, Any]) -> dict[str, Any]:
+        parameters = row.get("parameters") or {}
+        if isinstance(parameters, str):
+            try:
+                parameters = json.loads(parameters)
+            except json.JSONDecodeError:
+                parameters = {}
+        return {
+            "run_id": row.get("run_id"),
+            "schedule_id": row.get("schedule_id"),
+            "status": row.get("status") or "",
+            "message": row.get("message") or "",
+            "file_name": row.get("file_name") or "",
+            "file_path": row.get("file_path") or "",
+            "storage_link": row.get("storage_link") or "",
+            "storage_status": row.get("storage_status") or "",
+            "parameters": parameters if isinstance(parameters, dict) else {},
+            "started_at": row.get("started_at") or "",
+            "finished_at": row.get("finished_at") or "",
+            "duration_ms": int(row.get("duration_ms") or 0),
+            "created_by": row.get("created_by") or "",
+        }
 
     def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         headers = {"apikey": self.secret_key, "Content-Type": "application/json"}

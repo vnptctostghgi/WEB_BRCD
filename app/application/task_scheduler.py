@@ -7,6 +7,7 @@ import threading
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.application.onebss_data_mining_service import run_data_mining_schedule
 from app.application.zalo_auto_message_service import send_zalo_auto_message
 from app.application.database_service import DatabaseService
 from app.data_access.internal_api_client import InternalApiClient
@@ -275,3 +276,110 @@ class ZaloAutoMessageScheduler:
 
 
 zalo_auto_message_scheduler = ZaloAutoMessageScheduler()
+
+
+class DataMiningScheduler:
+    """Tai bao cao OneBSS tu dong theo lich trong admin."""
+
+    def __init__(self) -> None:
+        self.repository: Any | None = None
+        self.settings: Settings | None = None
+        self.thread: threading.Thread | None = None
+        self.stop_event = threading.Event()
+        self.interval_seconds = 30
+        self.schema_warning_logged = False
+
+    def configure(self, repository: Any, settings: Settings) -> None:
+        self.repository = repository
+        self.settings = settings
+
+    def start(self) -> None:
+        if not self.repository or not self.settings:
+            raise RuntimeError("DataMiningScheduler chua duoc configure.")
+        if self.thread and self.thread.is_alive():
+            return
+        self.stop_event.clear()
+        self.thread = threading.Thread(target=self._run_loop, name="data-mining-scheduler", daemon=True)
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=5)
+
+    def _run_loop(self) -> None:
+        while not self.stop_event.is_set():
+            try:
+                self.check_due_schedules()
+            except Exception:
+                logger.exception("Data mining scheduler failed")
+            self.stop_event.wait(self.interval_seconds)
+
+    def check_due_schedules(self, now: datetime | None = None) -> int:
+        assert self.repository is not None
+        assert self.settings is not None
+        current = now or datetime.now(LOCAL_TIMEZONE)
+        success_count = 0
+        try:
+            schedules = self.repository.list_data_mining_schedules(active_only=True)
+        except RuntimeError as error:
+            if "data_mining" in str(error) and not self.schema_warning_logged:
+                logger.warning("Bang data_mining_schedules chua ton tai. Hay chay sql/supabase_upgrade_admin_modules.sql tren Supabase.")
+                self.schema_warning_logged = True
+            return 0
+        for schedule in schedules:
+            run_key = self._due_run_key(schedule, current)
+            if not run_key:
+                continue
+            result = run_data_mining_schedule(
+                self.repository,
+                self.settings,
+                schedule,
+                created_by="data_mining_scheduler",
+                interactive=False,
+            )
+            ok = bool(result.get("ok"))
+            self.repository.mark_data_mining_schedule_run(
+                str(schedule.get("schedule_id") or ""),
+                run_key,
+                ok,
+                result,
+            )
+            if ok:
+                success_count += 1
+        return success_count
+
+    @classmethod
+    def _due_run_key(cls, schedule: dict[str, Any], current: datetime) -> str:
+        if not schedule.get("is_active"):
+            return ""
+        schedule_type = str(schedule.get("schedule_type") or "Daily").strip().lower()
+        current_time = current.strftime("%H:%M")
+        configured_time = str(schedule.get("run_time") or "07:00")[:5]
+        run_key = ""
+        if schedule_type == "daily":
+            if current_time == configured_time:
+                run_key = current.date().isoformat()
+        elif schedule_type == "weekly":
+            if current_time == configured_time and WorkTaskScheduler._weekday_matches(schedule.get("weekday"), current.weekday()):
+                iso_year, iso_week, _ = current.isocalendar()
+                run_key = f"{iso_year}-W{iso_week:02d}-{current.weekday()}"
+        elif schedule_type == "monthly":
+            month_day = cls._safe_month_day(schedule.get("month_day"), current)
+            if current_time == configured_time and current.day == month_day:
+                run_key = current.strftime("%Y-%m")
+        if not run_key or schedule.get("last_run_key") == run_key:
+            return ""
+        return run_key
+
+    @staticmethod
+    def _safe_month_day(raw_day: Any, current: datetime) -> int:
+        try:
+            day = int(raw_day or 1)
+        except (TypeError, ValueError):
+            day = 1
+        last_day = calendar.monthrange(current.year, current.month)[1]
+        return min(max(day, 1), last_day)
+
+
+data_mining_scheduler = DataMiningScheduler()

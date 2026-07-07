@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     zalo_webhook_url: str = ""
     zalo_webhook_secret: SecretStr = Field(default=SecretStr(""))
     zalo_auto_reply_enabled: bool = True
+    onebss_login_url: str = "https://onebss.vnpt.vn/"
+    onebss_username: str = ""
+    onebss_password: SecretStr = Field(default=SecretStr(""))
+    onebss_download_timeout_seconds: int = 180
+    data_mining_download_dir: str = "data/data_mining_downloads"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
 

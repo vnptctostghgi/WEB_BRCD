@@ -23,6 +23,7 @@ from app.application.database_service import DatabaseService
 from app.application.vault_service import VaultService
 from app.application.connection_service import ConnectionService
 from app.application.telegram_notifier import TelegramNotifier
+from app.application.onebss_data_mining_service import OneBssDownloadError, normalize_onebss_report_url, run_data_mining_schedule
 from app.application.zalo_auto_message_service import capture_page_screenshot_bytes, capture_public_url, send_zalo_auto_message
 from app.application.zalo_bot import ZaloBotClient
 from app.data_access.app_repository import (
@@ -322,6 +323,25 @@ class ZaloCapturePayload(BaseModel):
     page_url: str = ""
 
 
+class DataMiningSchedulePayload(BaseModel):
+    schedule_id: str = ""
+    name: str
+    report_url: str
+    schedule_type: Literal["Daily", "Weekly", "Monthly"] = "Daily"
+    run_time: str = "07:00"
+    weekday: str = ""
+    month_day: int = 1
+    storage_link: str = ""
+    file_name_template: str = ""
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    is_active: bool = True
+
+
+class DataMiningRunPayload(BaseModel):
+    otp: str = ""
+    allow_device_registration: bool = True
+
+
 class PageCapturePayload(BaseModel):
     page_url: str = "/"
 
@@ -458,6 +478,15 @@ def raise_zalo_auto_message_schema_error(error: RuntimeError) -> None:
     raise error
 
 
+def raise_data_mining_schema_error(error: RuntimeError) -> None:
+    if "data_mining_schedules" in str(error) or "data_mining_runs" in str(error):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Supabase chua co bang data_mining_schedules/data_mining_runs. Hay chay lai file sql/supabase_upgrade_admin_modules.sql.",
+        ) from error
+    raise error
+
+
 def raise_sql_report_schema_error(error: RuntimeError) -> None:
     if "sql_reports" in str(error):
         raise HTTPException(
@@ -547,6 +576,33 @@ def normalize_zalo_auto_message_payload(payload: ZaloAutoMessagePayload, schedul
         "caption": payload.caption.strip(),
         "photo_url": validate_zalo_photo_url(payload.photo_url),
         "is_active": payload.is_active,
+    }
+
+
+def normalize_data_mining_schedule_payload(payload: DataMiningSchedulePayload, schedule_id: str) -> dict[str, Any]:
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ten lich dao du lieu khong duoc de trong.")
+    try:
+        report_url = normalize_onebss_report_url(payload.report_url)
+    except OneBssDownloadError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    run_time = str(payload.run_time or "07:00").strip()
+    if not re.fullmatch(r"\d{2}:\d{2}", run_time):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Thoi gian lay phai dung dinh dang HH:MM.")
+    month_day = min(max(int(payload.month_day or 1), 1), 31)
+    return {
+        "schedule_id": schedule_id,
+        "name": name,
+        "report_url": report_url,
+        "schedule_type": payload.schedule_type,
+        "run_time": run_time,
+        "weekday": payload.weekday.strip(),
+        "month_day": month_day,
+        "storage_link": payload.storage_link.strip(),
+        "file_name_template": payload.file_name_template.strip(),
+        "parameters": payload.parameters if isinstance(payload.parameters, dict) else {},
+        "is_active": bool(payload.is_active),
     }
 
 
@@ -1866,6 +1922,81 @@ def get_zalo_auto_message_capture(capture_id: str, token: str = "") -> Response:
         media_type=str(capture.get("mime_type") or "image/png"),
         headers={"Cache-Control": "public, max-age=86400"},
     )
+
+
+@router.get("/api/admin/data-mining/schedules")
+def list_data_mining_schedules(request: Request) -> dict:
+    admin_user(request)
+    repository = build_app_repository()
+    try:
+        return {"schedules": repository.list_data_mining_schedules()}
+    except RuntimeError as error:
+        raise_data_mining_schema_error(error)
+
+
+@router.post("/api/admin/data-mining/schedules")
+def save_data_mining_schedule(request: Request, payload: DataMiningSchedulePayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    try:
+        schedule_id = payload.schedule_id.strip() or repository.generate_data_mining_schedule_id()
+        schedule_payload = normalize_data_mining_schedule_payload(payload, schedule_id)
+        repository.save_data_mining_schedule(schedule_payload)
+        schedule = repository.get_data_mining_schedule(schedule_id)
+    except RuntimeError as error:
+        raise_data_mining_schema_error(error)
+    repository.add_audit_log(actor["username"], "data_mining_schedule_saved", f"Luu lich dao du lieu {schedule_id}")
+    return {"ok": True, "schedule": schedule}
+
+
+@router.delete("/api/admin/data-mining/schedules/{schedule_id}")
+def delete_data_mining_schedule(request: Request, schedule_id: str) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    try:
+        if not repository.get_data_mining_schedule(schedule_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay lich dao du lieu.")
+        repository.delete_data_mining_schedule(schedule_id)
+    except RuntimeError as error:
+        raise_data_mining_schema_error(error)
+    repository.add_audit_log(actor["username"], "data_mining_schedule_deleted", f"Xoa lich dao du lieu {schedule_id}")
+    return {"ok": True}
+
+
+@router.get("/api/admin/data-mining/runs")
+def list_data_mining_runs(request: Request, schedule_id: str = "", limit: int = 50) -> dict:
+    admin_user(request)
+    repository = build_app_repository()
+    try:
+        return {"runs": repository.list_data_mining_runs(schedule_id=schedule_id.strip(), limit=limit)}
+    except RuntimeError as error:
+        raise_data_mining_schema_error(error)
+
+
+@router.post("/api/admin/data-mining/schedules/{schedule_id}/run-now")
+def run_data_mining_schedule_now(request: Request, schedule_id: str, payload: DataMiningRunPayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    try:
+        schedule = repository.get_data_mining_schedule(schedule_id)
+        if not schedule:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay lich dao du lieu.")
+        result = run_data_mining_schedule(
+            repository,
+            get_settings(),
+            schedule,
+            otp=payload.otp.strip(),
+            created_by=actor["username"],
+            allow_device_registration=payload.allow_device_registration,
+            interactive=True,
+        )
+        run_key = f"manual:{result.get('run_id') or datetime.now().isoformat(timespec='seconds')}"
+        repository.mark_data_mining_schedule_run(schedule_id, run_key, bool(result.get("ok")), result)
+        refreshed_schedule = repository.get_data_mining_schedule(schedule_id)
+    except RuntimeError as error:
+        raise_data_mining_schema_error(error)
+    repository.add_audit_log(actor["username"], "data_mining_manual_run", f"Chay thu lich dao du lieu {schedule_id}: {result.get('ok')}")
+    return {"ok": bool(result.get("ok")), "result": result, "schedule": refreshed_schedule}
 
 
 @router.get("/api/admin/work-tasks")

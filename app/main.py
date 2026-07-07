@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.application.connection_service import ConnectionService
-from app.application.task_scheduler import dashboard_chart_cache_scheduler, work_task_scheduler, zalo_auto_message_scheduler
+from app.application.task_scheduler import dashboard_chart_cache_scheduler, data_mining_scheduler, work_task_scheduler, zalo_auto_message_scheduler
 from app.application.telegram_notifier import TelegramNotifier
 from app.data_access.repository_factory import build_repository
 from app.presentation.routes import router
@@ -30,9 +30,12 @@ async def lifespan(_: FastAPI):
     dashboard_chart_cache_scheduler.start()
     zalo_auto_message_scheduler.configure(repository, settings)
     zalo_auto_message_scheduler.start()
+    data_mining_scheduler.configure(repository, settings)
+    data_mining_scheduler.start()
     try:
         yield
     finally:
+        data_mining_scheduler.stop()
         zalo_auto_message_scheduler.stop()
         dashboard_chart_cache_scheduler.stop()
         work_task_scheduler.stop()

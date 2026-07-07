@@ -366,6 +366,50 @@ class AppRepository:
                 CREATE INDEX IF NOT EXISTS zalo_message_captures_schedule_idx
                 ON zalo_message_captures (schedule_id, created_at DESC);
 
+                CREATE TABLE IF NOT EXISTS data_mining_schedules (
+                    schedule_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    report_url TEXT NOT NULL,
+                    schedule_type TEXT NOT NULL DEFAULT 'Daily',
+                    run_time TEXT NOT NULL DEFAULT '07:00',
+                    weekday TEXT NOT NULL DEFAULT '',
+                    month_day INTEGER NOT NULL DEFAULT 1,
+                    storage_link TEXT NOT NULL DEFAULT '',
+                    file_name_template TEXT NOT NULL DEFAULT '',
+                    parameters_json TEXT NOT NULL DEFAULT '{}',
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    last_run_key TEXT NOT NULL DEFAULT '',
+                    last_success_key TEXT NOT NULL DEFAULT '',
+                    last_run_at TEXT NOT NULL DEFAULT '',
+                    last_success_at TEXT NOT NULL DEFAULT '',
+                    last_status TEXT NOT NULL DEFAULT '',
+                    last_error TEXT NOT NULL DEFAULT '',
+                    last_file_name TEXT NOT NULL DEFAULT '',
+                    last_file_path TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS data_mining_runs (
+                    run_id TEXT PRIMARY KEY,
+                    schedule_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'running',
+                    message TEXT NOT NULL DEFAULT '',
+                    file_name TEXT NOT NULL DEFAULT '',
+                    file_path TEXT NOT NULL DEFAULT '',
+                    storage_link TEXT NOT NULL DEFAULT '',
+                    storage_status TEXT NOT NULL DEFAULT '',
+                    parameters_json TEXT NOT NULL DEFAULT '{}',
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT NOT NULL DEFAULT '',
+                    duration_ms INTEGER NOT NULL DEFAULT 0,
+                    created_by TEXT NOT NULL DEFAULT '',
+                    FOREIGN KEY(schedule_id) REFERENCES data_mining_schedules(schedule_id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS data_mining_runs_schedule_idx
+                ON data_mining_runs (schedule_id, started_at DESC);
+
                 CREATE TABLE IF NOT EXISTS login_attempts (
                     username TEXT PRIMARY KEY COLLATE NOCASE,
                     fail_count INTEGER NOT NULL DEFAULT 0,
@@ -1358,6 +1402,200 @@ class AppRepository:
             row = connection.execute("SELECT * FROM zalo_message_captures WHERE capture_id=?", (capture_id,)).fetchone()
             return self._decode_zalo_capture(dict(row), include_image=True) if row else None
 
+    def list_data_mining_schedules(self, active_only: bool = False) -> list[dict[str, Any]]:
+        query = "SELECT * FROM data_mining_schedules"
+        if active_only:
+            query += " WHERE is_active = 1"
+        query += " ORDER BY run_time, schedule_id"
+        with self.connect() as connection:
+            rows = connection.execute(query).fetchall()
+            return [self._decode_data_mining_schedule(dict(row)) for row in rows]
+
+    def get_data_mining_schedule(self, schedule_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM data_mining_schedules WHERE schedule_id=?", (schedule_id,)).fetchone()
+            return self._decode_data_mining_schedule(dict(row)) if row else None
+
+    def generate_data_mining_schedule_id(self) -> str:
+        with self.connect() as connection:
+            rows = connection.execute("SELECT schedule_id FROM data_mining_schedules WHERE schedule_id LIKE 'MINE%'").fetchall()
+        max_number = 0
+        for row in rows:
+            suffix = str(row["schedule_id"])[4:]
+            if suffix.isdigit():
+                max_number = max(max_number, int(suffix))
+        return f"MINE{max_number + 1:04d}"
+
+    def save_data_mining_schedule(self, payload: dict[str, Any]) -> None:
+        now = self._now()
+        schedule_id = str(payload["schedule_id"]).strip()
+        parameters = payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {}
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO data_mining_schedules
+                (schedule_id, name, report_url, schedule_type, run_time, weekday, month_day,
+                 storage_link, file_name_template, parameters_json, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(schedule_id) DO UPDATE SET
+                  name=excluded.name,
+                  report_url=excluded.report_url,
+                  schedule_type=excluded.schedule_type,
+                  run_time=excluded.run_time,
+                  weekday=excluded.weekday,
+                  month_day=excluded.month_day,
+                  storage_link=excluded.storage_link,
+                  file_name_template=excluded.file_name_template,
+                  parameters_json=excluded.parameters_json,
+                  is_active=excluded.is_active,
+                  updated_at=excluded.updated_at
+                """,
+                (
+                    schedule_id,
+                    str(payload.get("name", "")).strip(),
+                    str(payload.get("report_url", "")).strip(),
+                    str(payload.get("schedule_type", "Daily")).strip() or "Daily",
+                    str(payload.get("run_time", "07:00")).strip() or "07:00",
+                    str(payload.get("weekday", "")).strip(),
+                    int(payload.get("month_day") or 1),
+                    str(payload.get("storage_link", "")).strip(),
+                    str(payload.get("file_name_template", "")).strip(),
+                    json.dumps(parameters, ensure_ascii=False),
+                    int(bool(payload.get("is_active", True))),
+                    now,
+                    now,
+                ),
+            )
+
+    def delete_data_mining_schedule(self, schedule_id: str) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM data_mining_runs WHERE schedule_id=?", (schedule_id,))
+            connection.execute("DELETE FROM data_mining_schedules WHERE schedule_id=?", (schedule_id,))
+
+    def create_data_mining_run(self, schedule_id: str, parameters: dict[str, Any] | None = None, created_by: str = "") -> dict[str, Any]:
+        now = self._now()
+        run = {
+            "run_id": f"RUN{uuid.uuid4().hex[:16].upper()}",
+            "schedule_id": schedule_id,
+            "status": "running",
+            "message": "",
+            "file_name": "",
+            "file_path": "",
+            "storage_link": "",
+            "storage_status": "",
+            "parameters": parameters if isinstance(parameters, dict) else {},
+            "started_at": now,
+            "finished_at": "",
+            "duration_ms": 0,
+            "created_by": created_by or "",
+        }
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO data_mining_runs
+                (run_id, schedule_id, status, message, file_name, file_path, storage_link,
+                 storage_status, parameters_json, started_at, finished_at, duration_ms, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run["run_id"],
+                    run["schedule_id"],
+                    run["status"],
+                    run["message"],
+                    run["file_name"],
+                    run["file_path"],
+                    run["storage_link"],
+                    run["storage_status"],
+                    json.dumps(run["parameters"], ensure_ascii=False),
+                    run["started_at"],
+                    run["finished_at"],
+                    run["duration_ms"],
+                    run["created_by"],
+                ),
+            )
+        return run
+
+    def finish_data_mining_run(self, run_id: str, result: dict[str, Any]) -> None:
+        now = self._now()
+        with self.connect() as connection:
+            started = connection.execute("SELECT started_at FROM data_mining_runs WHERE run_id=?", (run_id,)).fetchone()
+            duration_ms = int(result.get("duration_ms") or 0)
+            if started and not duration_ms:
+                try:
+                    started_at = datetime.fromisoformat(str(started["started_at"]))
+                    duration_ms = max(0, int((datetime.now(UTC) - started_at).total_seconds() * 1000))
+                except ValueError:
+                    duration_ms = 0
+            connection.execute(
+                """
+                UPDATE data_mining_runs
+                SET status=?, message=?, file_name=?, file_path=?, storage_link=?,
+                    storage_status=?, finished_at=?, duration_ms=?
+                WHERE run_id=?
+                """,
+                (
+                    str(result.get("status") or ("success" if result.get("ok") else "failed"))[:50],
+                    str(result.get("message") or "")[:1000],
+                    str(result.get("file_name") or "")[:255],
+                    str(result.get("file_path") or "")[:1000],
+                    str(result.get("storage_link") or "")[:1000],
+                    str(result.get("storage_status") or "")[:255],
+                    now,
+                    duration_ms,
+                    run_id,
+                ),
+            )
+
+    def mark_data_mining_schedule_run(self, schedule_id: str, run_key: str, ok: bool, result: dict[str, Any]) -> None:
+        now = self._now()
+        status_text = "success" if ok else str(result.get("status") or "failed")
+        error_text = "" if ok else str(result.get("message") or result.get("error") or "")[:500]
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE data_mining_schedules
+                SET last_run_key=?,
+                    last_success_key=CASE WHEN ? THEN ? ELSE last_success_key END,
+                    last_run_at=?,
+                    last_success_at=CASE WHEN ? THEN ? ELSE last_success_at END,
+                    last_status=?,
+                    last_error=?,
+                    last_file_name=CASE WHEN ? THEN ? ELSE last_file_name END,
+                    last_file_path=CASE WHEN ? THEN ? ELSE last_file_path END,
+                    updated_at=?
+                WHERE schedule_id=?
+                """,
+                (
+                    run_key,
+                    int(ok),
+                    run_key,
+                    now,
+                    int(ok),
+                    now,
+                    status_text[:50],
+                    error_text,
+                    int(ok),
+                    str(result.get("file_name") or "")[:255],
+                    int(ok),
+                    str(result.get("file_path") or "")[:1000],
+                    now,
+                    schedule_id,
+                ),
+            )
+
+    def list_data_mining_runs(self, schedule_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+        limit = min(max(int(limit or 50), 1), 200)
+        query = "SELECT * FROM data_mining_runs"
+        params: tuple[Any, ...] = ()
+        if schedule_id:
+            query += " WHERE schedule_id=?"
+            params = (schedule_id,)
+        query += " ORDER BY started_at DESC LIMIT ?"
+        params = (*params, limit)
+        with self.connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+            return [self._decode_data_mining_run(dict(row)) for row in rows]
+
     @staticmethod
     def _decode_connection(row: dict[str, Any]) -> dict[str, Any]:
         row["config"] = json.loads(row.pop("config_json") or "{}")
@@ -1455,6 +1693,58 @@ class AppRepository:
         if include_image:
             payload["image_base64"] = row.get("image_base64") or ""
         return payload
+
+    @staticmethod
+    def _decode_data_mining_schedule(row: dict[str, Any]) -> dict[str, Any]:
+        try:
+            parameters = json.loads(row.get("parameters_json") or "{}")
+        except json.JSONDecodeError:
+            parameters = {}
+        return {
+            "schedule_id": row.get("schedule_id"),
+            "name": row.get("name") or "",
+            "report_url": row.get("report_url") or "",
+            "schedule_type": row.get("schedule_type") or "Daily",
+            "run_time": row.get("run_time") or "07:00",
+            "weekday": row.get("weekday") or "",
+            "month_day": int(row.get("month_day") or 1),
+            "storage_link": row.get("storage_link") or "",
+            "file_name_template": row.get("file_name_template") or "",
+            "parameters": parameters if isinstance(parameters, dict) else {},
+            "is_active": bool(row.get("is_active")),
+            "last_run_key": row.get("last_run_key") or "",
+            "last_success_key": row.get("last_success_key") or "",
+            "last_run_at": row.get("last_run_at") or "",
+            "last_success_at": row.get("last_success_at") or "",
+            "last_status": row.get("last_status") or "",
+            "last_error": row.get("last_error") or "",
+            "last_file_name": row.get("last_file_name") or "",
+            "last_file_path": row.get("last_file_path") or "",
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        }
+
+    @staticmethod
+    def _decode_data_mining_run(row: dict[str, Any]) -> dict[str, Any]:
+        try:
+            parameters = json.loads(row.get("parameters_json") or "{}")
+        except json.JSONDecodeError:
+            parameters = {}
+        return {
+            "run_id": row.get("run_id"),
+            "schedule_id": row.get("schedule_id"),
+            "status": row.get("status") or "",
+            "message": row.get("message") or "",
+            "file_name": row.get("file_name") or "",
+            "file_path": row.get("file_path") or "",
+            "storage_link": row.get("storage_link") or "",
+            "storage_status": row.get("storage_status") or "",
+            "parameters": parameters if isinstance(parameters, dict) else {},
+            "started_at": row.get("started_at") or "",
+            "finished_at": row.get("finished_at") or "",
+            "duration_ms": int(row.get("duration_ms") or 0),
+            "created_by": row.get("created_by") or "",
+        }
 
     @staticmethod
     def _now() -> str:

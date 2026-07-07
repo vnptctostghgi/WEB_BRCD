@@ -587,6 +587,110 @@ def test_zalo_auto_message_scheduler_sends_due_photo(monkeypatch) -> None:
         get_settings.cache_clear()
 
 
+def test_admin_can_manage_data_mining_schedules_and_run_now(monkeypatch) -> None:
+    calls = []
+
+    def fake_run_data_mining_schedule(repository, settings, schedule, **kwargs):
+        calls.append({"schedule_id": schedule["schedule_id"], "otp": kwargs.get("otp"), "created_by": kwargs.get("created_by")})
+        run = repository.create_data_mining_run(schedule["schedule_id"], schedule.get("parameters"), created_by=kwargs.get("created_by") or "")
+        result = {
+            "ok": True,
+            "status": "success",
+            "message": "Da tai bao cao OneBSS.",
+            "file_name": "bien_dong_0700_08072026.xlsx",
+            "file_path": "data/data_mining_downloads/bien_dong_0700_08072026.xlsx",
+            "storage_status": "saved_local",
+        }
+        repository.finish_data_mining_run(run["run_id"], result)
+        return {**result, "run_id": run["run_id"], "schedule_id": schedule["schedule_id"]}
+
+    monkeypatch.setattr(routes, "run_data_mining_schedule", fake_run_data_mining_schedule)
+    with TestClient(app) as client:
+        login(client)
+        report_url = "https://onebss.vnpt.vn/#/report/bi?path=PHATTRIENTHUEBAO%2FBIENDONGPHATTRIENTHUEBAO%2FRP_BSS_28429&name=Test"
+        created = client.post(
+            "/api/admin/data-mining/schedules",
+            json={
+                "name": "Bien dong thue bao",
+                "report_url": report_url,
+                "schedule_type": "Daily",
+                "run_time": "07:00",
+                "storage_link": "data/test_downloads",
+                "file_name_template": "bien_dong",
+                "parameters": {"P_TUNGAY": "01/07/2026", "P_DENNGAY": "08/07/2026"},
+                "is_active": True,
+            },
+        )
+        assert created.status_code == 200
+        schedule = created.json()["schedule"]
+        assert schedule["schedule_id"].startswith("MINE")
+        assert schedule["parameters"]["P_TUNGAY"] == "01/07/2026"
+
+        listed = client.get("/api/admin/data-mining/schedules")
+        assert listed.status_code == 200
+        assert any(item["schedule_id"] == schedule["schedule_id"] for item in listed.json()["schedules"])
+
+        run_now = client.post(
+            f"/api/admin/data-mining/schedules/{schedule['schedule_id']}/run-now",
+            json={"otp": "123456", "allow_device_registration": True},
+        )
+        assert run_now.status_code == 200
+        assert run_now.json()["ok"] is True
+        assert calls[-1]["otp"] == "123456"
+
+        runs = client.get(f"/api/admin/data-mining/runs?schedule_id={schedule['schedule_id']}").json()["runs"]
+        assert len(runs) == 1
+        assert runs[0]["file_name"] == "bien_dong_0700_08072026.xlsx"
+
+        assert client.delete(f"/api/admin/data-mining/schedules/{schedule['schedule_id']}").status_code == 200
+        assert client.get(f"/api/admin/data-mining/runs?schedule_id={schedule['schedule_id']}").json()["runs"] == []
+
+
+def test_data_mining_scheduler_runs_due_schedule_once(monkeypatch) -> None:
+    from app.application.task_scheduler import DataMiningScheduler, LOCAL_TIMEZONE
+
+    calls = []
+
+    def fake_run_data_mining_schedule(repository, settings, schedule, **kwargs):
+        calls.append((schedule["schedule_id"], kwargs.get("interactive")))
+        return {
+            "ok": True,
+            "status": "success",
+            "message": "Da tai bao cao OneBSS.",
+            "file_name": "scheduler_0711_08072026.xlsx",
+            "file_path": "data/data_mining_downloads/scheduler_0711_08072026.xlsx",
+        }
+
+    monkeypatch.setattr("app.application.task_scheduler.run_data_mining_schedule", fake_run_data_mining_schedule)
+    with TestClient(app) as client:
+        login(client)
+        created = client.post(
+            "/api/admin/data-mining/schedules",
+            json={
+                "name": "Scheduler OneBSS",
+                "report_url": "https://onebss.vnpt.vn/#/report/bi?path=PHATTRIENTHUEBAO%2FBIENDONGPHATTRIENTHUEBAO%2FRP_BSS_28429&name=Test",
+                "schedule_type": "Daily",
+                "run_time": "07:11",
+                "file_name_template": "scheduler",
+                "parameters": {},
+                "is_active": True,
+            },
+        )
+        assert created.status_code == 200
+        schedule_id = created.json()["schedule"]["schedule_id"]
+
+        scheduler = DataMiningScheduler()
+        scheduler.configure(routes.build_app_repository(), get_settings())
+        now = datetime(2026, 7, 8, 7, 11, tzinfo=LOCAL_TIMEZONE)
+        assert scheduler.check_due_schedules(now) == 1
+        assert calls == [(schedule_id, False)]
+        assert scheduler.check_due_schedules(now) == 0
+
+        refreshed = routes.build_app_repository().get_data_mining_schedule(schedule_id)
+        assert refreshed["last_status"] == "success"
+        assert refreshed["last_file_name"] == "scheduler_0711_08072026.xlsx"
+
+
 def test_admin_can_manage_work_tasks() -> None:
     with TestClient(app) as client:
         login(client)

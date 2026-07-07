@@ -375,6 +375,25 @@
           </section>
           <section class="data-card mt-4">
             <div class="section-heading">
+              <div><p class="eyebrow">Đào dữ liệu OneBSS</p><h2>Lịch lấy báo cáo tự động</h2><p>Cấu hình link báo cáo, tham số lọc JSON, thời gian lấy và nơi lưu file Excel.</p></div>
+              <div class="action-group"><button class="btn-primary" id="add-data-mining-schedule" type="button">Thêm lịch</button><button class="btn-secondary" id="refresh-data-mining" type="button">Làm mới</button></div>
+            </div>
+            <div id="data-mining-result" class="result hidden mb-4"></div>
+            <div class="table-scroll mb-4">
+              <table class="compact-admin-table inline-admin-table">
+                <thead><tr><th>Nội dung</th><th>Lịch lấy</th><th>Lưu file</th><th>Tham số</th><th>Trạng thái</th><th>Lần chạy gần nhất</th><th class="table-action-column">Chức năng</th></tr></thead>
+                <tbody id="data-mining-schedules-table"></tbody>
+              </table>
+            </div>
+            <div class="table-scroll">
+              <table class="compact-admin-table inline-admin-table">
+                <thead><tr><th>Thời gian</th><th>Lịch</th><th>Trạng thái</th><th>File</th><th>Thông báo</th></tr></thead>
+                <tbody id="data-mining-runs-table"></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="data-card mt-4">
+            <div class="section-heading">
               <div><p class="eyebrow">Zalo Bot</p><h2>Nhật ký tin nhắn</h2><p>Ghi lại tin nhắn bot nhận được qua webhook và tin nhắn bot gửi phản hồi.</p></div>
               <div class="action-group"><button class="btn-secondary" id="zalo-send-test-message" type="button"><span class="button-label">Gửi test Zalo</span><span class="spinner"></span></button><button class="btn-secondary" id="refresh-zalo-message-logs" type="button">Làm mới</button></div>
             </div>
@@ -422,6 +441,7 @@
     <dialog id="connection-dialog"><form class="dialog-form" id="connection-form"><div class="dialog-heading"><div><p class="eyebrow">Quản trị kết nối</p><h2>Cấu hình kết nối</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mã kết nối<input class="form-control" name="code" readonly /></label><label>Tên kết nối<input class="form-control" name="name" required /></label><label>Loại kết nối<select class="form-control" name="connection_type"><option value="internal_api">API dữ liệu nội bộ</option><option value="supabase">Supabase REST</option><option value="ftp">FTP/SFTP</option><option value="drive">Drive/API</option><option value="telegram">Telegram Bot</option><option value="zalo">Zalo Bot</option></select></label><label>Mô tả<textarea class="form-control min-h-20" name="description" rows="2"></textarea></label><label>Cấu hình JSON<textarea class="form-control min-h-32 font-mono text-xs" name="config_json" rows="7" placeholder='{"url":"http://10.92.17.88:8000/api/du-lieu-web"}'></textarea><small>Không nhập mật khẩu thật tại đây. Mật khẩu/secret nên để trong biến môi trường.</small></label><label class="checkbox-label"><input type="checkbox" name="is_active" /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu kết nối</button></form></dialog>
 
     <dialog id="edit-user-dialog"><form class="dialog-form" id="edit-user-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Cập nhật</p><h2>Chỉnh sửa người dùng</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Họ và tên<input class="form-control" name="full_name" required /></label><label>Vai trò<select class="form-control" name="role"><option value="viewer">Người xem</option><option value="admin">Quản trị viên</option></select></label><label class="checkbox-label"><input type="checkbox" name="is_active" /> Tài khoản đang hoạt động</label><label>Mật khẩu đặt lại<input class="form-control" type="password" name="password" minlength="10" placeholder="Để trống nếu không đổi" /></label><fieldset><legend>Cây quyền chức năng</legend><div id="permission-tree" class="permission-tree"></div></fieldset><div class="result hidden" role="alert"></div><button class="btn-primary" type="submit">Lưu thay đổi</button></form></dialog>
+    <dialog id="data-mining-dialog"><form class="dialog-form" id="data-mining-form"><div class="dialog-heading"><div><p class="eyebrow">Đào dữ liệu OneBSS</p><h2>Cấu hình lịch lấy báo cáo</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mã lịch<input class="form-control" name="schedule_id" readonly placeholder="Tự động tạo khi lưu" /></label><label>Nội dung<input class="form-control" name="name" required placeholder="Ví dụ: Biến động phát triển thuê bao" /></label><label>Link báo cáo<textarea class="form-control min-h-20" name="report_url" rows="2" required placeholder="https://onebss.vnpt.vn/#/report/bi?..."></textarea></label><label>Loại lịch<select class="form-control" name="schedule_type"><option value="Daily" selected>Hàng ngày</option><option value="Weekly">Hàng tuần</option><option value="Monthly">Hàng tháng</option></select></label><label>Giờ lấy<input class="form-control" name="run_time" type="time" value="07:00" required /></label><label>Thứ trong tuần<input class="form-control" name="weekday" placeholder="T2, T3, thứ 2, CN" /></label><label>Ngày trong tháng<input class="form-control" name="month_day" type="number" min="1" max="31" value="1" /></label><label>Link lưu dữ liệu<input class="form-control" name="storage_link" placeholder="Google Drive link hoặc thư mục nội bộ" /></label><label>Cấu trúc tên<input class="form-control" name="file_name_template" placeholder="Tên file, hệ thống tự thêm hhmm_ddMMyyyy" /></label><label>Tham số lọc JSON<textarea class="form-control min-h-32 font-mono text-xs" name="parameters_json" rows="7" placeholder='{"P_TUNGAY":"01/07/2026","P_DENNGAY":"08/07/2026"}'></textarea></label><label class="checkbox-label"><input type="checkbox" name="is_active" checked /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" id="save-data-mining-button" type="button">Lưu lịch đào dữ liệu</button></form></dialog>
     {% endif %}
     <dialog id="sql-report-dialog">
       <form class="dialog-form" id="sql-report-form">
@@ -442,6 +462,6 @@
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script src="/static/app.js?v=96"></script>
+    <script src="/static/app.js?v=97"></script>
   </body>
 </html>
