@@ -4207,7 +4207,10 @@ function renderDataMiningRuns() {
 function renderDataMiningRunRow(run) {
   const startedAt = run.started_at ? new Date(run.started_at).toLocaleString("vi-VN") : "-";
   const ok = run.status === "success";
-  const file = run.file_path ? `<code>${escapeHtml(run.file_name || run.file_path)}</code><small class="cell-note">${escapeHtml(run.file_path)}</small>` : "-";
+  const storageLink = run.storage_link && /^https?:\/\//.test(run.storage_link)
+    ? `<small class="cell-note"><a href="${escapeHtml(run.storage_link)}" target="_blank" rel="noopener">Mở file lưu trữ</a></small>`
+    : "";
+  const file = run.file_path ? `<code>${escapeHtml(run.file_name || run.file_path)}</code><small class="cell-note">${escapeHtml(run.file_path)}</small>${storageLink}` : (storageLink || "-");
   return `
     <tr>
       <td>${escapeHtml(startedAt)}</td>

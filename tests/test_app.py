@@ -646,6 +646,29 @@ def test_admin_can_manage_data_mining_schedules_and_run_now(monkeypatch) -> None
         assert client.get(f"/api/admin/data-mining/runs?schedule_id={schedule['schedule_id']}").json()["runs"] == []
 
 
+def test_google_drive_folder_link_and_storage_upload(monkeypatch, tmp_path) -> None:
+    from app.application import onebss_data_mining_service as service
+    from app.application.google_drive_service import extract_google_drive_folder_id
+
+    uploaded_calls = []
+
+    def fake_upload_file_to_google_drive(settings, local_path, file_name, folder_id):
+        uploaded_calls.append((str(local_path), file_name, folder_id))
+        return {"file_id": "drive-file-001", "web_view_link": "https://drive.google.com/file/d/drive-file-001/view"}
+
+    local_file = tmp_path / "report.xlsx"
+    local_file.write_bytes(b"excel")
+    monkeypatch.setattr(service, "upload_file_to_google_drive", fake_upload_file_to_google_drive)
+
+    folder_url = "https://drive.google.com/drive/folders/1TJqLjq8OpZ_x_D-djxRk0w4HacUh4HmS"
+    assert extract_google_drive_folder_id(folder_url) == "1TJqLjq8OpZ_x_D-djxRk0w4HacUh4HmS"
+    result = service.save_downloaded_file(get_settings(), local_file, folder_url)
+    assert result["ok"] is True
+    assert result["storage_link"] == "https://drive.google.com/file/d/drive-file-001/view"
+    assert result["storage_status"] == "uploaded_google_drive:drive-file-001"
+    assert uploaded_calls == [(str(local_file), "report.xlsx", "1TJqLjq8OpZ_x_D-djxRk0w4HacUh4HmS")]
+
+
 def test_data_mining_scheduler_runs_due_schedule_once(monkeypatch) -> None:
     from app.application.task_scheduler import DataMiningScheduler, LOCAL_TIMEZONE
 

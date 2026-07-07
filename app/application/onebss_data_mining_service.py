@@ -10,6 +10,12 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.application.google_drive_service import (
+    GoogleDriveConfigurationError,
+    extract_google_drive_folder_id,
+    google_drive_folder_id,
+    upload_file_to_google_drive,
+)
 from app.application.zalo_auto_message_service import install_playwright_chromium, playwright_needs_browser_install
 from app.settings import Settings
 
@@ -156,16 +162,17 @@ class OneBssReportDownloader:
                         )
                         target_file.parent.mkdir(parents=True, exist_ok=True)
                         download.save_as(str(target_file))
-                        storage_status = copy_to_storage_link(target_file, str(schedule.get("storage_link") or ""))
+                        storage_result = save_downloaded_file(self.settings, target_file, str(schedule.get("storage_link") or ""))
+                        ok = bool(storage_result.get("ok", True))
                         context.storage_state(path=str(ONEBSS_STATE_PATH))
                         return {
-                            "ok": True,
-                            "status": "success",
-                            "message": "Da tai bao cao OneBSS.",
+                            "ok": ok,
+                            "status": "success" if ok else str(storage_result.get("status") or "storage_failed"),
+                            "message": storage_result.get("message") or "Da tai bao cao OneBSS.",
                             "file_name": target_file.name,
                             "file_path": str(target_file),
-                            "storage_link": str(schedule.get("storage_link") or ""),
-                            "storage_status": storage_status,
+                            "storage_link": storage_result.get("storage_link") or str(schedule.get("storage_link") or ""),
+                            "storage_status": storage_result.get("storage_status") or "",
                             "report_id": export_info.get("report_id") or "",
                             "report_title": export_info.get("title") or "",
                             "parameters": export_info.get("params") or parameters,
@@ -334,6 +341,43 @@ def build_target_file_path(
     filename = f"{safe_filename_part(stem)}_{suffix}{extension}"
     base_dir = Path(str(getattr(settings, "data_mining_download_dir", "data/data_mining_downloads") or "data/data_mining_downloads"))
     return (base_dir / filename).resolve()
+
+
+def save_downloaded_file(settings: Settings, source_file: Path, storage_link: str) -> dict[str, Any]:
+    target = str(storage_link or "").strip()
+    folder_id = google_drive_folder_id(settings, target)
+    if folder_id and (extract_google_drive_folder_id(target) or str(getattr(settings, "google_drive_folder_id", "") or "").strip()):
+        try:
+            uploaded = upload_file_to_google_drive(settings, source_file, source_file.name, folder_id)
+        except GoogleDriveConfigurationError as error:
+            return {
+                "ok": False,
+                "status": "google_drive_not_configured",
+                "message": f"Da tai bao cao OneBSS va luu local, nhung Google Drive chua cau hinh dung: {error}",
+                "storage_link": target,
+                "storage_status": "google_drive_not_configured",
+            }
+        except Exception as error:
+            logger.exception("Cannot upload %s to Google Drive folder %s", source_file, folder_id)
+            return {
+                "ok": False,
+                "status": "google_drive_upload_failed",
+                "message": f"Da tai bao cao OneBSS va luu local, nhung upload Google Drive loi: {str(error)[:300]}",
+                "storage_link": target,
+                "storage_status": "google_drive_upload_failed",
+            }
+        return {
+            "ok": True,
+            "message": "Da tai bao cao OneBSS va upload Google Drive.",
+            "storage_link": uploaded.get("web_view_link") or uploaded.get("web_content_link") or target,
+            "storage_status": f"uploaded_google_drive:{uploaded.get('file_id') or ''}",
+        }
+    return {
+        "ok": True,
+        "message": "Da tai bao cao OneBSS.",
+        "storage_link": target,
+        "storage_status": copy_to_storage_link(source_file, target),
+    }
 
 
 def copy_to_storage_link(source_file: Path, storage_link: str) -> str:

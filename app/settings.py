@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     onebss_password: SecretStr = Field(default=SecretStr(""))
     onebss_download_timeout_seconds: int = 180
     data_mining_download_dir: str = "data/data_mining_downloads"
+    google_drive_service_account_json_base64: SecretStr = Field(default=SecretStr(""))
+    google_drive_service_account_json: SecretStr = Field(default=SecretStr(""))
+    google_drive_service_account_file: str = ""
+    google_drive_folder_id: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
 
