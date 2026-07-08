@@ -591,7 +591,12 @@ def test_admin_can_manage_data_mining_schedules_and_run_now(monkeypatch) -> None
     calls = []
 
     def fake_run_data_mining_schedule(repository, settings, schedule, **kwargs):
-        calls.append({"schedule_id": schedule["schedule_id"], "otp": kwargs.get("otp"), "created_by": kwargs.get("created_by")})
+        calls.append({
+            "schedule_id": schedule["schedule_id"],
+            "otp": kwargs.get("otp"),
+            "created_by": kwargs.get("created_by"),
+            "parameter_overrides": kwargs.get("parameter_overrides"),
+        })
         run = repository.create_data_mining_run(schedule["schedule_id"], schedule.get("parameters"), created_by=kwargs.get("created_by") or "")
         result = {
             "ok": True,
@@ -632,11 +637,12 @@ def test_admin_can_manage_data_mining_schedules_and_run_now(monkeypatch) -> None
 
         run_now = client.post(
             f"/api/admin/data-mining/schedules/{schedule['schedule_id']}/run-now",
-            json={"otp": "123456", "allow_device_registration": True},
+            json={"otp": "123456", "allow_device_registration": True, "parameters": {"P_DENNGAY": "09/07/2026"}},
         )
         assert run_now.status_code == 200
         assert run_now.json()["ok"] is True
         assert calls[-1]["otp"] == "123456"
+        assert calls[-1]["parameter_overrides"] == {"P_DENNGAY": "09/07/2026"}
 
         runs = client.get(f"/api/admin/data-mining/runs?schedule_id={schedule['schedule_id']}").json()["runs"]
         assert len(runs) == 1
@@ -667,6 +673,78 @@ def test_google_drive_folder_link_and_storage_upload(monkeypatch, tmp_path) -> N
     assert result["storage_link"] == "https://drive.google.com/file/d/drive-file-001/view"
     assert result["storage_status"] == "uploaded_google_drive:drive-file-001"
     assert uploaded_calls == [(str(local_file), "report.xlsx", "1TJqLjq8OpZ_x_D-djxRk0w4HacUh4HmS")]
+
+
+def test_data_mining_dynamic_date_parameters() -> None:
+    from app.application.onebss_data_mining_service import LOCAL_TIMEZONE, resolve_dynamic_parameters
+
+    now = datetime(2026, 7, 8, 9, 30, tzinfo=LOCAL_TIMEZONE)
+    params = resolve_dynamic_parameters(
+        {
+            "P_TUNGAY": "{{month_start}}",
+            "P_DENNGAY": "{{today}}",
+            "P_HOMQUA": "{{yesterday}}",
+            "P_CUOITHANG": "{{month_end}}",
+            "P_OFFSET": "{{today-7d}}",
+            "P_STATIC": "13",
+        },
+        now,
+    )
+    assert params["P_TUNGAY"] == "01/07/2026"
+    assert params["P_DENNGAY"] == "08/07/2026"
+    assert params["P_HOMQUA"] == "07/07/2026"
+    assert params["P_CUOITHANG"] == "31/07/2026"
+    assert params["P_OFFSET"] == "01/07/2026"
+    assert params["P_STATIC"] == "13"
+
+
+def test_data_mining_run_resolves_parameters_before_download(monkeypatch) -> None:
+    from app.application import onebss_data_mining_service as service
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 7, 8, 9, 30, tzinfo=tz)
+
+    class FakeRepository:
+        def __init__(self):
+            self.created_parameters = None
+            self.finished_result = None
+
+        def create_data_mining_run(self, schedule_id, parameters, created_by=""):
+            self.created_parameters = parameters
+            return {"run_id": "RUN001", "schedule_id": schedule_id, "parameters": parameters}
+
+        def finish_data_mining_run(self, run_id, result):
+            self.finished_result = result
+
+    class FakeDownloader:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def download_report(self, schedule, **kwargs):
+            return {
+                "ok": True,
+                "status": "success",
+                "message": "ok",
+                "parameters": schedule["parameters"],
+            }
+
+    monkeypatch.setattr(service, "datetime", FixedDateTime)
+    monkeypatch.setattr(service, "OneBssReportDownloader", FakeDownloader)
+    repository = FakeRepository()
+    result = service.run_data_mining_schedule(
+        repository,
+        get_settings(),
+        {
+            "schedule_id": "MINE0001",
+            "parameters": {"P_TUNGAY": "{{month_start}}", "P_DENNGAY": "{{today}}"},
+        },
+        parameter_overrides={"P_DENNGAY": "{{today-1d}}"},
+        created_by="admin",
+    )
+    assert repository.created_parameters == {"P_TUNGAY": "01/07/2026", "P_DENNGAY": "07/07/2026"}
+    assert result["parameters"] == repository.created_parameters
 
 
 def test_data_mining_scheduler_runs_due_schedule_once(monkeypatch) -> None:

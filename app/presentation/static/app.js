@@ -4276,13 +4276,24 @@ async function saveDataMiningSchedule(event) {
 }
 
 async function runDataMiningScheduleNow(scheduleId, button) {
+  const schedule = dataMiningSchedules.find((item) => item.schedule_id === scheduleId);
   const otp = prompt("Nhập OTP OneBSS nếu đang có mã. Có thể để trống nếu phiên OneBSS còn hiệu lực.");
   if (otp === null) return;
+  const defaultParameters = JSON.stringify(schedule?.parameters || {}, null, 2);
+  const parametersText = prompt("Nhập JSON tham số cho lần chạy này. Để trống nếu muốn dùng tham số trong lịch.", defaultParameters);
+  if (parametersText === null) return;
+  let parameters = {};
+  try {
+    parameters = parametersText.trim() ? JSON.parse(parametersText) : {};
+  } catch {
+    showMessage($("#data-mining-result"), "Tham số JSON chạy thử chưa đúng định dạng.", "error");
+    return;
+  }
   setButtonLoading(button, true);
   try {
     const response = await api(`/api/admin/data-mining/schedules/${encodeURIComponent(scheduleId)}/run-now`, {
       method: "POST",
-      body: JSON.stringify({ otp, allow_device_registration: true }),
+      body: JSON.stringify({ otp, allow_device_registration: true, parameters }),
     });
     const message = response.result?.message || (response.ok ? "Đã chạy lịch đào dữ liệu." : "Chưa chạy xong lịch đào dữ liệu.");
     showMessage($("#data-mining-result"), message, response.ok ? "success" : "error");

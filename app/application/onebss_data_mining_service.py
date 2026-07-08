@@ -30,6 +30,7 @@ except ZoneInfoNotFoundError:
 ONEBSS_HOST = "onebss.vnpt.vn"
 ONEBSS_STATE_PATH = Path("data/onebss_browser_state.json")
 FILENAME_UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
+DATE_TOKEN_PATTERN = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)(?:\s*([+-])\s*(\d+)\s*d)?\s*\}\}")
 
 
 class OneBssDownloadError(RuntimeError):
@@ -45,16 +46,18 @@ def run_data_mining_schedule(
     created_by: str = "",
     allow_device_registration: bool = False,
     interactive: bool = False,
+    parameter_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    schedule_for_run = with_resolved_schedule_parameters(schedule, parameter_overrides)
     run = repository.create_data_mining_run(
-        str(schedule.get("schedule_id") or ""),
-        schedule.get("parameters") if isinstance(schedule.get("parameters"), dict) else {},
+        str(schedule_for_run.get("schedule_id") or ""),
+        schedule_for_run.get("parameters") if isinstance(schedule_for_run.get("parameters"), dict) else {},
         created_by=created_by,
     )
     started = time.monotonic()
     try:
         result = OneBssReportDownloader(settings).download_report(
-            schedule,
+            schedule_for_run,
             otp=otp,
             allow_device_registration=allow_device_registration,
             interactive=interactive,
@@ -68,7 +71,7 @@ def run_data_mining_schedule(
         }
     result["duration_ms"] = int((time.monotonic() - started) * 1000)
     repository.finish_data_mining_run(str(run.get("run_id") or ""), result)
-    return {**result, "run_id": run.get("run_id"), "schedule_id": schedule.get("schedule_id")}
+    return {**result, "run_id": run.get("run_id"), "schedule_id": schedule_for_run.get("schedule_id")}
 
 
 class OneBssReportDownloader:
@@ -341,6 +344,61 @@ def build_target_file_path(
     filename = f"{safe_filename_part(stem)}_{suffix}{extension}"
     base_dir = Path(str(getattr(settings, "data_mining_download_dir", "data/data_mining_downloads") or "data/data_mining_downloads"))
     return (base_dir / filename).resolve()
+
+
+def with_resolved_schedule_parameters(schedule: dict[str, Any], overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+    parameters = schedule.get("parameters") if isinstance(schedule.get("parameters"), dict) else {}
+    merged_parameters = {**parameters}
+    if isinstance(overrides, dict):
+        merged_parameters.update(overrides)
+    return {**schedule, "parameters": resolve_dynamic_parameters(merged_parameters)}
+
+
+def resolve_dynamic_parameters(parameters: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
+    current = now or datetime.now(LOCAL_TIMEZONE)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=LOCAL_TIMEZONE)
+    else:
+        current = current.astimezone(LOCAL_TIMEZONE)
+    return {key: resolve_dynamic_parameter_value(value, current) for key, value in parameters.items()}
+
+
+def resolve_dynamic_parameter_value(value: Any, current: datetime) -> Any:
+    if isinstance(value, str):
+        return DATE_TOKEN_PATTERN.sub(lambda match: format_date_token(match, current), value)
+    if isinstance(value, list):
+        return [resolve_dynamic_parameter_value(item, current) for item in value]
+    if isinstance(value, dict):
+        return {key: resolve_dynamic_parameter_value(item, current) for key, item in value.items()}
+    return value
+
+
+def format_date_token(match: re.Match[str], current: datetime) -> str:
+    token = match.group(1).lower()
+    day = current.date()
+    if token == "yesterday":
+        day = day - timedelta(days=1)
+    elif token == "tomorrow":
+        day = day + timedelta(days=1)
+    elif token == "month_start":
+        day = day.replace(day=1)
+    elif token == "month_end":
+        next_month = day.replace(day=28) + timedelta(days=4)
+        day = next_month.replace(day=1) - timedelta(days=1)
+    elif token == "last_month_start":
+        first_day = day.replace(day=1)
+        day = (first_day - timedelta(days=1)).replace(day=1)
+    elif token == "last_month_end":
+        day = day.replace(day=1) - timedelta(days=1)
+    elif token != "today":
+        return match.group(0)
+    sign = match.group(2)
+    amount = int(match.group(3) or 0)
+    if sign == "+":
+        day = day + timedelta(days=amount)
+    elif sign == "-":
+        day = day - timedelta(days=amount)
+    return day.strftime("%d/%m/%Y")
 
 
 def save_downloaded_file(settings: Settings, source_file: Path, storage_link: str) -> dict[str, Any]:

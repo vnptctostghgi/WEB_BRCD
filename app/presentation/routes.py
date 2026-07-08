@@ -340,6 +340,7 @@ class DataMiningSchedulePayload(BaseModel):
 class DataMiningRunPayload(BaseModel):
     otp: str = ""
     allow_device_registration: bool = True
+    parameters: dict[str, Any] = Field(default_factory=dict)
 
 
 class PageCapturePayload(BaseModel):
@@ -1989,6 +1990,7 @@ def run_data_mining_schedule_now(request: Request, schedule_id: str, payload: Da
             created_by=actor["username"],
             allow_device_registration=payload.allow_device_registration,
             interactive=True,
+            parameter_overrides=payload.parameters if isinstance(payload.parameters, dict) else {},
         )
         run_key = f"manual:{result.get('run_id') or datetime.now().isoformat(timespec='seconds')}"
         repository.mark_data_mining_schedule_run(schedule_id, run_key, bool(result.get("ok")), result)
