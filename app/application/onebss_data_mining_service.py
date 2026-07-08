@@ -202,6 +202,7 @@ class OneBssReportDownloader:
         self._fill_first(page, ["input[name='password']", "input[type='password']"], password)
         self._click_button_text(page, ["Đăng nhập", "Dang nhap", "Login"])
         page.wait_for_load_state("networkidle", timeout=90000)
+        page.wait_for_timeout(1000)
 
         if self._page_contains(page, ["mã OTP", "ma OTP", "OTP"]):
             if not otp:
@@ -213,6 +214,7 @@ class OneBssReportDownloader:
             self._fill_otp(page, otp)
             self._click_button_text(page, ["Xác nhận", "Xac nhan", "Gửi yêu cầu", "Gui yeu cau", "Đăng nhập", "Dang nhap"])
             page.wait_for_load_state("networkidle", timeout=90000)
+            page.wait_for_timeout(1000)
 
         if self._page_contains(page, ["ĐĂNG KÝ THIẾT BỊ", "DANG KY THIET BI", "đăng ký thiết bị", "dang ky thiet bi"]):
             if not allow_device_registration:
@@ -294,6 +296,10 @@ class OneBssReportDownloader:
         button = page.locator("button[type='submit']")
         if button.count():
             button.first.click(timeout=15000)
+            return True
+        visible_buttons = page.locator("button:visible")
+        if visible_buttons.count() == 1:
+            visible_buttons.first.click(timeout=15000)
             return True
         return False
 
