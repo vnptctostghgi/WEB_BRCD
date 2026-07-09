@@ -5087,7 +5087,7 @@ function renderOneBssRunParameters() {
   const jsonTemplate = JSON.stringify(template, null, 2);
   container.innerHTML = `
     ${variables.length ? `<div class="compact-code-cell">${renderCompactCode(variables.join(", "))}</div>` : ""}
-    <label>Tham số lọc JSON<textarea class="form-control onebss-param-json" rows="7" placeholder='{"P_TUNGAY":"{{month_start}}","P_DENNGAY":"{{today}}"}'>${escapeHtml(jsonTemplate === "{}" ? "" : jsonTemplate)}</textarea></label>
+    <label>Tham số lọc JSON<textarea class="form-control onebss-param-json" rows="7" placeholder='{"P_PHANVUNG_ID":{"$each":["13","14","15"]},"P_TUNGAY":"{{month_start}}","P_DENNGAY":"{{today}}","$merge_excel":{"sheet":"DATA","source_column":"P_PHANVUNG_ID"}}'>${escapeHtml(jsonTemplate === "{}" ? "" : jsonTemplate)}</textarea></label>
   `;
 }
 

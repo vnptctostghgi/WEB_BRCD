@@ -7,6 +7,8 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from itertools import product
+from pathlib import Path
 from typing import Any
 
 from app.application.onebss_data_mining_service import (
@@ -79,6 +81,21 @@ class PendingOneBssSession:
     parameters: dict[str, Any]
     created_by: str
     created_at: float
+
+
+@dataclass
+class OneBssParameterRun:
+    parameters: dict[str, Any]
+    source_values: dict[str, Any]
+
+
+@dataclass
+class OneBssDownloadedFile:
+    file_path: Path
+    suggested_filename: str
+    export_info: dict[str, Any]
+    parameters: dict[str, Any]
+    source_values: dict[str, Any]
 
 
 PENDING_ONEBSS_SESSIONS: dict[str, PendingOneBssSession] = {}
@@ -244,6 +261,110 @@ def finish_onebss_report_download(
 ) -> dict[str, Any]:
     started = time.monotonic()
     report_url = normalize_onebss_report_url(report.get("report_url"))
+    schedule_like = {
+        "report_url": report_url,
+        "storage_link": report.get("storage_link") or "",
+        "file_name_template": report.get("ten_bao_cao") or report.get("ma_bao_cao") or "",
+    }
+    parameter_runs, merge_config, each_keys = build_onebss_parameter_runs(parameters)
+    downloaded_files: list[OneBssDownloadedFile] = []
+    temporary_files: list[Path] = []
+    try:
+        if len(parameter_runs) == 1:
+            downloaded = download_onebss_report_file(
+                settings,
+                helper,
+                page,
+                report,
+                parameter_runs[0].parameters,
+                source_values=parameter_runs[0].source_values,
+            )
+            downloaded_files.append(downloaded)
+            target_file = downloaded.file_path
+            storage_result = save_downloaded_file(settings, target_file, str(report.get("storage_link") or ""))
+            context.storage_state(path=str(ONEBSS_STATE_PATH))
+            ok = bool(storage_result.get("ok", True))
+            export_info = downloaded.export_info
+            return {
+                "ok": ok,
+                "status": "success" if ok else str(storage_result.get("status") or "storage_failed"),
+                "message": storage_result.get("message") or "Da tai bao cao OneBSS.",
+                "file_name": target_file.name,
+                "file_path": str(target_file),
+                "storage_link": storage_result.get("storage_link") or str(report.get("storage_link") or ""),
+                "storage_status": storage_result.get("storage_status") or "",
+                "report_id": export_info.get("report_id") or "",
+                "report_title": export_info.get("title") or report.get("ten_bao_cao") or "",
+                "parameters": export_info.get("params") or parameter_runs[0].parameters,
+                "duration_ms": int((time.monotonic() - started) * 1000),
+                "finished_at": datetime.now(LOCAL_TIMEZONE).isoformat(timespec="seconds"),
+            }
+
+        for index, parameter_run in enumerate(parameter_runs, start=1):
+            target_file = build_onebss_temp_file_path(settings, index)
+            temporary_files.append(target_file)
+            downloaded_files.append(
+                download_onebss_report_file(
+                    settings,
+                    helper,
+                    page,
+                    report,
+                    parameter_run.parameters,
+                    target_file=target_file,
+                    source_values=parameter_run.source_values,
+                )
+            )
+
+        first_export = downloaded_files[0].export_info if downloaded_files else {}
+        target_file = build_target_file_path(
+            settings,
+            schedule_like,
+            suggested_filename=merged_excel_suggested_filename(downloaded_files[0].suggested_filename if downloaded_files else ".xlsx"),
+            report_title=str(first_export.get("title") or report.get("ten_bao_cao") or ""),
+        )
+        merge_onebss_excel_files(downloaded_files, target_file, merge_config, each_keys)
+        storage_result = save_downloaded_file(settings, target_file, str(report.get("storage_link") or ""))
+        context.storage_state(path=str(ONEBSS_STATE_PATH))
+        ok = bool(storage_result.get("ok", True))
+        status = "success" if ok else str(storage_result.get("status") or "storage_failed")
+        storage_message = storage_result.get("message") or "Da tai bao cao OneBSS."
+        merged_message = f"Da tai va gop {len(downloaded_files)} file OneBSS thanh 1 file."
+        message = f"{merged_message} {storage_message}" if ok else storage_message
+        return {
+            "ok": ok,
+            "status": status,
+            "message": message,
+            "file_name": target_file.name,
+            "file_path": str(target_file),
+            "storage_link": storage_result.get("storage_link") or str(report.get("storage_link") or ""),
+            "storage_status": storage_result.get("storage_status") or "",
+            "report_id": first_export.get("report_id") or "",
+            "report_title": first_export.get("title") or report.get("ten_bao_cao") or "",
+            "parameters": parameters,
+            "run_parameters": [downloaded.parameters for downloaded in downloaded_files],
+            "merged_file_count": len(downloaded_files),
+            "duration_ms": int((time.monotonic() - started) * 1000),
+            "finished_at": datetime.now(LOCAL_TIMEZONE).isoformat(timespec="seconds"),
+        }
+    finally:
+        for temporary_file in temporary_files:
+            try:
+                temporary_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
+def download_onebss_report_file(
+    settings: Settings,
+    helper: OneBssReportDownloader,
+    page: Any,
+    report: dict[str, Any],
+    parameters: dict[str, Any],
+    *,
+    target_file: Path | None = None,
+    source_values: dict[str, Any] | None = None,
+) -> OneBssDownloadedFile:
+    report_url = normalize_onebss_report_url(report.get("report_url"))
     page.wait_for_function(REPORT_COMPONENT_READY_SCRIPT, timeout=90000)
     export_info: dict[str, Any] = {}
     with page.expect_download(timeout=helper.timeout_ms) as download_info:
@@ -251,36 +372,213 @@ def finish_onebss_report_download(
     download = download_info.value
     if export_info and not export_info.get("ok", True):
         raise OneBssDownloadError(str(export_info.get("message") or "OneBSS khong tao duoc file xuat."))
-    schedule_like = {
-        "report_url": report_url,
-        "storage_link": report.get("storage_link") or "",
-        "file_name_template": report.get("ten_bao_cao") or report.get("ma_bao_cao") or "",
-    }
-    target_file = build_target_file_path(
-        settings,
-        schedule_like,
-        suggested_filename=download.suggested_filename,
-        report_title=str(export_info.get("title") or report.get("ten_bao_cao") or ""),
-    )
+    if target_file is None:
+        schedule_like = {
+            "report_url": report_url,
+            "storage_link": report.get("storage_link") or "",
+            "file_name_template": report.get("ten_bao_cao") or report.get("ma_bao_cao") or "",
+        }
+        target_file = build_target_file_path(
+            settings,
+            schedule_like,
+            suggested_filename=download.suggested_filename,
+            report_title=str(export_info.get("title") or report.get("ten_bao_cao") or ""),
+        )
     target_file.parent.mkdir(parents=True, exist_ok=True)
     download.save_as(str(target_file))
-    storage_result = save_downloaded_file(settings, target_file, str(report.get("storage_link") or ""))
-    context.storage_state(path=str(ONEBSS_STATE_PATH))
-    ok = bool(storage_result.get("ok", True))
-    return {
-        "ok": ok,
-        "status": "success" if ok else str(storage_result.get("status") or "storage_failed"),
-        "message": storage_result.get("message") or "Da tai bao cao OneBSS.",
-        "file_name": target_file.name,
-        "file_path": str(target_file),
-        "storage_link": storage_result.get("storage_link") or str(report.get("storage_link") or ""),
-        "storage_status": storage_result.get("storage_status") or "",
-        "report_id": export_info.get("report_id") or "",
-        "report_title": export_info.get("title") or report.get("ten_bao_cao") or "",
-        "parameters": export_info.get("params") or parameters,
-        "duration_ms": int((time.monotonic() - started) * 1000),
-        "finished_at": datetime.now(LOCAL_TIMEZONE).isoformat(timespec="seconds"),
-    }
+    return OneBssDownloadedFile(
+        file_path=target_file,
+        suggested_filename=str(download.suggested_filename or target_file.name),
+        export_info=export_info,
+        parameters=export_info.get("params") if isinstance(export_info.get("params"), dict) else parameters,
+        source_values=source_values or {},
+    )
+
+
+def build_onebss_temp_file_path(settings: Settings, index: int) -> Path:
+    base_dir = Path(str(getattr(settings, "data_mining_download_dir", "data/data_mining_downloads") or "data/data_mining_downloads"))
+    base_dir.mkdir(parents=True, exist_ok=True)
+    return (base_dir / f".onebss_part_{uuid.uuid4().hex}_{index}.xlsx").resolve()
+
+
+def merged_excel_suggested_filename(suggested_filename: str) -> str:
+    suffix = Path(str(suggested_filename or "")).suffix.lower()
+    if suffix == ".xlsx":
+        return suggested_filename
+    stem = Path(str(suggested_filename or "onebss_report")).stem or "onebss_report"
+    return f"{stem}.xlsx"
+
+
+def build_onebss_parameter_runs(parameters: dict[str, Any]) -> tuple[list[OneBssParameterRun], dict[str, Any], list[str]]:
+    merge_config = parameters.get("$merge_excel") if isinstance(parameters.get("$merge_excel"), dict) else {}
+    base_parameters: dict[str, Any] = {}
+    each_items: list[tuple[str, list[Any]]] = []
+    for key, value in parameters.items():
+        if str(key).startswith("$"):
+            continue
+        if isinstance(value, dict) and "$each" in value:
+            each_values = value.get("$each")
+            if not isinstance(each_values, list) or not each_values:
+                raise OneBssDownloadError(f"Bien {key} dung $each nhung danh sach gia tri dang rong hoac khong hop le.")
+            each_items.append((key, each_values))
+            continue
+        base_parameters[key] = value
+
+    if not each_items:
+        return [OneBssParameterRun(parameters=base_parameters, source_values={})], merge_config, []
+
+    runs: list[OneBssParameterRun] = []
+    for values in product(*(item[1] for item in each_items)):
+        run_parameters = {**base_parameters}
+        source_values: dict[str, Any] = {}
+        for (key, _), value in zip(each_items, values):
+            run_parameters[key] = value
+            source_values[key] = value
+        runs.append(OneBssParameterRun(parameters=run_parameters, source_values=source_values))
+    return runs, merge_config, [item[0] for item in each_items]
+
+
+def merge_onebss_excel_files(
+    downloaded_files: list[OneBssDownloadedFile],
+    target_file: Path,
+    merge_config: dict[str, Any],
+    each_keys: list[str],
+) -> None:
+    if not downloaded_files:
+        raise OneBssDownloadError("Khong co file OneBSS nao de gop.")
+    try:
+        from openpyxl import Workbook, load_workbook
+        from openpyxl.styles import Font
+    except ImportError as error:
+        raise OneBssDownloadError("May chu chua cai openpyxl de gop file Excel OneBSS.") from error
+
+    output_workbook = Workbook()
+    output_sheet = output_workbook.active
+    output_sheet.title = safe_excel_sheet_title(str(merge_config.get("sheet") or "DATA"))
+    source_column_name = merge_source_column_name(merge_config, each_keys)
+    header_signature: tuple[str, ...] | None = None
+    header_output_row: int | None = None
+    max_columns = 1
+
+    for file_index, downloaded in enumerate(downloaded_files):
+        workbook = load_workbook(downloaded.file_path, data_only=False, read_only=True)
+        try:
+            sheet_name = str(merge_config.get("source_sheet") or "").strip()
+            worksheet = workbook[sheet_name] if sheet_name and sheet_name in workbook.sheetnames else workbook.active
+            rows = worksheet_rows(worksheet)
+        finally:
+            workbook.close()
+        if not rows:
+            continue
+        header_index = detect_header_row_index(rows, merge_config)
+        if file_index == 0:
+            selected_rows = list(enumerate(rows))
+            header_signature = row_signature(rows[header_index]) if 0 <= header_index < len(rows) else None
+        else:
+            start_index = header_index + 1 if header_signature and row_signature(rows[header_index]) == header_signature else int(merge_config.get("skip_rows", 1) or 0)
+            selected_rows = list(enumerate(rows[start_index:], start=start_index))
+
+        source_label = merge_source_label(downloaded.source_values, source_column_name)
+        for source_row_index, row in selected_rows:
+            if file_index > 0 and not row_has_content(row):
+                continue
+            output_row = trim_trailing_empty_cells(row)
+            if source_column_name:
+                if source_row_index == header_index:
+                    output_row.append(source_column_name)
+                elif source_row_index > header_index and row_has_content(row):
+                    output_row.append(source_label)
+                else:
+                    output_row.append("")
+            output_sheet.append(output_row)
+            max_columns = max(max_columns, len(output_row))
+            if file_index == 0 and source_row_index == header_index:
+                header_output_row = output_sheet.max_row
+
+    if output_sheet.max_row == 1 and not row_has_content([cell.value for cell in output_sheet[1]]):
+        raise OneBssDownloadError("Cac file OneBSS tai ve khong co du lieu de gop.")
+    if header_output_row:
+        for cell in output_sheet[header_output_row]:
+            cell.font = Font(bold=True)
+        output_sheet.freeze_panes = f"A{header_output_row + 1}"
+    apply_basic_excel_widths(output_sheet, max_columns)
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    output_workbook.save(target_file)
+
+
+def worksheet_rows(worksheet: Any) -> list[list[Any]]:
+    rows = [[cell.value for cell in row] for row in worksheet.iter_rows()]
+    while rows and not row_has_content(rows[-1]):
+        rows.pop()
+    return rows
+
+
+def detect_header_row_index(rows: list[list[Any]], merge_config: dict[str, Any]) -> int:
+    configured = merge_config.get("header_row")
+    if configured not in {None, ""}:
+        try:
+            return max(0, min(len(rows) - 1, int(configured) - 1))
+        except (TypeError, ValueError):
+            pass
+    min_cells = int(merge_config.get("min_header_cells") or 2)
+    for index, row in enumerate(rows):
+        if sum(1 for value in row if value not in {None, ""}) >= min_cells:
+            return index
+    return 0
+
+
+def row_has_content(row: list[Any]) -> bool:
+    return any(value not in {None, ""} for value in row)
+
+
+def trim_trailing_empty_cells(row: list[Any]) -> list[Any]:
+    trimmed = list(row)
+    while trimmed and trimmed[-1] in {None, ""}:
+        trimmed.pop()
+    return trimmed
+
+
+def row_signature(row: list[Any]) -> tuple[str, ...]:
+    return tuple(str(value or "").strip().lower() for value in trim_trailing_empty_cells(row))
+
+
+def merge_source_column_name(merge_config: dict[str, Any], each_keys: list[str]) -> str:
+    value = merge_config.get("source_column")
+    if value is False:
+        return ""
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    if value is None and len(each_keys) == 1:
+        return each_keys[0]
+    if value is True and each_keys:
+        return "_".join(each_keys)
+    return ""
+
+
+def merge_source_label(source_values: dict[str, Any], source_column_name: str) -> Any:
+    if not source_values or not source_column_name:
+        return ""
+    if source_column_name in source_values:
+        return source_values[source_column_name]
+    if len(source_values) == 1:
+        return next(iter(source_values.values()))
+    return ", ".join(f"{key}={value}" for key, value in source_values.items())
+
+
+def safe_excel_sheet_title(value: str) -> str:
+    title = re.sub(r"[\[\]:*?/\\]", "_", value).strip() or "DATA"
+    return title[:31]
+
+
+def apply_basic_excel_widths(worksheet: Any, max_columns: int) -> None:
+    for column_index in range(1, min(max_columns, 80) + 1):
+        letter = worksheet.cell(row=1, column=column_index).column_letter
+        width = 10
+        for row_index in range(1, min(worksheet.max_row, 200) + 1):
+            value = worksheet.cell(row=row_index, column=column_index).value
+            if value not in {None, ""}:
+                width = max(width, min(len(str(value)) + 2, 45))
+        worksheet.column_dimensions[letter].width = width
 
 
 def keep_onebss_session(

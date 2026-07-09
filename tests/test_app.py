@@ -1057,6 +1057,70 @@ def test_onebss_login_deviceid_screen_requests_otp() -> None:
     assert playwright.stopped is True
 
 
+def test_onebss_each_parameter_builds_multiple_payloads() -> None:
+    from app.application.onebss_report_service import build_onebss_parameter_runs
+
+    runs, merge_config, each_keys = build_onebss_parameter_runs(
+        {
+            "P_PHANVUNG_ID": {"$each": ["13", "14", "15"]},
+            "P_LOAI_NGAY": "1",
+            "P_TUNGAY": "01/07/2026",
+            "P_DENNGAY": "09/07/2026",
+            "$merge_excel": {"mode": "append", "sheet": "DATA", "source_column": "P_PHANVUNG_ID"},
+        }
+    )
+
+    assert each_keys == ["P_PHANVUNG_ID"]
+    assert merge_config["sheet"] == "DATA"
+    assert [run.parameters["P_PHANVUNG_ID"] for run in runs] == ["13", "14", "15"]
+    assert all("$merge_excel" not in run.parameters for run in runs)
+    assert all("$each" not in run.parameters["P_PHANVUNG_ID"] for run in runs)
+
+
+def test_onebss_merge_excel_files_appends_rows_with_source_column(tmp_path) -> None:
+    from openpyxl import Workbook, load_workbook
+
+    from app.application.onebss_report_service import OneBssDownloadedFile, merge_onebss_excel_files
+
+    files = []
+    for region, amount in [("13", 100), ("14", 200), ("15", 300)]:
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Bao cao"
+        sheet.append(["Bao cao phat trien thue bao"])
+        sheet.append(["MA_TB", "DOANH_THU"])
+        sheet.append([f"TB{region}", amount])
+        source = tmp_path / f"region_{region}.xlsx"
+        workbook.save(source)
+        files.append(
+            OneBssDownloadedFile(
+                file_path=source,
+                suggested_filename=source.name,
+                export_info={},
+                parameters={"P_PHANVUNG_ID": region},
+                source_values={"P_PHANVUNG_ID": region},
+            )
+        )
+
+    target = tmp_path / "merged.xlsx"
+    merge_onebss_excel_files(
+        files,
+        target,
+        {"mode": "append", "sheet": "DATA", "source_column": "P_PHANVUNG_ID"},
+        ["P_PHANVUNG_ID"],
+    )
+
+    merged = load_workbook(target)
+    rows = list(merged["DATA"].values)
+    assert rows == [
+        ("Bao cao phat trien thue bao", None, None),
+        ("MA_TB", "DOANH_THU", "P_PHANVUNG_ID"),
+        ("TB13", 100, "13"),
+        ("TB14", 200, "14"),
+        ("TB15", 300, "15"),
+    ]
+
+
 def test_onebss_report_run_records_unhandled_errors(monkeypatch) -> None:
     def failing_run_onebss_report_request(settings, report, parameters, **kwargs):
         raise RuntimeError("browser launch failed")
