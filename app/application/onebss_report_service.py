@@ -160,14 +160,12 @@ def start_onebss_report_session(
         page = context.new_page()
         helper = OneBssReportDownloader(settings)
         page.goto(report_url, wait_until="domcontentloaded", timeout=90000)
-        page.wait_for_load_state("networkidle", timeout=90000)
-        page.wait_for_timeout(1000)
+        wait_for_onebss_network_quiet(page, timeout_ms=8000, pause_ms=1000)
         if helper._is_login_page(page):
             helper._fill_first(page, ["input[name='username']", "input[placeholder*='Tài khoản']", "input[placeholder*='Tên']", "input[type='text']"], username)
             helper._fill_first(page, ["input[name='password']", "input[placeholder*='Mật khẩu']", "input[type='password']"], password)
             click_onebss_button(page, helper, ["Đăng nhập", "Dang nhap", "Login"])
-            page.wait_for_load_state("networkidle", timeout=90000)
-            wait_for_onebss_auth_transition(page, helper)
+            wait_for_onebss_auth_transition(page, helper, timeout_ms=30000)
             if page_contains(page, OTP_TEXT_NEEDLES):
                 pending = keep_onebss_session(playwright, browser, context, page, report, parameters, created_by)
                 return {
@@ -215,8 +213,7 @@ def continue_onebss_report_session(
         pending.parameters = parameters if parameters else pending.parameters
         helper._fill_otp(page, str(otp).strip())
         click_onebss_button(page, helper, ["Xác nhận", "Xac nhan", "Gửi yêu cầu", "Gui yeu cau", "Đăng nhập", "Dang nhap"])
-        page.wait_for_load_state("networkidle", timeout=90000)
-        wait_for_onebss_auth_transition(page, helper)
+        wait_for_onebss_auth_transition(page, helper, timeout_ms=30000)
         if page_contains(page, OTP_INVALID_TEXT_NEEDLES):
             return {
                 "ok": False,
@@ -239,7 +236,7 @@ def continue_onebss_report_session(
         report_url = normalize_onebss_report_url(pending.report.get("report_url"))
         if page.url != report_url:
             page.goto(report_url, wait_until="domcontentloaded", timeout=90000)
-            page.wait_for_load_state("networkidle", timeout=90000)
+            wait_for_onebss_network_quiet(page, timeout_ms=8000, pause_ms=1000)
         result = finish_onebss_report_download(settings, helper, context, page, pending.report, pending.parameters)
         pop_onebss_session(session_id)
         close_browser_stack(pending.browser, pending.context, pending.playwright)
@@ -643,6 +640,24 @@ def close_browser_stack(browser: Any, context: Any, playwright: Any | None = Non
             pass
 
 
+def wait_for_onebss_network_quiet(page: Any, *, timeout_ms: int = 8000, pause_ms: int = 500) -> bool:
+    try:
+        page.wait_for_load_state("networkidle", timeout=timeout_ms)
+        quiet = True
+    except Exception:
+        quiet = False
+        try:
+            logger.info("OneBSS network stayed active after %sms at %s", timeout_ms, page.url)
+        except Exception:
+            pass
+    if pause_ms > 0:
+        try:
+            page.wait_for_timeout(pause_ms)
+        except Exception:
+            time.sleep(pause_ms / 1000)
+    return quiet
+
+
 def wait_for_onebss_auth_transition(page: Any, helper: OneBssReportDownloader, timeout_ms: int = 12000) -> None:
     deadline = time.monotonic() + (timeout_ms / 1000)
     device_needles = ["ĐĂNG KÝ THIẾT BỊ", "DANG KY THIET BI", "đăng ký thiết bị", "dang ky thiet bi"]
@@ -734,8 +749,7 @@ def handle_onebss_otp_request(
         if not clicked:
             break
         clicked_any = True
-        page.wait_for_load_state("networkidle", timeout=90000)
-        page.wait_for_timeout(1000)
+        wait_for_onebss_network_quiet(page, timeout_ms=5000, pause_ms=1000)
 
     if not clicked_any and not page_contains(page, OTP_TEXT_NEEDLES) and not url_indicates_otp_flow:
         return None
@@ -768,8 +782,7 @@ def handle_onebss_device_registration(page: Any, helper: OneBssReportDownloader,
                 "message": "OneBSS yeu cau dang ky thiet bi moi nhung khong tim thay nut gui yeu cau.",
                 "parameters": parameters,
             }
-        page.wait_for_load_state("networkidle", timeout=90000)
-        page.wait_for_timeout(1000)
+        wait_for_onebss_network_quiet(page, timeout_ms=8000, pause_ms=1000)
     except Exception as error:
         logger.exception("Cannot send OneBSS device registration request")
         return {
