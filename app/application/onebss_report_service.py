@@ -28,6 +28,44 @@ from app.settings import Settings
 logger = logging.getLogger(__name__)
 OTP_PATTERN = re.compile(r"^\d{6}$")
 PENDING_SESSION_TTL_SECONDS = 10 * 60
+OTP_TEXT_NEEDLES = ["OTP", "mã OTP", "ma OTP", "mã xác thực", "ma xac thuc", "mã xác nhận", "ma xac nhan"]
+OTP_INVALID_TEXT_NEEDLES = ["Số OTP không hợp lệ", "OTP không hợp lệ", "OTP khong hop le"]
+OTP_REQUEST_TEXT_NEEDLES = [
+    "Gửi yêu cầu",
+    "Gui yeu cau",
+    "Gửi mã",
+    "Gui ma",
+    "Gửi OTP",
+    "Gui OTP",
+    "Xác nhận",
+    "Xac nhan",
+    "xác nhận đăng nhập",
+    "xac nhan dang nhap",
+]
+OTP_REQUEST_BUTTON_TEXTS = [
+    "Gửi yêu cầu",
+    "Gui yeu cau",
+    "Gửi mã",
+    "Gui ma",
+    "Gửi OTP",
+    "Gui OTP",
+    "Xác nhận",
+    "Xac nhan",
+    "Tiếp tục",
+    "Tiep tuc",
+    "Đăng nhập",
+    "Dang nhap",
+]
+LOGIN_ERROR_TEXT_NEEDLES = [
+    "sai mật khẩu",
+    "sai mat khau",
+    "không đúng",
+    "khong dung",
+    "không hợp lệ",
+    "khong hop le",
+    "tài khoản hoặc mật khẩu",
+    "tai khoan hoac mat khau",
+]
 
 
 @dataclass
@@ -113,7 +151,7 @@ def start_onebss_report_session(
             helper._click_button_text(page, ["Đăng nhập", "Dang nhap", "Login"])
             page.wait_for_load_state("networkidle", timeout=90000)
             page.wait_for_timeout(1500)
-            if page_contains(page, ["OTP", "mã OTP", "ma OTP"]):
+            if page_contains(page, OTP_TEXT_NEEDLES):
                 pending = keep_onebss_session(playwright, browser, context, page, report, parameters, created_by)
                 return {
                     "ok": False,
@@ -126,9 +164,12 @@ def start_onebss_report_session(
             if device_result:
                 close_browser_stack(browser, context, playwright)
                 return device_result
+            otp_request_result = handle_onebss_otp_request(page, helper, playwright, browser, context, report, parameters, created_by)
+            if otp_request_result:
+                return otp_request_result
             if helper._is_login_page(page):
                 close_browser_stack(browser, context, playwright)
-                return {"ok": False, "status": "login_failed", "message": "Dang nhap OneBSS chua thanh cong.", "parameters": parameters}
+                return {"ok": False, "status": "login_failed", "message": onebss_login_failed_message(page), "parameters": parameters}
         result = finish_onebss_report_download(settings, helper, context, page, report, parameters)
         close_browser_stack(browser, context, playwright)
         return result
@@ -159,7 +200,7 @@ def continue_onebss_report_session(
         helper._click_button_text(page, ["Xác nhận", "Xac nhan", "Gửi yêu cầu", "Gui yeu cau", "Đăng nhập", "Dang nhap"])
         page.wait_for_load_state("networkidle", timeout=90000)
         page.wait_for_timeout(1500)
-        if page_contains(page, ["Số OTP không hợp lệ", "OTP không hợp lệ", "OTP khong hop le"]):
+        if page_contains(page, OTP_INVALID_TEXT_NEEDLES):
             return {
                 "ok": False,
                 "status": "otp_invalid",
@@ -167,7 +208,7 @@ def continue_onebss_report_session(
                 "session_id": session_id,
                 "parameters": pending.parameters,
             }
-        if page_contains(page, ["OTP", "mã OTP", "ma OTP"]) and helper._is_login_page(page):
+        if page_contains(page, OTP_TEXT_NEEDLES) and helper._is_login_page(page):
             return {"ok": False, "status": "otp_required", "message": "OneBSS van dang yeu cau OTP.", "session_id": session_id, "parameters": pending.parameters}
         device_result = handle_onebss_device_registration(page, helper, pending.parameters)
         if device_result:
@@ -177,7 +218,7 @@ def continue_onebss_report_session(
         if helper._is_login_page(page):
             pop_onebss_session(session_id)
             close_browser_stack(pending.browser, pending.context, pending.playwright)
-            return {"ok": False, "status": "login_failed", "message": "Dang nhap OneBSS chua thanh cong.", "parameters": pending.parameters}
+            return {"ok": False, "status": "login_failed", "message": onebss_login_failed_message(page), "parameters": pending.parameters}
         report_url = normalize_onebss_report_url(pending.report.get("report_url"))
         if page.url != report_url:
             page.goto(report_url, wait_until="domcontentloaded", timeout=90000)
@@ -304,6 +345,47 @@ def close_browser_stack(browser: Any, context: Any, playwright: Any | None = Non
             pass
 
 
+def handle_onebss_otp_request(
+    page: Any,
+    helper: OneBssReportDownloader,
+    playwright: Any,
+    browser: Any,
+    context: Any,
+    report: dict[str, Any],
+    parameters: dict[str, Any],
+    created_by: str,
+) -> dict[str, Any] | None:
+    if page_contains(page, LOGIN_ERROR_TEXT_NEEDLES):
+        return None
+    url = str(getattr(page, "url", "") or "").lower()
+    url_indicates_otp_flow = "auth/login" in url and ("username=" in url or "deviceid=" in url)
+    if not url_indicates_otp_flow and not page_contains(page, OTP_REQUEST_TEXT_NEEDLES):
+        return None
+
+    clicked_any = False
+    for _ in range(3):
+        if page_contains(page, OTP_TEXT_NEEDLES):
+            break
+        clicked = helper._click_button_text(page, OTP_REQUEST_BUTTON_TEXTS)
+        if not clicked:
+            break
+        clicked_any = True
+        page.wait_for_load_state("networkidle", timeout=90000)
+        page.wait_for_timeout(1000)
+
+    if not clicked_any and not page_contains(page, OTP_TEXT_NEEDLES) and not url_indicates_otp_flow:
+        return None
+
+    pending = keep_onebss_session(playwright, browser, context, page, report, parameters, created_by)
+    return {
+        "ok": False,
+        "status": "otp_required",
+        "message": "OneBSS da gui yeu cau OTP. Hay nhap ma OTP khi dien thoai nhan duoc.",
+        "session_id": pending.session_id,
+        "parameters": parameters,
+    }
+
+
 def handle_onebss_device_registration(page: Any, helper: OneBssReportDownloader, parameters: dict[str, Any]) -> dict[str, Any] | None:
     if not page_contains(page, ["ĐĂNG KÝ THIẾT BỊ", "DANG KY THIET BI", "đăng ký thiết bị", "dang ky thiet bi"]):
         return None
@@ -340,6 +422,17 @@ def handle_onebss_device_registration(page: Any, helper: OneBssReportDownloader,
             "parameters": parameters,
         }
     return None
+
+
+def onebss_login_failed_message(page: Any) -> str:
+    url = str(getattr(page, "url", "") or "")
+    try:
+        text = " ".join(str(page.locator("body").inner_text(timeout=3000) or "").split())
+    except Exception:
+        text = ""
+    if text:
+        return f"Dang nhap OneBSS chua thanh cong. Trang hien tai: {url}. Noi dung: {text[:300]}"
+    return f"Dang nhap OneBSS chua thanh cong. Trang hien tai: {url}"
 
 
 def page_contains(page: Any, needles: list[str]) -> bool:

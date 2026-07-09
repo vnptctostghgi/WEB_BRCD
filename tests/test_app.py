@@ -974,6 +974,89 @@ def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
         assert runs[0]["storage_link"] == "https://drive.google.com/file/d/onebss-file/view"
 
 
+def test_onebss_login_deviceid_screen_requests_otp() -> None:
+    from app.application.onebss_report_service import (
+        handle_onebss_otp_request,
+        pop_onebss_session,
+        close_browser_stack,
+    )
+
+    class FakeBodyLocator:
+        def __init__(self, page):
+            self.page = page
+
+        def inner_text(self, timeout=0):
+            return self.page.body_text
+
+    class FakePage:
+        url = "https://onebss.vnpt.vn/#/auth/login?username=quyennt.cto&deviceId=12345"
+
+        def __init__(self):
+            self.body_text = "Xac nhan gui yeu cau"
+            self.waits = 0
+
+        def locator(self, selector):
+            assert selector == "body"
+            return FakeBodyLocator(self)
+
+        def wait_for_load_state(self, *args, **kwargs):
+            self.waits += 1
+
+        def wait_for_timeout(self, *args, **kwargs):
+            self.waits += 1
+
+    class FakeHelper:
+        def __init__(self):
+            self.clicks = 0
+
+        def _click_button_text(self, page, texts):
+            self.clicks += 1
+            page.body_text = "Nhap ma OTP"
+            return True
+
+    class FakeClosable:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class FakePlaywright:
+        def __init__(self):
+            self.stopped = False
+
+        def stop(self):
+            self.stopped = True
+
+    page = FakePage()
+    helper = FakeHelper()
+    browser = FakeClosable()
+    context = FakeClosable()
+    playwright = FakePlaywright()
+
+    result = handle_onebss_otp_request(
+        page,
+        helper,
+        playwright,
+        browser,
+        context,
+        {"ma_bao_cao": "TEST"},
+        {"P_DENNGAY": "{{today}}"},
+        "admin",
+    )
+
+    assert result is not None
+    assert result["status"] == "otp_required"
+    assert result["session_id"]
+    assert helper.clicks == 1
+    pending = pop_onebss_session(result["session_id"])
+    assert pending is not None
+    close_browser_stack(pending.browser, pending.context, pending.playwright)
+    assert browser.closed is True
+    assert context.closed is True
+    assert playwright.stopped is True
+
+
 def test_onebss_report_run_records_unhandled_errors(monkeypatch) -> None:
     def failing_run_onebss_report_request(settings, report, parameters, **kwargs):
         raise RuntimeError("browser launch failed")
