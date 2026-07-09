@@ -163,9 +163,9 @@ def start_onebss_report_session(
         page.wait_for_load_state("networkidle", timeout=90000)
         page.wait_for_timeout(1000)
         if helper._is_login_page(page):
-            helper._fill_first(page, ["input[name='username']", "input[placeholder*='Tên']", "input[type='text']"], username)
-            helper._fill_first(page, ["input[name='password']", "input[type='password']"], password)
-            helper._click_button_text(page, ["Đăng nhập", "Dang nhap", "Login"])
+            helper._fill_first(page, ["input[name='username']", "input[placeholder*='Tài khoản']", "input[placeholder*='Tên']", "input[type='text']"], username)
+            helper._fill_first(page, ["input[name='password']", "input[placeholder*='Mật khẩu']", "input[type='password']"], password)
+            click_onebss_button(page, helper, ["Đăng nhập", "Dang nhap", "Login"])
             page.wait_for_load_state("networkidle", timeout=90000)
             wait_for_onebss_auth_transition(page, helper)
             if page_contains(page, OTP_TEXT_NEEDLES):
@@ -214,7 +214,7 @@ def continue_onebss_report_session(
     try:
         pending.parameters = parameters if parameters else pending.parameters
         helper._fill_otp(page, str(otp).strip())
-        helper._click_button_text(page, ["Xác nhận", "Xac nhan", "Gửi yêu cầu", "Gui yeu cau", "Đăng nhập", "Dang nhap"])
+        click_onebss_button(page, helper, ["Xác nhận", "Xac nhan", "Gửi yêu cầu", "Gui yeu cau", "Đăng nhập", "Dang nhap"])
         page.wait_for_load_state("networkidle", timeout=90000)
         wait_for_onebss_auth_transition(page, helper)
         if page_contains(page, OTP_INVALID_TEXT_NEEDLES):
@@ -666,6 +666,49 @@ def wait_for_onebss_auth_transition(page: Any, helper: OneBssReportDownloader, t
             time.sleep(0.5)
 
 
+def click_onebss_button(page: Any, helper: OneBssReportDownloader, texts: list[str]) -> bool:
+    if helper._click_button_text(page, texts):
+        return True
+    try:
+        clicked = page.evaluate(
+            """
+            (texts) => {
+              const normalize = (value) => String(value || '')
+                .normalize('NFD')
+                .replace(/[\\u0300-\\u036f]/g, '')
+                .replace(/\\s+/g, ' ')
+                .trim()
+                .toLowerCase();
+              const wanted = texts.map(normalize).filter(Boolean);
+              const buttons = Array.from(document.querySelectorAll('button'));
+              const visible = buttons.filter((button) => {
+                const rect = button.getBoundingClientRect();
+                const style = window.getComputedStyle(button);
+                return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && !button.disabled;
+              });
+              const matched = visible.find((button) => {
+                const text = normalize(button.innerText || button.textContent || button.value);
+                return wanted.some((item) => text === item || text.includes(item));
+              });
+              const target = matched || (visible.length === 1 ? visible[0] : null);
+              if (!target) return false;
+              target.click();
+              return true;
+            }
+            """,
+            texts,
+        )
+        if clicked:
+            return True
+    except Exception:
+        pass
+    try:
+        page.keyboard.press("Enter")
+        return True
+    except Exception:
+        return False
+
+
 def handle_onebss_otp_request(
     page: Any,
     helper: OneBssReportDownloader,
@@ -687,7 +730,7 @@ def handle_onebss_otp_request(
     for _ in range(3):
         if page_contains(page, OTP_TEXT_NEEDLES):
             break
-        clicked = helper._click_button_text(page, OTP_REQUEST_BUTTON_TEXTS)
+        clicked = click_onebss_button(page, helper, OTP_REQUEST_BUTTON_TEXTS)
         if not clicked:
             break
         clicked_any = True

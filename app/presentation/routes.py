@@ -255,6 +255,7 @@ class OneBssReportPayload(BaseModel):
     ma_bao_cao: str = ""
     ten_bao_cao: str
     danh_sach_bien: list[str] = Field(default_factory=list)
+    parameters: dict[str, Any] = Field(default_factory=dict)
     report_url: str
     storage_link: str = ""
 
@@ -1529,6 +1530,7 @@ def save_admin_onebss_report(request: Request, payload: OneBssReportPayload) -> 
             ma_bao_cao,
             ten_bao_cao,
             variables,
+            payload.parameters if isinstance(payload.parameters, dict) else {},
             report_url,
             payload.storage_link.strip(),
         )
@@ -1787,11 +1789,12 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
     if not report:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay cau hinh bao cao OneBSS.")
     started_at = datetime.now().isoformat(timespec="seconds")
+    run_parameters = payload.parameters if isinstance(payload.parameters, dict) and payload.parameters else report.get("parameters") or {}
     try:
         result = run_onebss_report_request(
             get_settings(),
             report,
-            payload.parameters,
+            run_parameters,
             otp=payload.otp.strip(),
             session_id=payload.session_id.strip(),
             created_by=actor["username"],
@@ -1802,10 +1805,10 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
             "ok": False,
             "status": "failed",
             "message": f"Loi khi khoi chay OneBSS: {error}",
-            "parameters": payload.parameters,
+            "parameters": run_parameters,
         }
     if result.get("status") in {"otp_required", "otp_invalid"} and result.get("session_id"):
-        return {"ok": False, "status": result.get("status"), "message": result.get("message"), "session_id": result.get("session_id"), "parameters": result.get("parameters") or payload.parameters}
+        return {"ok": False, "status": result.get("status"), "message": result.get("message"), "session_id": result.get("session_id"), "parameters": result.get("parameters") or run_parameters}
     finished_at = result.get("finished_at") or datetime.now().isoformat(timespec="seconds")
     try:
         run = repository.save_onebss_report_run({
@@ -1817,7 +1820,7 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
             "file_path": result.get("file_path") or "",
             "storage_link": result.get("storage_link") or "",
             "storage_status": result.get("storage_status") or "",
-            "parameters": result.get("parameters") if isinstance(result.get("parameters"), dict) else payload.parameters,
+            "parameters": result.get("parameters") if isinstance(result.get("parameters"), dict) else run_parameters,
             "started_at": started_at,
             "finished_at": finished_at,
             "duration_ms": int(result.get("duration_ms") or 0),

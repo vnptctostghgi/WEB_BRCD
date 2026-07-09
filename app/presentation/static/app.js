@@ -4817,7 +4817,7 @@ function refreshOneBssReportPicker() {
   const current = picker.value;
   const filteredReports = oneBssReports.filter((report) => {
     if (!search) return true;
-    const text = [report.ten_bao_cao, report.ma_bao_cao, report.report_url, report.storage_link, ...(report.danh_sach_bien || [])].join(" ").toLowerCase();
+    const text = [report.ten_bao_cao, report.ma_bao_cao, report.report_url, report.storage_link, JSON.stringify(report.parameters || {}), ...(report.danh_sach_bien || [])].join(" ").toLowerCase();
     return text.includes(search);
   });
   picker.innerHTML = `<option value="">Thêm báo cáo mới / chưa chọn báo cáo</option>${filteredReports.map((report) => `<option value="${escapeHtml(report.ma_bao_cao)}">${escapeHtml(report.ten_bao_cao)} (${escapeHtml(report.ma_bao_cao)})</option>`).join("")}`;
@@ -4832,6 +4832,15 @@ function createOneBssReportDraft() {
     ma_bao_cao: "",
     ten_bao_cao: "",
     danh_sach_bien: ["P_PHANVUNG_ID", "P_LOAI_NGAY", "P_TUNGAY", "P_DENNGAY", "P_LOAI_BAOCAO", "P_LOAI_BIENDONG"],
+    parameters: {
+      P_PHANVUNG_ID: { $each: ["13", "14", "15"] },
+      P_LOAI_NGAY: "1",
+      P_TUNGAY: "{{month_start}}",
+      P_DENNGAY: "{{today}}",
+      P_LOAI_BAOCAO: "2",
+      P_LOAI_BIENDONG: "1",
+      $merge_excel: { sheet: "DATA", source_column: "P_PHANVUNG_ID" },
+    },
     report_url: "",
     storage_link: "",
   };
@@ -4842,6 +4851,7 @@ function createOneBssReportDraft() {
 function renderOneBssReportEditor(report, isDraft = false) {
   const rowKey = report._rowKey || `onebss-${report.id}`;
   const params = (report.danh_sach_bien || []).join(", ");
+  const parameterJson = JSON.stringify(report.parameters || {}, null, 2);
   return `
     <div class="sql-report-editor-card" data-onebss-row="${escapeHtml(rowKey)}" data-onebss-report-id="${escapeHtml(report.id || "")}">
       <div class="section-heading">
@@ -4851,6 +4861,7 @@ function renderOneBssReportEditor(report, isDraft = false) {
       <label>Mã báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="Tự sinh nếu để trống" /></label>
       <label>Tên báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="Tên báo cáo OneBSS" /></label>
       <label>Danh sách biến<input class="form-control inline-admin-input inline-admin-params" data-inline-onebss-field="danh_sach_bien" value="${escapeHtml(params)}" placeholder="P_PHANVUNG_ID, P_LOAI_NGAY, P_TUNGAY, P_DENNGAY, P_LOAI_BAOCAO, P_LOAI_BIENDONG" /><small class="cell-note">Mỗi biến cách nhau bằng dấu phẩy.</small></label>
+      <label>Tham số xuất trực tiếp JSON<textarea class="form-control inline-admin-input font-mono text-xs" data-inline-onebss-field="parameters" rows="9" placeholder='{"P_PHANVUNG_ID":{"$each":["13","14","15"]},"P_TUNGAY":"{{month_start}}","P_DENNGAY":"{{today}}"}'>${escapeHtml(parameterJson === "{}" ? "" : parameterJson)}</textarea><small class="cell-note">Lưu điều kiện xuất ở đây để khi chạy chỉ cần bấm Lấy báo cáo.</small></label>
       <label>Link lấy báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="report_url" value="${escapeHtml(report.report_url || "")}" placeholder="https://onebss.vnpt.vn/#/report/bi?..." /></label>
       <label>Link lưu báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="storage_link" value="${escapeHtml(report.storage_link || "")}" placeholder="Link thư mục Google Drive hoặc thư mục nội bộ" /></label>
     </div>`;
@@ -4875,11 +4886,22 @@ async function saveInlineOneBssReport(rowKey, button) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+  let parameters = {};
+  const parameterText = row.querySelector('[data-inline-onebss-field="parameters"]')?.value.trim() || "";
+  if (parameterText) {
+    try {
+      parameters = JSON.parse(parameterText);
+    } catch {
+      showToast("Tham số xuất trực tiếp JSON chưa đúng định dạng.", "error");
+      return;
+    }
+  }
   const payload = {
     id: row.dataset.onebssReportId ? Number(row.dataset.onebssReportId) : null,
     ma_bao_cao: row.querySelector('[data-inline-onebss-field="ma_bao_cao"]')?.value.trim() || "",
     ten_bao_cao: row.querySelector('[data-inline-onebss-field="ten_bao_cao"]')?.value.trim() || "",
     danh_sach_bien: variables,
+    parameters,
     report_url: row.querySelector('[data-inline-onebss-field="report_url"]')?.value.trim() || "",
     storage_link: row.querySelector('[data-inline-onebss-field="storage_link"]')?.value.trim() || "",
   };
@@ -5080,14 +5102,10 @@ function renderOneBssRunParameters() {
     container.innerHTML = "";
     return;
   }
-  const template = variables.reduce((params, variable) => {
-    params[variable] = "";
-    return params;
-  }, {});
-  const jsonTemplate = JSON.stringify(template, null, 2);
+  const jsonTemplate = JSON.stringify(report?.parameters || {}, null, 2);
   container.innerHTML = `
     ${variables.length ? `<div class="compact-code-cell">${renderCompactCode(variables.join(", "))}</div>` : ""}
-    <label>Tham số lọc JSON<textarea class="form-control onebss-param-json" rows="7" placeholder='{"P_PHANVUNG_ID":{"$each":["13","14","15"]},"P_TUNGAY":"{{month_start}}","P_DENNGAY":"{{today}}","$merge_excel":{"sheet":"DATA","source_column":"P_PHANVUNG_ID"}}'>${escapeHtml(jsonTemplate === "{}" ? "" : jsonTemplate)}</textarea></label>
+    <label>Tham số đã cấu hình<textarea class="form-control onebss-param-json font-mono text-xs" rows="9" readonly placeholder="Chưa cấu hình tham số trong Quản trị dữ liệu OneBSS">${escapeHtml(jsonTemplate === "{}" ? "" : jsonTemplate)}</textarea></label>
   `;
 }
 
@@ -5104,6 +5122,8 @@ function collectOneBssRunParameters() {
       throw new Error("Tham số lọc JSON chưa đúng định dạng.");
     }
   }
+  const report = selectedOneBssReport();
+  if (report?.parameters && Object.keys(report.parameters).length) return report.parameters;
   return parameters;
 }
 

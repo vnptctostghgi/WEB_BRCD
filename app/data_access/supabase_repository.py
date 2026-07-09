@@ -598,6 +598,7 @@ class SupabaseRepository:
         ma_bao_cao: str,
         ten_bao_cao: str,
         danh_sach_bien: list[str],
+        parameters: dict[str, Any],
         report_url: str,
         storage_link: str,
     ) -> int:
@@ -605,6 +606,7 @@ class SupabaseRepository:
             "ma_bao_cao": ma_bao_cao,
             "ten_bao_cao": ten_bao_cao,
             "danh_sach_bien": danh_sach_bien,
+            "parameters": parameters if isinstance(parameters, dict) else {},
             "report_url": report_url,
             "storage_link": storage_link,
             "updated_at": self._now(),
@@ -1096,11 +1098,18 @@ class SupabaseRepository:
                 variables = json.loads(variables)
             except json.JSONDecodeError:
                 variables = []
+        parameters = row.get("parameters") or {}
+        if isinstance(parameters, str):
+            try:
+                parameters = json.loads(parameters)
+            except json.JSONDecodeError:
+                parameters = {}
         return {
             "id": row.get("id"),
             "ma_bao_cao": row.get("ma_bao_cao") or "",
             "ten_bao_cao": row.get("ten_bao_cao") or "",
             "danh_sach_bien": variables if isinstance(variables, list) else [],
+            "parameters": parameters if isinstance(parameters, dict) else {},
             "report_url": row.get("report_url") or "",
             "storage_link": row.get("storage_link") or "",
             "created_at": row.get("created_at"),

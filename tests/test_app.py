@@ -936,6 +936,7 @@ def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
         payload = {
             "ten_bao_cao": "Bien dong PTTB",
             "danh_sach_bien": ["P_TUNGAY", "P_DENNGAY"],
+            "parameters": {"P_TUNGAY": "{{month_start}}", "P_DENNGAY": "{{today}}"},
             "report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST&name=Test",
             "storage_link": "https://drive.google.com/drive/folders/test-folder",
         }
@@ -948,14 +949,16 @@ def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
         assert configs.status_code == 200
         report = next(item for item in configs.json()["reports"] if item["ma_bao_cao"] == code)
         assert report["danh_sach_bien"] == ["P_TUNGAY", "P_DENNGAY"]
+        assert report["parameters"] == {"P_TUNGAY": "{{month_start}}", "P_DENNGAY": "{{today}}"}
 
         first_run = client.post(
             "/api/onebss-reports/run",
-            json={"ma_bao_cao": code, "parameters": {"P_TUNGAY": "01/07/2026", "P_DENNGAY": "08/07/2026"}},
+            json={"ma_bao_cao": code},
         )
         assert first_run.status_code == 200
         assert first_run.json()["status"] == "otp_required"
         assert first_run.json()["session_id"] == "otp-session-001"
+        assert calls[-1]["parameters"] == payload["parameters"]
 
         second_run = client.post(
             "/api/onebss-reports/run",
@@ -963,12 +966,12 @@ def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
                 "ma_bao_cao": code,
                 "session_id": "otp-session-001",
                 "otp": "123456",
-                "parameters": {"P_TUNGAY": "01/07/2026", "P_DENNGAY": "08/07/2026"},
             },
         )
         assert second_run.status_code == 200
         assert second_run.json()["ok"] is True
         assert calls[-1]["otp"] == "123456"
+        assert calls[-1]["parameters"] == payload["parameters"]
         runs = client.get(f"/api/onebss-reports/runs?ma_bao_cao={code}").json()["runs"]
         assert len(runs) == 1
         assert runs[0]["storage_link"] == "https://drive.google.com/file/d/onebss-file/view"

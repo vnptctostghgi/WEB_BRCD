@@ -275,11 +275,15 @@ create table if not exists public.onebss_reports (
   ma_bao_cao text not null unique,
   ten_bao_cao text not null,
   danh_sach_bien jsonb not null default '[]'::jsonb,
+  parameters jsonb not null default '{}'::jsonb,
   report_url text not null,
   storage_link text not null default '',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.onebss_reports
+add column if not exists parameters jsonb not null default '{}'::jsonb;
 
 create unique index if not exists onebss_reports_ma_bao_cao_lower_idx
 on public.onebss_reports (lower(ma_bao_cao));
