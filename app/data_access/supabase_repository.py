@@ -630,7 +630,7 @@ class SupabaseRepository:
             "file_path": str(payload.get("file_path") or ""),
             "storage_link": str(payload.get("storage_link") or ""),
             "storage_status": str(payload.get("storage_status") or ""),
-            "parameters": payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {},
+            "parameters_json": payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {},
             "started_at": str(payload.get("started_at") or self._now()),
             "finished_at": str(payload.get("finished_at") or self._now()),
             "duration_ms": int(payload.get("duration_ms") or 0),
@@ -1109,7 +1109,7 @@ class SupabaseRepository:
 
     @staticmethod
     def _decode_onebss_report_run(row: dict[str, Any]) -> dict[str, Any]:
-        parameters = row.get("parameters") or {}
+        parameters = row.get("parameters_json") or row.get("parameters") or {}
         if isinstance(parameters, str):
             try:
                 parameters = json.loads(parameters)

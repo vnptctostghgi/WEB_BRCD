@@ -17,6 +17,7 @@ test_database.unlink(missing_ok=True)
 from fastapi.testclient import TestClient
 
 from app.application.database_service import DatabaseService
+from app.data_access.supabase_repository import SupabaseRepository
 from app.main import app
 from app.presentation import routes
 from app.settings import get_settings
@@ -1001,6 +1002,28 @@ def test_onebss_report_run_records_unhandled_errors(monkeypatch) -> None:
         runs = client.get(f"/api/onebss-reports/runs?ma_bao_cao={code}").json()["runs"]
         assert len(runs) == 1
         assert runs[0]["status"] == "failed"
+
+
+def test_supabase_onebss_run_uses_parameters_json_column(monkeypatch) -> None:
+    captured = {}
+    repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
+
+    def fake_insert(table, payload):
+        captured["table"] = table
+        captured["payload"] = payload
+        return payload
+
+    monkeypatch.setattr(repository, "_insert", fake_insert)
+    run = repository.save_onebss_report_run({
+        "ma_bao_cao": "TEST",
+        "ten_bao_cao": "Test",
+        "status": "failed",
+        "parameters": {"P_TUNGAY": "01/07/2026"},
+    })
+    assert captured["table"] == "onebss_report_runs"
+    assert "parameters_json" in captured["payload"]
+    assert "parameters" not in captured["payload"]
+    assert run["parameters"] == {"P_TUNGAY": "01/07/2026"}
 
 
 def test_dynamic_report_expands_comma_values_for_in_bind_params() -> None:

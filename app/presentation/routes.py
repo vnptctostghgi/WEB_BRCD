@@ -518,7 +518,15 @@ def raise_sql_report_schema_error(error: RuntimeError) -> None:
 
 
 def raise_onebss_report_schema_error(error: RuntimeError) -> None:
-    if "onebss_reports" in str(error) or "onebss_report_runs" in str(error):
+    error_text = str(error)
+    is_missing_table_error = (
+        "PGRST205" in error_text
+        or "42P01" in error_text
+        or "Could not find the table" in error_text
+        or "relation" in error_text and "does not exist" in error_text
+        or "Supabase REST loi 404" in error_text
+    )
+    if ("onebss_reports" in error_text or "onebss_report_runs" in error_text) and is_missing_table_error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Supabase chua co bang onebss_reports/onebss_report_runs. Hay chay lai file sql/supabase_upgrade_admin_modules.sql.",
