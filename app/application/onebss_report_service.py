@@ -162,8 +162,24 @@ def start_onebss_report_session(
         page.goto(report_url, wait_until="domcontentloaded", timeout=90000)
         wait_for_onebss_network_quiet(page, timeout_ms=8000, pause_ms=1000)
         if helper._is_login_page(page):
-            helper._fill_first(page, ["input[name='username']", "input[placeholder*='Tài khoản']", "input[placeholder*='Tên']", "input[type='text']"], username)
-            helper._fill_first(page, ["input[name='password']", "input[placeholder*='Mật khẩu']", "input[type='password']"], password)
+            if not wait_for_onebss_login_form(page, timeout_ms=30000):
+                close_browser_stack(browser, context, playwright)
+                return {
+                    "ok": False,
+                    "status": "login_form_not_ready",
+                    "message": f"Trang dang nhap OneBSS chua hien form tren may chu. {onebss_login_diagnostic_text(page)}",
+                    "parameters": parameters,
+                }
+            username_filled = helper._fill_first(page, ["input[name='username']", "input[placeholder*='Tài khoản']", "input[placeholder*='Tên']", "input[type='text']"], username)
+            password_filled = helper._fill_first(page, ["input[name='password']", "input[placeholder*='Mật khẩu']", "input[type='password']"], password)
+            if not username_filled or not password_filled:
+                close_browser_stack(browser, context, playwright)
+                return {
+                    "ok": False,
+                    "status": "login_form_not_ready",
+                    "message": f"Khong dien duoc tai khoan/mat khau OneBSS tren may chu. {onebss_login_diagnostic_text(page)}",
+                    "parameters": parameters,
+                }
             click_onebss_button(page, helper, ["Đăng nhập", "Dang nhap", "Login"])
             wait_for_onebss_auth_transition(page, helper, timeout_ms=30000)
             if page_contains(page, OTP_TEXT_NEEDLES):
@@ -658,6 +674,78 @@ def wait_for_onebss_network_quiet(page: Any, *, timeout_ms: int = 8000, pause_ms
     return quiet
 
 
+def wait_for_onebss_login_form(page: Any, timeout_ms: int = 30000) -> bool:
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    while time.monotonic() < deadline:
+        state = onebss_login_page_state(page)
+        if int(state.get("passwordInputCount") or 0) > 0 and int(state.get("inputCount") or 0) >= 2:
+            return True
+        try:
+            page.wait_for_timeout(500)
+        except Exception:
+            time.sleep(0.5)
+    return False
+
+
+def onebss_login_page_state(page: Any) -> dict[str, Any]:
+    try:
+        state = page.evaluate(
+            """
+            () => {
+              const inputs = Array.from(document.querySelectorAll('input'));
+              const buttons = Array.from(document.querySelectorAll('button'));
+              const inputInfo = inputs.slice(0, 8).map((input) => ({
+                type: input.getAttribute('type') || '',
+                name: input.getAttribute('name') || '',
+                placeholder: input.getAttribute('placeholder') || '',
+                autocomplete: input.getAttribute('autocomplete') || '',
+                visible: !!(input.offsetWidth || input.offsetHeight || input.getClientRects().length),
+              }));
+              const buttonTexts = buttons.slice(0, 8).map((button) => (button.innerText || button.textContent || '').replace(/\\s+/g, ' ').trim()).filter(Boolean);
+              return {
+                url: location.href,
+                title: document.title || '',
+                readyState: document.readyState || '',
+                htmlLength: document.documentElement ? document.documentElement.outerHTML.length : 0,
+                bodyLength: document.body ? document.body.innerText.length : 0,
+                bodyText: document.body ? document.body.innerText.replace(/\\s+/g, ' ').trim().slice(0, 300) : '',
+                inputCount: inputs.length,
+                passwordInputCount: inputs.filter((input) => String(input.getAttribute('type') || '').toLowerCase() === 'password').length,
+                buttonCount: buttons.length,
+                buttonTexts,
+                inputInfo,
+              };
+            }
+            """
+        )
+        return state if isinstance(state, dict) else {}
+    except Exception as error:
+        return {"diagnosticError": str(error)[:200], "url": str(getattr(page, "url", "") or "")}
+
+
+def onebss_login_diagnostic_text(page: Any) -> str:
+    state = onebss_login_page_state(page)
+    parts = [
+        f"Trang hien tai: {state.get('url') or getattr(page, 'url', '')}",
+        f"title={state.get('title') or ''}",
+        f"ready={state.get('readyState') or ''}",
+        f"html={state.get('htmlLength') or 0}",
+        f"body={state.get('bodyLength') or 0}",
+        f"inputs={state.get('inputCount') or 0}",
+        f"password_inputs={state.get('passwordInputCount') or 0}",
+        f"buttons={state.get('buttonCount') or 0}",
+    ]
+    button_texts = state.get("buttonTexts")
+    if isinstance(button_texts, list) and button_texts:
+        parts.append(f"button_texts={', '.join(str(item)[:40] for item in button_texts[:4])}")
+    body_text = str(state.get("bodyText") or "")
+    if body_text:
+        parts.append(f"Noi dung: {body_text[:300]}")
+    if state.get("diagnosticError"):
+        parts.append(f"diagnostic_error={state.get('diagnosticError')}")
+    return ". ".join(parts)
+
+
 def wait_for_onebss_auth_transition(page: Any, helper: OneBssReportDownloader, timeout_ms: int = 12000) -> None:
     deadline = time.monotonic() + (timeout_ms / 1000)
     device_needles = ["ĐĂNG KÝ THIẾT BỊ", "DANG KY THIET BI", "đăng ký thiết bị", "dang ky thiet bi"]
@@ -802,14 +890,7 @@ def handle_onebss_device_registration(page: Any, helper: OneBssReportDownloader,
 
 
 def onebss_login_failed_message(page: Any) -> str:
-    url = str(getattr(page, "url", "") or "")
-    try:
-        text = " ".join(str(page.locator("body").inner_text(timeout=3000) or "").split())
-    except Exception:
-        text = ""
-    if text:
-        return f"Dang nhap OneBSS chua thanh cong. Trang hien tai: {url}. Noi dung: {text[:300]}"
-    return f"Dang nhap OneBSS chua thanh cong. Trang hien tai: {url}"
+    return f"Dang nhap OneBSS chua thanh cong. {onebss_login_diagnostic_text(page)}"
 
 
 def page_contains(page: Any, needles: list[str]) -> bool:
