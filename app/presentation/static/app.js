@@ -4831,7 +4831,7 @@ function createOneBssReportDraft() {
     id: "",
     ma_bao_cao: "",
     ten_bao_cao: "",
-    danh_sach_bien: ["P_PHANVUNG_ID", "P_LOAI_NGAY", "P_TUNGAY", "P_DENNGAY"],
+    danh_sach_bien: ["P_PHANVUNG_ID", "P_LOAI_NGAY", "P_TUNGAY", "P_DENNGAY", "P_LOAI_BAOCAO", "P_LOAI_BIENDONG"],
     report_url: "",
     storage_link: "",
   };
@@ -4850,8 +4850,8 @@ function renderOneBssReportEditor(report, isDraft = false) {
       </div>
       <label>Mã báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="Tự sinh nếu để trống" /></label>
       <label>Tên báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="Tên báo cáo OneBSS" /></label>
-      <label>Danh sách biến<input class="form-control inline-admin-input inline-admin-params" data-inline-onebss-field="danh_sach_bien" value="${escapeHtml(params)}" placeholder="P_PHANVUNG_ID, P_TUNGAY, P_DENNGAY" /><small class="cell-note">Mỗi biến cách nhau bằng dấu phẩy.</small></label>
-      <label>Link lấy báo cáo<textarea class="form-control inline-admin-code connection-editor-code" data-inline-onebss-field="report_url" rows="4" placeholder="https://onebss.vnpt.vn/#/report/bi?...">${escapeHtml(report.report_url || "")}</textarea></label>
+      <label>Danh sách biến<input class="form-control inline-admin-input inline-admin-params" data-inline-onebss-field="danh_sach_bien" value="${escapeHtml(params)}" placeholder="P_PHANVUNG_ID, P_LOAI_NGAY, P_TUNGAY, P_DENNGAY, P_LOAI_BAOCAO, P_LOAI_BIENDONG" /><small class="cell-note">Mỗi biến cách nhau bằng dấu phẩy.</small></label>
+      <label>Link lấy báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="report_url" value="${escapeHtml(report.report_url || "")}" placeholder="https://onebss.vnpt.vn/#/report/bi?..." /></label>
       <label>Link lưu báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="storage_link" value="${escapeHtml(report.storage_link || "")}" placeholder="Link thư mục Google Drive hoặc thư mục nội bộ" /></label>
     </div>`;
 }
