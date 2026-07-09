@@ -26,12 +26,14 @@ FEATURE_ROWS = [
     ("truyvansql", "Truy vấn SQL", None, 30),
     ("baocaomoi", "Báo cáo mới", None, 35),
     ("thietkelayoutbaocao", "Thiết kế Layout báo cáo", "baocaomoi", 36),
+    ("daodulieuonebss", "Đào dữ liệu OneBSS", "baocaomoi", 37),
     ("taikhoanweb", "Tài khoản web", "quantriweb", 40),
     ("xemdanhsachtaikhoan", "Xem danh sách tài khoản", "taikhoanweb", 41),
     ("themvasuataikhoan", "Thêm và sửa tài khoản", "taikhoanweb", 42),
     ("xemmatkhaudaluu", "Xem mật khẩu đã lưu", "taikhoanweb", 43),
     ("nhatkyhoatdong", "Nhật ký hoạt động", "quantriweb", 90),
     ("quantrisql", "Quản trị SQL", "quantriketnoi", 23),
+    ("quantridulieuonebss", "Quản trị dữ liệu OneBSS", "quantriketnoi", 24),
 ]
 
 FEATURE_CODE_ALIASES = {
@@ -53,6 +55,7 @@ FEATURE_CODE_ALIASES = {
     "vault.reveal": "xemmatkhaudaluu",
     "admin.audit": "nhatkyhoatdong",
     "admin.sql_reports": "quantrisql",
+    "admin.onebss_reports": "quantridulieuonebss",
     "web_links": "lienketweb",
     "web_links.elearning": "elearning",
 }
@@ -261,6 +264,37 @@ class AppRepository:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS onebss_reports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ma_bao_cao TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    ten_bao_cao TEXT NOT NULL,
+                    danh_sach_bien_json TEXT NOT NULL DEFAULT '[]',
+                    report_url TEXT NOT NULL,
+                    storage_link TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS onebss_report_runs (
+                    run_id TEXT PRIMARY KEY,
+                    ma_bao_cao TEXT NOT NULL,
+                    ten_bao_cao TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    message TEXT NOT NULL DEFAULT '',
+                    file_name TEXT NOT NULL DEFAULT '',
+                    file_path TEXT NOT NULL DEFAULT '',
+                    storage_link TEXT NOT NULL DEFAULT '',
+                    storage_status TEXT NOT NULL DEFAULT '',
+                    parameters_json TEXT NOT NULL DEFAULT '{}',
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT NOT NULL DEFAULT '',
+                    duration_ms INTEGER NOT NULL DEFAULT 0,
+                    created_by TEXT NOT NULL DEFAULT ''
+                );
+
+                CREATE INDEX IF NOT EXISTS onebss_report_runs_report_idx
+                ON onebss_report_runs (ma_bao_cao, started_at DESC);
 
                 CREATE TABLE IF NOT EXISTS dashboard_layouts (
                     page_id TEXT PRIMARY KEY,
@@ -1030,6 +1064,115 @@ class AppRepository:
         with self.connect() as connection:
             connection.execute("DELETE FROM sql_reports WHERE id=?", (report_id,))
 
+    def list_onebss_reports(self) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute("SELECT * FROM onebss_reports ORDER BY ten_bao_cao").fetchall()
+            return [self._decode_onebss_report(dict(row)) for row in rows]
+
+    def get_onebss_report_by_id(self, report_id: int) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM onebss_reports WHERE id=?", (report_id,)).fetchone()
+            return self._decode_onebss_report(dict(row)) if row else None
+
+    def get_onebss_report_by_code(self, ma_bao_cao: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM onebss_reports WHERE ma_bao_cao=?", (ma_bao_cao,)).fetchone()
+            return self._decode_onebss_report(dict(row)) if row else None
+
+    def generate_onebss_report_code(self) -> str:
+        with self.connect() as connection:
+            rows = connection.execute("SELECT ma_bao_cao FROM onebss_reports WHERE ma_bao_cao LIKE 'ONEBSS%'").fetchall()
+        numbers = []
+        for row in rows:
+            match = re.search(r"(\d+)$", str(row["ma_bao_cao"] or ""))
+            if match:
+                numbers.append(int(match.group(1)))
+        return f"ONEBSS{(max(numbers) if numbers else 0) + 1:04d}"
+
+    def save_onebss_report(
+        self,
+        report_id: int | None,
+        ma_bao_cao: str,
+        ten_bao_cao: str,
+        danh_sach_bien: list[str],
+        report_url: str,
+        storage_link: str,
+    ) -> int:
+        now = self._now()
+        params_payload = json.dumps(danh_sach_bien, ensure_ascii=False)
+        with self.connect() as connection:
+            if report_id:
+                connection.execute(
+                    """
+                    UPDATE onebss_reports
+                    SET ma_bao_cao=?, ten_bao_cao=?, danh_sach_bien_json=?, report_url=?, storage_link=?, updated_at=?
+                    WHERE id=?
+                    """,
+                    (ma_bao_cao, ten_bao_cao, params_payload, report_url, storage_link, now, report_id),
+                )
+                return int(report_id)
+            cursor = connection.execute(
+                """
+                INSERT INTO onebss_reports
+                (ma_bao_cao, ten_bao_cao, danh_sach_bien_json, report_url, storage_link, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (ma_bao_cao, ten_bao_cao, params_payload, report_url, storage_link, now, now),
+            )
+            return int(cursor.lastrowid)
+
+    def delete_onebss_report(self, report_id: int) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM onebss_reports WHERE id=?", (report_id,))
+
+    def save_onebss_report_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = self._now()
+        run_id = str(payload.get("run_id") or f"OBRUN{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}{secrets.token_hex(3).upper()}")
+        parameters = payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {}
+        row = {
+            "run_id": run_id,
+            "ma_bao_cao": str(payload.get("ma_bao_cao") or ""),
+            "ten_bao_cao": str(payload.get("ten_bao_cao") or ""),
+            "status": str(payload.get("status") or "failed"),
+            "message": str(payload.get("message") or ""),
+            "file_name": str(payload.get("file_name") or ""),
+            "file_path": str(payload.get("file_path") or ""),
+            "storage_link": str(payload.get("storage_link") or ""),
+            "storage_status": str(payload.get("storage_status") or ""),
+            "parameters_json": json.dumps(parameters, ensure_ascii=False),
+            "started_at": str(payload.get("started_at") or now),
+            "finished_at": str(payload.get("finished_at") or now),
+            "duration_ms": int(payload.get("duration_ms") or 0),
+            "created_by": str(payload.get("created_by") or ""),
+        }
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO onebss_report_runs
+                (run_id, ma_bao_cao, ten_bao_cao, status, message, file_name, file_path, storage_link,
+                 storage_status, parameters_json, started_at, finished_at, duration_ms, created_by)
+                VALUES (:run_id, :ma_bao_cao, :ten_bao_cao, :status, :message, :file_name, :file_path, :storage_link,
+                        :storage_status, :parameters_json, :started_at, :finished_at, :duration_ms, :created_by)
+                """,
+                row,
+            )
+        return self._decode_onebss_report_run(row)
+
+    def list_onebss_report_runs(self, ma_bao_cao: str = "", limit: int = 50) -> list[dict[str, Any]]:
+        safe_limit = min(max(int(limit or 50), 1), 200)
+        with self.connect() as connection:
+            if ma_bao_cao:
+                rows = connection.execute(
+                    "SELECT * FROM onebss_report_runs WHERE ma_bao_cao=? ORDER BY started_at DESC LIMIT ?",
+                    (ma_bao_cao, safe_limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM onebss_report_runs ORDER BY started_at DESC LIMIT ?",
+                    (safe_limit,),
+                ).fetchall()
+            return [self._decode_onebss_report_run(dict(row)) for row in rows]
+
     def list_dashboard_layouts(self) -> list[dict[str, Any]]:
         with self.connect() as connection:
             rows = connection.execute(
@@ -1693,6 +1836,46 @@ class AppRepository:
         if include_image:
             payload["image_base64"] = row.get("image_base64") or ""
         return payload
+
+    @staticmethod
+    def _decode_onebss_report(row: dict[str, Any]) -> dict[str, Any]:
+        try:
+            variables = json.loads(row.get("danh_sach_bien_json") or "[]")
+        except json.JSONDecodeError:
+            variables = []
+        return {
+            "id": row.get("id"),
+            "ma_bao_cao": row.get("ma_bao_cao") or "",
+            "ten_bao_cao": row.get("ten_bao_cao") or "",
+            "danh_sach_bien": variables if isinstance(variables, list) else [],
+            "report_url": row.get("report_url") or "",
+            "storage_link": row.get("storage_link") or "",
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        }
+
+    @staticmethod
+    def _decode_onebss_report_run(row: dict[str, Any]) -> dict[str, Any]:
+        try:
+            parameters = json.loads(row.get("parameters_json") or "{}")
+        except json.JSONDecodeError:
+            parameters = {}
+        return {
+            "run_id": row.get("run_id"),
+            "ma_bao_cao": row.get("ma_bao_cao") or "",
+            "ten_bao_cao": row.get("ten_bao_cao") or "",
+            "status": row.get("status") or "",
+            "message": row.get("message") or "",
+            "file_name": row.get("file_name") or "",
+            "file_path": row.get("file_path") or "",
+            "storage_link": row.get("storage_link") or "",
+            "storage_status": row.get("storage_status") or "",
+            "parameters": parameters if isinstance(parameters, dict) else {},
+            "started_at": row.get("started_at") or "",
+            "finished_at": row.get("finished_at") or "",
+            "duration_ms": int(row.get("duration_ms") or 0),
+            "created_by": row.get("created_by") or "",
+        }
 
     @staticmethod
     def _decode_data_mining_schedule(row: dict[str, Any]) -> dict[str, Any]:

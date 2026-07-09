@@ -1,5 +1,6 @@
 import sqlite3
 import json
+import re
 import secrets
 import uuid
 from datetime import UTC, datetime
@@ -33,6 +34,7 @@ FEATURE_ROWS = [
     {"code": "truyvansql", "name": "Truy vấn SQL", "parent_code": None, "sort_order": 30},
     {"code": "baocaomoi", "name": "Báo cáo mới", "parent_code": None, "sort_order": 35},
     {"code": "thietkelayoutbaocao", "name": "Thiết kế Layout báo cáo", "parent_code": "baocaomoi", "sort_order": 36},
+    {"code": "daodulieuonebss", "name": "Đào dữ liệu OneBSS", "parent_code": "baocaomoi", "sort_order": 37},
     {"code": "taikhoanweb", "name": "Tài khoản web", "parent_code": "quantriweb", "sort_order": 40},
     {"code": "xemdanhsachtaikhoan", "name": "Xem danh sách tài khoản", "parent_code": "taikhoanweb", "sort_order": 41},
     {"code": "themvasuataikhoan", "name": "Thêm và sửa tài khoản", "parent_code": "taikhoanweb", "sort_order": 42},
@@ -41,6 +43,7 @@ FEATURE_ROWS = [
 ]
 
 FEATURE_ROWS.append({"code": "quantrisql", "name": "Quản trị SQL", "parent_code": "quantriketnoi", "sort_order": 23})
+FEATURE_ROWS.append({"code": "quantridulieuonebss", "name": "Quản trị dữ liệu OneBSS", "parent_code": "quantriketnoi", "sort_order": 24})
 OBSOLETE_FEATURE_CODES = (
     *LEGACY_REMOVED_FEATURE_CODES,
     *FEATURE_CODE_ALIASES.keys(),
@@ -568,6 +571,81 @@ class SupabaseRepository:
     def delete_sql_report(self, report_id: int) -> None:
         self._delete("sql_reports", {"id": f"eq.{report_id}"})
 
+    def list_onebss_reports(self) -> list[dict[str, Any]]:
+        rows = self._get("onebss_reports", {"order": "ten_bao_cao.asc"})
+        return [self._decode_onebss_report(row) for row in rows]
+
+    def get_onebss_report_by_id(self, report_id: int) -> dict[str, Any] | None:
+        rows = self._get("onebss_reports", {"id": f"eq.{report_id}", "limit": "1"})
+        return self._decode_onebss_report(rows[0]) if rows else None
+
+    def get_onebss_report_by_code(self, ma_bao_cao: str) -> dict[str, Any] | None:
+        rows = self._get("onebss_reports", {"ma_bao_cao": f"eq.{ma_bao_cao}", "limit": "1"})
+        return self._decode_onebss_report(rows[0]) if rows else None
+
+    def generate_onebss_report_code(self) -> str:
+        rows = self._get("onebss_reports", {"select": "ma_bao_cao", "ma_bao_cao": "like.ONEBSS%", "order": "ma_bao_cao.desc"})
+        numbers = []
+        for row in rows:
+            match = re.search(r"(\d+)$", str(row.get("ma_bao_cao") or ""))
+            if match:
+                numbers.append(int(match.group(1)))
+        return f"ONEBSS{(max(numbers) if numbers else 0) + 1:04d}"
+
+    def save_onebss_report(
+        self,
+        report_id: int | None,
+        ma_bao_cao: str,
+        ten_bao_cao: str,
+        danh_sach_bien: list[str],
+        report_url: str,
+        storage_link: str,
+    ) -> int:
+        payload = {
+            "ma_bao_cao": ma_bao_cao,
+            "ten_bao_cao": ten_bao_cao,
+            "danh_sach_bien": danh_sach_bien,
+            "report_url": report_url,
+            "storage_link": storage_link,
+            "updated_at": self._now(),
+        }
+        if report_id:
+            self._patch("onebss_reports", {"id": f"eq.{report_id}"}, payload)
+            return int(report_id)
+        payload["created_at"] = self._now()
+        return int(self._insert("onebss_reports", payload)["id"])
+
+    def delete_onebss_report(self, report_id: int) -> None:
+        self._delete("onebss_reports", {"id": f"eq.{report_id}"})
+
+    def save_onebss_report_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        run_id = str(payload.get("run_id") or f"OBRUN{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}{secrets.token_hex(3).upper()}")
+        row = {
+            "run_id": run_id,
+            "ma_bao_cao": str(payload.get("ma_bao_cao") or ""),
+            "ten_bao_cao": str(payload.get("ten_bao_cao") or ""),
+            "status": str(payload.get("status") or "failed"),
+            "message": str(payload.get("message") or ""),
+            "file_name": str(payload.get("file_name") or ""),
+            "file_path": str(payload.get("file_path") or ""),
+            "storage_link": str(payload.get("storage_link") or ""),
+            "storage_status": str(payload.get("storage_status") or ""),
+            "parameters": payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {},
+            "started_at": str(payload.get("started_at") or self._now()),
+            "finished_at": str(payload.get("finished_at") or self._now()),
+            "duration_ms": int(payload.get("duration_ms") or 0),
+            "created_by": str(payload.get("created_by") or ""),
+        }
+        self._insert("onebss_report_runs", row)
+        return self._decode_onebss_report_run(row)
+
+    def list_onebss_report_runs(self, ma_bao_cao: str = "", limit: int = 50) -> list[dict[str, Any]]:
+        params = {"order": "started_at.desc", "limit": str(min(max(int(limit or 50), 1), 200))}
+        if ma_bao_cao:
+            params["ma_bao_cao"] = f"eq.{ma_bao_cao}"
+        rows = self._get("onebss_report_runs", params)
+        return [self._decode_onebss_report_run(row) for row in rows]
+
     def list_dashboard_layouts(self) -> list[dict[str, Any]]:
         return self._get("dashboard_layouts", {
             "select": "page_id,page_name,created_at,updated_at",
@@ -1009,6 +1087,50 @@ class SupabaseRepository:
         if include_image:
             payload["image_base64"] = row.get("image_base64") or ""
         return payload
+
+    @staticmethod
+    def _decode_onebss_report(row: dict[str, Any]) -> dict[str, Any]:
+        variables = row.get("danh_sach_bien") or []
+        if isinstance(variables, str):
+            try:
+                variables = json.loads(variables)
+            except json.JSONDecodeError:
+                variables = []
+        return {
+            "id": row.get("id"),
+            "ma_bao_cao": row.get("ma_bao_cao") or "",
+            "ten_bao_cao": row.get("ten_bao_cao") or "",
+            "danh_sach_bien": variables if isinstance(variables, list) else [],
+            "report_url": row.get("report_url") or "",
+            "storage_link": row.get("storage_link") or "",
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        }
+
+    @staticmethod
+    def _decode_onebss_report_run(row: dict[str, Any]) -> dict[str, Any]:
+        parameters = row.get("parameters") or {}
+        if isinstance(parameters, str):
+            try:
+                parameters = json.loads(parameters)
+            except json.JSONDecodeError:
+                parameters = {}
+        return {
+            "run_id": row.get("run_id"),
+            "ma_bao_cao": row.get("ma_bao_cao") or "",
+            "ten_bao_cao": row.get("ten_bao_cao") or "",
+            "status": row.get("status") or "",
+            "message": row.get("message") or "",
+            "file_name": row.get("file_name") or "",
+            "file_path": row.get("file_path") or "",
+            "storage_link": row.get("storage_link") or "",
+            "storage_status": row.get("storage_status") or "",
+            "parameters": parameters if isinstance(parameters, dict) else {},
+            "started_at": row.get("started_at") or "",
+            "finished_at": row.get("finished_at") or "",
+            "duration_ms": int(row.get("duration_ms") or 0),
+            "created_by": row.get("created_by") or "",
+        }
 
     @staticmethod
     def _decode_data_mining_schedule(row: dict[str, Any]) -> dict[str, Any]:

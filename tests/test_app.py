@@ -899,6 +899,80 @@ def test_admin_can_manage_sql_reports_and_run_dynamic_report() -> None:
         assert body["pagination"]["page_size"] == 20
 
 
+def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
+    calls = []
+
+    def fake_run_onebss_report_request(settings, report, parameters, **kwargs):
+        calls.append({
+            "report": report["ma_bao_cao"],
+            "parameters": parameters,
+            "otp": kwargs.get("otp"),
+            "session_id": kwargs.get("session_id"),
+        })
+        if not kwargs.get("session_id"):
+            return {
+                "ok": False,
+                "status": "otp_required",
+                "message": "OneBSS yeu cau OTP.",
+                "session_id": "otp-session-001",
+                "parameters": parameters,
+            }
+        return {
+            "ok": True,
+            "status": "success",
+            "message": "Da tai bao cao OneBSS va upload Google Drive.",
+            "file_name": "onebss.xlsx",
+            "file_path": "data/data_mining_downloads/onebss.xlsx",
+            "storage_link": "https://drive.google.com/file/d/onebss-file/view",
+            "storage_status": "uploaded_google_drive:onebss-file",
+            "parameters": parameters,
+            "duration_ms": 1234,
+        }
+
+    monkeypatch.setattr(routes, "run_onebss_report_request", fake_run_onebss_report_request)
+    with TestClient(app) as client:
+        login(client)
+        payload = {
+            "ten_bao_cao": "Bien dong PTTB",
+            "danh_sach_bien": ["P_TUNGAY", "P_DENNGAY"],
+            "report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST&name=Test",
+            "storage_link": "https://drive.google.com/drive/folders/test-folder",
+        }
+        created = client.post("/api/admin/onebss-reports", json=payload)
+        assert created.status_code == 200
+        code = created.json()["ma_bao_cao"]
+        assert code.startswith("ONEBSS")
+
+        configs = client.get("/api/onebss-reports/configs")
+        assert configs.status_code == 200
+        report = next(item for item in configs.json()["reports"] if item["ma_bao_cao"] == code)
+        assert report["danh_sach_bien"] == ["P_TUNGAY", "P_DENNGAY"]
+
+        first_run = client.post(
+            "/api/onebss-reports/run",
+            json={"ma_bao_cao": code, "parameters": {"P_TUNGAY": "01/07/2026", "P_DENNGAY": "08/07/2026"}},
+        )
+        assert first_run.status_code == 200
+        assert first_run.json()["status"] == "otp_required"
+        assert first_run.json()["session_id"] == "otp-session-001"
+
+        second_run = client.post(
+            "/api/onebss-reports/run",
+            json={
+                "ma_bao_cao": code,
+                "session_id": "otp-session-001",
+                "otp": "123456",
+                "parameters": {"P_TUNGAY": "01/07/2026", "P_DENNGAY": "08/07/2026"},
+            },
+        )
+        assert second_run.status_code == 200
+        assert second_run.json()["ok"] is True
+        assert calls[-1]["otp"] == "123456"
+        runs = client.get(f"/api/onebss-reports/runs?ma_bao_cao={code}").json()["runs"]
+        assert len(runs) == 1
+        assert runs[0]["storage_link"] == "https://drive.google.com/file/d/onebss-file/view"
+
+
 def test_dynamic_report_expands_comma_values_for_in_bind_params() -> None:
     with TestClient(app) as client:
         login(client)

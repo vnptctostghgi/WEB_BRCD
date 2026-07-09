@@ -3,6 +3,7 @@ import base64
 import binascii
 import hmac
 import json
+from datetime import datetime
 from html import escape as html_escape
 from html.parser import HTMLParser
 import re
@@ -24,6 +25,7 @@ from app.application.vault_service import VaultService
 from app.application.connection_service import ConnectionService
 from app.application.telegram_notifier import TelegramNotifier
 from app.application.onebss_data_mining_service import OneBssDownloadError, normalize_onebss_report_url, run_data_mining_schedule
+from app.application.onebss_report_service import run_onebss_report_request
 from app.application.zalo_auto_message_service import capture_page_screenshot_bytes, capture_public_url, send_zalo_auto_message
 from app.application.zalo_bot import ZaloBotClient
 from app.data_access.app_repository import (
@@ -246,11 +248,27 @@ class SqlReportPayload(BaseModel):
     cac_tham_so: list[str] = []
 
 
+class OneBssReportPayload(BaseModel):
+    id: int | None = None
+    ma_bao_cao: str = ""
+    ten_bao_cao: str
+    danh_sach_bien: list[str] = Field(default_factory=list)
+    report_url: str
+    storage_link: str = ""
+
+
 class RunReportPayload(BaseModel):
     ma_bao_cao: str
     filters: dict[str, Any] = {}
     page: int = 1
     page_size: int = 20
+
+
+class RunOneBssReportPayload(BaseModel):
+    ma_bao_cao: str
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    otp: str = ""
+    session_id: str = ""
 
 
 class DashboardLayoutPayload(BaseModel):
@@ -493,6 +511,15 @@ def raise_sql_report_schema_error(error: RuntimeError) -> None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Supabase chưa có bảng sql_reports. Hãy chạy lại file sql/supabase_upgrade_admin_modules.sql.",
+        ) from error
+    raise error
+
+
+def raise_onebss_report_schema_error(error: RuntimeError) -> None:
+    if "onebss_reports" in str(error) or "onebss_report_runs" in str(error):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Supabase chua co bang onebss_reports/onebss_report_runs. Hay chay lai file sql/supabase_upgrade_admin_modules.sql.",
         ) from error
     raise error
 
@@ -1464,6 +1491,57 @@ def delete_sql_report(request: Request, report_id: int) -> dict:
     return {"ok": True}
 
 
+@router.get("/api/admin/onebss-reports")
+def list_admin_onebss_reports(request: Request) -> dict:
+    admin_user(request)
+    try:
+        return {"reports": build_app_repository().list_onebss_reports()}
+    except RuntimeError as error:
+        raise_onebss_report_schema_error(error)
+
+
+@router.post("/api/admin/onebss-reports")
+def save_admin_onebss_report(request: Request, payload: OneBssReportPayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    ten_bao_cao = payload.ten_bao_cao.strip()
+    if not ten_bao_cao:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ten bao cao OneBSS khong duoc de trong.")
+    try:
+        report_url = normalize_onebss_report_url(payload.report_url)
+    except OneBssDownloadError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    ma_bao_cao = payload.ma_bao_cao.strip().upper() or repository.generate_onebss_report_code()
+    variables = [item.strip() for item in payload.danh_sach_bien if item.strip()]
+    try:
+        report_id = repository.save_onebss_report(
+            payload.id,
+            ma_bao_cao,
+            ten_bao_cao,
+            variables,
+            report_url,
+            payload.storage_link.strip(),
+        )
+    except sqlite3.IntegrityError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ma bao cao OneBSS da ton tai.") from error
+    except RuntimeError as error:
+        raise_onebss_report_schema_error(error)
+    repository.add_audit_log(actor["username"], "onebss_report_saved", f"Luu cau hinh OneBSS {ma_bao_cao}")
+    return {"ok": True, "id": report_id, "ma_bao_cao": ma_bao_cao}
+
+
+@router.delete("/api/admin/onebss-reports/{report_id}")
+def delete_admin_onebss_report(request: Request, report_id: int) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    try:
+        repository.delete_onebss_report(report_id)
+    except RuntimeError as error:
+        raise_onebss_report_schema_error(error)
+    repository.add_audit_log(actor["username"], "onebss_report_deleted", f"Xoa cau hinh OneBSS {report_id}")
+    return {"ok": True}
+
+
 @router.get("/api/admin/dashboard-layouts")
 def list_dashboard_layouts(request: Request) -> dict:
     admin_user(request)
@@ -1665,6 +1743,71 @@ def run_dynamic_report(request: Request, payload: RunReportPayload) -> dict:
         )
     except RuntimeError as error:
         raise_sql_report_schema_error(error)
+
+
+@router.get("/api/onebss-reports/configs")
+def list_onebss_report_configs(request: Request) -> dict:
+    admin_user(request)
+    try:
+        reports = build_app_repository().list_onebss_reports()
+    except RuntimeError as error:
+        raise_onebss_report_schema_error(error)
+    return {"reports": reports}
+
+
+@router.get("/api/onebss-reports/runs")
+def list_onebss_report_runs(request: Request, ma_bao_cao: str = "", limit: int = 50) -> dict:
+    admin_user(request)
+    try:
+        runs = build_app_repository().list_onebss_report_runs(ma_bao_cao=ma_bao_cao.strip().upper(), limit=limit)
+    except RuntimeError as error:
+        raise_onebss_report_schema_error(error)
+    return {"runs": runs}
+
+
+@router.post("/api/onebss-reports/run")
+def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    ma_bao_cao = payload.ma_bao_cao.strip().upper()
+    try:
+        report = repository.get_onebss_report_by_code(ma_bao_cao)
+    except RuntimeError as error:
+        raise_onebss_report_schema_error(error)
+    if not report:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay cau hinh bao cao OneBSS.")
+    started_at = datetime.now().isoformat(timespec="seconds")
+    result = run_onebss_report_request(
+        get_settings(),
+        report,
+        payload.parameters,
+        otp=payload.otp.strip(),
+        session_id=payload.session_id.strip(),
+        created_by=actor["username"],
+    )
+    if result.get("status") in {"otp_required", "otp_invalid"} and result.get("session_id"):
+        return {"ok": False, "status": result.get("status"), "message": result.get("message"), "session_id": result.get("session_id"), "parameters": result.get("parameters") or payload.parameters}
+    finished_at = result.get("finished_at") or datetime.now().isoformat(timespec="seconds")
+    try:
+        run = repository.save_onebss_report_run({
+            "ma_bao_cao": report.get("ma_bao_cao"),
+            "ten_bao_cao": report.get("ten_bao_cao"),
+            "status": result.get("status") or ("success" if result.get("ok") else "failed"),
+            "message": result.get("message") or "",
+            "file_name": result.get("file_name") or "",
+            "file_path": result.get("file_path") or "",
+            "storage_link": result.get("storage_link") or "",
+            "storage_status": result.get("storage_status") or "",
+            "parameters": result.get("parameters") if isinstance(result.get("parameters"), dict) else payload.parameters,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "duration_ms": int(result.get("duration_ms") or 0),
+            "created_by": actor["username"],
+        })
+    except RuntimeError as error:
+        raise_onebss_report_schema_error(error)
+    repository.add_audit_log(actor["username"], "onebss_report_run", f"Chay bao cao OneBSS {ma_bao_cao}: {result.get('ok')}")
+    return {"ok": bool(result.get("ok")), "status": run.get("status"), "message": run.get("message"), "result": result, "run": run}
 
 
 @router.post("/api/admin/telegram/test-message")

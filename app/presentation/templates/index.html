@@ -25,7 +25,7 @@
       };
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=71" />
+    <link rel="stylesheet" href="/static/styles.css?v=72" />
   </head>
   <body class="app-dark min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'themvasuataikhoan' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'xemmatkhaudaluu' in user.permissions }}">
     <svg class="icon-sprite" aria-hidden="true">
@@ -91,6 +91,7 @@
             <details class="nav-group">
               <summary data-feature-code="baocaomoi"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-chart"></use></svg><strong>Báo cáo mới</strong></summary>
               <button class="nav-item child" data-feature-code="thietkelayoutbaocao" data-view="dashboard-builder" data-title="Thiết kế Layout báo cáo" data-keywords="dashboard builder thiet ke layout bao cao tab bieu do"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Thiết kế Layout báo cáo</span></button>
+              <button class="nav-item child" data-feature-code="daodulieuonebss" data-view="onebss-mining" data-title="Đào dữ liệu OneBSS" data-keywords="dao du lieu onebss bao cao excel"><svg class="nav-svg"><use href="#icon-database"></use></svg><span>Đào dữ liệu OneBSS</span></button>
             </details>
             {% endif %}
           </div>
@@ -340,6 +341,29 @@
           </section>
         </section>
 
+        <section class="app-view" id="view-onebss-mining">
+          <div class="page-header"><div><p class="eyebrow">Đào dữ liệu OneBSS</p><h1>Đào dữ liệu OneBSS</h1><p class="subtitle">Chạy báo cáo OneBSS trong nền, lưu file và ghi lại kết quả lấy dữ liệu.</p></div></div>
+          <section class="data-card">
+            <form id="onebss-run-form" class="grid gap-3 xl:grid-cols-[1.2fr_2fr_auto]">
+              <label>Loại báo cáo<select class="form-control" id="onebss-run-report-select" name="ma_bao_cao"></select></label>
+              <div id="onebss-run-parameters" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
+              <div class="flex flex-col gap-2 md:flex-row xl:flex-col xl:justify-end">
+                <button class="btn-primary" id="run-onebss-report" type="submit"><span class="button-label">Lấy báo cáo</span><span class="spinner"></span></button>
+              </div>
+            </form>
+            <div id="onebss-otp-panel" class="result error hidden mt-4">
+              <label>Nhập OTP OneBSS<input class="form-control otp-alert-input" id="onebss-otp-input" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="Nhập 6 số OTP" /></label>
+            </div>
+            <div id="onebss-run-message" class="result hidden mt-4"></div>
+            <div class="table-scroll mt-4">
+              <table class="compact-admin-table inline-admin-table">
+                <thead><tr><th>Thời gian</th><th>Báo cáo</th><th>Kết quả</th><th>Tham số</th><th>File dữ liệu</th><th>Thông báo</th></tr></thead>
+                <tbody id="onebss-run-history"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
         <section class="app-view hidden" id="view-reports-old">
           <div class="page-header"><div><p class="eyebrow">Truy vấn SQL</p><h1>Truy vấn SQL</h1><p class="subtitle">Khu vực này sẽ hiển thị biểu đồ và báo cáo BRCĐ theo yêu cầu tiếp theo.</p></div></div>
           <section class="data-card"><div class="grid gap-4 md:grid-cols-3"><div class="chart-placeholder">Thuê bao</div><div class="chart-placeholder">Doanh thu</div><div class="chart-placeholder">Chất lượng</div></div></section>
@@ -359,6 +383,18 @@
             </div>
             <div id="sql-reports-message" class="result hidden mb-4"></div>
             <div id="sql-report-editor" class="sql-report-editor"></div>
+          </section>
+          <section class="data-card mt-4">
+            <div class="section-heading">
+              <div><p class="eyebrow">Quản trị dữ liệu OneBSS</p><h2>Danh sách báo cáo OneBSS</h2><p>Lưu link báo cáo, danh sách biến và nơi lưu file để module đào dữ liệu sử dụng.</p></div>
+              <button class="btn-primary" id="add-inline-onebss-report" type="button">Thêm báo cáo</button>
+            </div>
+            <div class="admin-inline-toolbar">
+              <label>Tìm báo cáo<input class="form-control" id="onebss-report-search" placeholder="Nhập tên, mã, biến hoặc link báo cáo..." /></label>
+              <label>Chọn báo cáo<select class="form-control" id="onebss-report-picker"><option value="">Thêm báo cáo mới / chưa chọn báo cáo</option></select></label>
+            </div>
+            <div id="onebss-reports-message" class="result hidden mb-4"></div>
+            <div id="onebss-report-editor" class="sql-report-editor"></div>
           </section>
           <section class="data-card mt-4">
             <div class="section-heading">
@@ -462,6 +498,6 @@
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script src="/static/app.js?v=99"></script>
+    <script src="/static/app.js?v=100"></script>
   </body>
 </html>

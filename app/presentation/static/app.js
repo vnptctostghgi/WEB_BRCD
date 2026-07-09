@@ -15,6 +15,11 @@ let workTasks = [];
 let zaloAutoMessages = [];
 let dataMiningSchedules = [];
 let dataMiningRuns = [];
+let oneBssReports = [];
+let oneBssReportDrafts = [];
+let oneBssReportRuns = [];
+let oneBssPendingSessionId = "";
+let oneBssRunInProgress = false;
 let sqlReports = [];
 let sqlReportDrafts = [];
 let dynamicReportPage = 1;
@@ -210,6 +215,7 @@ const navFeatureConfig = {
   nhatkyhoatdong: { view: "audit", icon: "audit", keywords: "nhat ky audit log" },
   truyvansql: { view: "reports", icon: "chart", keywords: "truy van sql bao cao thong ke bieu do" },
   thietkelayoutbaocao: { view: "dashboard-builder", icon: "chart", keywords: "dashboard builder thiet ke layout bao cao tab bieu do" },
+  daodulieuonebss: { view: "onebss-mining", icon: "database", keywords: "dao du lieu onebss bao cao excel" },
 };
 
 const navGroupOnlyFeatureCodes = new Set(["dashboard", "baocaomoi"]);
@@ -348,6 +354,7 @@ function viewLoaderForNav(nextView, dashboardPageId) {
   if (nextView === "websites") return () => loadAdminWebsites();
   if (nextView === "system") return () => loadSystem();
   if (nextView === "reports") return () => loadDynamicReports();
+  if (nextView === "onebss-mining") return () => loadOneBssMining();
   if (nextView === "dashboard-builder") return () => loadDashboardBuilder();
   if (nextView === "menu-admin") return () => loadMenuLayout();
   if (nextView === "work-tasks") return () => loadWorkTasks();
@@ -969,6 +976,26 @@ if (role === "admin") {
   $("#add-inline-sql-report")?.addEventListener("click", addInlineSqlReport);
   $("#sql-report-search")?.addEventListener("input", renderSqlReports);
   $("#sql-report-picker")?.addEventListener("change", renderSqlReports);
+  $("#add-inline-onebss-report")?.addEventListener("click", addInlineOneBssReport);
+  $("#onebss-report-search")?.addEventListener("input", renderOneBssReports);
+  $("#onebss-report-picker")?.addEventListener("change", renderOneBssReports);
+  $("#onebss-run-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    oneBssPendingSessionId = "";
+    $("#onebss-otp-input") && ($("#onebss-otp-input").value = "");
+    $("#onebss-otp-panel")?.classList.add("hidden");
+    await runOneBssReport();
+  });
+  $("#onebss-run-report-select")?.addEventListener("change", () => {
+    oneBssPendingSessionId = "";
+    $("#onebss-otp-panel")?.classList.add("hidden");
+    renderOneBssRunParameters();
+  });
+  $("#onebss-otp-input")?.addEventListener("input", async (event) => {
+    const value = event.currentTarget.value.replace(/\D/g, "").slice(0, 6);
+    event.currentTarget.value = value;
+    if (value.length === 6 && oneBssPendingSessionId && !oneBssRunInProgress) await runOneBssReport(value);
+  });
   $("#connection-search")?.addEventListener("input", renderConnectionsTable);
   $("#connection-picker")?.addEventListener("change", renderConnectionsTable);
   $("#create-menu")?.addEventListener("click", createMenu);
@@ -3941,7 +3968,7 @@ async function deleteWorkTask(taskId) {
 }
 
 async function loadSystem({ force = false } = {}) {
-  if (!force && isDataFresh("system") && isDataFresh("connections") && isDataFresh("sqlReports") && isDataFresh("dataMining")) return;
+  if (!force && isDataFresh("system") && isDataFresh("connections") && isDataFresh("sqlReports") && isDataFresh("oneBssReports") && isDataFresh("dataMining")) return;
   $("#system-cards").innerHTML = loadingRow(1, "Đang tải thông tin hệ thống...");
   const [data] = await Promise.all([
     api("/api/admin/system"),
@@ -3950,6 +3977,7 @@ async function loadSystem({ force = false } = {}) {
     loadZaloMessageLogs({ force }),
     loadDataMining({ force }),
     loadSqlReports({ force }),
+    loadOneBssReports({ force }),
   ]);
   markDataFresh("system");
   $("#system-cards").innerHTML = [
@@ -4734,6 +4762,171 @@ async function deleteSqlReport(reportId) {
   }
 }
 
+async function loadOneBssReports({ force = false } = {}) {
+  if (!force && isDataFresh("oneBssReports")) {
+    renderOneBssReports();
+    fillOneBssRunSelect();
+    return;
+  }
+  if (oneBssReports.length && !force) {
+    renderOneBssReports();
+    fillOneBssRunSelect();
+  }
+  if (!oneBssReports.length || force) renderOneBssReportEditorLoading("Đang tải cấu hình OneBSS...");
+  try {
+    const data = await api("/api/admin/onebss-reports");
+    oneBssReports = data.reports || [];
+    markDataFresh("oneBssReports");
+    renderOneBssReports();
+    fillOneBssRunSelect();
+  } catch (error) {
+    showMessage($("#onebss-reports-message"), error.message, "error");
+    const editor = $("#onebss-report-editor");
+    if (editor) editor.innerHTML = `<div class="empty-state"><div><strong>Không tải được cấu hình OneBSS</strong><p>${escapeHtml(error.message)}</p></div></div>`;
+  }
+}
+
+function renderOneBssReports() {
+  const editor = $("#onebss-report-editor");
+  if (!editor) return;
+  refreshOneBssReportPicker();
+  const pickedCode = $("#onebss-report-picker")?.value || "";
+  const selectedReport = pickedCode ? oneBssReports.find((report) => report.ma_bao_cao === pickedCode) : null;
+  const draft = oneBssReportDrafts[0] || createOneBssReportDraft();
+  editor.innerHTML = renderOneBssReportEditor(selectedReport || draft, !selectedReport);
+  document.querySelectorAll("[data-inline-onebss-field]").forEach((field) => {
+    field.addEventListener("input", () => markOneBssReportDirty(field.closest("[data-onebss-row]")));
+  });
+  document.querySelectorAll("[data-save-onebss-report-inline]").forEach((button) => {
+    button.addEventListener("click", () => saveInlineOneBssReport(button.dataset.saveOnebssReportInline, button));
+  });
+  document.querySelectorAll("[data-delete-onebss-report]").forEach((button) => {
+    button.addEventListener("click", () => deleteInlineOneBssReport(button.dataset.deleteOnebssReport));
+  });
+}
+
+function renderOneBssReportEditorLoading(text) {
+  const editor = $("#onebss-report-editor");
+  if (editor) editor.innerHTML = `<div class="loading-row">${escapeHtml(text)}</div>`;
+}
+
+function refreshOneBssReportPicker() {
+  const picker = $("#onebss-report-picker");
+  if (!picker) return;
+  const search = ($("#onebss-report-search")?.value || "").trim().toLowerCase();
+  const current = picker.value;
+  const filteredReports = oneBssReports.filter((report) => {
+    if (!search) return true;
+    const text = [report.ten_bao_cao, report.ma_bao_cao, report.report_url, report.storage_link, ...(report.danh_sach_bien || [])].join(" ").toLowerCase();
+    return text.includes(search);
+  });
+  picker.innerHTML = `<option value="">Thêm báo cáo mới / chưa chọn báo cáo</option>${filteredReports.map((report) => `<option value="${escapeHtml(report.ma_bao_cao)}">${escapeHtml(report.ten_bao_cao)} (${escapeHtml(report.ma_bao_cao)})</option>`).join("")}`;
+  if (current && filteredReports.some((report) => report.ma_bao_cao === current)) picker.value = current;
+}
+
+function createOneBssReportDraft() {
+  const draft = {
+    _draft: true,
+    _rowKey: "draft-new-onebss-report",
+    id: "",
+    ma_bao_cao: "",
+    ten_bao_cao: "",
+    danh_sach_bien: ["P_PHANVUNG_ID", "P_LOAI_NGAY", "P_TUNGAY", "P_DENNGAY"],
+    report_url: "",
+    storage_link: "",
+  };
+  oneBssReportDrafts = [draft];
+  return draft;
+}
+
+function renderOneBssReportEditor(report, isDraft = false) {
+  const rowKey = report._rowKey || `onebss-${report.id}`;
+  const params = (report.danh_sach_bien || []).join(", ");
+  return `
+    <div class="sql-report-editor-card" data-onebss-row="${escapeHtml(rowKey)}" data-onebss-report-id="${escapeHtml(report.id || "")}">
+      <div class="section-heading">
+        <div><p class="eyebrow">${isDraft ? "Thêm báo cáo OneBSS" : "Chỉnh báo cáo OneBSS"}</p><h3>${isDraft ? "Tạo cấu hình báo cáo mới" : escapeHtml(report.ten_bao_cao || report.ma_bao_cao)}</h3></div>
+        <div class="action-group"><button class="table-action ${isDraft ? "" : "hidden"}" data-save-onebss-report-inline="${escapeHtml(rowKey)}">Lưu</button>${isDraft ? "" : `<button class="table-action danger" data-delete-onebss-report="${escapeHtml(rowKey)}">Xóa</button>`}</div>
+      </div>
+      <label>Mã báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="Tự sinh nếu để trống" /></label>
+      <label>Tên báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="Tên báo cáo OneBSS" /></label>
+      <label>Danh sách biến<input class="form-control inline-admin-input inline-admin-params" data-inline-onebss-field="danh_sach_bien" value="${escapeHtml(params)}" placeholder="P_PHANVUNG_ID, P_TUNGAY, P_DENNGAY" /><small class="cell-note">Mỗi biến cách nhau bằng dấu phẩy.</small></label>
+      <label>Link lấy báo cáo<textarea class="form-control inline-admin-code connection-editor-code" data-inline-onebss-field="report_url" rows="4" placeholder="https://onebss.vnpt.vn/#/report/bi?...">${escapeHtml(report.report_url || "")}</textarea></label>
+      <label>Link lưu báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="storage_link" value="${escapeHtml(report.storage_link || "")}" placeholder="Link thư mục Google Drive hoặc thư mục nội bộ" /></label>
+    </div>`;
+}
+
+function markOneBssReportDirty(row) {
+  row?.querySelector("[data-save-onebss-report-inline]")?.classList.remove("hidden");
+}
+
+function addInlineOneBssReport() {
+  oneBssReportDrafts = [createOneBssReportDraft()];
+  if ($("#onebss-report-picker")) $("#onebss-report-picker").value = "";
+  if ($("#onebss-report-search")) $("#onebss-report-search").value = "";
+  renderOneBssReports();
+  document.querySelector('[data-onebss-row="draft-new-onebss-report"]')?.querySelector("input")?.focus();
+}
+
+async function saveInlineOneBssReport(rowKey, button) {
+  const row = document.querySelector(`[data-onebss-row="${CSS.escape(rowKey)}"]`);
+  if (!row) return;
+  const variables = (row.querySelector('[data-inline-onebss-field="danh_sach_bien"]')?.value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const payload = {
+    id: row.dataset.onebssReportId ? Number(row.dataset.onebssReportId) : null,
+    ma_bao_cao: row.querySelector('[data-inline-onebss-field="ma_bao_cao"]')?.value.trim() || "",
+    ten_bao_cao: row.querySelector('[data-inline-onebss-field="ten_bao_cao"]')?.value.trim() || "",
+    danh_sach_bien: variables,
+    report_url: row.querySelector('[data-inline-onebss-field="report_url"]')?.value.trim() || "",
+    storage_link: row.querySelector('[data-inline-onebss-field="storage_link"]')?.value.trim() || "",
+  };
+  if (!payload.ten_bao_cao || !payload.report_url) {
+    showToast("Vui lòng nhập tên báo cáo và link lấy báo cáo OneBSS.", "error");
+    return;
+  }
+  setButtonLoading(button, true);
+  try {
+    const response = await api("/api/admin/onebss-reports", { method: "POST", body: JSON.stringify(payload) });
+    oneBssReportDrafts = oneBssReportDrafts.filter((item) => item._rowKey !== rowKey);
+    markDataStale("oneBssReports", "oneBssMining");
+    showMessage($("#onebss-reports-message"), "Đã lưu cấu hình OneBSS.");
+    showToast("Đã lưu cấu hình OneBSS.");
+    await loadOneBssReports({ force: true });
+    const picker = $("#onebss-report-picker");
+    if (picker && response.ma_bao_cao) {
+      picker.value = response.ma_bao_cao;
+      renderOneBssReports();
+    }
+  } catch (error) {
+    showMessage($("#onebss-reports-message"), error.message, "error");
+    showToast(error.message, "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+async function deleteInlineOneBssReport(rowKey) {
+  if (rowKey.startsWith("draft-")) {
+    oneBssReportDrafts = oneBssReportDrafts.filter((item) => item._rowKey !== rowKey);
+    renderOneBssReports();
+    return;
+  }
+  const row = document.querySelector(`[data-onebss-row="${CSS.escape(rowKey)}"]`);
+  const reportId = row?.dataset.onebssReportId;
+  if (!reportId || !confirm("Xóa cấu hình báo cáo OneBSS này?")) return;
+  try {
+    await api(`/api/admin/onebss-reports/${reportId}`, { method: "DELETE" });
+    markDataStale("oneBssReports", "oneBssMining");
+    showMessage($("#onebss-reports-message"), "Đã xóa cấu hình OneBSS.");
+    await loadOneBssReports({ force: true });
+  } catch (error) {
+    showMessage($("#onebss-reports-message"), error.message, "error");
+  }
+}
+
 async function loadDynamicReports() {
   if (!sqlReports.length) {
     try {
@@ -4835,6 +5028,168 @@ function renderDynamicReportTable(response) {
   $("#dynamic-report-page-info").textContent = `Trang ${page} · ${rows.length}/${dynamicReportTotal} dòng`;
   $("#dynamic-report-prev").disabled = page <= 1;
   $("#dynamic-report-next").disabled = page * pageSize >= dynamicReportTotal;
+}
+
+async function loadOneBssMining({ force = false } = {}) {
+  if (!force && isDataFresh("oneBssMining")) {
+    fillOneBssRunSelect();
+    renderOneBssRunParameters();
+    renderOneBssRunHistory();
+    return;
+  }
+  try {
+    const [configData, runData] = await Promise.all([
+      api("/api/onebss-reports/configs"),
+      api("/api/onebss-reports/runs?limit=30"),
+    ]);
+    oneBssReports = configData.reports || [];
+    oneBssReportRuns = runData.runs || [];
+    markDataFresh("oneBssReports");
+    markDataFresh("oneBssMining");
+    fillOneBssRunSelect();
+    renderOneBssRunParameters();
+    renderOneBssRunHistory();
+  } catch (error) {
+    showMessage($("#onebss-run-message"), error.message, "error");
+    const history = $("#onebss-run-history");
+    if (history) history.innerHTML = emptyRow(6, "Không tải được dữ liệu OneBSS", error.message);
+  }
+}
+
+function fillOneBssRunSelect() {
+  const select = $("#onebss-run-report-select");
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = oneBssReports.length
+    ? oneBssReports.map((report) => `<option value="${escapeHtml(report.ma_bao_cao)}">${escapeHtml(report.ten_bao_cao)} (${escapeHtml(report.ma_bao_cao)})</option>`).join("")
+    : `<option value="">Chưa có báo cáo OneBSS</option>`;
+  if (current && oneBssReports.some((report) => report.ma_bao_cao === current)) select.value = current;
+}
+
+function selectedOneBssReport() {
+  const code = $("#onebss-run-report-select")?.value || "";
+  return oneBssReports.find((report) => report.ma_bao_cao === code) || null;
+}
+
+function renderOneBssRunParameters() {
+  const container = $("#onebss-run-parameters");
+  if (!container) return;
+  const report = selectedOneBssReport();
+  const variables = report?.danh_sach_bien || [];
+  if (!report) {
+    container.innerHTML = "";
+    return;
+  }
+  const template = variables.reduce((params, variable) => {
+    params[variable] = "";
+    return params;
+  }, {});
+  const jsonTemplate = JSON.stringify(template, null, 2);
+  container.innerHTML = `
+    ${variables.length ? `<div class="compact-code-cell">${renderCompactCode(variables.join(", "))}</div>` : ""}
+    <label>Tham số lọc JSON<textarea class="form-control onebss-param-json" rows="7" placeholder='{"P_TUNGAY":"{{month_start}}","P_DENNGAY":"{{today}}"}'>${escapeHtml(jsonTemplate === "{}" ? "" : jsonTemplate)}</textarea></label>
+  `;
+}
+
+function collectOneBssRunParameters() {
+  const parameters = {};
+  document.querySelectorAll(".onebss-param-input").forEach((input) => {
+    parameters[input.name] = input.value || "";
+  });
+  const jsonBox = $(".onebss-param-json");
+  if (jsonBox && jsonBox.value.trim()) {
+    try {
+      return JSON.parse(jsonBox.value);
+    } catch {
+      throw new Error("Tham số lọc JSON chưa đúng định dạng.");
+    }
+  }
+  return parameters;
+}
+
+async function runOneBssReport(otp = "") {
+  const select = $("#onebss-run-report-select");
+  const button = $("#run-onebss-report");
+  const message = $("#onebss-run-message");
+  const report = selectedOneBssReport();
+  if (!select || !select.value || !report) {
+    showMessage(message, "Chưa có cấu hình báo cáo OneBSS.", "error");
+    return;
+  }
+  let parameters = {};
+  try {
+    parameters = collectOneBssRunParameters();
+  } catch (error) {
+    showMessage(message, error.message, "error");
+    return;
+  }
+  oneBssRunInProgress = true;
+  setButtonLoading(button, true);
+  try {
+    const response = await api("/api/onebss-reports/run", {
+      method: "POST",
+      body: JSON.stringify({
+        ma_bao_cao: select.value,
+        parameters,
+        otp,
+        session_id: oneBssPendingSessionId,
+      }),
+    });
+    if (response.status === "otp_required" || response.status === "otp_invalid") {
+      oneBssPendingSessionId = response.session_id || oneBssPendingSessionId;
+      $("#onebss-otp-panel")?.classList.remove("hidden");
+      $("#onebss-otp-input")?.focus();
+      showMessage(message, response.message || "OneBSS yêu cầu OTP.", response.status === "otp_invalid" ? "error" : "info");
+      return;
+    }
+    oneBssPendingSessionId = "";
+    $("#onebss-otp-panel")?.classList.add("hidden");
+    $("#onebss-otp-input") && ($("#onebss-otp-input").value = "");
+    showMessage(message, response.message || (response.ok ? "Đã lấy báo cáo OneBSS." : "Lấy báo cáo OneBSS lỗi."), response.ok ? "success" : "error");
+    await refreshOneBssRunHistory(select.value);
+  } catch (error) {
+    showMessage(message, error.message, "error");
+  } finally {
+    oneBssRunInProgress = false;
+    setButtonLoading(button, false);
+  }
+}
+
+async function refreshOneBssRunHistory(maBaoCao = "") {
+  const query = maBaoCao ? `?ma_bao_cao=${encodeURIComponent(maBaoCao)}&limit=30` : "?limit=30";
+  const data = await api(`/api/onebss-reports/runs${query}`);
+  oneBssReportRuns = data.runs || [];
+  renderOneBssRunHistory();
+}
+
+function renderOneBssRunHistory() {
+  const table = $("#onebss-run-history");
+  if (!table) return;
+  table.innerHTML = oneBssReportRuns.length
+    ? oneBssReportRuns.map((run) => renderOneBssRunRow(run)).join("")
+    : emptyRow(6, "Chưa có lượt lấy báo cáo", "Kết quả lấy OneBSS sẽ xuất hiện ở đây sau khi bấm Lấy báo cáo.");
+}
+
+function renderOneBssRunRow(run) {
+  const startedAt = run.started_at ? new Date(run.started_at).toLocaleString("vi-VN") : "-";
+  const ok = run.status === "success";
+  const storageStatus = run.storage_status || "";
+  const isUploadedDriveFile = /^uploaded_google_drive:/i.test(storageStatus);
+  const isDirectFileLink = run.storage_link
+    && /^https?:\/\//.test(run.storage_link)
+    && (isUploadedDriveFile || /\/file\/d\/|[?&]id=/.test(run.storage_link));
+  const fileLink = isDirectFileLink
+    ? `<a href="${escapeHtml(run.storage_link)}" target="_blank" rel="noopener">Mở file</a>`
+    : (run.file_path ? `<code>${escapeHtml(run.file_name || run.file_path)}</code><small class="cell-note">${escapeHtml(run.file_path)}</small>` : "-");
+  return `
+    <tr>
+      <td>${escapeHtml(startedAt)}</td>
+      <td><strong>${escapeHtml(run.ten_bao_cao || run.ma_bao_cao)}</strong><small class="cell-note">${escapeHtml(run.ma_bao_cao || "")}</small></td>
+      <td><span class="status ${ok ? "viewer" : "inactive"}">${escapeHtml(run.status || "-")}</span></td>
+      <td class="compact-code-cell">${renderCompactCode(JSON.stringify(run.parameters || {}))}</td>
+      <td>${fileLink}${storageStatus ? `<small class="cell-note">${escapeHtml(storageStatus)}</small>` : ""}</td>
+      <td>${escapeHtml(run.message || "")}</td>
+    </tr>`;
 }
 
 $("#telegram-test-message")?.addEventListener("click", async () => {
