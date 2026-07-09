@@ -973,6 +973,36 @@ def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
         assert runs[0]["storage_link"] == "https://drive.google.com/file/d/onebss-file/view"
 
 
+def test_onebss_report_run_records_unhandled_errors(monkeypatch) -> None:
+    def failing_run_onebss_report_request(settings, report, parameters, **kwargs):
+        raise RuntimeError("browser launch failed")
+
+    monkeypatch.setattr(routes, "run_onebss_report_request", failing_run_onebss_report_request)
+    with TestClient(app) as client:
+        login(client)
+        created = client.post(
+            "/api/admin/onebss-reports",
+            json={
+                "ten_bao_cao": "OneBSS failed run",
+                "danh_sach_bien": ["P_TUNGAY"],
+                "report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST_FAIL&name=Test",
+                "storage_link": "https://drive.google.com/drive/folders/test-folder",
+            },
+        )
+        assert created.status_code == 200
+        code = created.json()["ma_bao_cao"]
+
+        response = client.post("/api/onebss-reports/run", json={"ma_bao_cao": code, "parameters": {"P_TUNGAY": "01/07/2026"}})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["ok"] is False
+        assert data["status"] == "failed"
+        assert "browser launch failed" in data["message"]
+        runs = client.get(f"/api/onebss-reports/runs?ma_bao_cao={code}").json()["runs"]
+        assert len(runs) == 1
+        assert runs[0]["status"] == "failed"
+
+
 def test_dynamic_report_expands_comma_values_for_in_bind_params() -> None:
     with TestClient(app) as client:
         login(client)

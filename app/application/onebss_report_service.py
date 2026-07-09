@@ -21,6 +21,7 @@ from app.application.onebss_data_mining_service import (
     save_downloaded_file,
     with_resolved_schedule_parameters,
 )
+from app.application.zalo_auto_message_service import install_playwright_chromium, playwright_needs_browser_install
 from app.settings import Settings
 
 
@@ -80,19 +81,29 @@ def start_onebss_report_session(
     except ImportError:
         return {"ok": False, "status": "missing_playwright", "message": "May chu chua cai Playwright."}
 
-    playwright = sync_playwright().start()
-    browser = playwright.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
-    context_options: dict[str, Any] = {
-        "accept_downloads": True,
-        "locale": "vi-VN",
-        "viewport": {"width": 1440, "height": 920},
-    }
-    if ONEBSS_STATE_PATH.exists():
-        context_options["storage_state"] = str(ONEBSS_STATE_PATH)
-    context = browser.new_context(**context_options)
-    page = context.new_page()
-    helper = OneBssReportDownloader(settings)
+    playwright: Any | None = None
+    browser: Any | None = None
+    context: Any | None = None
     try:
+        playwright = sync_playwright().start()
+        try:
+            browser = playwright.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+        except Exception as launch_error:
+            if playwright_needs_browser_install(launch_error):
+                install_playwright_chromium()
+                browser = playwright.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+            else:
+                raise
+        context_options: dict[str, Any] = {
+            "accept_downloads": True,
+            "locale": "vi-VN",
+            "viewport": {"width": 1440, "height": 920},
+        }
+        if ONEBSS_STATE_PATH.exists():
+            context_options["storage_state"] = str(ONEBSS_STATE_PATH)
+        context = browser.new_context(**context_options)
+        page = context.new_page()
+        helper = OneBssReportDownloader(settings)
         page.goto(report_url, wait_until="domcontentloaded", timeout=90000)
         page.wait_for_load_state("networkidle", timeout=90000)
         page.wait_for_timeout(1000)

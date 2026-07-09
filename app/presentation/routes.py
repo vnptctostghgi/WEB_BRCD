@@ -3,6 +3,7 @@ import base64
 import binascii
 import hmac
 import json
+import logging
 from datetime import datetime
 from html import escape as html_escape
 from html.parser import HTMLParser
@@ -41,6 +42,7 @@ from app.settings import get_settings
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path("app/presentation/templates"))
+logger = logging.getLogger(__name__)
 FAILED_LOGIN_COUNTS: dict[str, int] = {}
 ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
 DASHBOARD_LAYOUT_TYPES = {
@@ -1777,14 +1779,23 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
     if not report:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay cau hinh bao cao OneBSS.")
     started_at = datetime.now().isoformat(timespec="seconds")
-    result = run_onebss_report_request(
-        get_settings(),
-        report,
-        payload.parameters,
-        otp=payload.otp.strip(),
-        session_id=payload.session_id.strip(),
-        created_by=actor["username"],
-    )
+    try:
+        result = run_onebss_report_request(
+            get_settings(),
+            report,
+            payload.parameters,
+            otp=payload.otp.strip(),
+            session_id=payload.session_id.strip(),
+            created_by=actor["username"],
+        )
+    except Exception as error:
+        logger.exception("Unhandled OneBSS report run error")
+        result = {
+            "ok": False,
+            "status": "failed",
+            "message": f"Loi khi khoi chay OneBSS: {error}",
+            "parameters": payload.parameters,
+        }
     if result.get("status") in {"otp_required", "otp_invalid"} and result.get("session_id"):
         return {"ok": False, "status": result.get("status"), "message": result.get("message"), "session_id": result.get("session_id"), "parameters": result.get("parameters") or payload.parameters}
     finished_at = result.get("finished_at") or datetime.now().isoformat(timespec="seconds")
@@ -1806,7 +1817,10 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
         })
     except RuntimeError as error:
         raise_onebss_report_schema_error(error)
-    repository.add_audit_log(actor["username"], "onebss_report_run", f"Chay bao cao OneBSS {ma_bao_cao}: {result.get('ok')}")
+    try:
+        repository.add_audit_log(actor["username"], "onebss_report_run", f"Chay bao cao OneBSS {ma_bao_cao}: {result.get('ok')}")
+    except Exception:
+        logger.exception("Cannot write OneBSS report audit log")
     return {"ok": bool(result.get("ok")), "status": run.get("status"), "message": run.get("message"), "result": result, "run": run}
 
 
