@@ -142,11 +142,11 @@ def start_onebss_report_session(
     try:
         playwright = sync_playwright().start()
         try:
-            browser = playwright.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+            browser = playwright.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"], timeout=30000)
         except Exception as launch_error:
             if playwright_needs_browser_install(launch_error):
                 install_playwright_chromium()
-                browser = playwright.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+                browser = playwright.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"], timeout=30000)
             else:
                 raise
         context_options: dict[str, Any] = {
@@ -158,8 +158,10 @@ def start_onebss_report_session(
             context_options["storage_state"] = str(ONEBSS_STATE_PATH)
         context = browser.new_context(**context_options)
         page = context.new_page()
+        page.set_default_timeout(30000)
+        page.set_default_navigation_timeout(30000)
         helper = OneBssReportDownloader(settings)
-        page.goto(report_url, wait_until="domcontentloaded", timeout=90000)
+        goto_onebss_page(page, report_url, step="open_report")
         wait_for_onebss_network_quiet(page, timeout_ms=8000, pause_ms=1000)
         if helper._is_login_page(page):
             if not wait_for_onebss_login_form(page, timeout_ms=30000):
@@ -251,7 +253,7 @@ def continue_onebss_report_session(
             return {"ok": False, "status": "login_failed", "message": onebss_login_failed_message(page), "parameters": pending.parameters}
         report_url = normalize_onebss_report_url(pending.report.get("report_url"))
         if page.url != report_url:
-            page.goto(report_url, wait_until="domcontentloaded", timeout=90000)
+            goto_onebss_page(page, report_url, step="open_report_after_otp")
             wait_for_onebss_network_quiet(page, timeout_ms=8000, pause_ms=1000)
         result = finish_onebss_report_download(settings, helper, context, page, pending.report, pending.parameters)
         pop_onebss_session(session_id)
@@ -672,6 +674,17 @@ def wait_for_onebss_network_quiet(page: Any, *, timeout_ms: int = 8000, pause_ms
         except Exception:
             time.sleep(pause_ms / 1000)
     return quiet
+
+
+def goto_onebss_page(page: Any, url: str, *, step: str, timeout_ms: int = 30000) -> None:
+    logger.info("OneBSS step=%s goto=%s", step, url)
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+    except Exception as error:
+        logger.exception("OneBSS step=%s cannot open page", step)
+        raise OneBssDownloadError(
+            f"May chu khong mo duoc trang OneBSS trong {int(timeout_ms / 1000)} giay o buoc {step}: {str(error)[:500]}"
+        ) from error
 
 
 def wait_for_onebss_login_form(page: Any, timeout_ms: int = 30000) -> bool:
