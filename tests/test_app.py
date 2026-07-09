@@ -1057,6 +1057,42 @@ def test_onebss_login_deviceid_screen_requests_otp() -> None:
     assert playwright.stopped is True
 
 
+def test_onebss_auth_transition_waits_for_delayed_otp() -> None:
+    from app.application.onebss_report_service import page_contains, wait_for_onebss_auth_transition
+
+    class FakeBodyLocator:
+        def __init__(self, page):
+            self.page = page
+
+        def inner_text(self, timeout=0):
+            self.page.reads += 1
+            if self.page.reads < 4:
+                return "Dang nhap"
+            return "XAC THUC OTP"
+
+    class FakePage:
+        def __init__(self):
+            self.reads = 0
+            self.waits = 0
+
+        def locator(self, selector):
+            assert selector == "body"
+            return FakeBodyLocator(self)
+
+        def wait_for_timeout(self, timeout):
+            self.waits += 1
+
+    class FakeHelper:
+        def _is_login_page(self, page):
+            return True
+
+    page = FakePage()
+    wait_for_onebss_auth_transition(page, FakeHelper(), timeout_ms=3000)
+
+    assert page.waits >= 1
+    assert page_contains(page, ["OTP"]) is True
+
+
 def test_onebss_each_parameter_builds_multiple_payloads() -> None:
     from app.application.onebss_report_service import build_onebss_parameter_runs
 

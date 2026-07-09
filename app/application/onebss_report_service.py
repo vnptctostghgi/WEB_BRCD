@@ -167,7 +167,7 @@ def start_onebss_report_session(
             helper._fill_first(page, ["input[name='password']", "input[type='password']"], password)
             helper._click_button_text(page, ["Đăng nhập", "Dang nhap", "Login"])
             page.wait_for_load_state("networkidle", timeout=90000)
-            page.wait_for_timeout(1500)
+            wait_for_onebss_auth_transition(page, helper)
             if page_contains(page, OTP_TEXT_NEEDLES):
                 pending = keep_onebss_session(playwright, browser, context, page, report, parameters, created_by)
                 return {
@@ -216,7 +216,7 @@ def continue_onebss_report_session(
         helper._fill_otp(page, str(otp).strip())
         helper._click_button_text(page, ["Xác nhận", "Xac nhan", "Gửi yêu cầu", "Gui yeu cau", "Đăng nhập", "Dang nhap"])
         page.wait_for_load_state("networkidle", timeout=90000)
-        page.wait_for_timeout(1500)
+        wait_for_onebss_auth_transition(page, helper)
         if page_contains(page, OTP_INVALID_TEXT_NEEDLES):
             return {
                 "ok": False,
@@ -641,6 +641,29 @@ def close_browser_stack(browser: Any, context: Any, playwright: Any | None = Non
             playwright.stop()
         except Exception:
             pass
+
+
+def wait_for_onebss_auth_transition(page: Any, helper: OneBssReportDownloader, timeout_ms: int = 12000) -> None:
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    device_needles = ["ĐĂNG KÝ THIẾT BỊ", "DANG KY THIET BI", "đăng ký thiết bị", "dang ky thiet bi"]
+    while time.monotonic() < deadline:
+        if (
+            page_contains(page, OTP_TEXT_NEEDLES)
+            or page_contains(page, OTP_INVALID_TEXT_NEEDLES)
+            or page_contains(page, LOGIN_ERROR_TEXT_NEEDLES)
+            or page_contains(page, device_needles)
+            or page_contains(page, OTP_REQUEST_TEXT_NEEDLES)
+        ):
+            return
+        try:
+            if not helper._is_login_page(page):
+                return
+        except Exception:
+            return
+        try:
+            page.wait_for_timeout(500)
+        except Exception:
+            time.sleep(0.5)
 
 
 def handle_onebss_otp_request(
