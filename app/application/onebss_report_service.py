@@ -41,6 +41,7 @@ ONEBSS_API_TOKEN_ID = "97388db0-6ce9-11ea-bc55-0242ac130003"
 ONEBSS_API_CLIENT_ID = "clientapp"
 ONEBSS_API_CLIENT_SECRET = "password"
 ONEBSS_API_META_KEYS = {"baocao_id"}
+ONEBSS_EXPORT_TIMEOUT_SECONDS = 900
 KNOWN_ONEBSS_REPORT_IDS = {
     "PHATTRIENTHUEBAO/BIENDONGPHATTRIENTHUEBAO/RP_BSS_28429": 41668,
 }
@@ -538,12 +539,108 @@ def download_onebss_report_file_api(
     target_file: Path | None = None,
     source_values: dict[str, Any] | None = None,
 ) -> OneBssDownloadedFile:
+    try:
+        return download_onebss_grid_file_api(
+            settings,
+            token,
+            report,
+            parameters,
+            target_file=target_file,
+            source_values=source_values,
+        )
+    except OneBssDownloadError as error:
+        if not should_fallback_to_onebss_excel_export(error):
+            raise
+        logger.info("OneBSS grid data API is not usable, fallback to direct Excel export: %s", error)
+    return download_onebss_export_file_api(
+        settings,
+        token,
+        report,
+        parameters,
+        target_file=target_file,
+        source_values=source_values,
+    )
+
+
+def download_onebss_grid_file_api(
+    settings: Settings,
+    token: OneBssApiToken,
+    report: dict[str, Any],
+    parameters: dict[str, Any],
+    *,
+    target_file: Path | None = None,
+    source_values: dict[str, Any] | None = None,
+) -> OneBssDownloadedFile:
     report_url = normalize_onebss_report_url(report.get("report_url"))
     report_id = onebss_report_id(report, parameters, token)
     export_params = onebss_export_parameters(parameters)
     request_id = datetime.now(LOCAL_TIMEZONE).strftime("%d%m%y%H%M%S") + str(int(time.time() * 1000) % 1000).zfill(3)
     headers = {**onebss_api_auth_headers(token), "apiKey": "x"}
-    timeout = onebss_api_timeout(settings, minimum_seconds=int(getattr(settings, "onebss_download_timeout_seconds", 180) or 180))
+    payload = {"baocao_id": report_id, "params": export_params}
+    timeout = onebss_api_timeout(settings, minimum_seconds=ONEBSS_EXPORT_TIMEOUT_SECONDS)
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            response = client.post(
+                f"{ONEBSS_API_BASE_URL}/web-report/report/bi/run_v7",
+                params={"requestId": request_id},
+                headers=headers,
+                json=payload,
+            )
+            response = poll_onebss_json_if_needed(client, response, headers, payload, settings)
+    except httpx.TimeoutException as error:
+        raise OneBssDownloadError(
+            f"OneBSS tra du lieu luoi qua lau va bi het thoi gian cho sau {ONEBSS_EXPORT_TIMEOUT_SECONDS} giay."
+        ) from error
+    except httpx.HTTPError as error:
+        raise OneBssDownloadError(f"Khong goi duoc API du lieu luoi OneBSS: {error}") from error
+
+    data = parse_onebss_json_response(response)
+    rows = onebss_grid_rows(data, response)
+    suggested_filename = f"onebss_grid_{report_id}.xlsx"
+    if target_file is None:
+        schedule_like = {
+            "report_url": report_url,
+            "storage_link": report.get("storage_link") or "",
+            "file_name_template": report.get("ten_bao_cao") or report.get("ma_bao_cao") or "",
+        }
+        target_file = build_target_file_path(
+            settings,
+            schedule_like,
+            suggested_filename=suggested_filename,
+            report_title=str(report.get("ten_bao_cao") or ""),
+        )
+    write_onebss_grid_excel(rows, target_file, sheet_name="DATA")
+    return OneBssDownloadedFile(
+        file_path=target_file,
+        suggested_filename=suggested_filename,
+        export_info={
+            "ok": True,
+            "source": "run_v7_grid",
+            "report_id": report_id,
+            "title": report.get("ten_bao_cao") or "",
+            "params": export_params,
+            "row_count": len(rows),
+        },
+        parameters=export_params,
+        source_values=source_values or {},
+    )
+
+
+def download_onebss_export_file_api(
+    settings: Settings,
+    token: OneBssApiToken,
+    report: dict[str, Any],
+    parameters: dict[str, Any],
+    *,
+    target_file: Path | None = None,
+    source_values: dict[str, Any] | None = None,
+) -> OneBssDownloadedFile:
+    report_url = normalize_onebss_report_url(report.get("report_url"))
+    report_id = onebss_report_id(report, parameters, token)
+    export_params = onebss_export_parameters(parameters)
+    request_id = datetime.now(LOCAL_TIMEZONE).strftime("%d%m%y%H%M%S") + str(int(time.time() * 1000) % 1000).zfill(3)
+    headers = {**onebss_api_auth_headers(token), "apiKey": "x"}
+    timeout = onebss_api_timeout(settings, minimum_seconds=ONEBSS_EXPORT_TIMEOUT_SECONDS)
     try:
         with httpx.Client(timeout=timeout) as client:
             response = client.post(
@@ -553,6 +650,11 @@ def download_onebss_report_file_api(
                 json={"baocao_id": report_id, "params": export_params},
             )
             response = poll_onebss_export_if_needed(client, response, headers, settings)
+    except httpx.TimeoutException as error:
+        raise OneBssDownloadError(
+            f"OneBSS tao file qua lau va bi het thoi gian cho sau {ONEBSS_EXPORT_TIMEOUT_SECONDS} giay. "
+            "Hay thu rut ngan khoang ngay hoac chay tung phan vung neu bao cao qua lon."
+        ) from error
     except httpx.HTTPError as error:
         raise OneBssDownloadError(f"Khong goi duoc API xuat OneBSS: {error}") from error
 
@@ -948,7 +1050,7 @@ def poll_onebss_export_if_needed(
     if not location:
         raise OneBssDownloadError("OneBSS dang tao file nhung khong tra link kiem tra file.")
     poll_url = onebss_export_poll_url(location)
-    deadline = time.monotonic() + max(60, int(getattr(settings, "onebss_download_timeout_seconds", 180) or 180))
+    deadline = time.monotonic() + max(ONEBSS_EXPORT_TIMEOUT_SECONDS, int(getattr(settings, "onebss_download_timeout_seconds", 180) or 180))
     last_response = response
     while time.monotonic() < deadline:
         time.sleep(10)
@@ -956,6 +1058,29 @@ def poll_onebss_export_if_needed(
         if last_response.status_code != 202:
             return last_response
     raise OneBssDownloadError(f"OneBSS chua tao xong file sau thoi gian cho. HTTP cuoi: {last_response.status_code}.")
+
+
+def poll_onebss_json_if_needed(
+    client: httpx.Client,
+    response: httpx.Response,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+    settings: Settings,
+) -> httpx.Response:
+    if response.status_code != 202:
+        return response
+    location = response.headers.get("location", "").strip() or response.text.strip().strip('"')
+    if not location:
+        raise OneBssDownloadError("OneBSS dang tao du lieu luoi nhung khong tra link kiem tra.")
+    poll_url = onebss_export_poll_url(location)
+    deadline = time.monotonic() + max(ONEBSS_EXPORT_TIMEOUT_SECONDS, int(getattr(settings, "onebss_download_timeout_seconds", 180) or 180))
+    last_response = response
+    while time.monotonic() < deadline:
+        time.sleep(10)
+        last_response = client.post(poll_url, headers=headers, json=payload)
+        if last_response.status_code != 202:
+            return last_response
+    raise OneBssDownloadError(f"OneBSS chua tra du lieu luoi sau thoi gian cho. HTTP cuoi: {last_response.status_code}.")
 
 
 def onebss_export_poll_url(location: str) -> str:
@@ -998,6 +1123,85 @@ def onebss_response_filename(response: httpx.Response, *, fallback: str) -> str:
     if match:
         return unquote(match.group(1).strip()) or fallback
     return fallback
+
+
+def onebss_grid_rows(data: dict[str, Any], response: httpx.Response | None = None) -> list[Any]:
+    if response is not None and response.status_code >= 400:
+        raise OneBssDownloadError(onebss_api_error_message(data, response, fallback="OneBSS khong tra du lieu luoi."))
+    if isinstance(data, dict):
+        error_code = str(data.get("error_code") or "")
+        if error_code and error_code != "BSS-00000000":
+            message = data.get("message") or data.get("message_detail") or data.get("error") or "OneBSS tra loi khi lay du lieu luoi."
+            raise OneBssDownloadError(str(message))
+        payload = data.get("data")
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            for key in ("data", "rows", "items", "records"):
+                rows = payload.get(key)
+                if isinstance(rows, list):
+                    return rows
+    return []
+
+
+def write_onebss_grid_excel(rows: list[Any], target_file: Path, *, sheet_name: str = "DATA") -> None:
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
+    except ImportError as error:
+        raise OneBssDownloadError("May chu chua cai openpyxl de tao file Excel tu du lieu OneBSS.") from error
+
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = safe_excel_sheet_title(sheet_name)
+    if rows and all(isinstance(row, dict) for row in rows):
+        headers = onebss_grid_headers(rows)
+        worksheet.append(headers)
+        for row in rows:
+            worksheet.append([excel_cell_value(row.get(header)) for header in headers])
+        for cell in worksheet[1]:
+            cell.font = Font(bold=True)
+        worksheet.freeze_panes = "A2"
+        apply_basic_excel_widths(worksheet, len(headers))
+    elif rows:
+        worksheet.append(["VALUE"])
+        for row in rows:
+            worksheet.append([excel_cell_value(row)])
+        worksheet["A1"].font = Font(bold=True)
+        worksheet.freeze_panes = "A2"
+        apply_basic_excel_widths(worksheet, 1)
+    else:
+        worksheet.append(["NO_DATA"])
+        worksheet["A1"].font = Font(bold=True)
+        apply_basic_excel_widths(worksheet, 1)
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    workbook.save(target_file)
+
+
+def onebss_grid_headers(rows: list[Any]) -> list[str]:
+    headers: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for key in row.keys():
+            key_text = str(key)
+            if key_text not in seen:
+                seen.add(key_text)
+                headers.append(key_text)
+    return headers or ["VALUE"]
+
+
+def excel_cell_value(value: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return value
+
+
+def should_fallback_to_onebss_excel_export(error: Exception) -> bool:
+    text = str(error).lower()
+    fallback_needles = ("chưa hỗ trợ", "chua ho tro", "header", "run_v7", "404", "not found")
+    return any(needle in text for needle in fallback_needles)
 
 
 def build_onebss_temp_file_path(settings: Settings, index: int) -> Path:

@@ -1135,6 +1135,25 @@ def test_onebss_report_id_uses_configured_meta_value() -> None:
     assert onebss_export_parameters(parameters) == {"P_PHANVUNG_ID": "13"}
 
 
+def test_onebss_grid_rows_are_written_to_excel(tmp_path) -> None:
+    from openpyxl import load_workbook
+
+    from app.application.onebss_report_service import onebss_grid_rows, write_onebss_grid_excel
+
+    rows = onebss_grid_rows({"error_code": "BSS-00000000", "data": [{"MA_TB": "TB1", "DOANH_THU": 10}, {"MA_TB": "TB2", "GOI": "FIBER"}]})
+    target = tmp_path / "onebss_grid.xlsx"
+    write_onebss_grid_excel(rows, target)
+
+    workbook = load_workbook(target, data_only=True)
+    try:
+        sheet = workbook["DATA"]
+        assert [sheet.cell(row=1, column=index).value for index in range(1, 4)] == ["MA_TB", "DOANH_THU", "GOI"]
+        assert sheet.cell(row=2, column=1).value == "TB1"
+        assert sheet.cell(row=3, column=3).value == "FIBER"
+    finally:
+        workbook.close()
+
+
 def test_onebss_merge_excel_files_appends_rows_with_source_column(tmp_path) -> None:
     from openpyxl import Workbook, load_workbook
 

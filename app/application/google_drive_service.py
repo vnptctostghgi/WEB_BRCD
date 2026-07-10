@@ -79,8 +79,11 @@ def upload_file_to_google_drive(settings: Settings, local_path: Path, file_name:
 
     credentials = service_account.Credentials.from_service_account_info(
         info,
-        scopes=["https://www.googleapis.com/auth/drive.file"],
+        scopes=["https://www.googleapis.com/auth/drive"],
     )
+    impersonated_user = str(getattr(settings, "google_drive_impersonated_user", "") or "").strip()
+    if impersonated_user:
+        credentials = credentials.with_subject(impersonated_user)
     drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
     media = MediaFileUpload(
         str(local_path),
@@ -92,6 +95,7 @@ def upload_file_to_google_drive(settings: Settings, local_path: Path, file_name:
         body=metadata,
         media_body=media,
         fields="id,name,webViewLink,webContentLink",
+        supportsAllDrives=True,
     ).execute()
     return {
         "ok": True,

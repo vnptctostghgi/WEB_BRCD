@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     google_drive_service_account_json: SecretStr = Field(default=SecretStr(""))
     google_drive_service_account_file: str = ""
     google_drive_folder_id: str = ""
+    google_drive_impersonated_user: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
 
