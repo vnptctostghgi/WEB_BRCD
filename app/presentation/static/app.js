@@ -26,8 +26,15 @@ let mobileGatewayDevices = [];
 let mobileGatewayOverview = {};
 let mobileGatewaySmsPage = 1;
 let mobileGatewaySmsHasMore = false;
-let mobileGatewayOtpConfigurations = [];
-let mobileGatewayOtpRequests = [];
+let mobileGatewayNotificationPage = 1;
+let mobileGatewayNotificationHasMore = false;
+let mobileGatewayOtpFilters = [];
+let mobileGatewayOtpLatest = [];
+let mobileGatewayMediaItems = [];
+let mobileGatewayPairingPollTimer = null;
+let mobileGatewayPairingCountdownTimer = null;
+let mobileGatewayActivePairingId = null;
+let mobileGatewayActivePairingExpiresAt = "";
 let sqlReports = [];
 let sqlReportDrafts = [];
 let dynamicReportPage = 1;
@@ -947,6 +954,7 @@ async function openEditUser(id) {
 }
 
 if (role === "admin") {
+  normalizeMobileGatewayUi();
   $("#create-user-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -980,7 +988,7 @@ if (role === "admin") {
   $("#mobile-refresh")?.addEventListener("click", () => loadMobileGateway({ force: true }));
   $("#mobile-create-pairing-code")?.addEventListener("click", createMobilePairingCode);
   document.querySelectorAll("[data-mobile-tab]").forEach((button) => button.addEventListener("click", () => activateMobileGatewayTab(button.dataset.mobileTab)));
-  ["#mobile-sms-device-filter", "#mobile-sms-sender-filter", "#mobile-sms-query-filter", "#mobile-sms-otp-filter"].forEach((selector) => {
+  ["#mobile-sms-device-filter", "#mobile-sms-sender-filter", "#mobile-sms-query-filter", "#mobile-sms-date-from", "#mobile-sms-date-to", "#mobile-sms-sim-filter"].forEach((selector) => {
     $(selector)?.addEventListener("input", () => {
       mobileGatewaySmsPage = 1;
       loadMobileGatewaySms({ force: true });
@@ -999,10 +1007,30 @@ if (role === "admin") {
     mobileGatewaySmsPage += 1;
     loadMobileGatewaySms({ force: true });
   });
-  $("#mobile-save-otp-config")?.addEventListener("click", saveMobileOtpConfiguration);
-  $("#mobile-test-otp-regex")?.addEventListener("click", testMobileOtpRegex);
-  $("#mobile-create-otp-request")?.addEventListener("click", createMobileOtpRequest);
-  $("#mobile-send-command")?.addEventListener("click", sendMobileCommand);
+  $("#mobile-save-otp-filter")?.addEventListener("click", saveMobileOtpFilter);
+  $("#mobile-refresh-otp")?.addEventListener("click", loadMobileOtpData);
+  ["#mobile-notification-device-filter", "#mobile-notification-app-filter", "#mobile-notification-query-filter"].forEach((selector) => {
+    $(selector)?.addEventListener("input", () => {
+      mobileGatewayNotificationPage = 1;
+      loadMobileNotifications({ force: true });
+    });
+    $(selector)?.addEventListener("change", () => {
+      mobileGatewayNotificationPage = 1;
+      loadMobileNotifications({ force: true });
+    });
+  });
+  $("#mobile-notification-prev")?.addEventListener("click", () => {
+    mobileGatewayNotificationPage = Math.max(1, mobileGatewayNotificationPage - 1);
+    loadMobileNotifications({ force: true });
+  });
+  $("#mobile-notification-next")?.addEventListener("click", () => {
+    if (!mobileGatewayNotificationHasMore) return;
+    mobileGatewayNotificationPage += 1;
+    loadMobileNotifications({ force: true });
+  });
+  ["#mobile-media-device-filter", "#mobile-media-type-filter"].forEach((selector) => {
+    $(selector)?.addEventListener("change", () => loadMobileMedia());
+  });
   $("#mobile-policy-device")?.addEventListener("change", loadMobilePolicy);
   $("#mobile-save-policy")?.addEventListener("click", saveMobilePolicy);
   $("#refresh-zalo-message-logs")?.addEventListener("click", loadZaloMessageLogs);
@@ -5461,6 +5489,148 @@ function mobileFormatTime(value) {
   }
 }
 
+function normalizeMobileGatewayUi() {
+  const root = $("#view-mobile-gateway");
+  if (!root || root.dataset.mobileUiV13 === "true") return;
+  root.dataset.mobileUiV13 = "true";
+  const actionGroup = root.querySelector(".page-header .action-group");
+  if (actionGroup) actionGroup.innerHTML = `<button class="btn-secondary" id="mobile-refresh" type="button">Làm mới</button>`;
+  const tabs = root.querySelector(".mobile-gateway-tabs");
+  if (tabs) {
+    tabs.innerHTML = `
+      <button class="mobile-gateway-tab active" data-mobile-tab="overview" type="button">Tổng quan</button>
+      <button class="mobile-gateway-tab" data-mobile-tab="devices-config" type="button">Thiết bị & Cấu hình</button>
+      <button class="mobile-gateway-tab" data-mobile-tab="sms" type="button">SMS</button>
+      <button class="mobile-gateway-tab" data-mobile-tab="otp" type="button">OTP</button>
+      <button class="mobile-gateway-tab" data-mobile-tab="notifications" type="button">Thông báo</button>
+      <button class="mobile-gateway-tab" data-mobile-tab="media" type="button">Camera / Media</button>`;
+  }
+  const devicesPanel = root.querySelector('[data-mobile-panel="devices"]');
+  if (devicesPanel) {
+    devicesPanel.dataset.mobilePanel = "devices-config";
+    devicesPanel.innerHTML = `
+      <section class="data-card">
+        <div class="section-heading">
+          <div><p class="eyebrow">Pairing</p><h2>Ghép nối thiết bị</h2></div>
+          <button class="btn-primary" id="mobile-create-pairing-code" type="button">Tạo mã ghép nối</button>
+        </div>
+        <div class="admin-inline-toolbar">
+          <label class="checkbox-label"><input type="checkbox" id="mobile-pair-sms" checked /> Đọc SMS</label>
+          <label class="checkbox-label"><input type="checkbox" id="mobile-pair-notifications" /> Đọc thông báo</label>
+          <label class="checkbox-label"><input type="checkbox" id="mobile-pair-heartbeat" checked /> Thiết bị & heartbeat</label>
+          <label class="checkbox-label"><input type="checkbox" id="mobile-pair-clipboard" /> Clipboard</label>
+          <label class="checkbox-label"><input type="checkbox" id="mobile-pair-camera" /> Camera và Media</label>
+        </div>
+        <div id="mobile-pairing-result" class="mobile-pairing-result hidden"></div>
+        <div class="table-scroll mt-4"><table><thead><tr><th>Trạng thái</th><th>Tạo bởi</th><th>Tạo lúc</th><th>Hết hạn</th><th>Thiết bị sử dụng</th></tr></thead><tbody id="mobile-pairing-table"></tbody></table></div>
+      </section>
+      <section class="data-card mt-4">
+        <div class="section-heading"><div><p class="eyebrow">Thiết bị</p><h2>Danh sách thiết bị</h2></div></div>
+        <div class="table-scroll"><table><thead><tr><th class="table-action-column">Thao tác</th><th>Thiết bị</th><th>Trạng thái</th><th>Heartbeat</th><th>Pin/Mạng</th><th>Phiên bản</th><th>Quyền</th><th>Policy</th><th>Hàng đợi</th></tr></thead><tbody id="mobile-devices-table"></tbody></table></div>
+      </section>
+      <section class="data-card mt-4">
+        <div class="section-heading"><div><p class="eyebrow">Policy</p><h2>Cấu hình thiết bị</h2></div><button class="btn-primary" id="mobile-save-policy" type="button">Lưu policy</button></div>
+        <form id="mobile-policy-form" class="mobile-form-grid">
+          <label>Thiết bị<select class="form-control" id="mobile-policy-device" name="device_id"></select></label>
+          <label>Heartbeat phút<input class="form-control" name="heartbeat_interval_minutes" type="number" value="15" /></label>
+          <label>Đồng bộ phút<input class="form-control" name="sync_interval_minutes" type="number" value="15" /></label>
+          <label>Batch size<input class="form-control" name="batch_size" type="number" value="50" /></label>
+          <label>Retention ngày<input class="form-control" name="local_retention_days" type="number" value="14" /></label>
+          <label>Minimum app<input class="form-control" name="minimum_app_version" value="1.3.0" /></label>
+          <label>Pairing TTL giây<input class="form-control" id="mobile-pairing-ttl" readonly /></label>
+          <label>Online threshold giây<input class="form-control" id="mobile-online-threshold" readonly /></label>
+          <label>Allowlist thông báo<textarea class="form-control" name="notification_allowlist" rows="3" placeholder="com.vnp.onebss&#10;com.example.app"></textarea></label>
+          <label class="checkbox-label"><input type="checkbox" name="sms_enabled" checked /> SMS</label>
+          <label class="checkbox-label"><input type="checkbox" name="notifications_enabled" /> Notification</label>
+          <label class="checkbox-label"><input type="checkbox" name="clipboard_enabled" /> Clipboard</label>
+          <label class="checkbox-label"><input type="checkbox" name="camera_enabled" /> Camera</label>
+          <label class="checkbox-label"><input type="checkbox" name="diagnostics_enabled" checked /> Diagnostics</label>
+          <label class="checkbox-label"><input type="checkbox" name="force_update" /> Force update</label>
+        </form>
+      </section>`;
+  }
+  const smsPanel = root.querySelector('[data-mobile-panel="sms"]');
+  if (smsPanel) {
+    smsPanel.innerHTML = `
+      <section class="data-card">
+        <div class="admin-inline-toolbar">
+          <label>Thiết bị<select class="form-control" id="mobile-sms-device-filter"><option value="">Tất cả</option></select></label>
+          <label>Người gửi<input class="form-control" id="mobile-sms-sender-filter" /></label>
+          <label>Nội dung<input class="form-control" id="mobile-sms-query-filter" /></label>
+          <label>Từ ngày<input class="form-control" id="mobile-sms-date-from" type="date" /></label>
+          <label>Đến ngày<input class="form-control" id="mobile-sms-date-to" type="date" /></label>
+          <label>SIM<input class="form-control" id="mobile-sms-sim-filter" type="number" /></label>
+        </div>
+        <div class="table-scroll"><table><thead><tr><th>Người gửi</th><th>Thời gian nhận</th><th>Nội dung</th><th>Thiết bị</th><th>SIM</th></tr></thead><tbody id="mobile-sms-table"></tbody></table></div>
+        <div class="mt-4 flex items-center justify-between gap-3"><span id="mobile-sms-page-info">Trang 1</span><div class="action-group"><button class="btn-secondary" id="mobile-sms-prev" type="button">Trang trước</button><button class="btn-secondary" id="mobile-sms-next" type="button">Trang sau</button></div></div>
+      </section>`;
+  }
+  const otpPanel = root.querySelector('[data-mobile-panel="otp"]');
+  if (otpPanel) {
+    otpPanel.innerHTML = `
+      <section class="grid gap-4 xl:grid-cols-[1fr_1fr]">
+        <div class="data-card">
+          <div class="section-heading"><div><p class="eyebrow">OTP filter</p><h2>Quy tắc lọc OTP</h2></div><button class="btn-primary" id="mobile-save-otp-filter" type="button">Lưu quy tắc</button></div>
+          <form id="mobile-otp-filter-form" class="mobile-form-grid">
+            <input type="hidden" name="id" />
+            <label>ID<input class="form-control" name="filter_id" value="onebss" /></label>
+            <label>Tên quy tắc<input class="form-control" name="rule_name" value="OneBSS mặc định" required /></label>
+            <label>Service code<input class="form-control" name="service_code" value="onebss" required /></label>
+            <label>Người gửi<input class="form-control" name="sender_pattern" value="293" required /></label>
+            <label>So khớp<select class="form-control" name="sender_match_type"><option value="contains">contains</option><option value="exact">exact</option><option value="regex">regex</option></select></label>
+            <label>Độ dài OTP<input class="form-control" name="otp_length" type="number" value="6" min="1" max="12" /></label>
+            <label>Start prefix<input class="form-control" name="start_prefix" value="1364" /></label>
+            <label>Hiệu lực giây<input class="form-control" name="validity_seconds" type="number" value="60" /></label>
+            <label>Thiết bị<select class="form-control" name="device_id" id="mobile-otp-device"><option value="">Tất cả</option></select></label>
+            <label>SIM<input class="form-control" name="sim_slot" type="number" /></label>
+            <label>Ưu tiên<input class="form-control" name="priority" type="number" value="10" /></label>
+            <label class="checkbox-label"><input type="checkbox" name="enabled" checked /> Bật</label>
+          </form>
+          <div class="table-scroll mt-4"><table><thead><tr><th>ID</th><th>Quy tắc</th><th>Sender</th><th>Prefix</th><th>Hiệu lực</th><th>Trạng thái</th></tr></thead><tbody id="mobile-otp-filters-table"></tbody></table></div>
+        </div>
+        <div class="data-card">
+          <div class="section-heading"><div><p class="eyebrow">OTP</p><h2>OTP mới nhất</h2></div><button class="btn-secondary" id="mobile-refresh-otp" type="button">Làm mới</button></div>
+          <div class="table-scroll"><table><thead><tr><th>Người gửi</th><th>Quy tắc</th><th>OTP mới nhất</th><th>Thời gian</th><th>Hiệu lực</th><th>Trạng thái</th></tr></thead><tbody id="mobile-otp-latest-table"></tbody></table></div>
+        </div>
+      </section>`;
+  }
+  const notificationsPanel = root.querySelector('[data-mobile-panel="notifications"]');
+  if (notificationsPanel) {
+    notificationsPanel.innerHTML = `
+      <section class="data-card">
+        <div class="admin-inline-toolbar">
+          <label>Thiết bị<select class="form-control" id="mobile-notification-device-filter"><option value="">Tất cả</option></select></label>
+          <label>App/Package<input class="form-control" id="mobile-notification-app-filter" /></label>
+          <label>Nội dung<input class="form-control" id="mobile-notification-query-filter" /></label>
+        </div>
+        <div class="table-scroll"><table><thead><tr><th>App</th><th>Tiêu đề</th><th>Nội dung</th><th>Thời gian</th><th>Thiết bị</th></tr></thead><tbody id="mobile-notifications-table"></tbody></table></div>
+        <div class="mt-4 flex items-center justify-between gap-3"><span id="mobile-notification-page-info">Trang 1</span><div class="action-group"><button class="btn-secondary" id="mobile-notification-prev" type="button">Trang trước</button><button class="btn-secondary" id="mobile-notification-next" type="button">Trang sau</button></div></div>
+      </section>`;
+  }
+  root.querySelector('[data-mobile-panel="commands"]')?.remove();
+  root.querySelector('[data-mobile-panel="logs"]')?.remove();
+  root.querySelector('[data-mobile-panel="settings"]')?.remove();
+  if (!root.querySelector('[data-mobile-panel="media"]')) {
+    const mediaPanel = document.createElement("section");
+    mediaPanel.className = "mobile-gateway-panel";
+    mediaPanel.dataset.mobilePanel = "media";
+    mediaPanel.innerHTML = `
+      <section class="data-card">
+        <div class="section-heading"><div><p class="eyebrow">Camera</p><h2>Thiết bị có camera/media</h2></div></div>
+        <div class="table-scroll"><table><thead><tr><th>Thiết bị</th><th>Trạng thái</th><th>Quyền camera</th><th>Heartbeat</th><th class="table-action-column">Yêu cầu</th></tr></thead><tbody id="mobile-media-devices-table"></tbody></table></div>
+      </section>
+      <section class="data-card mt-4">
+        <div class="section-heading"><div><p class="eyebrow">Media</p><h2>Ảnh/video gần đây</h2></div></div>
+        <div class="admin-inline-toolbar">
+          <label>Thiết bị<select class="form-control" id="mobile-media-device-filter"><option value="">Tất cả</option></select></label>
+          <label>Loại<select class="form-control" id="mobile-media-type-filter"><option value="">Tất cả</option><option value="image">Ảnh</option><option value="video">Video</option></select></label>
+        </div>
+        <div class="table-scroll"><table><thead><tr><th>Preview</th><th>Thiết bị</th><th>Loại</th><th>Thời gian</th><th>File</th><th>Trạng thái</th></tr></thead><tbody id="mobile-media-table"></tbody></table></div>
+      </section>`;
+    root.appendChild(mediaPanel);
+  }
+}
+
 function mobileDeviceLabel(deviceId) {
   const device = mobileGatewayDevices.find((item) => item.device_id === deviceId);
   return device ? `${device.name || device.device_id}` : (deviceId || "-");
@@ -5472,6 +5642,7 @@ function activateMobileGatewayTab(tabName) {
 }
 
 async function loadMobileGateway({ force = false } = {}) {
+  normalizeMobileGatewayUi();
   if (mobileGatewayLoaded && !force) {
     renderMobileGatewayDeviceOptions();
     return;
@@ -5484,11 +5655,11 @@ async function loadMobileGateway({ force = false } = {}) {
       loadMobilePairingCodes(),
       loadMobileGatewaySms({ force: true }),
       loadMobileOtpData(),
-      loadMobileNotifications(),
-      loadMobileCommands(),
-      loadMobileLogs(),
+      loadMobileNotifications({ force: true }),
+      loadMobileMedia(),
     ]);
     mobileGatewayLoaded = true;
+    startMobileOtpTicker();
     if (message) message.className = "result hidden mb-4";
   } catch (error) {
     showMessage(message, error.message, "error");
@@ -5519,6 +5690,11 @@ function renderMobileGatewayOverview() {
     `).join("");
   }
   renderMobileRecentSms(mobileGatewayOverview.recent_sms || []);
+  const settings = mobileGatewayOverview.settings || {};
+  const ttl = $("#mobile-pairing-ttl");
+  const threshold = $("#mobile-online-threshold");
+  if (ttl) ttl.value = settings.pairing_ttl_seconds || 600;
+  if (threshold) threshold.value = settings.online_threshold_seconds || 180;
 }
 
 function renderMobileRecentSms(items) {
@@ -5549,14 +5725,15 @@ async function loadMobileGatewayDevices() {
 
 function renderMobileGatewayDeviceOptions() {
   const options = mobileGatewayDevices.map((device) => `<option value="${escapeHtml(device.device_id)}">${escapeHtml(device.name || device.device_id)}</option>`).join("");
-  ["#mobile-command-device", "#mobile-policy-device"].forEach((selector) => {
+  ["#mobile-policy-device"].forEach((selector) => {
     const select = $(selector);
     if (select) select.innerHTML = options || `<option value="">Chưa có thiết bị</option>`;
   });
-  ["#mobile-sms-device-filter", "#mobile-otp-device"].forEach((selector) => {
+  ["#mobile-sms-device-filter", "#mobile-otp-device", "#mobile-notification-device-filter", "#mobile-media-device-filter"].forEach((selector) => {
     const select = $(selector);
     if (select) select.innerHTML = `<option value="">Tất cả</option>${options}`;
   });
+  renderMobileMediaDevices();
 }
 
 function renderMobileGatewayDevices() {
@@ -5815,6 +5992,383 @@ async function saveMobilePolicy() {
   };
   await api(`/api/admin/mobile-gateway/devices/${encodeURIComponent(deviceId)}/policy`, { method: "PUT", body: JSON.stringify(payload) });
   showToast("Đã lưu policy.");
+}
+
+function mobileGatewayDateStart(value) {
+  return value ? `${value}T00:00:00+00:00` : "";
+}
+
+function mobileGatewayDateEnd(value) {
+  return value ? `${value}T23:59:59+00:00` : "";
+}
+
+function mobileGatewayStatusText(code) {
+  if (code.used_at || code.status === "used") return { text: "Đã sử dụng", className: "viewer" };
+  const expiresAt = Date.parse(code.expires_at || "");
+  if (expiresAt && expiresAt < Date.now()) return { text: "Hết hạn", className: "inactive" };
+  return { text: "Chưa sử dụng", className: "pending" };
+}
+
+function startMobilePairingTimers() {
+  clearInterval(mobileGatewayPairingCountdownTimer);
+  clearInterval(mobileGatewayPairingPollTimer);
+  mobileGatewayPairingCountdownTimer = setInterval(renderMobilePairingCountdown, 1000);
+  mobileGatewayPairingPollTimer = setInterval(loadMobilePairingCodes, 3000);
+  renderMobilePairingCountdown();
+}
+
+function stopMobilePairingTimers() {
+  clearInterval(mobileGatewayPairingCountdownTimer);
+  clearInterval(mobileGatewayPairingPollTimer);
+  mobileGatewayPairingCountdownTimer = null;
+  mobileGatewayPairingPollTimer = null;
+}
+
+function renderMobilePairingCountdown(statusText = "") {
+  const box = $("#mobile-pairing-result");
+  if (!box || !mobileGatewayActivePairingId) return;
+  const expiresAt = Date.parse(mobileGatewayActivePairingExpiresAt || "");
+  const remaining = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+  const status = statusText || (remaining > 0 ? `Còn ${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}` : "Hết hạn");
+  const code = box.dataset.pairingCode || "";
+  box.className = "mobile-pairing-result";
+  box.innerHTML = `<strong>${escapeHtml(code)}</strong><span>${escapeHtml(status)}</span>`;
+  if (remaining <= 0 && !statusText) stopMobilePairingTimers();
+}
+
+async function createMobilePairingCode() {
+  const payload = {
+    sms_enabled: Boolean($("#mobile-pair-sms")?.checked),
+    notifications_enabled: Boolean($("#mobile-pair-notifications")?.checked),
+    heartbeat_enabled: Boolean($("#mobile-pair-heartbeat")?.checked),
+    clipboard_enabled: Boolean($("#mobile-pair-clipboard")?.checked),
+    camera_enabled: Boolean($("#mobile-pair-camera")?.checked),
+  };
+  const result = await api("/api/admin/mobile-gateway/pairing-codes", { method: "POST", body: JSON.stringify(payload) });
+  mobileGatewayActivePairingId = result.id;
+  mobileGatewayActivePairingExpiresAt = result.expires_at || "";
+  const box = $("#mobile-pairing-result");
+  if (box) {
+    box.dataset.pairingCode = result.pairing_code || "";
+    box.className = "mobile-pairing-result";
+    box.innerHTML = `<strong>${escapeHtml(result.pairing_code || "")}</strong><span>Đang chờ Poco F3 ghép nối...</span>`;
+  }
+  startMobilePairingTimers();
+  await loadMobilePairingCodes();
+}
+
+async function loadMobilePairingCodes() {
+  const data = await api("/api/admin/mobile-gateway/pairing-codes");
+  const codes = data.codes || [];
+  const table = $("#mobile-pairing-table");
+  if (table) {
+    table.innerHTML = codes.length ? codes.map((code) => {
+      const statusInfo = mobileGatewayStatusText(code);
+      const deviceName = code.used_by_device_id ? mobileDeviceLabel(code.used_by_device_id) : "-";
+      return `<tr>
+        <td><span class="status ${statusInfo.className}">${escapeHtml(statusInfo.text)}</span></td>
+        <td>${escapeHtml(code.created_by || "")}</td>
+        <td>${escapeHtml(mobileFormatTime(code.created_at))}</td>
+        <td>${escapeHtml(mobileFormatTime(code.expires_at))}</td>
+        <td>${escapeHtml(deviceName)}</td>
+      </tr>`;
+    }).join("") : emptyRow(5, "Chưa có mã ghép nối");
+  }
+  const active = codes.find((code) => String(code.id) === String(mobileGatewayActivePairingId));
+  if (active && (active.used_at || active.status === "used")) {
+    await loadMobileGatewayDevices();
+    renderMobilePairingCountdown(`Đã kết nối: ${mobileDeviceLabel(active.used_by_device_id)} lúc ${mobileFormatTime(active.used_at)}`);
+    stopMobilePairingTimers();
+    mobileGatewayActivePairingId = null;
+  }
+}
+
+function renderMobileGatewayDevices() {
+  const table = $("#mobile-devices-table");
+  if (!table) return;
+  table.innerHTML = mobileGatewayDevices.length ? mobileGatewayDevices.map((device) => {
+    const heartbeat = device.heartbeat || {};
+    const policy = device.policy || {};
+    const active = device.is_active;
+    const online = device.online;
+    const statusClass = !active ? "inactive" : (online ? "viewer" : "pending");
+    const statusText = !active ? "Đã thu hồi" : (online ? "Online" : "Offline");
+    const permissions = [
+      `SMS ${policy.sms_enabled ? "ON" : "OFF"}`,
+      `TB ${policy.notifications_enabled ? "ON" : "OFF"}`,
+      `Clipboard ${policy.clipboard_enabled ? "ON" : "OFF"}`,
+      `Camera ${policy.camera_enabled ? "ON" : "OFF"}`,
+    ].join(" · ");
+    return `<tr>
+      <td class="table-action-cell"><div class="action-group">
+        <button class="table-action" data-mobile-policy="${escapeHtml(device.device_id)}" type="button">Policy</button>
+        <button class="table-action" data-mobile-photo="${escapeHtml(device.device_id)}" type="button">Ảnh</button>
+        <button class="table-action" data-mobile-video="${escapeHtml(device.device_id)}" type="button">Video</button>
+        <button class="table-action danger" data-mobile-revoke="${escapeHtml(device.device_id)}" type="button">${active ? "Thu hồi" : "Kích hoạt"}</button>
+      </div></td>
+      <td><strong>${escapeHtml(device.name || device.device_id)}</strong><small class="cell-note">${escapeHtml(device.manufacturer || "")} ${escapeHtml(device.model || "")}</small></td>
+      <td><span class="status ${statusClass}">${statusText}</span></td>
+      <td>${escapeHtml(mobileFormatTime(device.last_seen_at))}<small class="cell-note">SMS permission: ${heartbeat.sms_permission ? "OK" : "-"} · Notification: ${heartbeat.notification_access ? "OK" : "-"}</small></td>
+      <td>${escapeHtml(String(heartbeat.battery_percent ?? "-"))}%<small class="cell-note">${escapeHtml(heartbeat.charging ? "Đang sạc" : "")} ${escapeHtml(heartbeat.network_type || "")}</small></td>
+      <td>${escapeHtml(device.app_version || "-")}<small class="cell-note">Android ${escapeHtml(device.android_version || "-")}</small></td>
+      <td>${escapeHtml(permissions)}</td>
+      <td>Min ${escapeHtml(policy.minimum_app_version || "1.3.0")}<small class="cell-note">${escapeHtml((policy.notification_allowlist || []).join(", "))}</small></td>
+      <td>SMS ${escapeHtml(String(heartbeat.pending_sms || 0))}<small class="cell-note">TB ${escapeHtml(String(heartbeat.pending_notifications || 0))}</small></td>
+    </tr>`;
+  }).join("") : emptyRow(9, "Chưa có thiết bị");
+  document.querySelectorAll("[data-mobile-revoke]").forEach((button) => button.addEventListener("click", () => toggleMobileDeviceActive(button.dataset.mobileRevoke)));
+  document.querySelectorAll("[data-mobile-policy]").forEach((button) => button.addEventListener("click", () => {
+    const select = $("#mobile-policy-device");
+    if (select) select.value = button.dataset.mobilePolicy;
+    loadMobilePolicy();
+    $("#mobile-policy-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }));
+  document.querySelectorAll("[data-mobile-photo]").forEach((button) => button.addEventListener("click", () => sendMobileMediaCommand(button.dataset.mobilePhoto, "capture_photo")));
+  document.querySelectorAll("[data-mobile-video]").forEach((button) => button.addEventListener("click", () => sendMobileMediaCommand(button.dataset.mobileVideo, "record_video")));
+  renderMobileMediaDevices();
+}
+
+async function sendMobileMediaCommand(deviceId, commandType) {
+  if (!deviceId) return;
+  await api("/api/admin/mobile-gateway/commands", {
+    method: "POST",
+    body: JSON.stringify({
+      device_id: deviceId,
+      command_type: commandType,
+      payload: { user_visible: true, message: commandType === "capture_photo" ? "Yêu cầu chụp ảnh từ quản trị viên" : "Yêu cầu quay video từ quản trị viên" },
+    }),
+  });
+  showToast(commandType === "capture_photo" ? "Đã gửi yêu cầu chụp ảnh." : "Đã gửi yêu cầu quay video.");
+  await loadMobileMedia();
+}
+
+async function loadMobileGatewaySms({ force = false } = {}) {
+  const deviceId = $("#mobile-sms-device-filter")?.value || "";
+  const sender = $("#mobile-sms-sender-filter")?.value || "";
+  const query = $("#mobile-sms-query-filter")?.value || "";
+  const dateFrom = mobileGatewayDateStart($("#mobile-sms-date-from")?.value || "");
+  const dateTo = mobileGatewayDateEnd($("#mobile-sms-date-to")?.value || "");
+  const simSlot = $("#mobile-sms-sim-filter")?.value || "";
+  if (force) setTableLoading("#mobile-sms-table", 5, "Đang tải SMS...");
+  const data = await api(`/api/admin/mobile-gateway/sms?page=${mobileGatewaySmsPage}&page_size=50&device_id=${encodeURIComponent(deviceId)}&sender=${encodeURIComponent(sender)}&query=${encodeURIComponent(query)}&date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}&sim_slot=${encodeURIComponent(simSlot)}`);
+  mobileGatewaySmsHasMore = Boolean(data.has_more);
+  renderMobileSmsTable(data.items || []);
+  const pageInfo = $("#mobile-sms-page-info");
+  if (pageInfo) pageInfo.textContent = `Trang ${mobileGatewaySmsPage}`;
+}
+
+function renderMobileSmsTable(items) {
+  const table = $("#mobile-sms-table");
+  if (!table) return;
+  table.replaceChildren();
+  if (!items.length) {
+    table.innerHTML = emptyRow(5, "Chưa có SMS");
+    return;
+  }
+  items.forEach((sms) => {
+    const row = document.createElement("tr");
+    [sms.sender || "", mobileFormatTime(sms.received_at), sms.body || sms.body_masked || "", mobileDeviceLabel(sms.device_id), sms.sim_slot ?? "-"].forEach((value) => {
+      const cell = document.createElement("td");
+      cell.textContent = String(value ?? "");
+      row.appendChild(cell);
+    });
+    table.appendChild(row);
+  });
+}
+
+async function loadMobileOtpData() {
+  const [filters, latest] = await Promise.all([
+    api("/api/admin/mobile-gateway/otp/filters"),
+    api("/api/admin/mobile-gateway/otp/latest?limit=100"),
+  ]);
+  mobileGatewayOtpFilters = filters.filters || [];
+  mobileGatewayOtpLatest = latest.items || [];
+  renderMobileOtpFilterForm();
+  renderMobileOtpFilters();
+  renderMobileOtpLatest();
+}
+
+function renderMobileOtpFilterForm() {
+  const form = $("#mobile-otp-filter-form");
+  if (!form || form.dataset.loaded === "true") return;
+  const otpFilter = mobileGatewayOtpFilters.find((item) => item.filter_id === "onebss") || mobileGatewayOtpFilters[0];
+  if (!otpFilter) return;
+  form.dataset.loaded = "true";
+  Object.entries(otpFilter).forEach(([key, value]) => {
+    const field = form.elements.namedItem(key);
+    if (!field) return;
+    if (field.type === "checkbox") field.checked = Boolean(value);
+    else field.value = value ?? "";
+  });
+}
+
+function renderMobileOtpFilters() {
+  const table = $("#mobile-otp-filters-table");
+  if (!table) return;
+  table.innerHTML = mobileGatewayOtpFilters.length ? mobileGatewayOtpFilters.map((item) => `<tr>
+    <td>${escapeHtml(item.filter_id || item.id || "")}</td>
+    <td>${escapeHtml(item.rule_name || "")}<small class="cell-note">${escapeHtml(item.service_code || "")}</small></td>
+    <td>${escapeHtml(item.sender_pattern || "")}<small class="cell-note">${escapeHtml(item.sender_match_type || "")}</small></td>
+    <td>${escapeHtml(item.start_prefix || "-")}<small class="cell-note">${escapeHtml(String(item.otp_length || 6))} ký tự</small></td>
+    <td>${escapeHtml(String(item.validity_seconds || 60))} giây</td>
+    <td><span class="status ${item.enabled ? "viewer" : "inactive"}">${item.enabled ? "Bật" : "Tắt"}</span></td>
+  </tr>`).join("") : emptyRow(6, "Chưa có quy tắc OTP");
+}
+
+async function saveMobileOtpFilter() {
+  const form = $("#mobile-otp-filter-form");
+  const data = Object.fromEntries(new FormData(form));
+  const payload = {
+    ...data,
+    id: data.id ? Number(data.id) : null,
+    enabled: Boolean(form.elements.namedItem("enabled")?.checked),
+    otp_length: Number(data.otp_length || 6),
+    validity_seconds: Number(data.validity_seconds || 60),
+    priority: Number(data.priority || 100),
+    sim_slot: data.sim_slot === "" ? null : Number(data.sim_slot),
+  };
+  await api("/api/admin/mobile-gateway/otp/filters", { method: "POST", body: JSON.stringify(payload) });
+  form.dataset.loaded = "";
+  showToast("Đã lưu quy tắc OTP.");
+  await loadMobileOtpData();
+}
+
+function mobileOtpLatestStatus(item) {
+  if (item.status === "used") return { text: "Đã sử dụng", className: "viewer", ttl: "-" };
+  const expiresAt = Date.parse(item.expires_at || "");
+  const remaining = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+  if (!expiresAt || remaining <= 0 || item.status === "expired") return { text: "Đã hết hiệu lực", className: "inactive", ttl: "0 giây" };
+  return { text: "Còn hiệu lực", className: "pending", ttl: `${remaining} giây` };
+}
+
+function renderMobileOtpLatest() {
+  const table = $("#mobile-otp-latest-table");
+  if (!table) return;
+  table.innerHTML = mobileGatewayOtpLatest.length ? mobileGatewayOtpLatest.map((item) => {
+    const statusInfo = mobileOtpLatestStatus(item);
+    return `<tr>
+      <td>${escapeHtml(item.sender || "")}</td>
+      <td>${escapeHtml(item.rule_name || item.filter_id || "")}</td>
+      <td><strong>${escapeHtml(item.code_masked || "")}</strong></td>
+      <td>${escapeHtml(mobileFormatTime(item.received_at))}</td>
+      <td>${escapeHtml(statusInfo.ttl)}</td>
+      <td><span class="status ${statusInfo.className}">${escapeHtml(statusInfo.text)}</span></td>
+    </tr>`;
+  }).join("") : emptyRow(6, "Chưa có OTP mới");
+}
+
+function startMobileOtpTicker() {
+  if (window.mobileGatewayOtpTicker) return;
+  window.mobileGatewayOtpTicker = setInterval(renderMobileOtpLatest, 1000);
+  window.mobileGatewayOtpRefresh = setInterval(() => {
+    if ($("#view-mobile-gateway")?.classList.contains("active")) loadMobileOtpData();
+  }, 15000);
+}
+
+async function loadMobileNotifications({ force = false } = {}) {
+  const deviceId = $("#mobile-notification-device-filter")?.value || "";
+  const packageName = $("#mobile-notification-app-filter")?.value || "";
+  const query = $("#mobile-notification-query-filter")?.value || "";
+  if (force) setTableLoading("#mobile-notifications-table", 5, "Đang tải thông báo...");
+  const data = await api(`/api/admin/mobile-gateway/notifications?page=${mobileGatewayNotificationPage}&page_size=50&device_id=${encodeURIComponent(deviceId)}&package_name=${encodeURIComponent(packageName)}&query=${encodeURIComponent(query)}`);
+  mobileGatewayNotificationHasMore = Boolean(data.has_more);
+  const table = $("#mobile-notifications-table");
+  if (table) {
+    table.innerHTML = (data.items || []).length ? data.items.map((item) => `<tr>
+      <td>${escapeHtml(item.app_name || item.package_name || "")}<small class="cell-note">${escapeHtml(item.package_name || "")}</small></td>
+      <td>${escapeHtml(item.title || "")}</td>
+      <td>${escapeHtml(item.text || item.text_masked || "")}</td>
+      <td>${escapeHtml(mobileFormatTime(item.posted_at))}</td>
+      <td>${escapeHtml(mobileDeviceLabel(item.device_id))}</td>
+    </tr>`).join("") : emptyRow(5, "Chưa có thông báo");
+  }
+  const pageInfo = $("#mobile-notification-page-info");
+  if (pageInfo) pageInfo.textContent = `Trang ${mobileGatewayNotificationPage}`;
+}
+
+async function loadMobileMedia() {
+  const deviceId = $("#mobile-media-device-filter")?.value || "";
+  const mediaType = $("#mobile-media-type-filter")?.value || "";
+  const data = await api(`/api/admin/mobile-gateway/media?page=1&page_size=50&device_id=${encodeURIComponent(deviceId)}&media_type=${encodeURIComponent(mediaType)}`);
+  mobileGatewayMediaItems = data.items || [];
+  renderMobileMediaDevices();
+  renderMobileMediaTable();
+}
+
+function renderMobileMediaDevices() {
+  const table = $("#mobile-media-devices-table");
+  if (!table) return;
+  table.innerHTML = mobileGatewayDevices.length ? mobileGatewayDevices.map((device) => {
+    const heartbeat = device.heartbeat || {};
+    const cameraEnabled = Boolean(device.policy?.camera_enabled);
+    return `<tr>
+      <td><strong>${escapeHtml(device.name || device.device_id)}</strong><small class="cell-note">${escapeHtml(device.model || "")}</small></td>
+      <td><span class="status ${device.online ? "viewer" : "pending"}">${device.online ? "Online" : "Offline"}</span></td>
+      <td><span class="status ${cameraEnabled ? "viewer" : "inactive"}">${cameraEnabled ? "Đã bật" : "Đang tắt"}</span></td>
+      <td>${escapeHtml(mobileFormatTime(device.last_seen_at))}<small class="cell-note">${escapeHtml(heartbeat.network_type || "")}</small></td>
+      <td class="table-action-cell"><div class="action-group">
+        <button class="table-action" data-mobile-photo="${escapeHtml(device.device_id)}" type="button" ${cameraEnabled ? "" : "disabled"}>Chụp ảnh</button>
+        <button class="table-action" data-mobile-video="${escapeHtml(device.device_id)}" type="button" ${cameraEnabled ? "" : "disabled"}>Quay video</button>
+      </div></td>
+    </tr>`;
+  }).join("") : emptyRow(5, "Chưa có thiết bị");
+  document.querySelectorAll("#mobile-media-devices-table [data-mobile-photo]").forEach((button) => button.addEventListener("click", () => sendMobileMediaCommand(button.dataset.mobilePhoto, "capture_photo")));
+  document.querySelectorAll("#mobile-media-devices-table [data-mobile-video]").forEach((button) => button.addEventListener("click", () => sendMobileMediaCommand(button.dataset.mobileVideo, "record_video")));
+}
+
+function renderMobileMediaTable() {
+  const table = $("#mobile-media-table");
+  if (!table) return;
+  table.innerHTML = mobileGatewayMediaItems.length ? mobileGatewayMediaItems.map((item) => {
+    const preview = item.drive_url ? `<a href="${escapeHtml(item.drive_url)}" target="_blank" rel="noopener">${item.media_type === "video" ? "Video" : "Ảnh"}</a>` : "-";
+    return `<tr>
+      <td>${preview}</td>
+      <td>${escapeHtml(mobileDeviceLabel(item.device_id))}</td>
+      <td>${escapeHtml(item.media_type || "")}<small class="cell-note">${escapeHtml(item.mime_type || "")}</small></td>
+      <td>${escapeHtml(mobileFormatTime(item.captured_at || item.uploaded_at || item.created_at))}</td>
+      <td>${item.drive_url ? `<a href="${escapeHtml(item.drive_url)}" target="_blank" rel="noopener">${escapeHtml(item.file_name || "Google Drive")}</a>` : escapeHtml(item.file_name || "")}</td>
+      <td><span class="status ${item.status === "uploaded" ? "viewer" : "inactive"}">${escapeHtml(item.status || "")}</span><small class="cell-note">${escapeHtml(item.error_message || "")}</small></td>
+    </tr>`;
+  }).join("") : emptyRow(6, "Chưa có media");
+}
+
+async function loadMobilePolicy() {
+  const deviceId = $("#mobile-policy-device")?.value || "";
+  if (!deviceId) return;
+  const data = await api(`/api/admin/mobile-gateway/devices/${encodeURIComponent(deviceId)}/policy`);
+  const form = $("#mobile-policy-form");
+  const policy = data.policy || {};
+  Object.entries(policy).forEach(([key, value]) => {
+    const field = form.elements.namedItem(key);
+    if (!field) return;
+    if (field.type === "checkbox") field.checked = Boolean(value);
+    else if (key === "notification_allowlist") field.value = (value || []).join("\n");
+    else field.value = value ?? "";
+  });
+}
+
+async function saveMobilePolicy() {
+  const form = $("#mobile-policy-form");
+  const deviceId = form.elements.namedItem("device_id")?.value || "";
+  if (!deviceId) return showToast("Chọn thiết bị.", "error");
+  const checkbox = (name) => Boolean(form.elements.namedItem(name)?.checked);
+  const payload = {
+    sms_enabled: checkbox("sms_enabled"),
+    notifications_enabled: checkbox("notifications_enabled"),
+    clipboard_enabled: checkbox("clipboard_enabled"),
+    camera_enabled: checkbox("camera_enabled"),
+    diagnostics_enabled: checkbox("diagnostics_enabled"),
+    force_update: checkbox("force_update"),
+    notification_allowlist: (form.elements.namedItem("notification_allowlist").value || "").split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean),
+    heartbeat_interval_minutes: Number(form.elements.namedItem("heartbeat_interval_minutes").value || 15),
+    sync_interval_minutes: Number(form.elements.namedItem("sync_interval_minutes").value || 15),
+    batch_size: Number(form.elements.namedItem("batch_size").value || 50),
+    local_retention_days: Number(form.elements.namedItem("local_retention_days").value || 14),
+    minimum_app_version: form.elements.namedItem("minimum_app_version").value || "1.3.0",
+  };
+  await api(`/api/admin/mobile-gateway/devices/${encodeURIComponent(deviceId)}/policy`, { method: "PUT", body: JSON.stringify(payload) });
+  showToast("Đã lưu policy.");
+  await loadMobileGatewayDevices();
 }
 
 $("#telegram-test-message")?.addEventListener("click", async () => {

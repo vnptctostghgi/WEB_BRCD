@@ -58,29 +58,32 @@ class OtpService:
         if not body:
             return None
         for request in self.repository.waiting_otp_requests():
-            config = self.repository.get_otp_configuration(str(request.get("service_code") or ""))
-            if not config or not config.get("enabled"):
-                continue
-            if config.get("source_type") not in {"sms", "both"}:
-                continue
             if not self._source_time_allowed(request, sms.get("received_at")):
                 continue
-            if not self._device_allowed(config, sms):
-                continue
-            if not self._sender_allowed(config, str(sms.get("normalized_sender") or sms.get("sender") or "")):
-                continue
-            code = security.extract_otp(
-                body,
-                str(config.get("otp_regex") or ""),
-                int(config.get("otp_length_min") or 4),
-                int(config.get("otp_length_max") or 8),
-                str(config.get("otp_keyword") or ""),
-            )
-            if not code:
-                continue
-            if self.repository.match_otp_request(str(request["request_id"]), "sms", sms["id"], code):
-                self.repository.mark_sms_matched(sms["id"], str(request["request_id"]), used=False)
-                return {"request_id": request["request_id"], "code_masked": security.code_mask(code)}
+            for otp_filter in self._filters_for_request(request):
+                if not otp_filter.get("enabled", True):
+                    continue
+                if otp_filter.get("source_type") and otp_filter.get("source_type") not in {"sms", "both"}:
+                    continue
+                if not self._device_allowed(otp_filter, sms):
+                    continue
+                if not self._sender_allowed(otp_filter, str(sms.get("normalized_sender") or sms.get("sender") or "")):
+                    continue
+                code = self._extract_code_for_filter(body, otp_filter)
+                if not code:
+                    continue
+                if self.repository.match_otp_request(str(request["request_id"]), "sms", sms["id"], code):
+                    self.repository.mark_sms_matched(sms["id"], str(request["request_id"]), used=False)
+                    self.repository.record_otp_latest(
+                        otp_filter=otp_filter,
+                        sender=str(sms.get("sender") or ""),
+                        code=code,
+                        received_at=str(sms.get("received_at") or ""),
+                        source_type="sms",
+                        source_id=sms["id"],
+                        request_id=str(request["request_id"]),
+                    )
+                    return {"request_id": request["request_id"], "code_masked": security.code_mask(code)}
         return None
 
     def match_incoming_notification(self, notification: dict[str, Any]) -> dict[str, Any] | None:
@@ -130,6 +133,56 @@ class OtpService:
             return False
         return requested_at <= source_dt <= expires_at
 
+    def _filters_for_request(self, request: dict[str, Any]) -> list[dict[str, Any]]:
+        service_code = str(request.get("service_code") or "").strip().lower()
+        filters = self.repository.list_otp_filters(service_code=service_code, enabled_only=True)
+        if filters:
+            return filters
+        config = self.repository.get_otp_configuration(service_code)
+        if not config or not config.get("enabled"):
+            return []
+        return [self._filter_from_config(config)]
+
+    @staticmethod
+    def _filter_from_config(config: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "filter_id": str(config.get("service_code") or ""),
+            "rule_name": str(config.get("service_name") or config.get("service_code") or ""),
+            "service_code": str(config.get("service_code") or ""),
+            "source_type": str(config.get("source_type") or "sms"),
+            "sender_pattern": str(config.get("sender_pattern") or ""),
+            "sender_match_type": "exact" if str(config.get("sender_match_type") or "") == "equals" else str(config.get("sender_match_type") or "contains"),
+            "otp_regex": str(config.get("otp_regex") or r"(?<!\d)(\d{4,8})(?!\d)"),
+            "otp_keyword": str(config.get("otp_keyword") or ""),
+            "otp_length_min": int(config.get("otp_length_min") or 4),
+            "otp_length_max": int(config.get("otp_length_max") or 8),
+            "validity_seconds": int(config.get("validity_seconds") or 180),
+            "device_id": str(config.get("device_id") or ""),
+            "sim_slot": config.get("sim_slot"),
+            "enabled": bool(config.get("enabled")),
+        }
+
+    @staticmethod
+    def _extract_code_for_filter(text: str, otp_filter: dict[str, Any]) -> str:
+        start_prefix = str(otp_filter.get("start_prefix") or "")
+        search_text = str(text or "")
+        if start_prefix:
+            index = search_text.find(start_prefix)
+            if index < 0:
+                return ""
+            search_text = search_text[index + len(start_prefix):]
+        otp_length = int(otp_filter.get("otp_length") or 0)
+        if otp_length > 0:
+            match = re.search(rf"(?<!\d)(\d{{{otp_length}}})(?!\d)", search_text)
+            return match.group(1) if match else ""
+        return security.extract_otp(
+            search_text,
+            str(otp_filter.get("otp_regex") or r"(?<!\d)(\d{4,8})(?!\d)"),
+            int(otp_filter.get("otp_length_min") or 4),
+            int(otp_filter.get("otp_length_max") or 8),
+            str(otp_filter.get("otp_keyword") or ""),
+        )
+
     @staticmethod
     def _device_allowed(config: dict[str, Any], source: dict[str, Any]) -> bool:
         configured_device = str(config.get("device_id") or "").strip()
@@ -152,7 +205,7 @@ class OtpService:
         sender = security.normalize_sender(normalized_sender)
         wanted = security.normalize_sender(pattern)
         match_type = str(config.get("sender_match_type") or "contains")
-        if match_type == "equals":
+        if match_type in {"equals", "exact"}:
             return sender == wanted
         if match_type == "regex":
             try:

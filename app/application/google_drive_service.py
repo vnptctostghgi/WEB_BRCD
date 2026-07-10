@@ -238,7 +238,7 @@ def load_service_account_info(settings: Settings) -> dict[str, Any]:
     return info
 
 
-def upload_file_to_google_drive(settings: Settings, local_path: Path, file_name: str, folder_id: str) -> dict[str, Any]:
+def upload_file_to_google_drive(settings: Settings, local_path: Path, file_name: str, folder_id: str, mime_type: str = "") -> dict[str, Any]:
     if not folder_id:
         raise GoogleDriveConfigurationError("Chua cau hinh folder_id Google Drive.")
     oauth_credentials = google_drive_oauth_credentials(settings)
@@ -249,6 +249,7 @@ def upload_file_to_google_drive(settings: Settings, local_path: Path, file_name:
             local_path,
             file_name,
             folder_id,
+            mime_type=mime_type,
             auth_mode="oauth",
             principal=str(oauth_config.get("oauth_email") or ""),
         )
@@ -270,6 +271,7 @@ def upload_file_to_google_drive(settings: Settings, local_path: Path, file_name:
         local_path,
         file_name,
         folder_id,
+        mime_type=mime_type,
         auth_mode="service_account",
         principal=impersonated_user or str(info.get("client_email") or ""),
     )
@@ -283,6 +285,7 @@ def upload_with_credentials(
     file_name: str,
     folder_id: str,
     *,
+    mime_type: str = "",
     auth_mode: str,
     principal: str = "",
 ) -> dict[str, Any]:
@@ -295,7 +298,7 @@ def upload_with_credentials(
     drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
     media = MediaFileUpload(
         str(local_path),
-        mimetype=guess_excel_mimetype(local_path),
+        mimetype=mime_type or guess_excel_mimetype(local_path),
         resumable=True,
     )
     metadata = {"name": file_name, "parents": [folder_id]}

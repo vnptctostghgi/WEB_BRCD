@@ -83,14 +83,23 @@ class DevicePolicyPayload(BaseModel):
     sms_enabled: bool = True
     notifications_enabled: bool = False
     clipboard_enabled: bool = False
+    camera_enabled: bool = False
     diagnostics_enabled: bool = True
     notification_allowlist: list[str] = Field(default_factory=list)
     heartbeat_interval_minutes: int = 15
     sync_interval_minutes: int = 15
     batch_size: int = 50
     local_retention_days: int = 14
-    minimum_app_version: str = "1.1.0"
+    minimum_app_version: str = "1.3.0"
     force_update: bool = False
+
+
+class PairingCodeCreatePayload(BaseModel):
+    sms_enabled: bool = True
+    notifications_enabled: bool = False
+    heartbeat_enabled: bool = True
+    clipboard_enabled: bool = False
+    camera_enabled: bool = False
 
 
 class AdminCommandPayload(BaseModel):
@@ -101,6 +110,8 @@ class AdminCommandPayload(BaseModel):
         "refresh_policy",
         "upload_diagnostics",
         "clear_synced_local_queue",
+        "capture_photo",
+        "record_video",
     ]
     device_id: str
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -127,6 +138,22 @@ class OtpConfigurationPayload(BaseModel):
     sim_slot: int | None = None
     auto_fill_enabled: bool = True
     manual_fallback_enabled: bool = True
+    priority: int = 100
+
+
+class OtpFilterPayload(BaseModel):
+    id: int | None = None
+    filter_id: str = ""
+    rule_name: str
+    service_code: str = "onebss"
+    sender_pattern: str
+    sender_match_type: Literal["exact", "contains", "regex", "equals"] = "contains"
+    otp_length: int = 6
+    start_prefix: str = ""
+    validity_seconds: int = 60
+    enabled: bool = True
+    device_id: str = ""
+    sim_slot: int | None = None
     priority: int = 100
 
 

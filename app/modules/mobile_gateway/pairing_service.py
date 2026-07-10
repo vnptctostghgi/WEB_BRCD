@@ -14,19 +14,23 @@ class PairingService:
     def __init__(self, repository: MobileGatewayRepository) -> None:
         self.repository = repository
 
-    def create_pairing_code(self, created_by: str) -> dict[str, Any]:
+    def create_pairing_code(self, created_by: str, policy_payload: dict[str, Any] | None = None) -> dict[str, Any]:
         code = security.generate_pairing_code()
         code_hash = security.pairing_code_hash(self.repository.settings, code)
+        ttl_seconds = int(getattr(self.repository.settings, "mobile_gateway_pairing_ttl_seconds", 600) or 600)
         row = self.repository.create_pairing_code(
             code_hash,
             created_by,
-            int(getattr(self.repository.settings, "mobile_gateway_pairing_ttl_seconds", 600) or 600),
+            ttl_seconds,
+            policy_payload or {},
         )
         return {
             "ok": True,
+            "id": row.get("id"),
             "pairing_code": code,
             "expires_at": row.get("expires_at"),
-            "message": "Ma ghep noi co hieu luc 10 phut.",
+            "ttl_seconds": ttl_seconds,
+            "message": "Ma ghep noi da duoc tao.",
         }
 
     def pair_device(self, payload: PairDevicePayload, ip_address: str) -> dict[str, Any]:
@@ -53,7 +57,17 @@ class PairingService:
                 "created_by": pairing.get("created_by") or "",
             }
         )
-        self.repository.save_policy(device_id, self.repository.default_policy(device_id), "system")
+        policy_payload = self.repository._json_loads(pairing.get("policy_payload"), {})
+        base_policy = self.repository.default_policy(device_id)
+        policy = {
+            **base_policy,
+            "sms_enabled": bool(policy_payload.get("sms_enabled", base_policy["sms_enabled"])),
+            "notifications_enabled": bool(policy_payload.get("notifications_enabled", base_policy["notifications_enabled"])),
+            "clipboard_enabled": bool(policy_payload.get("clipboard_enabled", base_policy["clipboard_enabled"])),
+            "camera_enabled": bool(policy_payload.get("camera_enabled", base_policy["camera_enabled"])),
+            "diagnostics_enabled": bool(policy_payload.get("heartbeat_enabled", True)),
+        }
+        self.repository.save_policy(device_id, policy, "system")
         self.repository.mark_pairing_used(int(pairing["id"]), device_id)
         return {
             "ok": True,

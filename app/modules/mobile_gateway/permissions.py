@@ -19,6 +19,8 @@ PERMISSIONS = {
     "mobile_gateway.commands.view": "Xem lenh",
     "mobile_gateway.commands.manage": "Gui lenh",
     "mobile_gateway.audit.view": "Xem nhat ky Mobile Gateway",
+    "mobile_gateway.media.view": "Xem media Mobile",
+    "mobile_gateway.media.manage": "Quan tri media Mobile",
 }
 
 

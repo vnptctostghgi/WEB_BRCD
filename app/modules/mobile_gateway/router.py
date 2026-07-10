@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import sqlite3
+import tempfile
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 
+from app.application.google_drive_service import GoogleDriveConfigurationError, upload_file_to_google_drive
 from app.data_access.repository_factory import build_repository
 from app.modules.mobile_gateway import security
 from app.modules.mobile_gateway.exceptions import PairingError
@@ -24,8 +27,10 @@ from app.modules.mobile_gateway.schemas import (
     HeartbeatPayload,
     NotificationBatchPayload,
     OtpConfigurationPayload,
+    OtpFilterPayload,
     OtpRegexTestPayload,
     OtpRequestCreatePayload,
+    PairingCodeCreatePayload,
     PairDevicePayload,
     SmsBatchPayload,
 )
@@ -35,6 +40,12 @@ from app.settings import get_settings
 
 router = APIRouter(prefix="/api/mobile-gateway", tags=["mobile-gateway"])
 admin_router = APIRouter(prefix="/api/admin/mobile-gateway", tags=["admin-mobile-gateway"])
+MOBILE_MEDIA_DRIVE_FOLDER_ID = "1BHXfVDbIPqvgFSX7K1Fz25OJLlUpOris"
+MEDIA_LIMITS = {
+    "image/jpeg": ("image", 20 * 1024 * 1024),
+    "image/png": ("image", 20 * 1024 * 1024),
+    "video/mp4": ("video", 250 * 1024 * 1024),
+}
 
 
 def mobile_repository() -> MobileGatewayRepository:
@@ -113,7 +124,10 @@ async def device_heartbeat(request: Request, payload: HeartbeatPayload, context:
 
 @router.get("/device/policy")
 async def device_policy(context: dict[str, Any] = Depends(authenticated_device)) -> dict[str, Any]:
-    policy = context["repository"].get_policy(context["device_id"])
+    repository = context["repository"]
+    repository.ensure_defaults()
+    policy = repository.get_policy(context["device_id"])
+    filters = repository.list_otp_filters(enabled_only=True)
     return {
         "ok": True,
         "policy": {
@@ -124,10 +138,23 @@ async def device_policy(context: dict[str, Any] = Depends(authenticated_device))
             "sms_enabled": bool(policy.get("sms_enabled")),
             "notifications_enabled": bool(policy.get("notifications_enabled")),
             "clipboard_enabled": bool(policy.get("clipboard_enabled")),
+            "camera_enabled": bool(policy.get("camera_enabled")),
             "diagnostics_enabled": bool(policy.get("diagnostics_enabled")),
-            "minimum_app_version": policy.get("minimum_app_version") or "1.1.0",
+            "minimum_app_version": policy.get("minimum_app_version") or "1.3.0",
             "force_update": bool(policy.get("force_update")),
             "local_retention_days": policy.get("local_retention_days") or 14,
+            "otp_filters": [
+                {
+                    "id": item.get("filter_id") or item.get("id"),
+                    "sender_pattern": item.get("sender_pattern") or "",
+                    "sender_match_type": item.get("sender_match_type") or "contains",
+                    "otp_length": item.get("otp_length") or 6,
+                    "start_prefix": item.get("start_prefix") or "",
+                    "validity_seconds": item.get("validity_seconds") or 60,
+                    "enabled": bool(item.get("enabled")),
+                }
+                for item in filters
+            ],
         },
     }
 
@@ -156,12 +183,94 @@ async def clipboard(payload: ClipboardPayload, context: dict[str, Any] = Depends
     return {"ok": True, "accepted": bool(policy.get("clipboard_enabled")), "message": "Clipboard sync is policy-controlled."}
 
 
+@router.post("/media/upload")
+async def upload_media(
+    command_id: str = Form(""),
+    media_type: str = Form(""),
+    captured_at: str = Form(""),
+    file: UploadFile = File(...),
+    context: dict[str, Any] = Depends(authenticated_device),
+) -> dict[str, Any]:
+    repository = context["repository"]
+    policy = repository.get_policy(context["device_id"])
+    if not bool(policy.get("camera_enabled")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Camera/media is disabled by policy.")
+    content_type = str(file.content_type or "").lower()
+    if content_type not in MEDIA_LIMITS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dinh dang media khong duoc ho tro.")
+    expected_type, max_size = MEDIA_LIMITS[content_type]
+    normalized_type = str(media_type or expected_type).strip().lower()
+    if normalized_type not in {"image", "video"} or normalized_type != expected_type:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="media_type khong khop voi file.")
+    safe_name = Path(file.filename or f"mobile-{command_id or 'media'}").name
+    suffix = Path(safe_name).suffix or (".mp4" if normalized_type == "video" else ".jpg")
+    drive_name = f"{context['device_id']}-{command_id or 'manual'}-{int(datetime.now(UTC).timestamp())}{suffix}"
+    temp_path = Path(tempfile.gettempdir()) / f"mobile-media-{context['device_id']}-{command_id or 'manual'}-{int(datetime.now(UTC).timestamp() * 1000)}{suffix}"
+    size_bytes = 0
+    try:
+        with temp_path.open("wb") as handle:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size_bytes += len(chunk)
+                if size_bytes > max_size:
+                    raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File media vuot gioi han.")
+                handle.write(chunk)
+        try:
+            upload = upload_file_to_google_drive(get_settings(), temp_path, drive_name, MOBILE_MEDIA_DRIVE_FOLDER_ID, mime_type=content_type)
+            media = repository.save_media(
+                {
+                    "device_id": context["device_id"],
+                    "command_id": command_id,
+                    "media_type": normalized_type,
+                    "file_name": drive_name,
+                    "mime_type": content_type,
+                    "size_bytes": size_bytes,
+                    "captured_at": captured_at or None,
+                    "uploaded_at": repository.now(),
+                    "drive_file_id": upload.get("file_id") or "",
+                    "drive_url": upload.get("web_view_link") or upload.get("web_content_link") or "",
+                    "status": "uploaded",
+                    "error_message": "",
+                }
+            )
+        except GoogleDriveConfigurationError as error:
+            media = repository.save_media(
+                {
+                    "device_id": context["device_id"],
+                    "command_id": command_id,
+                    "media_type": normalized_type,
+                    "file_name": drive_name,
+                    "mime_type": content_type,
+                    "size_bytes": size_bytes,
+                    "captured_at": captured_at or None,
+                    "uploaded_at": repository.now(),
+                    "status": "upload_failed",
+                    "error_message": str(error),
+                }
+            )
+            return {"ok": False, "media": media, "message": "Google Drive chua san sang upload media."}
+        return {"ok": True, "media": media}
+    finally:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 @admin_router.get("/overview")
 def admin_overview(request: Request) -> dict[str, Any]:
     require_mobile_permission(request, "mobile_gateway.view")
     repository = mobile_repository()
-    threshold = int(getattr(get_settings(), "mobile_gateway_online_threshold_seconds", 180) or 180)
-    return {"ok": True, "overview": repository.overview_counts(threshold)}
+    settings = get_settings()
+    threshold = int(getattr(settings, "mobile_gateway_online_threshold_seconds", 180) or 180)
+    overview = repository.overview_counts(threshold)
+    overview["settings"] = {
+        "pairing_ttl_seconds": int(getattr(settings, "mobile_gateway_pairing_ttl_seconds", 600) or 600),
+        "online_threshold_seconds": threshold,
+    }
+    return {"ok": True, "overview": overview}
 
 
 @admin_router.get("/devices")
@@ -174,19 +283,20 @@ def admin_devices(request: Request) -> dict[str, Any]:
     devices = []
     for device in repository.list_devices():
         heartbeat = heartbeats.get(str(device.get("device_id"))) or {}
+        policy = repository.get_policy(str(device.get("device_id") or ""))
         try:
             seen = datetime.fromisoformat(str(device.get("last_seen_at") or "").replace("Z", "+00:00"))
             online = bool(device.get("is_active")) and seen >= cutoff
         except ValueError:
             online = False
-        devices.append({**device, "online": online, "heartbeat": heartbeat})
+        devices.append({**device, "online": online, "heartbeat": heartbeat, "policy": policy})
     return {"ok": True, "devices": devices}
 
 
 @admin_router.post("/pairing-codes")
-def admin_create_pairing_code(request: Request) -> dict[str, Any]:
+def admin_create_pairing_code(request: Request, payload: PairingCodeCreatePayload = PairingCodeCreatePayload()) -> dict[str, Any]:
     actor = require_mobile_permission(request, "mobile_gateway.devices.manage")
-    result = PairingService(mobile_repository()).create_pairing_code(actor["username"])
+    result = PairingService(mobile_repository()).create_pairing_code(actor["username"], payload.model_dump())
     mobile_repository().base.add_audit_log(actor["username"], "mobile_pairing_code_created", "Tao ma ghep noi Mobile Gateway")
     return result
 
@@ -239,9 +349,30 @@ def admin_save_policy(request: Request, device_id: str, payload: DevicePolicyPay
 
 
 @admin_router.get("/sms")
-def admin_sms(request: Request, page: int = 1, page_size: int = 50, device_id: str = "", sender: str = "", query: str = "", otp_only: bool = False) -> dict[str, Any]:
+def admin_sms(
+    request: Request,
+    page: int = 1,
+    page_size: int = 50,
+    device_id: str = "",
+    sender: str = "",
+    query: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    sim_slot: str = "",
+    otp_only: bool = False,
+) -> dict[str, Any]:
     user = require_mobile_permission(request, "mobile_gateway.sms.view")
-    data = mobile_repository().list_sms(page=page, page_size=page_size, device_id=device_id, sender=sender, query=query, otp_only=otp_only)
+    data = mobile_repository().list_sms(
+        page=page,
+        page_size=page_size,
+        device_id=device_id,
+        sender=sender,
+        query=query,
+        date_from=date_from,
+        date_to=date_to,
+        sim_slot=sim_slot,
+        otp_only=otp_only,
+    )
     can_view_content = has_mobile_permission(user, "mobile_gateway.sms.view_content")
     if not has_mobile_permission(user, "mobile_gateway.sms.view_content"):
         for item in data["items"]:
@@ -253,16 +384,17 @@ def admin_sms(request: Request, page: int = 1, page_size: int = 50, device_id: s
 
 
 @admin_router.get("/notifications")
-def admin_notifications(request: Request, limit: int = 100) -> dict[str, Any]:
+def admin_notifications(request: Request, page: int = 1, page_size: int = 50, device_id: str = "", package_name: str = "", query: str = "") -> dict[str, Any]:
     user = require_mobile_permission(request, "mobile_gateway.notifications.view")
-    items = mobile_repository().list_notifications(limit)
+    data = mobile_repository().list_notifications(page=page, page_size=page_size, device_id=device_id, package_name=package_name, query=query)
+    items = data["items"]
     if not has_mobile_permission(user, "mobile_gateway.notifications.view_content"):
         for item in items:
             item["text"] = item.get("text_masked") or security.mask_otp_text(item.get("text") or "")
     else:
         for item in items:
             item["text"] = security.mask_otp_text(item.get("text") or item.get("text_masked") or "")
-    return {"ok": True, "items": items}
+    return {"ok": True, **data}
 
 
 @admin_router.get("/commands")
@@ -273,10 +405,18 @@ def admin_commands(request: Request, device_id: str = "", limit: int = 100) -> d
 
 @admin_router.post("/commands")
 def admin_create_command(request: Request, payload: AdminCommandPayload) -> dict[str, Any]:
-    actor = require_mobile_permission(request, "mobile_gateway.commands.manage")
+    required_permission = "mobile_gateway.media.manage" if payload.command_type in {"capture_photo", "record_video"} else "mobile_gateway.commands.manage"
+    actor = require_mobile_permission(request, required_permission)
     command = mobile_repository().create_command(payload.device_id, payload.command_type, payload.payload, actor["username"], payload.ttl_seconds)
     mobile_repository().base.add_audit_log(actor["username"], "mobile_command_created", f"Gui lenh {payload.command_type} toi {payload.device_id}")
     return {"ok": True, "command": command}
+
+
+@admin_router.get("/media")
+def admin_media(request: Request, page: int = 1, page_size: int = 50, device_id: str = "", media_type: str = "") -> dict[str, Any]:
+    require_mobile_permission(request, "mobile_gateway.media.view")
+    data = mobile_repository().list_media(page=page, page_size=page_size, device_id=device_id, media_type=media_type)
+    return {"ok": True, **data}
 
 
 @admin_router.get("/diagnostics")
@@ -291,6 +431,28 @@ def admin_otp_configurations(request: Request) -> dict[str, Any]:
     repository = mobile_repository()
     repository.ensure_defaults()
     return {"ok": True, "configurations": repository.list_otp_configurations()}
+
+
+@admin_router.get("/otp/filters")
+def admin_otp_filters(request: Request) -> dict[str, Any]:
+    require_mobile_permission(request, "mobile_gateway.otp.view")
+    repository = mobile_repository()
+    repository.ensure_defaults()
+    return {"ok": True, "filters": repository.list_otp_filters()}
+
+
+@admin_router.post("/otp/filters")
+def admin_save_otp_filter(request: Request, payload: OtpFilterPayload) -> dict[str, Any]:
+    actor = require_mobile_permission(request, "mobile_gateway.otp.manage")
+    otp_filter = mobile_repository().save_otp_filter(payload)
+    mobile_repository().base.add_audit_log(actor["username"], "mobile_otp_filter_saved", f"Luu quy tac OTP {otp_filter.get('filter_id')}")
+    return {"ok": True, "filter": otp_filter}
+
+
+@admin_router.get("/otp/latest")
+def admin_otp_latest(request: Request, limit: int = 100) -> dict[str, Any]:
+    require_mobile_permission(request, "mobile_gateway.otp.view")
+    return {"ok": True, "items": mobile_repository().list_otp_latest_values(limit)}
 
 
 @admin_router.post("/otp/configurations")
