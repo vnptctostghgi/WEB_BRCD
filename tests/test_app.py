@@ -976,6 +976,12 @@ def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
         assert len(runs) == 1
         assert runs[0]["storage_link"] == "https://drive.google.com/file/d/onebss-file/view"
 
+        cleared = client.delete(f"/api/onebss-reports/runs?ma_bao_cao={code}")
+        assert cleared.status_code == 200
+        assert cleared.json()["deleted"] == 1
+        runs_after_clear = client.get(f"/api/onebss-reports/runs?ma_bao_cao={code}").json()["runs"]
+        assert runs_after_clear == []
+
 
 def test_onebss_login_deviceid_screen_requests_otp() -> None:
     from app.application.onebss_report_service import (

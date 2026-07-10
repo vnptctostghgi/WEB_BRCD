@@ -1777,6 +1777,23 @@ def list_onebss_report_runs(request: Request, ma_bao_cao: str = "", limit: int =
     return {"runs": runs}
 
 
+@router.delete("/api/onebss-reports/runs")
+def clear_onebss_report_runs(request: Request, ma_bao_cao: str = "") -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    report_code = ma_bao_cao.strip().upper()
+    try:
+        deleted = repository.clear_onebss_report_runs(ma_bao_cao=report_code)
+    except RuntimeError as error:
+        raise_onebss_report_schema_error(error)
+    try:
+        scope = report_code or "all"
+        repository.add_audit_log(actor["username"], "onebss_report_runs_cleared", f"Xoa lich su chay OneBSS: {scope} ({deleted})")
+    except Exception:
+        logger.exception("Cannot write OneBSS clear history audit log")
+    return {"ok": True, "deleted": deleted}
+
+
 @router.post("/api/onebss-reports/run")
 def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict:
     actor = admin_user(request)

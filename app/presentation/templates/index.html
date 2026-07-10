@@ -315,7 +315,7 @@
 
         <section class="app-view" id="view-reports">
           <div class="page-header"><div><p class="eyebrow">Truy vấn SQL</p><h1>Truy vấn SQL</h1><p class="subtitle">Dữ liệu được lấy theo thời gian thực qua API nội bộ và hiển thị có phân trang.</p></div></div>
-          <section class="data-card">
+          <section class="data-card onebss-mining-panel">
             <form id="dynamic-report-form" class="grid gap-3 xl:grid-cols-[1.2fr_2fr_auto]">
               <label>Loại báo cáo<select class="form-control" id="dynamic-report-select" name="ma_bao_cao"></select></label>
               <div id="dynamic-report-filters" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
@@ -343,20 +343,25 @@
 
         <section class="app-view" id="view-onebss-mining">
           <div class="page-header"><div><p class="eyebrow">Đào dữ liệu OneBSS</p><h1>Đào dữ liệu OneBSS</h1><p class="subtitle">Chạy báo cáo OneBSS trong nền, lưu file và ghi lại kết quả lấy dữ liệu.</p></div></div>
-          <section class="data-card">
-            <form id="onebss-run-form" class="grid gap-3 xl:grid-cols-[1.2fr_2fr_auto]">
+          <section class="data-card onebss-mining-panel">
+            <form id="onebss-run-form" class="onebss-run-form">
               <label>Loại báo cáo<select class="form-control" id="onebss-run-report-select" name="ma_bao_cao"></select></label>
-              <div id="onebss-run-parameters" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
-              <div class="flex flex-col gap-2 md:flex-row xl:flex-col xl:justify-end">
+              <div id="onebss-run-parameters" class="onebss-run-parameters"></div>
+              <div class="onebss-run-actions">
+                <button class="table-action" id="toggle-onebss-param-edit" type="button">Ch&#7881;nh tham s&#7889;</button>
                 <button class="btn-primary" id="run-onebss-report" type="submit"><span class="button-label">Lấy báo cáo</span><span class="spinner"></span></button>
               </div>
             </form>
-            <div id="onebss-otp-panel" class="result error hidden mt-4">
+            <div id="onebss-otp-panel" class="onebss-otp-panel hidden">
               <label>Nhập OTP OneBSS<input class="form-control otp-alert-input" id="onebss-otp-input" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="Nhập 6 số OTP" /></label>
             </div>
-            <div id="onebss-run-message" class="result hidden mt-4"></div>
-            <div class="table-scroll mt-4">
-              <table class="compact-admin-table inline-admin-table">
+            <div id="onebss-run-message" class="result hidden mt-3"></div>
+            <div class="onebss-history-header">
+              <div><h2>Lá»‹ch sá»­ láº¥y dá»¯ liá»‡u</h2><p id="onebss-run-history-summary">ChÆ°a cÃ³ dá»¯ liá»‡u</p></div>
+              <button class="table-action danger" id="clear-onebss-run-history" type="button">Dá»n lá»‹ch sá»­</button>
+            </div>
+            <div class="table-scroll onebss-run-table-wrap">
+              <table class="compact-admin-table inline-admin-table onebss-run-table">
                 <thead><tr><th>Thời gian</th><th>Báo cáo</th><th>Kết quả</th><th>Tham số</th><th>File dữ liệu</th><th>Thông báo</th></tr></thead>
                 <tbody id="onebss-run-history"></tbody>
               </table>

@@ -20,6 +20,7 @@ let oneBssReportDrafts = [];
 let oneBssReportRuns = [];
 let oneBssPendingSessionId = "";
 let oneBssRunInProgress = false;
+let oneBssRunParameterEditing = false;
 let sqlReports = [];
 let sqlReportDrafts = [];
 let dynamicReportPage = 1;
@@ -986,8 +987,11 @@ if (role === "admin") {
     $("#onebss-otp-panel")?.classList.add("hidden");
     await runOneBssReport();
   });
+  $("#toggle-onebss-param-edit")?.addEventListener("click", toggleOneBssRunParameterEditing);
+  $("#clear-onebss-run-history")?.addEventListener("click", clearOneBssRunHistory);
   $("#onebss-run-report-select")?.addEventListener("change", () => {
     oneBssPendingSessionId = "";
+    oneBssRunParameterEditing = false;
     $("#onebss-otp-panel")?.classList.add("hidden");
     renderOneBssRunParameters();
   });
@@ -5210,6 +5214,124 @@ function renderOneBssRunRow(run) {
       <td>${fileLink}${storageStatus ? `<small class="cell-note">${escapeHtml(storageStatus)}</small>` : ""}</td>
       <td>${escapeHtml(run.message || "")}</td>
     </tr>`;
+}
+
+function normalizeOneBssRunShellText() {
+  const summary = $("#onebss-run-history-summary");
+  if (summary && !summary.dataset.normalized) {
+    summary.textContent = "Ch\u01b0a c\u00f3 d\u1eef li\u1ec7u";
+    summary.dataset.normalized = "1";
+  }
+  const historyTitle = $(".onebss-history-header h2");
+  if (historyTitle && !historyTitle.dataset.normalized) {
+    historyTitle.textContent = "L\u1ecbch s\u1eed l\u1ea5y d\u1eef li\u1ec7u";
+    historyTitle.dataset.normalized = "1";
+  }
+  const clearButton = $("#clear-onebss-run-history");
+  if (clearButton && !clearButton.dataset.normalized) {
+    clearButton.textContent = "D\u1ecdn l\u1ecbch s\u1eed";
+    clearButton.dataset.normalized = "1";
+  }
+  const tableHeader = $(".onebss-run-table thead tr");
+  if (tableHeader && !tableHeader.dataset.normalized) {
+    tableHeader.innerHTML = "<th>Th\u1eddi gian</th><th>B\u00e1o c\u00e1o</th><th>K\u1ebft qu\u1ea3</th><th>File</th><th>Th\u00f4ng b\u00e1o</th>";
+    tableHeader.dataset.normalized = "1";
+  }
+}
+
+function renderOneBssRunParameters() {
+  const container = $("#onebss-run-parameters");
+  if (!container) return;
+  normalizeOneBssRunShellText();
+  const report = selectedOneBssReport();
+  const variables = report?.danh_sach_bien || [];
+  if (!report) {
+    container.innerHTML = "";
+    updateOneBssParameterEditButton();
+    return;
+  }
+  const jsonTemplate = JSON.stringify(report?.parameters || {}, null, 2);
+  const chips = variables.length
+    ? variables.map((variable) => `<span>${escapeHtml(variable)}</span>`).join("")
+    : "<span>Kh\u00f4ng c\u00f3 bi\u1ebfn c\u1ea5u h\u00ecnh</span>";
+  container.innerHTML = `
+    <div class="onebss-variable-panel"><span class="onebss-field-title">Danh s\u00e1ch bi\u1ebfn</span><div class="onebss-variable-list">${chips}</div></div>
+    <label class="onebss-json-panel">
+      <span class="onebss-field-title">Tham s\u1ed1 l\u1ea7n ch\u1ea1y n\u00e0y</span>
+      <textarea class="form-control onebss-param-json font-mono text-xs" rows="${oneBssRunParameterEditing ? 10 : 5}" ${oneBssRunParameterEditing ? "" : "readonly"} placeholder="{}">${escapeHtml(jsonTemplate === "{}" ? "" : jsonTemplate)}</textarea>
+    </label>
+  `;
+  updateOneBssParameterEditButton();
+}
+
+function updateOneBssParameterEditButton() {
+  const button = $("#toggle-onebss-param-edit");
+  if (!button) return;
+  button.textContent = oneBssRunParameterEditing ? "D\u1eebng s\u1eeda" : "Ch\u1ec9nh tham s\u1ed1";
+  button.classList.toggle("active", oneBssRunParameterEditing);
+}
+
+function toggleOneBssRunParameterEditing() {
+  oneBssRunParameterEditing = !oneBssRunParameterEditing;
+  renderOneBssRunParameters();
+  if (oneBssRunParameterEditing) $(".onebss-param-json")?.focus();
+}
+
+function renderOneBssRunHistory() {
+  normalizeOneBssRunShellText();
+  const table = $("#onebss-run-history");
+  const summary = $("#onebss-run-history-summary");
+  if (summary) {
+    const successCount = oneBssReportRuns.filter((run) => run.status === "success").length;
+    summary.textContent = oneBssReportRuns.length ? `${oneBssReportRuns.length} l\u01b0\u1ee3t g\u1ea7n nh\u1ea5t, ${successCount} th\u00e0nh c\u00f4ng` : "Ch\u01b0a c\u00f3 d\u1eef li\u1ec7u";
+  }
+  if (!table) return;
+  const visibleRuns = oneBssReportRuns.slice(0, 12);
+  table.innerHTML = visibleRuns.length
+    ? visibleRuns.map((run) => renderOneBssRunRow(run)).join("")
+    : emptyRow(5, "Ch\u01b0a c\u00f3 l\u01b0\u1ee3t l\u1ea5y b\u00e1o c\u00e1o", "K\u1ebft qu\u1ea3 l\u1ea5y OneBSS s\u1ebd xu\u1ea5t hi\u1ec7n \u1edf \u0111\u00e2y sau khi b\u1ea5m L\u1ea5y b\u00e1o c\u00e1o.");
+}
+
+function renderOneBssRunRow(run) {
+  const startedAt = run.started_at ? new Date(run.started_at).toLocaleString("vi-VN") : "-";
+  const ok = run.status === "success";
+  const storageStatus = run.storage_status || "";
+  const isUploadedDriveFile = /^uploaded_google_drive:/i.test(storageStatus);
+  const isDirectFileLink = run.storage_link
+    && /^https?:\/\//.test(run.storage_link)
+    && (isUploadedDriveFile || /\/file\/d\/|\/spreadsheets\/d\/|[?&]id=/.test(run.storage_link));
+  const fileLink = isDirectFileLink
+    ? `<a class="onebss-file-link" href="${escapeHtml(run.storage_link)}" target="_blank" rel="noopener">M\u1edf file</a>`
+    : (run.file_path ? `<span class="onebss-file-name">${escapeHtml(run.file_name || run.file_path)}</span>` : "-");
+  const message = truncateText(run.message || "", 180);
+  return `
+    <tr>
+      <td class="onebss-time-cell">${escapeHtml(startedAt)}</td>
+      <td><strong>${escapeHtml(run.ten_bao_cao || run.ma_bao_cao)}</strong><small class="cell-note">${escapeHtml(run.ma_bao_cao || "")}</small></td>
+      <td><span class="status ${ok ? "viewer" : "inactive"}">${escapeHtml(run.status || "-")}</span></td>
+      <td>${fileLink}${storageStatus ? `<small class="cell-note">${escapeHtml(truncateText(storageStatus, 60))}</small>` : ""}</td>
+      <td><span title="${escapeHtml(run.message || "")}">${escapeHtml(message)}</span></td>
+    </tr>`;
+}
+
+function truncateText(value, maxLength = 120) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
+async function clearOneBssRunHistory() {
+  const select = $("#onebss-run-report-select");
+  const code = select?.value || "";
+  const message = $("#onebss-run-message");
+  if (!confirm("X\u00f3a l\u1ecbch s\u1eed l\u1ea5y d\u1eef li\u1ec7u OneBSS \u0111ang hi\u1ec3n th\u1ecb?")) return;
+  const query = code ? `?ma_bao_cao=${encodeURIComponent(code)}` : "";
+  try {
+    const response = await api(`/api/onebss-reports/runs${query}`, { method: "DELETE" });
+    showMessage(message, `\u0110\u00e3 d\u1ecdn ${response.deleted || 0} d\u00f2ng l\u1ecbch s\u1eed.`);
+    await refreshOneBssRunHistory(code);
+  } catch (error) {
+    showMessage(message, error.message, "error");
+  }
 }
 
 $("#telegram-test-message")?.addEventListener("click", async () => {

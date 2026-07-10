@@ -1180,6 +1180,14 @@ class AppRepository:
                 ).fetchall()
             return [self._decode_onebss_report_run(dict(row)) for row in rows]
 
+    def clear_onebss_report_runs(self, ma_bao_cao: str = "") -> int:
+        with self.connect() as connection:
+            if ma_bao_cao:
+                cursor = connection.execute("DELETE FROM onebss_report_runs WHERE ma_bao_cao=?", (ma_bao_cao,))
+            else:
+                cursor = connection.execute("DELETE FROM onebss_report_runs")
+            return int(cursor.rowcount or 0)
+
     def list_dashboard_layouts(self) -> list[dict[str, Any]]:
         with self.connect() as connection:
             rows = connection.execute(

@@ -648,6 +648,15 @@ class SupabaseRepository:
         rows = self._get("onebss_report_runs", params)
         return [self._decode_onebss_report_run(row) for row in rows]
 
+    def clear_onebss_report_runs(self, ma_bao_cao: str = "") -> int:
+        if ma_bao_cao:
+            existing = self._get("onebss_report_runs", {"select": "id", "ma_bao_cao": f"eq.{ma_bao_cao}"})
+            self._delete("onebss_report_runs", {"ma_bao_cao": f"eq.{ma_bao_cao}"})
+        else:
+            existing = self._get("onebss_report_runs", {"select": "id"})
+            self._delete("onebss_report_runs", {"id": "gt.0"})
+        return len(existing)
+
     def list_dashboard_layouts(self) -> list[dict[str, Any]]:
         return self._get("dashboard_layouts", {
             "select": "page_id,page_name,created_at,updated_at",
