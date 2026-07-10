@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.modules.mobile_gateway.event_bus import mobile_gateway_events
 from app.modules.mobile_gateway.otp_service import OtpService
 from app.modules.mobile_gateway.repository import MobileGatewayRepository
 from app.modules.mobile_gateway.schemas import SmsMessageIn
@@ -23,4 +24,14 @@ class SmsService:
                 latest = self.otp_service.record_latest_from_sms(sms)
                 if latest:
                     matches.append(latest)
+        if inserted:
+            mobile_gateway_events.publish(
+                "sms_batch",
+                {
+                    "device_id": device_id,
+                    "inserted": len(inserted),
+                    "skipped": skipped,
+                    "otp_matches": len(matches),
+                },
+            )
         return {"ok": True, "inserted": len(inserted), "skipped": skipped, "otp_matches": len(matches)}

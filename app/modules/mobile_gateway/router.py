@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import sqlite3
 import tempfile
 from datetime import UTC, datetime, timedelta
@@ -7,10 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.responses import StreamingResponse
 
 from app.application.google_drive_service import GoogleDriveConfigurationError, upload_file_to_google_drive
 from app.data_access.repository_factory import build_repository
 from app.modules.mobile_gateway import security
+from app.modules.mobile_gateway.event_bus import mobile_gateway_events
 from app.modules.mobile_gateway.exceptions import PairingError
 from app.modules.mobile_gateway.notification_service import NotificationService
 from app.modules.mobile_gateway.otp_service import OtpService
@@ -301,6 +305,37 @@ def admin_overview(request: Request) -> dict[str, Any]:
         "online_threshold_seconds": threshold,
     }
     return {"ok": True, "overview": overview}
+
+
+@admin_router.get("/events")
+async def admin_events(request: Request) -> StreamingResponse:
+    require_mobile_permission(request, "mobile_gateway.view")
+
+    async def event_stream():
+        queue = mobile_gateway_events.subscribe()
+        try:
+            yield "event: ready\ndata: {\"ok\": true}\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=25)
+                    data = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+                    yield f"event: {event.get('type', 'message')}\ndata: {data}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            mobile_gateway_events.unsubscribe(queue)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @admin_router.get("/devices")

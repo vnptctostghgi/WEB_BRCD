@@ -130,6 +130,7 @@ async function loadMobileGateway({ force = false } = {}) {
     ]);
     mobileGatewayLoaded = true;
     startMobileOtpTicker();
+    startMobileGatewayEvents();
     if (message) message.className = "result hidden mb-4";
   } catch (error) {
     showMessage(message, error.message, "error");
@@ -303,6 +304,31 @@ function startMobileSmsAutoRefresh() {
     clearInterval(window.mobileGatewaySmsAutoRefresh);
     window.mobileGatewaySmsAutoRefresh = null;
   }
+}
+
+function startMobileGatewayEvents() {
+  if (window.mobileGatewayEventSource || typeof EventSource === "undefined") return;
+  const source = new EventSource("/api/admin/mobile-gateway/events");
+  window.mobileGatewayEventSource = source;
+  const reloadFromEvent = () => {
+    clearTimeout(window.mobileGatewayEventReloadTimer);
+    window.mobileGatewayEventReloadTimer = setTimeout(() => {
+      if (!$("#view-mobile-gateway")?.classList.contains("active")) return;
+      mobileGatewaySmsPage = 1;
+      loadMobileGatewaySms({ silent: true, markNew: true });
+      loadMobileGatewayOverview();
+      loadMobileOtpData();
+    }, 250);
+  };
+  source.addEventListener("sms_batch", reloadFromEvent);
+  source.onerror = () => {
+    source.close();
+    window.mobileGatewayEventSource = null;
+    clearTimeout(window.mobileGatewayEventReconnectTimer);
+    window.mobileGatewayEventReconnectTimer = setTimeout(() => {
+      if ($("#view-mobile-gateway")?.classList.contains("active")) startMobileGatewayEvents();
+    }, 5000);
+  };
 }
 
 function renderMobileOtpFilterForm() {
