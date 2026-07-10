@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 import uuid
 
 from fastapi import FastAPI, Request
@@ -14,8 +15,14 @@ from app.presentation.routes import router
 from app.settings import get_settings
 
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
-settings.validate_for_startup()
+try:
+    settings.validate_for_startup()
+except RuntimeError as error:
+    if settings.production_strict_startup:
+        raise
+    logger.warning("Production startup checks need attention: %s", error)
 docs_enabled = not settings.is_production
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",

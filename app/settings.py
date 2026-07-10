@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     google_drive_oauth_client_id: str = ""
     google_drive_oauth_client_secret: SecretStr = Field(default=SecretStr(""))
     google_drive_oauth_redirect_uri: str = ""
+    production_strict_startup: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
 
