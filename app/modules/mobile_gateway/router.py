@@ -297,7 +297,7 @@ def admin_overview(request: Request) -> dict[str, Any]:
     threshold = int(getattr(settings, "mobile_gateway_online_threshold_seconds", 180) or 180)
     overview = repository.overview_counts(threshold)
     overview["settings"] = {
-        "pairing_ttl_seconds": int(getattr(settings, "mobile_gateway_pairing_ttl_seconds", 600) or 600),
+        "pairing_ttl_seconds": int(getattr(settings, "mobile_gateway_pairing_ttl_seconds", 0) or 0),
         "online_threshold_seconds": threshold,
     }
     return {"ok": True, "overview": overview}
@@ -496,9 +496,11 @@ def admin_otp_filters(request: Request) -> dict[str, Any]:
 @admin_router.post("/otp/filters")
 def admin_save_otp_filter(request: Request, payload: OtpFilterPayload) -> dict[str, Any]:
     actor = require_mobile_permission(request, "mobile_gateway.otp.manage")
-    otp_filter = mobile_repository().save_otp_filter(payload)
-    mobile_repository().base.add_audit_log(actor["username"], "mobile_otp_filter_saved", f"Luu quy tac OTP {otp_filter.get('filter_id')}")
-    return {"ok": True, "filter": otp_filter}
+    repository = mobile_repository()
+    otp_filter = repository.save_otp_filter(payload)
+    latest = OtpService(repository).rematch_latest_for_filter(otp_filter)
+    repository.base.add_audit_log(actor["username"], "mobile_otp_filter_saved", f"Luu quy tac OTP {otp_filter.get('filter_id')}")
+    return {"ok": True, "filter": otp_filter, "latest": latest}
 
 
 @admin_router.get("/otp/latest")
@@ -522,7 +524,7 @@ def admin_save_otp_configuration(request: Request, payload: OtpConfigurationPayl
 def admin_test_otp_regex(request: Request, payload: OtpRegexTestPayload) -> dict[str, Any]:
     require_mobile_permission(request, "mobile_gateway.otp.view")
     code = security.extract_otp(payload.sample_text, payload.otp_regex)
-    return {"ok": True, "matched": bool(code), "code_masked": security.code_mask(code)}
+    return {"ok": True, "matched": bool(code), "code_masked": code, "code": code}
 
 
 @admin_router.get("/otp/requests")

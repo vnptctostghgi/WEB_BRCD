@@ -3329,6 +3329,12 @@ legend {
   padding-bottom: .65rem;
 }
 
+.mobile-refresh-tab {
+  min-height: 38px;
+  margin-left: auto;
+  padding: .55rem .8rem;
+}
+
 .mobile-gateway-tab {
   min-height: 38px;
   border: 1px solid rgba(125, 211, 252, .28);
@@ -3353,6 +3359,24 @@ legend {
 
 .mobile-gateway-panel.active {
   display: block;
+}
+
+.mobile-sms-new {
+  outline: 2px solid rgba(248, 113, 113, .95);
+  outline-offset: -2px;
+  background: rgba(127, 29, 29, .24);
+}
+
+.mobile-sms-new td:first-child::before {
+  content: "Mới";
+  display: inline-block;
+  margin-right: .45rem;
+  border-radius: 6px;
+  background: rgba(248, 113, 113, .18);
+  color: #fecaca;
+  padding: .12rem .35rem;
+  font-size: .68rem;
+  font-weight: 900;
 }
 
 .status-card {

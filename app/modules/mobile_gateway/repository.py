@@ -461,7 +461,7 @@ class MobileGatewayRepository:
                 "sender": message.sender,
                 "normalized_sender": security.normalize_sender(message.sender),
                 "body_encrypted": security.encrypt_text(self.settings, body, "otp"),
-                "body_masked": security.mask_otp_text(body),
+                "body_masked": body,
                 "received_at": self.time_text(message.received_at),
                 "subscription_id": message.subscription_id or "",
                 "sim_slot": message.sim_slot,
@@ -500,7 +500,8 @@ class MobileGatewayRepository:
         item = dict(row)
         item["is_otp_candidate"] = bool(item.get("is_otp_candidate"))
         item["used_for_otp"] = bool(item.get("used_for_otp"))
-        item["body"] = security.decrypt_text(self.settings, item.get("body_encrypted") or "", "otp") if include_body else item.get("body_masked") or ""
+        decrypted_body = security.decrypt_text(self.settings, item.get("body_encrypted") or "", "otp") if include_body else ""
+        item["body"] = decrypted_body or item.get("body_masked") or ""
         item.pop("body_encrypted", None)
         return item
 
@@ -576,6 +577,14 @@ class MobileGatewayRepository:
             rows = self._get("mobile_sms_messages", {"id": f"eq.{sms_id}", "limit": "1"})
             row = rows[0] if rows else None
         return self.decode_sms(row, include_body=True) if row else None
+
+    def latest_sms_messages(self, limit: int = 200) -> list[dict[str, Any]]:
+        limit = min(max(1, int(limit or 200)), 500)
+        if self.is_sqlite:
+            rows = self._sqlite_rows("SELECT * FROM mobile_sms_messages ORDER BY received_at DESC, id DESC LIMIT ?", (limit,))
+        else:
+            rows = self._get("mobile_sms_messages", {"order": "received_at.desc,id.desc", "limit": str(limit)})
+        return [self.decode_sms(row, include_body=True) for row in rows]
 
     def mark_sms_matched(self, sms_id: str | int, request_id: str, used: bool = False) -> None:
         payload = {"otp_request_id": request_id}
@@ -1138,7 +1147,7 @@ class MobileGatewayRepository:
             "service_code": str(otp_filter.get("service_code") or ""),
             "rule_name": str(otp_filter.get("rule_name") or otp_filter.get("service_name") or ""),
             "sender": sender,
-            "code_masked": security.code_mask(code),
+            "code_masked": str(code or ""),
             "received_at": received_at or now,
             "expires_at": expires_at,
             "status": "valid",
@@ -1220,7 +1229,7 @@ class MobileGatewayRepository:
             "matched_source_id": str(source_id),
             "matched_at": now,
             "code_encrypted": encrypted,
-            "code_masked": security.code_mask(code),
+            "code_masked": str(code or ""),
             "updated_at": now,
         }
         if self.is_sqlite:
@@ -1232,7 +1241,7 @@ class MobileGatewayRepository:
                         code_encrypted=?, code_masked=?, updated_at=?
                     WHERE request_id=? AND status='waiting'
                     """,
-                    (source_type, str(source_id), now, encrypted, security.code_mask(code), now, request_id),
+                    (source_type, str(source_id), now, encrypted, str(code or ""), now, request_id),
                 )
                 changed = cursor.rowcount > 0
         else:
@@ -1348,8 +1357,6 @@ class MobileGatewayRepository:
             otp_timeout = {"total": len(self._get("otp_requests", {"requested_at": f"gte.{today}", "status": "eq.expired", "select": "id"}))}
             pending = {"total": len(self._get("mobile_commands", {"status": "in.(pending,delivered)", "select": "command_id"}))}
         recent_sms = self.list_sms(page=1, page_size=5)["items"]
-        for sms in recent_sms:
-            sms["body"] = security.mask_otp_text(sms.get("body") or sms.get("body_masked") or "")
         return {
             "devices_online": online,
             "devices_offline": max(0, len(devices) - online),

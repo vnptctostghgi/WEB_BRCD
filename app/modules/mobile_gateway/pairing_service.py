@@ -18,7 +18,8 @@ class PairingService:
         self.repository.expire_pairing_codes()
         code = security.generate_pairing_code()
         code_hash = security.pairing_code_hash(self.repository.settings, code)
-        ttl_seconds = int(getattr(self.repository.settings, "mobile_gateway_pairing_ttl_seconds", 600) or 600)
+        configured_ttl = int(getattr(self.repository.settings, "mobile_gateway_pairing_ttl_seconds", 0) or 0)
+        ttl_seconds = configured_ttl if configured_ttl > 0 else 10 * 365 * 24 * 60 * 60
         row = self.repository.create_pairing_code(
             code_hash,
             created_by,
@@ -30,7 +31,8 @@ class PairingService:
             "id": row.get("id"),
             "pairing_code": code,
             "expires_at": row.get("expires_at"),
-            "ttl_seconds": ttl_seconds,
+            "ttl_seconds": max(0, configured_ttl),
+            "no_expiry": configured_ttl <= 0,
             "message": "Ma ghep noi da duoc tao.",
         }
 

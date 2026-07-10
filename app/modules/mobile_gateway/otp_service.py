@@ -23,6 +23,14 @@ class OtpService:
             if service_code == "onebss":
                 self.repository.ensure_defaults()
                 config = self.repository.get_otp_configuration(service_code)
+            if not config and self.repository.list_otp_filters(service_code=service_code, enabled_only=True):
+                config = {
+                    "id": None,
+                    "service_code": service_code,
+                    "enabled": True,
+                    "source_type": "sms",
+                    "wait_timeout_seconds": timeout_seconds or 120,
+                }
         if not config or not config.get("enabled"):
             raise OtpServiceError(f"OTP configuration is disabled or missing: {service_code}")
         return self.repository.create_otp_request(service_code, job_id, config, timeout_seconds)
@@ -111,7 +119,38 @@ class OtpService:
                 source_id=sms["id"],
                 request_id="",
             )
-            return {"filter_id": otp_filter.get("filter_id"), "code_masked": security.code_mask(code)}
+            return {"filter_id": otp_filter.get("filter_id"), "code": code}
+        return None
+
+    def rematch_latest_for_filter(self, otp_filter: dict[str, Any]) -> dict[str, Any] | None:
+        if not otp_filter or not otp_filter.get("enabled", True):
+            return None
+        for sms in self.repository.latest_sms_messages(limit=300):
+            body = str(sms.get("body") or "")
+            if not body:
+                continue
+            if not self._device_allowed(otp_filter, sms):
+                continue
+            if not self._sender_allowed(otp_filter, str(sms.get("normalized_sender") or sms.get("sender") or "")):
+                continue
+            code = self._extract_code_for_filter(body, otp_filter)
+            if not code:
+                continue
+            self.repository.record_otp_latest(
+                otp_filter=otp_filter,
+                sender=str(sms.get("sender") or ""),
+                code=code,
+                received_at=str(sms.get("received_at") or ""),
+                source_type="sms",
+                source_id=sms["id"],
+                request_id="",
+            )
+            return {
+                "filter_id": otp_filter.get("filter_id"),
+                "sender": sms.get("sender") or "",
+                "code": code,
+                "received_at": sms.get("received_at") or "",
+            }
         return None
 
     def match_incoming_notification(self, notification: dict[str, Any]) -> dict[str, Any] | None:
@@ -194,14 +233,17 @@ class OtpService:
     def _extract_code_for_filter(text: str, otp_filter: dict[str, Any]) -> str:
         start_prefix = str(otp_filter.get("start_prefix") or "")
         search_text = str(text or "")
-        if start_prefix:
-            index = search_text.find(start_prefix)
-            if index < 0:
-                return ""
-            search_text = search_text[index + len(start_prefix):]
         otp_length = int(otp_filter.get("otp_length") or 0)
         if otp_length > 0:
-            match = re.search(rf"(?<!\d)(\d{{{otp_length}}})(?!\d)", search_text)
+            if start_prefix:
+                if len(start_prefix) > otp_length:
+                    return ""
+                match = re.search(rf"(?<!\d)({re.escape(start_prefix)}\d{{{otp_length - len(start_prefix)}}})(?!\d)", search_text)
+            else:
+                match = re.search(rf"(?<!\d)(\d{{{otp_length}}})(?!\d)", search_text)
+            return match.group(1) if match else ""
+        if start_prefix:
+            match = re.search(rf"(?<!\d)({re.escape(start_prefix)}\d+)(?!\d)", search_text)
             return match.group(1) if match else ""
         return security.extract_otp(
             search_text,
