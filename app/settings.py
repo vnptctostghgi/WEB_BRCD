@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     google_drive_service_account_file: str = ""
     google_drive_folder_id: str = ""
     google_drive_impersonated_user: str = ""
+    google_drive_oauth_client_id: str = ""
+    google_drive_oauth_client_secret: SecretStr = Field(default=SecretStr(""))
+    google_drive_oauth_redirect_uri: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
 

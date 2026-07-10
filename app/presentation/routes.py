@@ -18,10 +18,19 @@ import openpyxl
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pydantic import BaseModel, Field
 
 from app.application.auth_service import AuthService
 from app.application.database_service import DatabaseService
+from app.application.google_drive_service import (
+    GOOGLE_DRIVE_OAUTH_SCOPES,
+    GoogleDriveConfigurationError,
+    clear_google_drive_oauth_tokens,
+    google_drive_oauth_client_configured,
+    google_drive_oauth_status,
+    save_google_drive_oauth_tokens,
+)
 from app.application.vault_service import VaultService
 from app.application.connection_service import ConnectionService
 from app.application.telegram_notifier import TelegramNotifier
@@ -1150,6 +1159,70 @@ def normalize_google_sheet_public_url(raw_url: str) -> str:
     return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, urlencode(query), parsed.fragment))
 
 
+def google_drive_oauth_serializer(settings: Any) -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(settings.session_secret.get_secret_value(), salt="google-drive-oauth")
+
+
+def google_drive_oauth_redirect_uri(request: Request) -> str:
+    settings = get_settings()
+    configured = str(getattr(settings, "google_drive_oauth_redirect_uri", "") or "").strip()
+    if configured:
+        return configured
+    public_base = str(getattr(settings, "app_public_url", "") or "").strip().rstrip("/")
+    if not public_base:
+        forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip()
+        forwarded_host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",", 1)[0].strip()
+        if forwarded_proto and forwarded_host:
+            public_base = f"{forwarded_proto}://{forwarded_host}"
+        else:
+            public_base = str(request.base_url).rstrip("/")
+    return f"{public_base}/api/google-drive/oauth/callback"
+
+
+def google_drive_oauth_result_page(ok: bool, message: str) -> HTMLResponse:
+    safe_message = html_escape(message)
+    safe_status = "true" if ok else "false"
+    return HTMLResponse(
+        f"""<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><title>Google Drive</title>
+<style>body{{font-family:Arial,sans-serif;background:#082f49;color:#fff;margin:0;display:grid;min-height:100vh;place-items:center}}main{{max-width:520px;padding:28px;border:1px solid rgba(125,211,252,.35);border-radius:12px;background:rgba(2,6,23,.5)}}a{{color:#7dd3fc}}</style>
+</head><body><main><h1>{'Da ket noi Google Drive' if ok else 'Ket noi Google Drive loi'}</h1><p>{safe_message}</p><p>Co the dong cua so nay va quay lai trang quan tri.</p><p><a href="/">Quay lai he thong</a></p></main>
+<script>
+try {{
+  if (window.opener) {{
+    window.opener.postMessage({{ type: "google-drive-oauth", ok: {safe_status}, message: {json.dumps(message)} }}, window.location.origin);
+    setTimeout(() => window.close(), 1000);
+  }}
+}} catch (error) {{}}
+</script></body></html>""",
+        status_code=status.HTTP_200_OK if ok else status.HTTP_400_BAD_REQUEST,
+    )
+
+
+def is_sensitive_connection_key(key: str) -> bool:
+    lowered = str(key or "").lower()
+    return any(part in lowered for part in ("pass", "secret", "token", "credential", "private_key", "client_secret"))
+
+
+def public_connection_config(config: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    public: dict[str, Any] = {}
+    protected: list[str] = []
+    for key, value in (config or {}).items():
+        if is_sensitive_connection_key(str(key)):
+            protected.append(str(key))
+        else:
+            public[key] = value
+    return public, protected
+
+
+def merge_protected_connection_config(existing: dict[str, Any] | None, incoming: dict[str, Any] | None) -> dict[str, Any]:
+    merged = dict(incoming or {})
+    for key, value in (existing or {}).items():
+        if is_sensitive_connection_key(str(key)) and key not in merged:
+            merged[key] = value
+    return merged
+
+
 @router.get("/login", response_class=HTMLResponse)
 def login_page(request: Request) -> Response:
     next_path = request.query_params.get("next") or "/"
@@ -1405,16 +1478,128 @@ def storage_health(request: Request) -> dict:
     return {"ok": True, "backend": "sqlite"}
 
 
+@router.get("/api/google-drive/oauth/status")
+def google_drive_oauth_status_api(request: Request) -> dict:
+    admin_user(request)
+    return google_drive_oauth_status(get_settings(), build_app_repository())
+
+
+@router.post("/api/google-drive/oauth/start")
+def google_drive_oauth_start(request: Request) -> dict:
+    actor = admin_user(request)
+    settings = get_settings()
+    if not google_drive_oauth_client_configured(settings):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Chua cau hinh GOOGLE_DRIVE_OAUTH_CLIENT_ID/GOOGLE_DRIVE_OAUTH_CLIENT_SECRET "
+                "tren Render. Redirect URI can khai bao tren Google Cloud: "
+                f"{google_drive_oauth_redirect_uri(request)}"
+            ),
+        )
+    redirect_uri = google_drive_oauth_redirect_uri(request)
+    state_value = google_drive_oauth_serializer(settings).dumps(
+        {"user_id": actor["id"], "username": actor["username"], "redirect_uri": redirect_uri}
+    )
+    query = urlencode(
+        {
+            "client_id": settings.google_drive_oauth_client_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": " ".join(GOOGLE_DRIVE_OAUTH_SCOPES),
+            "access_type": "offline",
+            "prompt": "consent",
+            "include_granted_scopes": "true",
+            "state": state_value,
+        }
+    )
+    return {
+        "authorization_url": f"https://accounts.google.com/o/oauth2/v2/auth?{query}",
+        "redirect_uri": redirect_uri,
+    }
+
+
+@router.get("/api/google-drive/oauth/callback", response_class=HTMLResponse)
+def google_drive_oauth_callback(request: Request) -> HTMLResponse:
+    settings = get_settings()
+    error_text = request.query_params.get("error") or ""
+    if error_text:
+        return google_drive_oauth_result_page(False, f"Google tu choi ket noi: {error_text}")
+    code = request.query_params.get("code") or ""
+    state_value = request.query_params.get("state") or ""
+    if not code or not state_value:
+        return google_drive_oauth_result_page(False, "Google callback thieu code/state.")
+    try:
+        state_payload = google_drive_oauth_serializer(settings).loads(state_value, max_age=15 * 60)
+    except SignatureExpired:
+        return google_drive_oauth_result_page(False, "Phien ket noi Google Drive da het han. Hay bam ket noi lai.")
+    except BadSignature:
+        return google_drive_oauth_result_page(False, "Ma xac thuc Google Drive khong hop le.")
+    try:
+        actor = admin_user(request)
+    except HTTPException:
+        return google_drive_oauth_result_page(False, "Hay dang nhap trang quan tri roi ket noi Google Drive lai.")
+    if str(state_payload.get("username") or "") != str(actor.get("username") or ""):
+        return google_drive_oauth_result_page(False, "Tai khoan quan tri khong khop phien ket noi Google Drive.")
+    redirect_uri = str(state_payload.get("redirect_uri") or google_drive_oauth_redirect_uri(request))
+    try:
+        with httpx.Client(timeout=30) as client:
+            token_response = client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": code,
+                    "client_id": settings.google_drive_oauth_client_id,
+                    "client_secret": settings.google_drive_oauth_client_secret.get_secret_value(),
+                    "redirect_uri": redirect_uri,
+                    "grant_type": "authorization_code",
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            token_data = token_response.json() if token_response.content else {}
+            if token_response.status_code >= 400:
+                return google_drive_oauth_result_page(
+                    False,
+                    str(token_data.get("error_description") or token_data.get("error") or "Google khong tra token."),
+                )
+            email = ""
+            access_token = str(token_data.get("access_token") or "")
+            if access_token:
+                user_response = client.get(
+                    "https://www.googleapis.com/oauth2/v2/userinfo",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                if user_response.status_code < 400:
+                    user_info = user_response.json()
+                    email = str(user_info.get("email") or "")
+    except Exception as error:
+        logger.exception("Cannot finish Google Drive OAuth")
+        return google_drive_oauth_result_page(False, f"Khong hoan tat ket noi Google Drive: {str(error)[:300]}")
+    token_data["connected_at"] = datetime.now().isoformat(timespec="seconds")
+    try:
+        save_google_drive_oauth_tokens(settings, build_app_repository(), token_data, email=email)
+    except GoogleDriveConfigurationError as error:
+        return google_drive_oauth_result_page(False, str(error))
+    build_app_repository().add_audit_log(actor["username"], "google_drive_oauth_connected", "Ket noi Google Drive OAuth")
+    return google_drive_oauth_result_page(True, f"Da ket noi Google Drive{f' voi {email}' if email else ''}.")
+
+
+@router.post("/api/google-drive/oauth/disconnect")
+def google_drive_oauth_disconnect(request: Request) -> dict:
+    actor = admin_user(request)
+    clear_google_drive_oauth_tokens(build_app_repository())
+    build_app_repository().add_audit_log(actor["username"], "google_drive_oauth_disconnected", "Ngat ket noi Google Drive OAuth")
+    return {"ok": True, "message": "Da ngat ket noi Google Drive OAuth."}
+
+
 @router.get("/api/admin/connections")
 def system_connections(request: Request) -> dict:
     admin_user(request)
     connections = build_app_repository().list_system_connections()
     for connection in connections:
         config = connection.get("config", {})
-        connection["config"] = {
-            key: value for key, value in config.items()
-            if "pass" not in key.lower() and "secret" not in key.lower() and "key" not in key.lower()
-        }
+        public_config, protected_keys = public_connection_config(config)
+        connection["config"] = public_config
+        connection["protected_config_keys"] = protected_keys
         if config.get("secret_ref"):
             connection["secret_ref"] = config["secret_ref"]
     return {"connections": connections}
@@ -1436,12 +1621,14 @@ def test_system_connection(request: Request, code: str) -> dict:
 def save_system_connection(request: Request, code: str, payload: SystemConnectionPayload) -> dict:
     actor = admin_user(request)
     repository = build_app_repository()
+    existing = repository.get_system_connection_by_code(code.strip()) or {}
+    existing_config = existing.get("config") if isinstance(existing.get("config"), dict) else {}
     repository.upsert_system_connection(
         code.strip(),
         payload.name.strip(),
         payload.connection_type.strip(),
         payload.description.strip(),
-        payload.config,
+        merge_protected_connection_config(existing_config, payload.config),
         payload.is_active,
     )
     repository.add_audit_log(actor["username"], "system_connection_saved", f"Luu ket noi {code}")

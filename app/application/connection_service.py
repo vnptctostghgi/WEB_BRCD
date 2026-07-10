@@ -3,6 +3,7 @@ from typing import Any
 import httpx
 
 from app.application.database_service import DatabaseService
+from app.application.google_drive_service import test_google_drive_connection
 from app.application.telegram_notifier import TelegramNotifier
 from app.application.zalo_bot import ZaloBotClient
 from app.data_access.internal_api_client import InternalApiClient
@@ -47,13 +48,15 @@ class ConnectionService:
             config={"host": "", "port": 21, "secret_ref": "FTP_PASSWORD"},
             is_active=False,
         )
+        existing_drive = self.repository.get_system_connection_by_code("drive_storage") or {}
+        existing_drive_config = existing_drive.get("config") if isinstance(existing_drive.get("config"), dict) else {}
         self.repository.upsert_system_connection(
             code="drive_storage",
-            name="Drive",
+            name=str(existing_drive.get("name") or "Google Drive"),
             connection_type="drive",
             description="Kết nối Drive/Cloud storage. Chưa cấu hình OAuth hoặc service account.",
-            config={"provider": "", "folder": "", "secret_ref": "DRIVE_SECRET"},
-            is_active=False,
+            config={"provider": "", "folder": "", "secret_ref": "DRIVE_SECRET", **existing_drive_config},
+            is_active=bool(existing_drive.get("is_active") or existing_drive_config.get("oauth_refresh_token_enc")),
         )
         self.repository.upsert_system_connection(
             code="telegram_bot",
@@ -102,6 +105,9 @@ class ConnectionService:
 
         if connection["connection_type"] == "zalo":
             return self._with_connection(ZaloBotClient(self.settings).test(), connection)
+
+        if connection["connection_type"] == "drive":
+            return self._with_connection(test_google_drive_connection(self.settings, self.repository), connection)
 
         return self._with_connection(
             {

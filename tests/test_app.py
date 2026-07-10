@@ -676,6 +676,61 @@ def test_google_drive_folder_link_and_storage_upload(monkeypatch, tmp_path) -> N
     assert uploaded_calls == [(str(local_file), "report.xlsx", "1TJqLjq8OpZ_x_D-djxRk0w4HacUh4HmS")]
 
 
+def test_google_drive_oauth_start_and_protected_config(monkeypatch) -> None:
+    monkeypatch.setenv("GOOGLE_DRIVE_OAUTH_CLIENT_ID", "client-id.apps.googleusercontent.com")
+    monkeypatch.setenv("GOOGLE_DRIVE_OAUTH_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("APP_PUBLIC_URL", "https://vnptcto.com")
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        login(client)
+        repository = routes.build_app_repository()
+        repository.upsert_system_connection(
+            "drive_storage",
+            "Google Drive",
+            "drive",
+            "Drive OAuth",
+            {
+                "provider": "google_drive_oauth",
+                "folder": "folder-001",
+                "oauth_email": "owner@example.com",
+                "oauth_refresh_token_enc": "enc:stored-refresh-token",
+            },
+            True,
+        )
+
+        connections = client.get("/api/admin/connections")
+        assert connections.status_code == 200
+        drive = next(item for item in connections.json()["connections"] if item["code"] == "drive_storage")
+        assert "oauth_refresh_token_enc" not in drive["config"]
+        assert "oauth_refresh_token_enc" in drive["protected_config_keys"]
+
+        saved = client.put(
+            "/api/admin/connections/drive_storage",
+            json={
+                "name": "Google Drive",
+                "connection_type": "drive",
+                "description": "Drive OAuth",
+                "config": {"provider": "google_drive_oauth", "folder": "folder-002"},
+                "is_active": True,
+            },
+        )
+        assert saved.status_code == 200
+        stored = repository.get_system_connection_by_code("drive_storage")
+        assert stored["config"]["folder"] == "folder-002"
+        assert stored["config"]["oauth_refresh_token_enc"] == "enc:stored-refresh-token"
+
+        start = client.post("/api/google-drive/oauth/start")
+        assert start.status_code == 200
+        body = start.json()
+        assert body["redirect_uri"] == "https://vnptcto.com/api/google-drive/oauth/callback"
+        assert "https://accounts.google.com/o/oauth2/v2/auth" in body["authorization_url"]
+        assert "access_type=offline" in body["authorization_url"]
+    monkeypatch.delenv("GOOGLE_DRIVE_OAUTH_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_DRIVE_OAUTH_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("APP_PUBLIC_URL", raising=False)
+    get_settings.cache_clear()
+
+
 def test_data_mining_dynamic_date_parameters() -> None:
     from app.application.onebss_data_mining_service import LOCAL_TIMEZONE, resolve_dynamic_parameters
 

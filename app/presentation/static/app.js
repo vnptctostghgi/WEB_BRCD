@@ -4042,6 +4042,12 @@ function renderConnectionsTable() {
   document.querySelectorAll("[data-test-connection]").forEach((button) => {
     button.addEventListener("click", () => testConnection(button.dataset.testConnection, button));
   });
+  document.querySelectorAll("[data-connect-google-drive]").forEach((button) => {
+    button.addEventListener("click", () => connectGoogleDrive(button));
+  });
+  document.querySelectorAll("[data-disconnect-google-drive]").forEach((button) => {
+    button.addEventListener("click", () => disconnectGoogleDrive(button));
+  });
 }
 
 function renderConnectionEditorLoading(text) {
@@ -4067,7 +4073,8 @@ function refreshConnectionPicker() {
 function renderConnectionEditor(connection) {
   const configText = JSON.stringify(connection.config || {}, null, 2);
   const configKeys = Object.keys(connection.config || {});
-  const variables = [connection.secret_ref, ...configKeys].filter(Boolean);
+  const protectedKeys = connection.protected_config_keys || [];
+  const variables = [connection.secret_ref, ...configKeys, ...protectedKeys.map((key) => `protected:${key}`)].filter(Boolean);
   return `
     <div class="connection-editor-card" data-connection-row="${escapeHtml(connection.code)}">
       <div class="section-heading">
@@ -4083,9 +4090,32 @@ function renderConnectionEditor(connection) {
       </label>
       <label class="checkbox-label inline-checkbox"><input type="checkbox" data-inline-connection-active ${connection.is_active ? "checked" : ""} /> Đang dùng</label>
       <label>Danh sách biến<div class="connection-variable-list">${variables.length ? variables.map((item) => `<span class="status viewer">${escapeHtml(item)}</span>`).join(" ") : "Không có"}</div></label>
+      ${renderDriveOauthPanel(connection)}
       <label>Mô tả<textarea class="form-control inline-admin-note connection-description" data-inline-connection-field="description" rows="3" placeholder="Mô tả">${escapeHtml(connection.description || "")}</textarea></label>
       <label>Bảng lệnh / Cấu hình<textarea class="form-control inline-admin-code connection-editor-code" data-inline-connection-field="config_json" rows="14">${escapeHtml(configText)}</textarea></label>
       <div class="cell-note" id="connection-result-${escapeHtml(connection.code)}"></div>
+    </div>`;
+}
+
+function renderDriveOauthPanel(connection) {
+  if (connection.connection_type !== "drive" && connection.code !== "drive_storage") return "";
+  const config = connection.config || {};
+  const protectedKeys = connection.protected_config_keys || [];
+  const email = config.oauth_email || "";
+  const connectedAt = config.oauth_connected_at || "";
+  const folder = config.folder || config.folder_id || "";
+  const connected = Boolean(email || connectedAt || protectedKeys.includes("oauth_refresh_token_enc"));
+  return `
+    <div class="drive-oauth-panel">
+      <div>
+        <strong>Google Drive OAuth</strong>
+        <p>${connected ? `Đã kết nối${email ? `: ${escapeHtml(email)}` : ""}${connectedAt ? ` (${escapeHtml(connectedAt)})` : ""}` : "Chưa kết nối tài khoản Google Drive của anh."}</p>
+        <p>${folder ? `Thư mục mặc định: ${escapeHtml(folder)}` : "OneBSS sẽ ưu tiên thư mục trong link lưu báo cáo."}</p>
+      </div>
+      <div class="action-group">
+        <button class="btn-secondary" type="button" data-connect-google-drive><span class="button-label">${connected ? "Kết nối lại Drive" : "Kết nối Google Drive"}</span><span class="spinner"></span></button>
+        <button class="table-action danger ${connected ? "" : "hidden"}" type="button" data-disconnect-google-drive><span class="button-label">Ngắt kết nối</span><span class="spinner"></span></button>
+      </div>
     </div>`;
 }
 
@@ -4160,6 +4190,46 @@ async function saveConnection(event) {
     showMessage(form.querySelector(".result"), error.message, "error");
   }
 }
+
+async function connectGoogleDrive(button) {
+  const popup = window.open("", "google-drive-oauth", "width=560,height=760");
+  setButtonLoading(button, true);
+  try {
+    const result = await api("/api/google-drive/oauth/start", { method: "POST" });
+    if (popup) {
+      popup.location.href = result.authorization_url;
+      popup.focus();
+    } else {
+      window.location.href = result.authorization_url;
+    }
+    showToast("Đang mở trang cấp quyền Google Drive...");
+  } catch (error) {
+    if (popup) popup.close();
+    showToast(error.message, "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+async function disconnectGoogleDrive(button) {
+  if (!confirm("Ngắt kết nối Google Drive OAuth? File OneBSS sẽ không upload được vào Drive cá nhân cho tới khi kết nối lại.")) return;
+  setButtonLoading(button, true);
+  try {
+    await api("/api/google-drive/oauth/disconnect", { method: "POST" });
+    showToast("Đã ngắt kết nối Google Drive.");
+    await loadConnections({ force: true });
+  } catch (error) {
+    showToast(error.message, "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+window.addEventListener("message", async (event) => {
+  if (event.origin !== window.location.origin || event.data?.type !== "google-drive-oauth") return;
+  showToast(event.data.message || (event.data.ok ? "Đã kết nối Google Drive." : "Kết nối Google Drive lỗi."), event.data.ok ? "success" : "error");
+  await loadConnections({ force: true });
+});
 
 async function testConnection(code, button) {
   const resultBox = $(`#connection-result-${CSS.escape(code)}`);
