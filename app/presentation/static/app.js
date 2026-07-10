@@ -269,7 +269,18 @@ async function api(url, options = {}) {
     window.location.href = "/login";
     throw new Error("Phiên đăng nhập đã hết hạn.");
   }
-  const body = await response.json();
+  const text = await response.text();
+  let body = {};
+  if (text.trim()) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      const preview = text.replace(/\s+/g, " ").trim().slice(0, 240);
+      throw new Error(`May chu tra ve phan hoi khong phai JSON (HTTP ${response.status}). ${preview}`);
+    }
+  } else if (!response.ok) {
+    throw new Error(`May chu tra ve phan hoi rong (HTTP ${response.status}). Hay thu lai hoac rut ngan dieu kien bao cao.`);
+  }
   if (response.status === 403) {
     const message = body.detail || "Bạn không có quyền truy cập chức năng này";
     showToast(message, "error");
