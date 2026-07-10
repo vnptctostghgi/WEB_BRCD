@@ -33,6 +33,23 @@ class MobileGatewayRepository:
         return (datetime.now(UTC) + timedelta(seconds=max(1, int(seconds)))).isoformat(timespec="seconds")
 
     @staticmethod
+    def time_text(value: Any) -> str:
+        if value in (None, ""):
+            return ""
+        if isinstance(value, (int, float)):
+            number = float(value)
+            if number > 10_000_000_000:
+                number = number / 1000
+            return datetime.fromtimestamp(number, tz=UTC).isoformat(timespec="seconds")
+        raw = str(value).strip()
+        if raw.isdigit():
+            number = int(raw)
+            if number > 10_000_000_000:
+                number = number / 1000
+            return datetime.fromtimestamp(number, tz=UTC).isoformat(timespec="seconds")
+        return raw
+
+    @staticmethod
     def _json_loads(value: Any, fallback: Any) -> Any:
         if value in (None, ""):
             return fallback
@@ -149,6 +166,7 @@ class MobileGatewayRepository:
         return self._insert("mobile_pairing_codes", row)
 
     def list_pairing_codes(self, limit: int = 20) -> list[dict[str, Any]]:
+        self.expire_pairing_codes()
         if self.is_sqlite:
             return self._sqlite_rows(
                 "SELECT id, created_by, created_at, expires_at, used_at, used_by_device_id, policy_payload, status FROM mobile_pairing_codes ORDER BY id DESC LIMIT ?",
@@ -175,6 +193,14 @@ class MobileGatewayRepository:
                 )
             return
         self._patch("mobile_pairing_codes", {"id": f"eq.{pairing_id}", "status": "eq.active"}, {"status": "used", "used_at": now, "used_by_device_id": device_id})
+
+    def expire_pairing_codes(self) -> None:
+        now = self.now()
+        if self.is_sqlite:
+            with self.base.connect() as connection:
+                connection.execute("UPDATE mobile_pairing_codes SET status='expired' WHERE status='active' AND expires_at<?", (now,))
+            return
+        self._patch("mobile_pairing_codes", {"status": "eq.active", "expires_at": f"lt.{now}"}, {"status": "expired"})
 
     def create_device(self, payload: dict[str, Any]) -> dict[str, Any]:
         now = self.now()
@@ -259,6 +285,17 @@ class MobileGatewayRepository:
                 )
             return
         self._patch("mobile_devices", {"device_id": f"eq.{device_id}"}, payload)
+
+    def delete_device(self, device_id: str) -> None:
+        if self.is_sqlite:
+            with self.base.connect() as connection:
+                connection.execute("DELETE FROM mobile_device_nonces WHERE device_id=?", (device_id,))
+                connection.execute("DELETE FROM mobile_device_policies WHERE device_id=?", (device_id,))
+                connection.execute("DELETE FROM mobile_devices WHERE device_id=?", (device_id,))
+            return
+        self._delete("mobile_device_nonces", {"device_id": f"eq.{device_id}"})
+        self._delete("mobile_device_policies", {"device_id": f"eq.{device_id}"})
+        self._delete("mobile_devices", {"device_id": f"eq.{device_id}"})
 
     def cleanup_nonces(self) -> None:
         now = self.now()
@@ -372,6 +409,7 @@ class MobileGatewayRepository:
             "device_id": device_id,
             "created_at": now,
         }
+        row["last_sms_received_at"] = self.time_text(row.get("last_sms_received_at")) or None
         if self.is_sqlite:
             with self.base.connect() as connection:
                 connection.execute(
@@ -424,7 +462,7 @@ class MobileGatewayRepository:
                 "normalized_sender": security.normalize_sender(message.sender),
                 "body_encrypted": security.encrypt_text(self.settings, body, "otp"),
                 "body_masked": security.mask_otp_text(body),
-                "received_at": message.received_at,
+                "received_at": self.time_text(message.received_at),
                 "subscription_id": message.subscription_id or "",
                 "sim_slot": message.sim_slot,
                 "synced_at": now,
@@ -566,7 +604,7 @@ class MobileGatewayRepository:
                 "title": item.title or "",
                 "text_encrypted": security.encrypt_text(self.settings, text, "otp"),
                 "text_masked": security.mask_otp_text(text),
-                "posted_at": item.posted_at,
+                "posted_at": self.time_text(item.posted_at),
                 "used_for_otp": False,
                 "otp_request_id": None,
                 "created_at": now,

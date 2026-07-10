@@ -5494,16 +5494,14 @@ function normalizeMobileGatewayUi() {
   if (!root || root.dataset.mobileUiV13 === "true") return;
   root.dataset.mobileUiV13 = "true";
   const actionGroup = root.querySelector(".page-header .action-group");
-  if (actionGroup) actionGroup.innerHTML = `<button class="btn-secondary" id="mobile-refresh" type="button">Làm mới</button>`;
+  if (actionGroup) actionGroup.innerHTML = "";
   const tabs = root.querySelector(".mobile-gateway-tabs");
   if (tabs) {
     tabs.innerHTML = `
       <button class="mobile-gateway-tab active" data-mobile-tab="overview" type="button">Tổng quan</button>
-      <button class="mobile-gateway-tab" data-mobile-tab="devices-config" type="button">Thiết bị & Cấu hình</button>
+      <button class="mobile-gateway-tab" data-mobile-tab="devices-config" type="button">Thiết bị</button>
       <button class="mobile-gateway-tab" data-mobile-tab="sms" type="button">SMS</button>
-      <button class="mobile-gateway-tab" data-mobile-tab="otp" type="button">OTP</button>
-      <button class="mobile-gateway-tab" data-mobile-tab="notifications" type="button">Thông báo</button>
-      <button class="mobile-gateway-tab" data-mobile-tab="media" type="button">Camera / Media</button>`;
+      <button class="mobile-gateway-tab" data-mobile-tab="otp" type="button">OTP</button>`;
   }
   const devicesPanel = root.querySelector('[data-mobile-panel="devices"]');
   if (devicesPanel) {
@@ -5511,42 +5509,15 @@ function normalizeMobileGatewayUi() {
     devicesPanel.innerHTML = `
       <section class="data-card">
         <div class="section-heading">
-          <div><p class="eyebrow">Pairing</p><h2>Ghép nối thiết bị</h2></div>
-          <button class="btn-primary" id="mobile-create-pairing-code" type="button">Tạo mã ghép nối</button>
-        </div>
-        <div class="admin-inline-toolbar">
-          <label class="checkbox-label"><input type="checkbox" id="mobile-pair-sms" checked /> Đọc SMS</label>
-          <label class="checkbox-label"><input type="checkbox" id="mobile-pair-notifications" /> Đọc thông báo</label>
-          <label class="checkbox-label"><input type="checkbox" id="mobile-pair-heartbeat" checked /> Thiết bị & heartbeat</label>
-          <label class="checkbox-label"><input type="checkbox" id="mobile-pair-clipboard" /> Clipboard</label>
-          <label class="checkbox-label"><input type="checkbox" id="mobile-pair-camera" /> Camera và Media</label>
+          <div><p class="eyebrow">Pairing</p><h2>Kết nối điện thoại đọc SMS</h2></div>
+          <div class="action-group"><button class="btn-primary" id="mobile-create-pairing-code" type="button">Tạo mã ghép nối</button><button class="btn-secondary" id="mobile-refresh-inline" type="button">Làm mới</button></div>
         </div>
         <div id="mobile-pairing-result" class="mobile-pairing-result hidden"></div>
         <div class="table-scroll mt-4"><table><thead><tr><th>Trạng thái</th><th>Tạo bởi</th><th>Tạo lúc</th><th>Hết hạn</th><th>Thiết bị sử dụng</th></tr></thead><tbody id="mobile-pairing-table"></tbody></table></div>
       </section>
       <section class="data-card mt-4">
         <div class="section-heading"><div><p class="eyebrow">Thiết bị</p><h2>Danh sách thiết bị</h2></div></div>
-        <div class="table-scroll"><table><thead><tr><th class="table-action-column">Thao tác</th><th>Thiết bị</th><th>Trạng thái</th><th>Heartbeat</th><th>Pin/Mạng</th><th>Phiên bản</th><th>Quyền</th><th>Policy</th><th>Hàng đợi</th></tr></thead><tbody id="mobile-devices-table"></tbody></table></div>
-      </section>
-      <section class="data-card mt-4">
-        <div class="section-heading"><div><p class="eyebrow">Policy</p><h2>Cấu hình thiết bị</h2></div><button class="btn-primary" id="mobile-save-policy" type="button">Lưu policy</button></div>
-        <form id="mobile-policy-form" class="mobile-form-grid">
-          <label>Thiết bị<select class="form-control" id="mobile-policy-device" name="device_id"></select></label>
-          <label>Heartbeat phút<input class="form-control" name="heartbeat_interval_minutes" type="number" value="15" /></label>
-          <label>Đồng bộ phút<input class="form-control" name="sync_interval_minutes" type="number" value="15" /></label>
-          <label>Batch size<input class="form-control" name="batch_size" type="number" value="50" /></label>
-          <label>Retention ngày<input class="form-control" name="local_retention_days" type="number" value="14" /></label>
-          <label>Minimum app<input class="form-control" name="minimum_app_version" value="1.3.0" /></label>
-          <label>Pairing TTL giây<input class="form-control" id="mobile-pairing-ttl" readonly /></label>
-          <label>Online threshold giây<input class="form-control" id="mobile-online-threshold" readonly /></label>
-          <label>Allowlist thông báo<textarea class="form-control" name="notification_allowlist" rows="3" placeholder="com.vnp.onebss&#10;com.example.app"></textarea></label>
-          <label class="checkbox-label"><input type="checkbox" name="sms_enabled" checked /> SMS</label>
-          <label class="checkbox-label"><input type="checkbox" name="notifications_enabled" /> Notification</label>
-          <label class="checkbox-label"><input type="checkbox" name="clipboard_enabled" /> Clipboard</label>
-          <label class="checkbox-label"><input type="checkbox" name="camera_enabled" /> Camera</label>
-          <label class="checkbox-label"><input type="checkbox" name="diagnostics_enabled" checked /> Diagnostics</label>
-          <label class="checkbox-label"><input type="checkbox" name="force_update" /> Force update</label>
-        </form>
+        <div class="table-scroll"><table><thead><tr><th class="table-action-column">Thao tác</th><th>Thiết bị</th><th>Trạng thái</th><th>Heartbeat</th><th>Pin/Mạng</th><th>Phiên bản</th><th>SMS chờ</th></tr></thead><tbody id="mobile-devices-table"></tbody></table></div>
       </section>`;
   }
   const smsPanel = root.querySelector('[data-mobile-panel="sms"]');
@@ -5610,25 +5581,9 @@ function normalizeMobileGatewayUi() {
   root.querySelector('[data-mobile-panel="commands"]')?.remove();
   root.querySelector('[data-mobile-panel="logs"]')?.remove();
   root.querySelector('[data-mobile-panel="settings"]')?.remove();
-  if (!root.querySelector('[data-mobile-panel="media"]')) {
-    const mediaPanel = document.createElement("section");
-    mediaPanel.className = "mobile-gateway-panel";
-    mediaPanel.dataset.mobilePanel = "media";
-    mediaPanel.innerHTML = `
-      <section class="data-card">
-        <div class="section-heading"><div><p class="eyebrow">Camera</p><h2>Thiết bị có camera/media</h2></div></div>
-        <div class="table-scroll"><table><thead><tr><th>Thiết bị</th><th>Trạng thái</th><th>Quyền camera</th><th>Heartbeat</th><th class="table-action-column">Yêu cầu</th></tr></thead><tbody id="mobile-media-devices-table"></tbody></table></div>
-      </section>
-      <section class="data-card mt-4">
-        <div class="section-heading"><div><p class="eyebrow">Media</p><h2>Ảnh/video gần đây</h2></div></div>
-        <div class="admin-inline-toolbar">
-          <label>Thiết bị<select class="form-control" id="mobile-media-device-filter"><option value="">Tất cả</option></select></label>
-          <label>Loại<select class="form-control" id="mobile-media-type-filter"><option value="">Tất cả</option><option value="image">Ảnh</option><option value="video">Video</option></select></label>
-        </div>
-        <div class="table-scroll"><table><thead><tr><th>Preview</th><th>Thiết bị</th><th>Loại</th><th>Thời gian</th><th>File</th><th>Trạng thái</th></tr></thead><tbody id="mobile-media-table"></tbody></table></div>
-      </section>`;
-    root.appendChild(mediaPanel);
-  }
+  root.querySelector('[data-mobile-panel="notifications"]')?.remove();
+  root.querySelector('[data-mobile-panel="media"]')?.remove();
+  $("#mobile-refresh-inline")?.addEventListener("click", () => loadMobileGateway({ force: true }));
 }
 
 function mobileDeviceLabel(deviceId) {
@@ -5643,10 +5598,6 @@ function activateMobileGatewayTab(tabName) {
 
 async function loadMobileGateway({ force = false } = {}) {
   normalizeMobileGatewayUi();
-  if (mobileGatewayLoaded && !force) {
-    renderMobileGatewayDeviceOptions();
-    return;
-  }
   const message = $("#mobile-gateway-message");
   try {
     await Promise.all([
@@ -5655,8 +5606,6 @@ async function loadMobileGateway({ force = false } = {}) {
       loadMobilePairingCodes(),
       loadMobileGatewaySms({ force: true }),
       loadMobileOtpData(),
-      loadMobileNotifications({ force: true }),
-      loadMobileMedia(),
     ]);
     mobileGatewayLoaded = true;
     startMobileOtpTicker();
@@ -6038,11 +5987,11 @@ function renderMobilePairingCountdown(statusText = "") {
 
 async function createMobilePairingCode() {
   const payload = {
-    sms_enabled: Boolean($("#mobile-pair-sms")?.checked),
-    notifications_enabled: Boolean($("#mobile-pair-notifications")?.checked),
-    heartbeat_enabled: Boolean($("#mobile-pair-heartbeat")?.checked),
-    clipboard_enabled: Boolean($("#mobile-pair-clipboard")?.checked),
-    camera_enabled: Boolean($("#mobile-pair-camera")?.checked),
+    sms_enabled: true,
+    notifications_enabled: false,
+    heartbeat_enabled: true,
+    clipboard_enabled: false,
+    camera_enabled: false,
   };
   const result = await api("/api/admin/mobile-gateway/pairing-codes", { method: "POST", body: JSON.stringify(payload) });
   mobileGatewayActivePairingId = result.id;
@@ -6088,44 +6037,25 @@ function renderMobileGatewayDevices() {
   if (!table) return;
   table.innerHTML = mobileGatewayDevices.length ? mobileGatewayDevices.map((device) => {
     const heartbeat = device.heartbeat || {};
-    const policy = device.policy || {};
     const active = device.is_active;
     const online = device.online;
     const statusClass = !active ? "inactive" : (online ? "viewer" : "pending");
     const statusText = !active ? "Đã thu hồi" : (online ? "Online" : "Offline");
-    const permissions = [
-      `SMS ${policy.sms_enabled ? "ON" : "OFF"}`,
-      `TB ${policy.notifications_enabled ? "ON" : "OFF"}`,
-      `Clipboard ${policy.clipboard_enabled ? "ON" : "OFF"}`,
-      `Camera ${policy.camera_enabled ? "ON" : "OFF"}`,
-    ].join(" · ");
     return `<tr>
       <td class="table-action-cell"><div class="action-group">
-        <button class="table-action" data-mobile-policy="${escapeHtml(device.device_id)}" type="button">Policy</button>
-        <button class="table-action" data-mobile-photo="${escapeHtml(device.device_id)}" type="button">Ảnh</button>
-        <button class="table-action" data-mobile-video="${escapeHtml(device.device_id)}" type="button">Video</button>
         <button class="table-action danger" data-mobile-revoke="${escapeHtml(device.device_id)}" type="button">${active ? "Thu hồi" : "Kích hoạt"}</button>
+        <button class="table-action danger" data-mobile-delete="${escapeHtml(device.device_id)}" type="button" ${online ? "disabled" : ""}>Xóa</button>
       </div></td>
       <td><strong>${escapeHtml(device.name || device.device_id)}</strong><small class="cell-note">${escapeHtml(device.manufacturer || "")} ${escapeHtml(device.model || "")}</small></td>
       <td><span class="status ${statusClass}">${statusText}</span></td>
       <td>${escapeHtml(mobileFormatTime(device.last_seen_at))}<small class="cell-note">SMS permission: ${heartbeat.sms_permission ? "OK" : "-"} · Notification: ${heartbeat.notification_access ? "OK" : "-"}</small></td>
       <td>${escapeHtml(String(heartbeat.battery_percent ?? "-"))}%<small class="cell-note">${escapeHtml(heartbeat.charging ? "Đang sạc" : "")} ${escapeHtml(heartbeat.network_type || "")}</small></td>
       <td>${escapeHtml(device.app_version || "-")}<small class="cell-note">Android ${escapeHtml(device.android_version || "-")}</small></td>
-      <td>${escapeHtml(permissions)}</td>
-      <td>Min ${escapeHtml(policy.minimum_app_version || "1.3.0")}<small class="cell-note">${escapeHtml((policy.notification_allowlist || []).join(", "))}</small></td>
-      <td>SMS ${escapeHtml(String(heartbeat.pending_sms || 0))}<small class="cell-note">TB ${escapeHtml(String(heartbeat.pending_notifications || 0))}</small></td>
+      <td>${escapeHtml(String(heartbeat.pending_sms || 0))}</td>
     </tr>`;
-  }).join("") : emptyRow(9, "Chưa có thiết bị");
+  }).join("") : emptyRow(7, "Chưa có thiết bị");
   document.querySelectorAll("[data-mobile-revoke]").forEach((button) => button.addEventListener("click", () => toggleMobileDeviceActive(button.dataset.mobileRevoke)));
-  document.querySelectorAll("[data-mobile-policy]").forEach((button) => button.addEventListener("click", () => {
-    const select = $("#mobile-policy-device");
-    if (select) select.value = button.dataset.mobilePolicy;
-    loadMobilePolicy();
-    $("#mobile-policy-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }));
-  document.querySelectorAll("[data-mobile-photo]").forEach((button) => button.addEventListener("click", () => sendMobileMediaCommand(button.dataset.mobilePhoto, "capture_photo")));
-  document.querySelectorAll("[data-mobile-video]").forEach((button) => button.addEventListener("click", () => sendMobileMediaCommand(button.dataset.mobileVideo, "record_video")));
-  renderMobileMediaDevices();
+  document.querySelectorAll("[data-mobile-delete]").forEach((button) => button.addEventListener("click", () => deleteMobileDevice(button.dataset.mobileDelete)));
 }
 
 async function sendMobileMediaCommand(deviceId, commandType) {
@@ -6140,6 +6070,16 @@ async function sendMobileMediaCommand(deviceId, commandType) {
   });
   showToast(commandType === "capture_photo" ? "Đã gửi yêu cầu chụp ảnh." : "Đã gửi yêu cầu quay video.");
   await loadMobileMedia();
+}
+
+async function deleteMobileDevice(deviceId) {
+  if (!deviceId) return;
+  const device = mobileGatewayDevices.find((item) => item.device_id === deviceId);
+  const label = device?.name || deviceId;
+  if (!confirm(`Xóa thiết bị đã ngừng kết nối: ${label}? SMS đã đồng bộ vẫn được giữ lại.`)) return;
+  await api(`/api/admin/mobile-gateway/devices/${encodeURIComponent(deviceId)}/delete`, { method: "POST" });
+  showToast("Đã xóa thiết bị khỏi danh sách.");
+  await loadMobileGateway({ force: true });
 }
 
 async function loadMobileGatewaySms({ force = false } = {}) {

@@ -60,6 +60,14 @@ def client_ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
+def epoch_millis(value: Any) -> int:
+    try:
+        parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        return int(parsed.timestamp() * 1000)
+    except ValueError:
+        return 0
+
+
 async def authenticated_device(request: Request) -> dict[str, Any]:
     settings = get_settings()
     if not bool(getattr(settings, "mobile_gateway_enabled", True)):
@@ -162,7 +170,16 @@ async def device_policy(context: dict[str, Any] = Depends(authenticated_device))
 @router.get("/device/commands")
 async def device_commands(context: dict[str, Any] = Depends(authenticated_device)) -> dict[str, Any]:
     commands = context["repository"].deliver_pending_commands(context["device_id"])
-    return {"ok": True, "commands": commands}
+    device_commands = [
+        {
+            "command_id": command.get("command_id"),
+            "type": command.get("command_type") or command.get("type") or "",
+            "payload": command.get("payload") or {},
+            "expires_at": epoch_millis(command.get("expires_at")),
+        }
+        for command in commands
+    ]
+    return {"ok": True, "commands": device_commands}
 
 
 @router.post("/device/commands/{command_id}/result")
@@ -250,8 +267,21 @@ async def upload_media(
                     "error_message": str(error),
                 }
             )
-            return {"ok": False, "media": media, "message": "Google Drive chua san sang upload media."}
-        return {"ok": True, "media": media}
+            return {
+                "ok": False,
+                "media": media,
+                "media_id": str(media.get("id") or ""),
+                "drive_file_id": media.get("drive_file_id") or "",
+                "drive_url": media.get("drive_url") or "",
+                "message": "Google Drive chua san sang upload media.",
+            }
+        return {
+            "ok": True,
+            "media": media,
+            "media_id": str(media.get("id") or ""),
+            "drive_file_id": media.get("drive_file_id") or "",
+            "drive_url": media.get("drive_url") or "",
+        }
     finally:
         try:
             temp_path.unlink(missing_ok=True)
@@ -331,6 +361,28 @@ def admin_reactivate_device(request: Request, device_id: str) -> dict[str, Any]:
     repo = mobile_repository()
     repo.update_device(device_id, {"is_active": True, "revoked_at": None})
     repo.base.add_audit_log(actor["username"], "mobile_device_reactivated", f"Kich hoat lai thiet bi {device_id}")
+    return {"ok": True}
+
+
+@admin_router.post("/devices/{device_id}/delete")
+def admin_delete_device(request: Request, device_id: str) -> dict[str, Any]:
+    actor = require_mobile_permission(request, "mobile_gateway.devices.manage")
+    repo = mobile_repository()
+    device = repo.get_device(device_id)
+    if not device:
+        return {"ok": True}
+    threshold = int(getattr(get_settings(), "mobile_gateway_online_threshold_seconds", 180) or 180)
+    cutoff = datetime.now(UTC) - timedelta(seconds=threshold)
+    online = False
+    try:
+        seen = datetime.fromisoformat(str(device.get("last_seen_at") or "").replace("Z", "+00:00"))
+        online = bool(device.get("is_active")) and seen >= cutoff
+    except ValueError:
+        online = False
+    if online:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chi xoa thiet bi da ngung ket noi.")
+    repo.delete_device(device_id)
+    repo.base.add_audit_log(actor["username"], "mobile_device_deleted", f"Xoa thiet bi Mobile Gateway {device_id}")
     return {"ok": True}
 
 

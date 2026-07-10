@@ -15,6 +15,7 @@ class PairingService:
         self.repository = repository
 
     def create_pairing_code(self, created_by: str, policy_payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.repository.expire_pairing_codes()
         code = security.generate_pairing_code()
         code_hash = security.pairing_code_hash(self.repository.settings, code)
         ttl_seconds = int(getattr(self.repository.settings, "mobile_gateway_pairing_ttl_seconds", 600) or 600)

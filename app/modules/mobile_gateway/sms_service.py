@@ -19,4 +19,8 @@ class SmsService:
             matched = self.otp_service.match_incoming_sms(sms)
             if matched:
                 matches.append(matched)
+            else:
+                latest = self.otp_service.record_latest_from_sms(sms)
+                if latest:
+                    matches.append(latest)
         return {"ok": True, "inserted": len(inserted), "skipped": skipped, "otp_matches": len(matches)}

@@ -86,6 +86,34 @@ class OtpService:
                     return {"request_id": request["request_id"], "code_masked": security.code_mask(code)}
         return None
 
+    def record_latest_from_sms(self, sms: dict[str, Any]) -> dict[str, Any] | None:
+        if sms.get("otp_request_id"):
+            return None
+        body = str(sms.get("body") or "")
+        if not body:
+            return None
+        self.repository.ensure_defaults()
+        filters = self.repository.list_otp_filters(enabled_only=True)
+        for otp_filter in filters:
+            if not self._device_allowed(otp_filter, sms):
+                continue
+            if not self._sender_allowed(otp_filter, str(sms.get("normalized_sender") or sms.get("sender") or "")):
+                continue
+            code = self._extract_code_for_filter(body, otp_filter)
+            if not code:
+                continue
+            self.repository.record_otp_latest(
+                otp_filter=otp_filter,
+                sender=str(sms.get("sender") or ""),
+                code=code,
+                received_at=str(sms.get("received_at") or ""),
+                source_type="sms",
+                source_id=sms["id"],
+                request_id="",
+            )
+            return {"filter_id": otp_filter.get("filter_id"), "code_masked": security.code_mask(code)}
+        return None
+
     def match_incoming_notification(self, notification: dict[str, Any]) -> dict[str, Any] | None:
         if notification.get("otp_request_id"):
             return None

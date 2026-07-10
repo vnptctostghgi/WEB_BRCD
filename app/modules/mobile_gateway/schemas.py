@@ -17,7 +17,7 @@ class SmsMessageIn(BaseModel):
     external_id: str
     sender: str
     body: str
-    received_at: str
+    received_at: str | int | float
     subscription_id: str = ""
     sim_slot: int | None = None
 
@@ -32,7 +32,7 @@ class NotificationIn(BaseModel):
     app_name: str = ""
     title: str = ""
     text: str = ""
-    posted_at: str
+    posted_at: str | int | float
 
 
 class NotificationBatchPayload(BaseModel):
@@ -52,7 +52,7 @@ class HeartbeatPayload(BaseModel):
     sms_permission: bool = False
     notification_access: bool = False
     battery_optimization_ignored: bool = False
-    last_sms_received_at: str | None = None
+    last_sms_received_at: str | int | float | None = None
 
 
 class CommandResultPayload(BaseModel):
@@ -72,7 +72,8 @@ class DiagnosticsPayload(BaseModel):
 
 class ClipboardPayload(BaseModel):
     text: str = ""
-    captured_at: str = ""
+    captured_at: str | int | float = ""
+    created_at: str | int | float = ""
 
 
 class DeviceUpdatePayload(BaseModel):
