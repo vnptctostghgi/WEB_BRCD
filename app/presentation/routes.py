@@ -53,6 +53,7 @@ router = APIRouter()
 templates = Jinja2Templates(directory=Path("app/presentation/templates"))
 logger = logging.getLogger(__name__)
 FAILED_LOGIN_COUNTS: dict[str, int] = {}
+MAX_USER_IMPORT_BYTES = 2 * 1024 * 1024
 ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
 DASHBOARD_LAYOUT_TYPES = {
     "1_column": 1,
@@ -247,7 +248,7 @@ class SystemConnectionPayload(BaseModel):
     name: str
     connection_type: str
     description: str = ""
-    config: dict = {}
+    config: dict[str, Any] = Field(default_factory=dict)
     is_active: bool = False
 
 
@@ -256,7 +257,7 @@ class SqlReportPayload(BaseModel):
     ten_bao_cao: str
     ma_bao_cao: str
     cau_lenh_sql: str
-    cac_tham_so: list[str] = []
+    cac_tham_so: list[str] = Field(default_factory=list)
 
 
 class OneBssReportPayload(BaseModel):
@@ -271,7 +272,7 @@ class OneBssReportPayload(BaseModel):
 
 class RunReportPayload(BaseModel):
     ma_bao_cao: str
-    filters: dict[str, Any] = {}
+    filters: dict[str, Any] = Field(default_factory=dict)
     page: int = 1
     page_size: int = 20
 
@@ -1380,8 +1381,11 @@ async def import_users(request: Request, file: UploadFile = File(...)) -> dict:
     actor = admin_user(request)
     if not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chỉ hỗ trợ file Excel .xlsx.")
+    content = await file.read(MAX_USER_IMPORT_BYTES + 1)
+    if len(content) > MAX_USER_IMPORT_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File import quá lớn. Giới hạn hiện tại là 2MB.")
     try:
-        employees = parse_employee_workbook(await file.read())
+        employees = parse_employee_workbook(content)
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     repository = build_app_repository()
@@ -2057,16 +2061,17 @@ def send_telegram_test_message(request: Request) -> dict:
 
 
 @router.get("/api/test/telegram-alert")
-def test_telegram_alert() -> dict:
+def test_telegram_alert(request: Request) -> dict:
+    actor = admin_user(request)
     sent = TelegramNotifier(get_settings()).send_message(
         "TEST Telegram",
         "\u26a0\ufe0f [TEST] Hệ thống kiểm tra kết nối Bot Telegram hoạt động bình thường!",
-        {"route": "/api/test/telegram-alert"},
+        {"route": "/api/test/telegram-alert", "actor": actor["username"]},
     )
     try:
         build_app_repository().add_audit_log(
-            "system",
-            "telegram_public_test_sent" if sent else "telegram_public_test_failed",
+            actor["username"],
+            "telegram_admin_test_sent" if sent else "telegram_admin_test_failed",
             "GET /api/test/telegram-alert",
         )
     except Exception:

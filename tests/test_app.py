@@ -3,6 +3,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 os.environ["DB_MOCK_MODE"] = "true"
 os.environ["INTERNAL_API_MOCK_MODE"] = "true"
 os.environ["INTERNAL_API_URL"] = "http://10.92.17.88:8000/api/du-lieu-web"
@@ -16,11 +18,12 @@ test_database.unlink(missing_ok=True)
 
 from fastapi.testclient import TestClient
 
+from app.application.telegram_notifier import sanitize_alert_details, sanitize_alert_text
 from app.application.database_service import DatabaseService
 from app.data_access.supabase_repository import SupabaseRepository
 from app.main import app
 from app.presentation import routes
-from app.settings import get_settings
+from app.settings import Settings, get_settings
 
 
 def login(client: TestClient, username: str = "admin", password: str = "Admin@Brcd2026!") -> None:
@@ -67,6 +70,37 @@ def test_static_assets_are_cacheable() -> None:
         response = client.get("/static/app.js?v=53")
         assert response.status_code == 200
         assert response.headers["cache-control"] == "public, max-age=604800"
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert response.headers["x-frame-options"] == "SAMEORIGIN"
+        assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+
+
+def test_production_startup_validation_rejects_unsafe_defaults() -> None:
+    settings = Settings(
+        app_env="production",
+        session_secret="change-this-session-secret",
+        initial_admin_password="ChangeMe123!",
+        internal_api_mock_mode=True,
+    )
+    with pytest.raises(RuntimeError) as error:
+        settings.validate_for_startup()
+    message = str(error.value)
+    assert "SESSION_SECRET" in message
+    assert "INITIAL_ADMIN_PASSWORD" in message
+    assert "INTERNAL_API_MOCK_MODE" in message
+    assert "ChangeMe123" not in message
+
+
+def test_telegram_alert_sanitizer_redacts_secrets() -> None:
+    text = sanitize_alert_text("token=abc123 password:super-secret cookie=session-id")
+    assert "abc123" not in text
+    assert "super-secret" not in text
+    assert "session-id" not in text
+    assert "[redacted]" in text
+
+    details = sanitize_alert_details({"telegram_token": "abc123", "url": "/x?password=super-secret"})
+    assert details["telegram_token"] == "[redacted]"
+    assert "super-secret" not in details["url"]
 
 
 def test_admin_navigation_payload_combines_features_and_layouts() -> None:
@@ -174,7 +208,7 @@ def test_five_failed_logins_send_telegram_alert(monkeypatch) -> None:
         assert len(sent_messages) == 2
 
 
-def test_public_telegram_alert_test_route(monkeypatch) -> None:
+def test_telegram_alert_test_route_requires_admin(monkeypatch) -> None:
     sent_messages = []
 
     def fake_send_message(self, title, message, details=None):
@@ -184,10 +218,32 @@ def test_public_telegram_alert_test_route(monkeypatch) -> None:
     monkeypatch.setattr("app.presentation.routes.TelegramNotifier.send_message", fake_send_message)
     with TestClient(app) as client:
         response = client.get("/api/test/telegram-alert")
+        assert response.status_code == 401
+        assert sent_messages == []
+
+        login(client)
+        response = client.get("/api/test/telegram-alert")
         assert response.status_code == 200
         assert response.json()["ok"] is True
         assert sent_messages[0][0] == "TEST Telegram"
         assert "[TEST]" in sent_messages[0][1]
+        assert sent_messages[0][2]["actor"] == "admin"
+
+
+def test_user_import_rejects_large_file() -> None:
+    with TestClient(app) as client:
+        login(client)
+        response = client.post(
+            "/api/admin/users/import",
+            files={
+                "file": (
+                    "users.xlsx",
+                    b"x" * (routes.MAX_USER_IMPORT_BYTES + 1),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        assert response.status_code == 413
 
 
 def test_zalo_webhook_rejects_invalid_secret(monkeypatch) -> None:

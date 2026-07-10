@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime
 from typing import Any
 
@@ -8,6 +9,30 @@ from app.settings import Settings
 
 
 logger = logging.getLogger(__name__)
+SENSITIVE_KEY_MARKERS = ("password", "token", "secret", "authorization", "cookie", "credential", "private_key", "api_key")
+SENSITIVE_INLINE_PATTERN = re.compile(
+    r"(?i)\b(password|token|secret|authorization|cookie|credential|private[_-]?key|api[_-]?key)\s*[:=]\s*[^\s,;&]+"
+)
+REDACTED = "[redacted]"
+
+
+def sanitize_alert_text(value: Any, max_length: int = 800) -> str:
+    text = str(value or "")
+    text = SENSITIVE_INLINE_PATTERN.sub(lambda match: f"{match.group(1)}={REDACTED}", text)
+    if len(text) > max_length:
+        return f"{text[:max_length]}..."
+    return text
+
+
+def sanitize_alert_details(details: dict[str, Any]) -> dict[str, str]:
+    sanitized: dict[str, str] = {}
+    for key, value in details.items():
+        normalized_key = str(key).lower()
+        if any(marker in normalized_key for marker in SENSITIVE_KEY_MARKERS):
+            sanitized[str(key)] = REDACTED
+        else:
+            sanitized[str(key)] = sanitize_alert_text(value, max_length=300)
+    return sanitized
 
 
 class TelegramNotifier:
@@ -32,9 +57,10 @@ class TelegramNotifier:
             f"Moi truong: {self.settings.app_env}",
             f"Thoi gian: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "",
-            message,
+            sanitize_alert_text(message, max_length=1200),
         ]
         if details:
+            details = sanitize_alert_details(details)
             lines.append("")
             lines.extend(f"- {key}: {value}" for key, value in details.items())
         try:
@@ -48,11 +74,11 @@ class TelegramNotifier:
                     },
             )
             if response.status_code >= 400:
-                logger.warning("Telegram send failed: %s %s", response.status_code, response.text[:300])
+                logger.warning("Telegram send failed: %s %s", response.status_code, sanitize_alert_text(response.text, max_length=300))
                 return False
             body = response.json()
             if not body.get("ok", True):
-                logger.warning("Telegram API returned ok=false: %s", body)
+                logger.warning("Telegram API returned ok=false: %s", sanitize_alert_text(body, max_length=300))
                 return False
             return True
         except Exception:

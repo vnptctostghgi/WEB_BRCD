@@ -4,6 +4,24 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+_PLACEHOLDER_SESSION_SECRETS = {
+    "",
+    "change-this-session-secret",
+    "hay-thay-bang-chuoi-bi-mat-dai-va-ngau-nhien",
+}
+_PLACEHOLDER_ADMIN_PASSWORDS = {
+    "",
+    "ChangeMe123!",
+    "Admin@Brcd2026!",
+    "admin",
+    "password",
+}
+
+
+def _secret_text(secret: SecretStr) -> str:
+    return secret.get_secret_value().strip()
+
+
 class Settings(BaseSettings):
     app_name: str = "Hệ thống quản trị đặc biệt"
     app_env: str = "development"
@@ -53,6 +71,46 @@ class Settings(BaseSettings):
     google_drive_oauth_redirect_uri: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.strip().lower() == "production"
+
+    def validate_for_startup(self) -> None:
+        if not self.is_production:
+            return
+
+        errors: list[str] = []
+        session_secret = _secret_text(self.session_secret)
+        if len(session_secret) < 32 or session_secret in _PLACEHOLDER_SESSION_SECRETS:
+            errors.append("SESSION_SECRET must be a random value with at least 32 characters")
+
+        initial_admin_password = _secret_text(self.initial_admin_password)
+        if len(initial_admin_password) < 12 or initial_admin_password in _PLACEHOLDER_ADMIN_PASSWORDS:
+            errors.append("INITIAL_ADMIN_PASSWORD must not use a default or weak value")
+
+        backend = self.app_database_backend.strip().lower()
+        if backend not in {"sqlite", "supabase"}:
+            errors.append("APP_DATABASE_BACKEND must be sqlite or supabase")
+        if backend == "supabase":
+            if not self.supabase_rest_url.strip():
+                errors.append("SUPABASE_REST_URL is required when APP_DATABASE_BACKEND=supabase")
+            if not _secret_text(self.supabase_secret_key):
+                errors.append("SUPABASE_SECRET_KEY is required when APP_DATABASE_BACKEND=supabase")
+
+        if self.internal_api_mock_mode:
+            errors.append("INTERNAL_API_MOCK_MODE must be false in production")
+        if not self.internal_api_url.strip():
+            errors.append("INTERNAL_API_URL is required in production")
+
+        if self.google_drive_oauth_client_id.strip() and not _secret_text(self.google_drive_oauth_client_secret):
+            errors.append("GOOGLE_DRIVE_OAUTH_CLIENT_SECRET is required with GOOGLE_DRIVE_OAUTH_CLIENT_ID")
+
+        if (_secret_text(self.zalo_bot_token) or self.zalo_webhook_url.strip()) and not _secret_text(self.zalo_webhook_secret):
+            errors.append("ZALO_WEBHOOK_SECRET is required when Zalo webhook is enabled")
+
+        if errors:
+            raise RuntimeError("Invalid production configuration: " + "; ".join(errors))
 
 
 @lru_cache

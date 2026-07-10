@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import uuid
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -14,6 +15,14 @@ from app.settings import get_settings
 
 
 settings = get_settings()
+settings.validate_for_startup()
+docs_enabled = not settings.is_production
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+}
 
 
 @asynccontextmanager
@@ -46,6 +55,9 @@ app = FastAPI(
     description="Trang quản trị BRCĐ theo kiến trúc 3 lớp.",
     version="0.1.0",
     lifespan=lifespan,
+    docs_url="/docs" if docs_enabled else None,
+    redoc_url="/redoc" if docs_enabled else None,
+    openapi_url="/openapi.json" if docs_enabled else None,
 )
 app.add_middleware(
     SessionMiddleware,
@@ -53,25 +65,33 @@ app.add_middleware(
     session_cookie="brcd_session",
     max_age=60 * 60 * 8,
     same_site="lax",
-    https_only=settings.app_env == "production",
+    https_only=settings.is_production,
 )
 app.mount("/static", StaticFiles(directory="app/presentation/static"), name="static")
 app.include_router(router)
 
 
 @app.middleware("http")
-async def add_static_cache_headers(request: Request, call_next):
+async def add_response_headers(request: Request, call_next):
     response = await call_next(request)
     if request.url.path.startswith("/static/") and response.status_code < 400:
         response.headers.setdefault("Cache-Control", "public, max-age=604800")
+    for header, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+    if settings.is_production:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
 
 
 @app.exception_handler(Exception)
 async def notify_unhandled_exception(request: Request, exc: Exception):
+    request_id = uuid.uuid4().hex[:12]
     TelegramNotifier(settings).send_message(
         "Web BRCĐ phát sinh lỗi chưa xử lý",
-        str(exc),
-        {"path": request.url.path, "method": request.method, "type": type(exc).__name__},
+        f"Unhandled application error. Reference: {request_id}",
+        {"request_id": request_id, "path": request.url.path, "method": request.method, "type": type(exc).__name__},
     )
-    return JSONResponse(status_code=500, content={"detail": "Hệ thống phát sinh lỗi. Quản trị viên đã được thông báo."})
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Hệ thống phát sinh lỗi. Quản trị viên đã được thông báo.", "request_id": request_id},
+    )
