@@ -11,7 +11,9 @@ from app.application.connection_service import ConnectionService
 from app.application.task_scheduler import dashboard_chart_cache_scheduler, data_mining_scheduler, work_task_scheduler, zalo_auto_message_scheduler
 from app.application.telegram_notifier import TelegramNotifier
 from app.data_access.repository_factory import build_repository
-from app.presentation.routes import router
+from app.modules.mobile_gateway.router import admin_router as mobile_gateway_admin_router
+from app.modules.mobile_gateway.router import router as mobile_gateway_router
+from app.presentation.routes import router as presentation_router
 from app.settings import get_settings
 
 
@@ -75,7 +77,9 @@ app.add_middleware(
     https_only=settings.is_production,
 )
 app.mount("/static", StaticFiles(directory="app/presentation/static"), name="static")
-app.include_router(router)
+app.include_router(mobile_gateway_router)
+app.include_router(mobile_gateway_admin_router)
+app.include_router(presentation_router)
 
 
 @app.middleware("http")

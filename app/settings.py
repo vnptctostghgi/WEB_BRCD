@@ -70,6 +70,12 @@ class Settings(BaseSettings):
     google_drive_oauth_client_secret: SecretStr = Field(default=SecretStr(""))
     google_drive_oauth_redirect_uri: str = ""
     production_strict_startup: bool = False
+    mobile_gateway_enabled: bool = True
+    mobile_gateway_master_key: SecretStr = Field(default=SecretStr(""))
+    otp_encryption_key: SecretStr = Field(default=SecretStr(""))
+    mobile_gateway_pairing_ttl_seconds: int = 600
+    mobile_gateway_hmac_max_clock_skew_seconds: int = 300
+    mobile_gateway_online_threshold_seconds: int = 180
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
 

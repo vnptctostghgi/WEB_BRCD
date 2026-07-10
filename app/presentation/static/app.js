@@ -21,6 +21,13 @@ let oneBssReportRuns = [];
 let oneBssPendingSessionId = "";
 let oneBssRunInProgress = false;
 let oneBssRunParameterEditing = false;
+let mobileGatewayLoaded = false;
+let mobileGatewayDevices = [];
+let mobileGatewayOverview = {};
+let mobileGatewaySmsPage = 1;
+let mobileGatewaySmsHasMore = false;
+let mobileGatewayOtpConfigurations = [];
+let mobileGatewayOtpRequests = [];
 let sqlReports = [];
 let sqlReportDrafts = [];
 let dynamicReportPage = 1;
@@ -211,6 +218,7 @@ const navFeatureConfig = {
   quantrimenu: { view: "menu-admin", icon: "list", keywords: "quan tri menu sap xep di chuyen module" },
   quantridanhmuc: { view: "catalogs", icon: "list", keywords: "quan tri danh muc phan vung vai tro bien" },
   quantriketnoi: { view: "system", icon: "plug", keywords: "quan tri ket noi api db ftp drive telegram zalo" },
+  mobilegateway: { view: "mobile-gateway", icon: "database", keywords: "mobile gateway sms otp android onebss" },
   phanquyennguoidung: { view: "permissions", icon: "shield", keywords: "phan quyen nguoi dung chuc nang" },
   phanquyendulieunguoidung: { view: "data-permissions", icon: "database", keywords: "phan quyen du lieu phan vung" },
   nhatkyhoatdong: { view: "audit", icon: "audit", keywords: "nhat ky audit log" },
@@ -367,6 +375,7 @@ function viewLoaderForNav(nextView, dashboardPageId) {
   if (nextView === "system") return () => loadSystem();
   if (nextView === "reports") return () => loadDynamicReports();
   if (nextView === "onebss-mining") return () => loadOneBssMining();
+  if (nextView === "mobile-gateway") return () => loadMobileGateway();
   if (nextView === "dashboard-builder") return () => loadDashboardBuilder();
   if (nextView === "menu-admin") return () => loadMenuLayout();
   if (nextView === "work-tasks") return () => loadWorkTasks();
@@ -968,6 +977,34 @@ if (role === "admin") {
   });
 
   $("#refresh-audit")?.addEventListener("click", () => loadAudit({ force: true }));
+  $("#mobile-refresh")?.addEventListener("click", () => loadMobileGateway({ force: true }));
+  $("#mobile-create-pairing-code")?.addEventListener("click", createMobilePairingCode);
+  document.querySelectorAll("[data-mobile-tab]").forEach((button) => button.addEventListener("click", () => activateMobileGatewayTab(button.dataset.mobileTab)));
+  ["#mobile-sms-device-filter", "#mobile-sms-sender-filter", "#mobile-sms-query-filter", "#mobile-sms-otp-filter"].forEach((selector) => {
+    $(selector)?.addEventListener("input", () => {
+      mobileGatewaySmsPage = 1;
+      loadMobileGatewaySms({ force: true });
+    });
+    $(selector)?.addEventListener("change", () => {
+      mobileGatewaySmsPage = 1;
+      loadMobileGatewaySms({ force: true });
+    });
+  });
+  $("#mobile-sms-prev")?.addEventListener("click", () => {
+    mobileGatewaySmsPage = Math.max(1, mobileGatewaySmsPage - 1);
+    loadMobileGatewaySms({ force: true });
+  });
+  $("#mobile-sms-next")?.addEventListener("click", () => {
+    if (!mobileGatewaySmsHasMore) return;
+    mobileGatewaySmsPage += 1;
+    loadMobileGatewaySms({ force: true });
+  });
+  $("#mobile-save-otp-config")?.addEventListener("click", saveMobileOtpConfiguration);
+  $("#mobile-test-otp-regex")?.addEventListener("click", testMobileOtpRegex);
+  $("#mobile-create-otp-request")?.addEventListener("click", createMobileOtpRequest);
+  $("#mobile-send-command")?.addEventListener("click", sendMobileCommand);
+  $("#mobile-policy-device")?.addEventListener("change", loadMobilePolicy);
+  $("#mobile-save-policy")?.addEventListener("click", saveMobilePolicy);
   $("#refresh-zalo-message-logs")?.addEventListener("click", loadZaloMessageLogs);
   $("#zalo-send-test-message")?.addEventListener("click", (event) => sendZaloTestMessage(event.currentTarget));
   $("#refresh-zalo-auto-messages")?.addEventListener("click", () => loadZaloAutoMessages({ force: true }));
@@ -1007,9 +1044,9 @@ if (role === "admin") {
     renderOneBssRunParameters();
   });
   $("#onebss-otp-input")?.addEventListener("input", async (event) => {
-    const value = event.currentTarget.value.replace(/\D/g, "").slice(0, 6);
+    const value = event.currentTarget.value.replace(/\D/g, "").slice(0, 8);
     event.currentTarget.value = value;
-    if (value.length === 6 && oneBssPendingSessionId && !oneBssRunInProgress) await runOneBssReport(value);
+    if (value.length >= 4 && oneBssPendingSessionId && !oneBssRunInProgress) await runOneBssReport(value);
   });
   $("#connection-search")?.addEventListener("input", renderConnectionsTable);
   $("#connection-picker")?.addEventListener("change", renderConnectionsTable);
@@ -5240,7 +5277,7 @@ async function runOneBssReport(otp = "") {
         session_id: oneBssPendingSessionId,
       }),
     });
-    if (response.status === "otp_required" || response.status === "otp_invalid") {
+    if (response.status === "otp_required" || response.status === "otp_invalid" || response.status === "manual_otp_required") {
       oneBssPendingSessionId = response.session_id || oneBssPendingSessionId;
       $("#onebss-otp-panel")?.classList.remove("hidden");
       $("#onebss-otp-input")?.focus();
@@ -5413,6 +5450,371 @@ async function clearOneBssRunHistory() {
   } catch (error) {
     showMessage(message, error.message, "error");
   }
+}
+
+function mobileFormatTime(value) {
+  if (!value) return "-";
+  try {
+    return new Date(value).toLocaleString("vi-VN");
+  } catch {
+    return "-";
+  }
+}
+
+function mobileDeviceLabel(deviceId) {
+  const device = mobileGatewayDevices.find((item) => item.device_id === deviceId);
+  return device ? `${device.name || device.device_id}` : (deviceId || "-");
+}
+
+function activateMobileGatewayTab(tabName) {
+  document.querySelectorAll("[data-mobile-tab]").forEach((button) => button.classList.toggle("active", button.dataset.mobileTab === tabName));
+  document.querySelectorAll("[data-mobile-panel]").forEach((panel) => panel.classList.toggle("active", panel.dataset.mobilePanel === tabName));
+}
+
+async function loadMobileGateway({ force = false } = {}) {
+  if (mobileGatewayLoaded && !force) {
+    renderMobileGatewayDeviceOptions();
+    return;
+  }
+  const message = $("#mobile-gateway-message");
+  try {
+    await Promise.all([
+      loadMobileGatewayOverview(),
+      loadMobileGatewayDevices(),
+      loadMobilePairingCodes(),
+      loadMobileGatewaySms({ force: true }),
+      loadMobileOtpData(),
+      loadMobileNotifications(),
+      loadMobileCommands(),
+      loadMobileLogs(),
+    ]);
+    mobileGatewayLoaded = true;
+    if (message) message.className = "result hidden mb-4";
+  } catch (error) {
+    showMessage(message, error.message, "error");
+  }
+}
+
+async function loadMobileGatewayOverview() {
+  const data = await api("/api/admin/mobile-gateway/overview");
+  mobileGatewayOverview = data.overview || {};
+  renderMobileGatewayOverview();
+}
+
+function renderMobileGatewayOverview() {
+  const cards = [
+    ["Online", mobileGatewayOverview.devices_online || 0],
+    ["Offline", mobileGatewayOverview.devices_offline || 0],
+    ["SMS hôm nay", mobileGatewayOverview.sms_today || 0],
+    ["OTP hôm nay", mobileGatewayOverview.otp_today || 0],
+    ["OTP thành công", mobileGatewayOverview.otp_success || 0],
+    ["OTP timeout", mobileGatewayOverview.otp_timeout || 0],
+    ["Lệnh chờ", mobileGatewayOverview.pending_commands || 0],
+    ["Cảnh báo", mobileGatewayOverview.device_alerts || 0],
+  ];
+  const target = $("#mobile-overview-cards");
+  if (target) {
+    target.innerHTML = cards.map(([label, value]) => `
+      <article class="status-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></article>
+    `).join("");
+  }
+  renderMobileRecentSms(mobileGatewayOverview.recent_sms || []);
+}
+
+function renderMobileRecentSms(items) {
+  const table = $("#mobile-recent-sms-table");
+  if (!table) return;
+  table.replaceChildren();
+  if (!items.length) {
+    table.innerHTML = emptyRow(4, "Chưa có SMS");
+    return;
+  }
+  items.forEach((sms) => {
+    const row = document.createElement("tr");
+    [mobileFormatTime(sms.received_at), mobileDeviceLabel(sms.device_id), sms.sender || "", sms.body || sms.body_masked || ""].forEach((value) => {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.appendChild(cell);
+    });
+    table.appendChild(row);
+  });
+}
+
+async function loadMobileGatewayDevices() {
+  const data = await api("/api/admin/mobile-gateway/devices");
+  mobileGatewayDevices = data.devices || [];
+  renderMobileGatewayDevices();
+  renderMobileGatewayDeviceOptions();
+}
+
+function renderMobileGatewayDeviceOptions() {
+  const options = mobileGatewayDevices.map((device) => `<option value="${escapeHtml(device.device_id)}">${escapeHtml(device.name || device.device_id)}</option>`).join("");
+  ["#mobile-command-device", "#mobile-policy-device"].forEach((selector) => {
+    const select = $(selector);
+    if (select) select.innerHTML = options || `<option value="">Chưa có thiết bị</option>`;
+  });
+  ["#mobile-sms-device-filter", "#mobile-otp-device"].forEach((selector) => {
+    const select = $(selector);
+    if (select) select.innerHTML = `<option value="">Tất cả</option>${options}`;
+  });
+}
+
+function renderMobileGatewayDevices() {
+  const table = $("#mobile-devices-table");
+  if (!table) return;
+  table.innerHTML = mobileGatewayDevices.length ? mobileGatewayDevices.map((device) => {
+    const heartbeat = device.heartbeat || {};
+    const active = device.is_active;
+    const online = device.online;
+    const statusClass = !active ? "inactive" : (online ? "viewer" : "pending");
+    const statusText = !active ? "Đã thu hồi" : (online ? "Online" : "Offline");
+    return `<tr>
+      <td class="table-action-cell"><div class="action-group">
+        <button class="table-action" data-mobile-policy="${escapeHtml(device.device_id)}" type="button">Policy</button>
+        <button class="table-action" data-mobile-command="${escapeHtml(device.device_id)}" type="button">Lệnh</button>
+        <button class="table-action danger" data-mobile-revoke="${escapeHtml(device.device_id)}" type="button">${active ? "Thu hồi" : "Kích hoạt"}</button>
+      </div></td>
+      <td><strong>${escapeHtml(device.name || device.device_id)}</strong><small class="cell-note">${escapeHtml(device.manufacturer || "")} ${escapeHtml(device.model || "")}</small></td>
+      <td><span class="status ${statusClass}">${statusText}</span></td>
+      <td>${escapeHtml(String(heartbeat.battery_percent ?? "-"))}%<small class="cell-note">${escapeHtml(heartbeat.charging ? "Đang sạc" : "")} ${escapeHtml(heartbeat.network_type || "")}</small></td>
+      <td>${escapeHtml(device.app_version || "-")}<small class="cell-note">Android ${escapeHtml(device.android_version || "-")}</small></td>
+      <td>SMS: ${heartbeat.sms_permission ? "OK" : "-"}<small class="cell-note">Notification: ${heartbeat.notification_access ? "OK" : "-"}</small></td>
+      <td>${escapeHtml(mobileFormatTime(device.last_seen_at))}<small class="cell-note">SMS chờ: ${escapeHtml(String(heartbeat.pending_sms || 0))}, TB chờ: ${escapeHtml(String(heartbeat.pending_notifications || 0))}</small></td>
+    </tr>`;
+  }).join("") : emptyRow(7, "Chưa có thiết bị");
+  document.querySelectorAll("[data-mobile-revoke]").forEach((button) => button.addEventListener("click", () => toggleMobileDeviceActive(button.dataset.mobileRevoke)));
+  document.querySelectorAll("[data-mobile-policy]").forEach((button) => button.addEventListener("click", () => {
+    activateMobileGatewayTab("settings");
+    const select = $("#mobile-policy-device");
+    if (select) select.value = button.dataset.mobilePolicy;
+    loadMobilePolicy();
+  }));
+  document.querySelectorAll("[data-mobile-command]").forEach((button) => button.addEventListener("click", () => {
+    activateMobileGatewayTab("commands");
+    const select = $("#mobile-command-device");
+    if (select) select.value = button.dataset.mobileCommand;
+  }));
+}
+
+async function toggleMobileDeviceActive(deviceId) {
+  const device = mobileGatewayDevices.find((item) => item.device_id === deviceId);
+  if (!device) return;
+  const action = device.is_active ? "revoke" : "reactivate";
+  await api(`/api/admin/mobile-gateway/devices/${encodeURIComponent(deviceId)}/${action}`, { method: "POST" });
+  await loadMobileGatewayDevices();
+}
+
+async function createMobilePairingCode() {
+  const result = await api("/api/admin/mobile-gateway/pairing-codes", { method: "POST" });
+  const box = $("#mobile-pairing-result");
+  if (box) {
+    box.className = "mobile-pairing-result";
+    box.textContent = `${result.pairing_code} - hết hạn: ${mobileFormatTime(result.expires_at)}`;
+  }
+  await loadMobilePairingCodes();
+}
+
+async function loadMobilePairingCodes() {
+  const data = await api("/api/admin/mobile-gateway/pairing-codes");
+  const table = $("#mobile-pairing-table");
+  if (!table) return;
+  table.innerHTML = (data.codes || []).length ? data.codes.map((code) => `<tr><td><span class="status ${code.status === "used" ? "viewer" : "pending"}">${escapeHtml(code.status)}</span></td><td>${escapeHtml(code.created_by || "")}</td><td>${escapeHtml(mobileFormatTime(code.expires_at))}</td><td>${escapeHtml(code.used_by_device_id || "-")}</td></tr>`).join("") : emptyRow(4, "Chưa có mã ghép nối");
+}
+
+async function loadMobileGatewaySms({ force = false } = {}) {
+  const deviceId = $("#mobile-sms-device-filter")?.value || "";
+  const sender = $("#mobile-sms-sender-filter")?.value || "";
+  const query = $("#mobile-sms-query-filter")?.value || "";
+  const otpOnly = $("#mobile-sms-otp-filter")?.checked ? "true" : "false";
+  if (force) setTableLoading("#mobile-sms-table", 7, "Đang tải SMS...");
+  const data = await api(`/api/admin/mobile-gateway/sms?page=${mobileGatewaySmsPage}&page_size=50&device_id=${encodeURIComponent(deviceId)}&sender=${encodeURIComponent(sender)}&query=${encodeURIComponent(query)}&otp_only=${otpOnly}`);
+  mobileGatewaySmsHasMore = Boolean(data.has_more);
+  renderMobileSmsTable(data.items || []);
+  const pageInfo = $("#mobile-sms-page-info");
+  if (pageInfo) pageInfo.textContent = `Trang ${mobileGatewaySmsPage}`;
+}
+
+function renderMobileSmsTable(items) {
+  const table = $("#mobile-sms-table");
+  if (!table) return;
+  table.replaceChildren();
+  if (!items.length) {
+    table.innerHTML = emptyRow(7, "Chưa có SMS");
+    return;
+  }
+  items.forEach((sms) => {
+    const row = document.createElement("tr");
+    const values = [
+      mobileFormatTime(sms.received_at),
+      mobileDeviceLabel(sms.device_id),
+      sms.sim_slot ?? "-",
+      sms.sender || "",
+      sms.body || sms.body_masked || "",
+      sms.is_otp_candidate ? "Có" : "-",
+      sms.used_for_otp ? "Đã dùng" : "-",
+    ];
+    values.forEach((value) => {
+      const cell = document.createElement("td");
+      cell.textContent = String(value ?? "");
+      row.appendChild(cell);
+    });
+    table.appendChild(row);
+  });
+}
+
+async function loadMobileOtpData() {
+  const [configs, requests] = await Promise.all([
+    api("/api/admin/mobile-gateway/otp/configurations"),
+    api("/api/admin/mobile-gateway/otp/requests?limit=100"),
+  ]);
+  mobileGatewayOtpConfigurations = configs.configurations || [];
+  mobileGatewayOtpRequests = requests.requests || [];
+  renderMobileOtpConfiguration();
+  renderMobileOtpRequests();
+}
+
+function renderMobileOtpConfiguration() {
+  const form = $("#mobile-otp-config-form");
+  const config = mobileGatewayOtpConfigurations.find((item) => item.service_code === "onebss") || mobileGatewayOtpConfigurations[0];
+  if (!form || !config) return;
+  Object.entries(config).forEach(([key, value]) => {
+    const field = form.elements.namedItem(key);
+    if (!field) return;
+    if (field.type === "checkbox") field.checked = Boolean(value);
+    else field.value = value ?? "";
+  });
+}
+
+async function saveMobileOtpConfiguration() {
+  const form = $("#mobile-otp-config-form");
+  const data = Object.fromEntries(new FormData(form));
+  const checkbox = (name) => Boolean(form.elements.namedItem(name)?.checked);
+  const payload = {
+    ...data,
+    id: data.id ? Number(data.id) : null,
+    enabled: checkbox("enabled"),
+    auto_fill_enabled: checkbox("auto_fill_enabled"),
+    manual_fallback_enabled: checkbox("manual_fallback_enabled"),
+    wait_timeout_seconds: Number(data.wait_timeout_seconds || 120),
+    validity_seconds: Number(data.validity_seconds || 180),
+    otp_length_min: 4,
+    otp_length_max: 8,
+    priority: Number(data.priority || 100),
+    sim_slot: data.sim_slot === "" ? null : Number(data.sim_slot),
+  };
+  await api("/api/admin/mobile-gateway/otp/configurations", { method: "POST", body: JSON.stringify(payload) });
+  showToast("Đã lưu cấu hình OTP.");
+  await loadMobileOtpData();
+}
+
+async function testMobileOtpRegex() {
+  const form = $("#mobile-otp-config-form");
+  const response = await api("/api/admin/mobile-gateway/otp/test-regex", {
+    method: "POST",
+    body: JSON.stringify({ otp_regex: form.elements.namedItem("otp_regex").value, sample_text: $("#mobile-otp-sample")?.value || "" }),
+  });
+  showToast(response.matched ? `Match: ${response.code_masked}` : "Không match OTP", response.matched ? "success" : "error");
+}
+
+async function createMobileOtpRequest() {
+  const form = $("#mobile-otp-config-form");
+  await api("/api/admin/mobile-gateway/otp/requests", {
+    method: "POST",
+    body: JSON.stringify({ service_code: form.elements.namedItem("service_code").value || "onebss", job_id: `manual-${Date.now()}` }),
+  });
+  await loadMobileOtpData();
+}
+
+function renderMobileOtpRequests() {
+  const table = $("#mobile-otp-requests-table");
+  if (!table) return;
+  table.innerHTML = mobileGatewayOtpRequests.length ? mobileGatewayOtpRequests.map((request) => `<tr>
+    <td><strong>${escapeHtml(request.request_id)}</strong><small class="cell-note">${escapeHtml(request.job_id || "")}</small></td>
+    <td>${escapeHtml(request.service_code || "")}</td>
+    <td><span class="status ${request.status === "consumed" ? "viewer" : request.status === "waiting" ? "pending" : "inactive"}">${escapeHtml(request.status || "")}</span></td>
+    <td>${escapeHtml(request.matched_source_type || "-")} ${escapeHtml(request.code_masked || "")}</td>
+    <td>${escapeHtml(mobileFormatTime(request.requested_at))}<small class="cell-note">Hết hạn ${escapeHtml(mobileFormatTime(request.expires_at))}</small></td>
+    <td class="table-action-cell">${request.status === "waiting" ? `<button class="table-action danger" data-mobile-cancel-otp="${escapeHtml(request.request_id)}" type="button">Hủy</button>` : ""}</td>
+  </tr>`).join("") : emptyRow(6, "Chưa có OTP request");
+  document.querySelectorAll("[data-mobile-cancel-otp]").forEach((button) => button.addEventListener("click", async () => {
+    await api(`/api/admin/mobile-gateway/otp/requests/${encodeURIComponent(button.dataset.mobileCancelOtp)}/cancel`, { method: "POST" });
+    await loadMobileOtpData();
+  }));
+}
+
+async function loadMobileNotifications() {
+  const data = await api("/api/admin/mobile-gateway/notifications?limit=100");
+  const table = $("#mobile-notifications-table");
+  if (!table) return;
+  table.innerHTML = (data.items || []).length ? data.items.map((item) => `<tr><td>${escapeHtml(mobileFormatTime(item.posted_at))}</td><td>${escapeHtml(mobileDeviceLabel(item.device_id))}</td><td>${escapeHtml(item.package_name || "")}</td><td>${escapeHtml(item.title || "")}</td><td>${escapeHtml(item.text || item.text_masked || "")}</td><td>${escapeHtml(item.used_for_otp ? "Đã dùng" : "-")}</td></tr>`).join("") : emptyRow(6, "Chưa có thông báo");
+}
+
+async function loadMobileCommands() {
+  const data = await api("/api/admin/mobile-gateway/commands?limit=100");
+  const table = $("#mobile-commands-table");
+  if (!table) return;
+  table.innerHTML = (data.commands || []).length ? data.commands.map((command) => `<tr><td>${escapeHtml(mobileFormatTime(command.created_at))}</td><td>${escapeHtml(mobileDeviceLabel(command.device_id))}</td><td>${escapeHtml(command.command_type || "")}</td><td><span class="status ${command.status === "completed" ? "viewer" : command.status === "failed" ? "inactive" : "pending"}">${escapeHtml(command.status || "")}</span></td><td>${escapeHtml(mobileFormatTime(command.expires_at))}</td><td>${escapeHtml(command.sanitized_error || "")}</td></tr>`).join("") : emptyRow(6, "Chưa có lệnh");
+}
+
+async function sendMobileCommand() {
+  const deviceId = $("#mobile-command-device")?.value || "";
+  const commandType = $("#mobile-command-type")?.value || "";
+  if (!deviceId || !commandType) return showToast("Chọn thiết bị và lệnh.", "error");
+  await api("/api/admin/mobile-gateway/commands", { method: "POST", body: JSON.stringify({ device_id: deviceId, command_type: commandType, payload: {} }) });
+  showToast("Đã gửi lệnh.");
+  await loadMobileCommands();
+}
+
+async function loadMobileLogs() {
+  const [diagnostics, events] = await Promise.all([
+    api("/api/admin/mobile-gateway/diagnostics?limit=100"),
+    api("/api/admin/mobile-gateway/otp/events?limit=100"),
+  ]);
+  const diagTable = $("#mobile-diagnostics-table");
+  if (diagTable) {
+    diagTable.innerHTML = (diagnostics.items || []).length ? diagnostics.items.map((item) => `<tr><td>${escapeHtml(mobileFormatTime(item.created_at))}</td><td>${escapeHtml(mobileDeviceLabel(item.device_id))}</td><td>${escapeHtml(item.app_version || "")}</td><td>${escapeHtml(item.sanitized_error || "")}</td><td class="compact-code-cell">${renderCompactCode(JSON.stringify(item.payload || {}))}</td></tr>`).join("") : emptyRow(5, "Chưa có diagnostics");
+  }
+  const eventTable = $("#mobile-otp-events-table");
+  if (eventTable) {
+    eventTable.innerHTML = (events.events || []).length ? events.events.map((event) => `<tr><td>${escapeHtml(mobileFormatTime(event.created_at))}</td><td>${escapeHtml(event.request_id || "")}</td><td>${escapeHtml(event.event_type || "")}</td><td>${escapeHtml(event.source_type || "")} ${escapeHtml(event.source_id || "")}</td></tr>`).join("") : emptyRow(4, "Chưa có sự kiện OTP");
+  }
+}
+
+async function loadMobilePolicy() {
+  const deviceId = $("#mobile-policy-device")?.value || "";
+  if (!deviceId) return;
+  const data = await api(`/api/admin/mobile-gateway/devices/${encodeURIComponent(deviceId)}/policy`);
+  const form = $("#mobile-policy-form");
+  const policy = data.policy || {};
+  Object.entries(policy).forEach(([key, value]) => {
+    const field = form.elements.namedItem(key);
+    if (!field) return;
+    if (field.type === "checkbox") field.checked = Boolean(value);
+    else if (key === "notification_allowlist") field.value = (value || []).join("\n");
+    else field.value = value ?? "";
+  });
+}
+
+async function saveMobilePolicy() {
+  const form = $("#mobile-policy-form");
+  const deviceId = form.elements.namedItem("device_id")?.value || "";
+  if (!deviceId) return showToast("Chọn thiết bị.", "error");
+  const checkbox = (name) => Boolean(form.elements.namedItem(name)?.checked);
+  const payload = {
+    sms_enabled: checkbox("sms_enabled"),
+    notifications_enabled: checkbox("notifications_enabled"),
+    clipboard_enabled: checkbox("clipboard_enabled"),
+    diagnostics_enabled: checkbox("diagnostics_enabled"),
+    force_update: checkbox("force_update"),
+    notification_allowlist: (form.elements.namedItem("notification_allowlist").value || "").split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean),
+    heartbeat_interval_minutes: Number(form.elements.namedItem("heartbeat_interval_minutes").value || 15),
+    sync_interval_minutes: Number(form.elements.namedItem("sync_interval_minutes").value || 15),
+    batch_size: Number(form.elements.namedItem("batch_size").value || 50),
+    local_retention_days: Number(form.elements.namedItem("local_retention_days").value || 14),
+    minimum_app_version: form.elements.namedItem("minimum_app_version").value || "1.1.0",
+  };
+  await api(`/api/admin/mobile-gateway/devices/${encodeURIComponent(deviceId)}/policy`, { method: "PUT", body: JSON.stringify(payload) });
+  showToast("Đã lưu policy.");
 }
 
 $("#telegram-test-message")?.addEventListener("click", async () => {

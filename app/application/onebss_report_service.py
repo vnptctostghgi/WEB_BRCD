@@ -30,11 +30,15 @@ from app.application.onebss_data_mining_service import (
     with_resolved_schedule_parameters,
 )
 from app.application.zalo_auto_message_service import install_playwright_chromium, playwright_needs_browser_install
+from app.data_access.repository_factory import build_repository
+from app.modules.mobile_gateway.exceptions import OtpServiceError
+from app.modules.mobile_gateway.otp_service import OtpService
+from app.modules.mobile_gateway.repository import MobileGatewayRepository
 from app.settings import Settings
 
 
 logger = logging.getLogger(__name__)
-OTP_PATTERN = re.compile(r"^\d{6}$")
+OTP_PATTERN = re.compile(r"^\d{4,8}$")
 PENDING_SESSION_TTL_SECONDS = 10 * 60
 ONEBSS_API_BASE_URL = "https://api-onebss.vnpt.vn"
 ONEBSS_API_TOKEN_ID = "97388db0-6ce9-11ea-bc55-0242ac130003"
@@ -160,6 +164,82 @@ def run_onebss_report_request(
     return start_onebss_api_session(settings, report, resolved_parameters, created_by=created_by)
 
 
+def onebss_manual_otp_response(
+    session_id: str,
+    parameters: dict[str, Any],
+    message: str,
+    *,
+    status: str = "otp_required",
+    report_url: str = "",
+    otp_request_id: str = "",
+) -> dict[str, Any]:
+    response: dict[str, Any] = {
+        "ok": False,
+        "status": status,
+        "message": message,
+        "session_id": session_id,
+        "parameters": parameters,
+    }
+    if report_url:
+        response["report_url"] = report_url
+    if otp_request_id:
+        response["otp_request_id"] = otp_request_id
+    return response
+
+
+def resolve_onebss_otp_with_mobile_gateway(
+    settings: Settings,
+    session_id: str,
+    parameters: dict[str, Any],
+    *,
+    report_url: str = "",
+    fallback_message: str = "OneBSS da gui OTP ve dien thoai. Hay nhap OTP neu Mobile Gateway chua tu lay duoc.",
+) -> dict[str, Any]:
+    if not bool(getattr(settings, "mobile_gateway_enabled", True)):
+        return onebss_manual_otp_response(session_id, parameters, fallback_message, report_url=report_url)
+
+    request_id = ""
+    manual_fallback_enabled = True
+    try:
+        repository = MobileGatewayRepository(build_repository(settings), settings)
+        repository.ensure_defaults()
+        config = repository.get_otp_configuration("onebss") or {}
+        manual_fallback_enabled = bool(config.get("manual_fallback_enabled", True))
+        if config and not bool(config.get("auto_fill_enabled", True)):
+            return onebss_manual_otp_response(session_id, parameters, fallback_message, report_url=report_url)
+        service = OtpService(repository)
+        otp_request = service.create_request("onebss", job_id=session_id)
+        request_id = str(otp_request.get("request_id") or "")
+        timeout_seconds = int((config or {}).get("wait_timeout_seconds") or otp_request.get("wait_timeout_seconds") or 120)
+        code = service.wait_for_code(request_id, timeout_seconds)
+    except OtpServiceError as error:
+        logger.info("OneBSS Mobile Gateway OTP is not available: %s", str(error)[:160])
+        return onebss_manual_otp_response(session_id, parameters, fallback_message, report_url=report_url)
+    except Exception:
+        logger.exception("Cannot wait OneBSS OTP from Mobile Gateway")
+        return onebss_manual_otp_response(session_id, parameters, fallback_message, report_url=report_url)
+
+    if code:
+        if session_id.startswith("api-"):
+            return continue_onebss_api_session(settings, session_id, code, parameters)
+        return continue_onebss_report_session(settings, session_id, code, parameters)
+
+    status_value = "manual_otp_required" if manual_fallback_enabled else "otp_timeout"
+    message = (
+        "Chua nhan duoc OTP tu Mobile Gateway trong thoi gian cho. Hay nhap OTP thu cong."
+        if manual_fallback_enabled
+        else "Chua nhan duoc OTP tu Mobile Gateway trong thoi gian cho."
+    )
+    return onebss_manual_otp_response(
+        session_id,
+        parameters,
+        message,
+        status=status_value,
+        report_url=report_url,
+        otp_request_id=request_id,
+    )
+
+
 def start_onebss_api_session(
     settings: Settings,
     report: dict[str, Any],
@@ -205,14 +285,13 @@ def start_onebss_api_session(
     secret_code = str(((data.get("data") if isinstance(data, dict) else {}) or {}).get("secretCode") or "").strip()
     if response.status_code == 200 and secret_code:
         pending = keep_onebss_api_session(secret_code, report, parameters, username, mobile_id, device_id, created_by)
-        return {
-            "ok": False,
-            "status": "otp_required",
-            "message": "OneBSS da gui OTP ve dien thoai. Hay nhap du 6 so OTP.",
-            "session_id": pending.session_id,
-            "parameters": parameters,
-            "report_url": report_url,
-        }
+        return resolve_onebss_otp_with_mobile_gateway(
+            settings,
+            pending.session_id,
+            parameters,
+            report_url=report_url,
+            fallback_message="OneBSS da gui OTP ve dien thoai. Hay nhap OTP.",
+        )
     return {
         "ok": False,
         "status": "login_failed",
@@ -232,7 +311,7 @@ def continue_onebss_api_session(
     if not pending:
         return {"ok": False, "status": "otp_session_expired", "message": "Phien OTP OneBSS da het han, hay bam lay bao cao lai."}
     if not OTP_PATTERN.fullmatch(str(otp or "").strip()):
-        return {"ok": False, "status": "otp_required", "message": "OTP phai du 6 chu so.", "session_id": session_id, "parameters": pending.parameters}
+        return {"ok": False, "status": "otp_required", "message": "OTP phai tu 4 den 8 chu so.", "session_id": session_id, "parameters": pending.parameters}
 
     effective_parameters = parameters if parameters else pending.parameters
     try:
@@ -353,18 +432,12 @@ def start_onebss_report_session(
             wait_for_onebss_auth_transition(page, helper, timeout_ms=30000)
             if page_contains(page, OTP_TEXT_NEEDLES):
                 pending = keep_onebss_session(playwright, browser, context, page, report, parameters, created_by)
-                return {
-                    "ok": False,
-                    "status": "otp_required",
-                    "message": "OneBSS yeu cau OTP.",
-                    "session_id": pending.session_id,
-                    "parameters": parameters,
-                }
+                return resolve_onebss_otp_with_mobile_gateway(settings, pending.session_id, parameters, fallback_message="OneBSS yeu cau OTP. Hay nhap OTP neu Mobile Gateway chua tu lay duoc.")
             device_result = handle_onebss_device_registration(page, helper, parameters)
             if device_result:
                 close_browser_stack(browser, context, playwright)
                 return device_result
-            otp_request_result = handle_onebss_otp_request(page, helper, playwright, browser, context, report, parameters, created_by)
+            otp_request_result = handle_onebss_otp_request(settings, page, helper, playwright, browser, context, report, parameters, created_by)
             if otp_request_result:
                 return otp_request_result
             if helper._is_login_page(page):
@@ -389,7 +462,7 @@ def continue_onebss_report_session(
     if not pending:
         return {"ok": False, "status": "otp_session_expired", "message": "Phien OTP OneBSS da het han, hay bam lay bao cao lai."}
     if not OTP_PATTERN.fullmatch(str(otp or "").strip()):
-        return {"ok": False, "status": "otp_required", "message": "OTP phai du 6 chu so.", "session_id": session_id, "parameters": pending.parameters}
+        return {"ok": False, "status": "otp_required", "message": "OTP phai tu 4 den 8 chu so.", "session_id": session_id, "parameters": pending.parameters}
 
     page = pending.page
     context = pending.context
@@ -1662,6 +1735,7 @@ def click_onebss_button(page: Any, helper: OneBssReportDownloader, texts: list[s
 
 
 def handle_onebss_otp_request(
+    settings: Settings,
     page: Any,
     helper: OneBssReportDownloader,
     playwright: Any,
@@ -1692,13 +1766,12 @@ def handle_onebss_otp_request(
         return None
 
     pending = keep_onebss_session(playwright, browser, context, page, report, parameters, created_by)
-    return {
-        "ok": False,
-        "status": "otp_required",
-        "message": "OneBSS da gui yeu cau OTP. Hay nhap ma OTP khi dien thoai nhan duoc.",
-        "session_id": pending.session_id,
-        "parameters": parameters,
-    }
+    return resolve_onebss_otp_with_mobile_gateway(
+        settings,
+        pending.session_id,
+        parameters,
+        fallback_message="OneBSS da gui yeu cau OTP. Hay nhap ma OTP khi dien thoai nhan duoc.",
+    )
 
 
 def handle_onebss_device_registration(page: Any, helper: OneBssReportDownloader, parameters: dict[str, Any]) -> dict[str, Any] | None:

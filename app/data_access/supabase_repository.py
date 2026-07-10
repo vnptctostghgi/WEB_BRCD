@@ -18,11 +18,12 @@ from app.data_access.app_repository import (
     hash_password,
     normalize_feature_code,
 )
+from app.modules.mobile_gateway.migrations import MOBILE_GATEWAY_FEATURE_ROWS
 
 
 FEATURE_ROWS = [
     {"code": "dashboard", "name": "Tổng quan", "parent_code": None, "sort_order": 10},
-    {"code": "quantriweb", "name": "Quản trị web", "parent_code": None, "sort_order": 20},
+    {"code": "quantriweb", "name": "Quản trị hệ thống", "parent_code": None, "sort_order": 20},
     {"code": "quantringuoidung", "name": "Quản trị người dùng", "parent_code": "quantriweb", "sort_order": 21},
     {"code": "quantriketnoi", "name": "Quản trị kết nối", "parent_code": "quantriweb", "sort_order": 22},
     {"code": "phanquyennguoidung", "name": "Phân quyền người dùng", "parent_code": "quantriweb", "sort_order": 23},
@@ -44,6 +45,10 @@ FEATURE_ROWS = [
 
 FEATURE_ROWS.append({"code": "quantrisql", "name": "Quản trị SQL", "parent_code": "quantriketnoi", "sort_order": 23})
 FEATURE_ROWS.append({"code": "quantridulieuonebss", "name": "Quản trị dữ liệu OneBSS", "parent_code": "quantriketnoi", "sort_order": 24})
+FEATURE_ROWS.extend(
+    {"code": code, "name": name, "parent_code": parent_code, "sort_order": sort_order}
+    for code, name, parent_code, sort_order in MOBILE_GATEWAY_FEATURE_ROWS
+)
 OBSOLETE_FEATURE_CODES = (
     *LEGACY_REMOVED_FEATURE_CODES,
     *FEATURE_CODE_ALIASES.keys(),
@@ -172,6 +177,7 @@ class SupabaseRepository:
         try:
             self._patch("features", {"code": "eq.truyvansql"}, {"name": "Truy vấn SQL"})
             self._patch("features", {"code": "eq.baocaomoi"}, {"name": "Báo cáo mới"})
+            self._patch("features", {"code": "eq.quantriweb"}, {"name": "Quản trị hệ thống"})
             report_children = self._get("features", {"parent_code": "eq.truyvansql", "select": "code"})
             for child in report_children:
                 payload = {"parent_code": "baocaomoi"}

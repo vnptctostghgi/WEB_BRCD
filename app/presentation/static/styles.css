@@ -3421,6 +3421,92 @@ legend {
   background: rgba(127, 29, 29, .32);
 }
 
+.mobile-gateway-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin: .75rem 0 1rem;
+  border-bottom: 1px solid rgba(125, 211, 252, .22);
+  padding-bottom: .65rem;
+}
+
+.mobile-gateway-tab {
+  min-height: 38px;
+  border: 1px solid rgba(125, 211, 252, .28);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, .44);
+  color: #bae6fd;
+  padding: .55rem .8rem;
+  font-size: .84rem;
+  font-weight: 850;
+}
+
+.mobile-gateway-tab:hover,
+.mobile-gateway-tab.active {
+  border-color: rgba(34, 197, 94, .55);
+  background: rgba(22, 101, 52, .22);
+  color: #f0fdf4;
+}
+
+.mobile-gateway-panel {
+  display: none;
+}
+
+.mobile-gateway-panel.active {
+  display: block;
+}
+
+.status-card {
+  display: grid;
+  gap: .45rem;
+  min-height: 92px;
+  border: 1px solid rgba(125, 211, 252, .2);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, .28);
+  padding: .95rem;
+}
+
+.status-card span {
+  color: #bae6fd;
+  font-size: .76rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.status-card strong {
+  color: #fff;
+  font-size: 1.65rem;
+  line-height: 1;
+}
+
+.mobile-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: .85rem;
+}
+
+.mobile-form-grid label,
+.mobile-gateway-panel label {
+  color: #dbeafe;
+  font-size: .78rem;
+  font-weight: 850;
+}
+
+.mobile-pairing-result {
+  border: 1px solid rgba(34, 197, 94, .42);
+  border-radius: 8px;
+  background: rgba(22, 101, 52, .2);
+  color: #dcfce7;
+  font-family: "Courier New", monospace;
+  font-size: .95rem;
+  font-weight: 900;
+  padding: .8rem;
+}
+
+.mobile-gateway-panel table td {
+  vertical-align: top;
+}
+
 .onebss-otp-panel label {
   display: grid;
   gap: .45rem;

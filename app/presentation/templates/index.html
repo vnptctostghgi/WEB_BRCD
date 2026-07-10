@@ -25,7 +25,7 @@
       };
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=75" />
+    <link rel="stylesheet" href="/static/styles.css?v=77" />
   </head>
   <body class="app-dark min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'themvasuataikhoan' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'xemmatkhaudaluu' in user.permissions }}">
     <svg class="icon-sprite" aria-hidden="true">
@@ -69,7 +69,7 @@
             {% endif %}
             {% if user.role == "admin" or "xemdanhsachtaikhoan" in user.permissions %}
             <details class="nav-group">
-              <summary data-feature-code="quantriweb"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-shield"></use></svg><strong>Quản trị web</strong></summary>
+              <summary data-feature-code="quantriweb"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-shield"></use></svg><strong>Quản trị hệ thống</strong></summary>
               {% if user.role == "admin" or "xemdanhsachtaikhoan" in user.permissions %}
               <button class="nav-item child" data-feature-code="taikhoanweb" data-view="vault" data-title="Tài khoản web" data-keywords="tai khoan web mat khau"><svg class="nav-svg"><use href="#icon-vault"></use></svg><span>Tài khoản web</span></button>
               {% endif %}
@@ -78,6 +78,7 @@
               <button class="nav-item child" data-feature-code="quantrimenu" data-view="menu-admin" data-title="Quản trị menu" data-keywords="quan tri menu sap xep di chuyen module"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản trị menu</span></button>
               <button class="nav-item child" data-feature-code="quantridanhmuc" data-view="catalogs" data-title="Quản trị danh mục" data-keywords="quan tri danh muc phan vung vai tro bien"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản trị danh mục</span></button>
               <button class="nav-item child" data-feature-code="quantriketnoi" data-view="system" data-title="Quản trị kết nối" data-keywords="quan tri ket noi api db ftp drive telegram"><svg class="nav-svg"><use href="#icon-plug"></use></svg><span>Quản trị kết nối</span></button>
+              <button class="nav-item child" data-feature-code="mobilegateway" data-view="mobile-gateway" data-title="Mobile Gateway" data-keywords="mobile gateway sms otp android onebss"><svg class="nav-svg"><use href="#icon-database"></use></svg><span>Mobile Gateway</span></button>
               <details class="nav-group nav-subgroup">
                 <summary data-feature-code="phanquyen"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-shield"></use></svg><strong>Phân quyền</strong></summary>
                 <button class="nav-item child subchild" data-feature-code="phanquyennguoidung" data-view="permissions" data-title="Phân quyền người dùng" data-keywords="phan quyen nguoi dung chuc nang"><svg class="nav-svg"><use href="#icon-shield"></use></svg><span>Người dùng</span></button>
@@ -366,7 +367,7 @@
               </div>
             </form>
             <div id="onebss-otp-panel" class="onebss-otp-panel hidden">
-              <label>Nhập OTP OneBSS<input class="form-control otp-alert-input" id="onebss-otp-input" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="Nhập 6 số OTP" /></label>
+              <label>Nhập OTP OneBSS<input class="form-control otp-alert-input" id="onebss-otp-input" inputmode="numeric" maxlength="8" autocomplete="one-time-code" placeholder="Nhập OTP" /></label>
             </div>
             <div id="onebss-run-message" class="result hidden mt-3"></div>
             <div class="onebss-history-header">
@@ -473,6 +474,133 @@
           <section class="data-card mt-4"><h2>Kiểm tra vận hành</h2><div class="mt-4 grid gap-3 md:grid-cols-2"><p class="check-item">Mật khẩu được băm, không lưu dạng rõ.</p><p class="check-item">Cookie phiên không đọc được bằng JavaScript.</p><p class="check-item">DB cơ quan chỉ được truy cập qua API nội bộ.</p><p class="check-item">Route quản trị yêu cầu vai trò admin.</p></div></section>
         </section>
 
+        <section class="app-view" id="view-mobile-gateway">
+          <div class="page-header">
+            <div><p class="eyebrow">Mobile Gateway</p><h1>VNPT CTO Mobile Gateway</h1></div>
+            <div class="action-group"><button class="btn-primary" id="mobile-create-pairing-code" type="button">Tạo mã ghép nối</button><button class="btn-secondary" id="mobile-refresh" type="button">Làm mới</button></div>
+          </div>
+          <div id="mobile-gateway-message" class="result hidden mb-4"></div>
+          <div class="mobile-gateway-tabs" role="tablist" aria-label="Mobile Gateway">
+            <button class="mobile-gateway-tab active" data-mobile-tab="overview" type="button">Tổng quan</button>
+            <button class="mobile-gateway-tab" data-mobile-tab="devices" type="button">Thiết bị</button>
+            <button class="mobile-gateway-tab" data-mobile-tab="sms" type="button">SMS</button>
+            <button class="mobile-gateway-tab" data-mobile-tab="otp" type="button">OTP</button>
+            <button class="mobile-gateway-tab" data-mobile-tab="notifications" type="button">Thông báo</button>
+            <button class="mobile-gateway-tab" data-mobile-tab="commands" type="button">Lệnh</button>
+            <button class="mobile-gateway-tab" data-mobile-tab="logs" type="button">Nhật ký</button>
+            <button class="mobile-gateway-tab" data-mobile-tab="settings" type="button">Cấu hình</button>
+          </div>
+
+          <section class="mobile-gateway-panel active" data-mobile-panel="overview">
+            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" id="mobile-overview-cards"></div>
+            <section class="data-card mt-4">
+              <div class="section-heading"><div><p class="eyebrow">SMS</p><h2>SMS gần nhất</h2></div></div>
+              <div class="table-scroll"><table><thead><tr><th>Thời gian</th><th>Thiết bị</th><th>Người gửi</th><th>Nội dung</th></tr></thead><tbody id="mobile-recent-sms-table"></tbody></table></div>
+            </section>
+          </section>
+
+          <section class="mobile-gateway-panel" data-mobile-panel="devices">
+            <section class="data-card">
+              <div class="section-heading"><div><p class="eyebrow">Pairing</p><h2>Mã ghép nối</h2></div></div>
+              <div id="mobile-pairing-result" class="mobile-pairing-result hidden"></div>
+              <div class="table-scroll mt-4"><table><thead><tr><th>Trạng thái</th><th>Tạo bởi</th><th>Hết hạn</th><th>Thiết bị sử dụng</th></tr></thead><tbody id="mobile-pairing-table"></tbody></table></div>
+            </section>
+            <section class="data-card mt-4">
+              <div class="section-heading"><div><p class="eyebrow">Thiết bị</p><h2>Danh sách thiết bị</h2></div></div>
+              <div class="table-scroll"><table><thead><tr><th class="table-action-column">Thao tác</th><th>Thiết bị</th><th>Trạng thái</th><th>Pin/Mạng</th><th>Phiên bản</th><th>Quyền</th><th>Heartbeat</th></tr></thead><tbody id="mobile-devices-table"></tbody></table></div>
+            </section>
+          </section>
+
+          <section class="mobile-gateway-panel" data-mobile-panel="sms">
+            <section class="data-card">
+              <div class="admin-inline-toolbar">
+                <label>Thiết bị<select class="form-control" id="mobile-sms-device-filter"><option value="">Tất cả</option></select></label>
+                <label>Người gửi<input class="form-control" id="mobile-sms-sender-filter" /></label>
+                <label>Nội dung<input class="form-control" id="mobile-sms-query-filter" /></label>
+                <label class="checkbox-label"><input type="checkbox" id="mobile-sms-otp-filter" /> Chỉ OTP</label>
+              </div>
+              <div class="table-scroll"><table><thead><tr><th>Thời gian</th><th>Thiết bị</th><th>SIM</th><th>Người gửi</th><th>Nội dung</th><th>OTP</th><th>Đã dùng</th></tr></thead><tbody id="mobile-sms-table"></tbody></table></div>
+              <div class="mt-4 flex items-center justify-between gap-3"><span id="mobile-sms-page-info">Trang 1</span><div class="action-group"><button class="btn-secondary" id="mobile-sms-prev" type="button">Trang trước</button><button class="btn-secondary" id="mobile-sms-next" type="button">Trang sau</button></div></div>
+            </section>
+          </section>
+
+          <section class="mobile-gateway-panel" data-mobile-panel="otp">
+            <section class="grid gap-4 xl:grid-cols-[1fr_1fr]">
+              <div class="data-card">
+                <div class="section-heading"><div><p class="eyebrow">OTP</p><h2>Cấu hình OTP</h2></div><button class="btn-primary" id="mobile-save-otp-config" type="button">Lưu cấu hình</button></div>
+                <form id="mobile-otp-config-form" class="mobile-form-grid">
+                  <input type="hidden" name="id" />
+                  <label>Tên hệ thống<input class="form-control" name="service_name" value="OneBSS" required /></label>
+                  <label>Service code<input class="form-control" name="service_code" value="onebss" required /></label>
+                  <label>Nguồn<select class="form-control" name="source_type"><option value="sms">SMS</option><option value="notification">Notification</option><option value="both">Cả hai</option></select></label>
+                  <label>Người gửi<input class="form-control" name="sender_pattern" value="VNPT" /></label>
+                  <label>So khớp<select class="form-control" name="sender_match_type"><option value="contains">contains</option><option value="equals">equals</option><option value="regex">regex</option></select></label>
+                  <label>Regex<input class="form-control" name="otp_regex" value="(?&lt;!\d)(\d{4,8})(?!\d)" /></label>
+                  <label>Keyword<input class="form-control" name="otp_keyword" /></label>
+                  <label>Timeout<input class="form-control" name="wait_timeout_seconds" type="number" value="120" /></label>
+                  <label>Hiệu lực<input class="form-control" name="validity_seconds" type="number" value="180" /></label>
+                  <label>Thiết bị<select class="form-control" name="device_id" id="mobile-otp-device"><option value="">Tất cả</option></select></label>
+                  <label>SIM<input class="form-control" name="sim_slot" type="number" /></label>
+                  <label>Package<input class="form-control" name="package_pattern" /></label>
+                  <label>Title<input class="form-control" name="title_pattern" /></label>
+                  <label>Ưu tiên<input class="form-control" name="priority" type="number" value="10" /></label>
+                  <label class="checkbox-label"><input type="checkbox" name="enabled" checked /> Bật</label>
+                  <label class="checkbox-label"><input type="checkbox" name="auto_fill_enabled" checked /> Tự động điền</label>
+                  <label class="checkbox-label"><input type="checkbox" name="manual_fallback_enabled" checked /> Nhập tay dự phòng</label>
+                </form>
+                <div class="mt-4">
+                  <label>SMS mẫu<textarea class="form-control" id="mobile-otp-sample" rows="3"></textarea></label>
+                  <button class="btn-secondary mt-2" id="mobile-test-otp-regex" type="button">Kiểm tra regex</button>
+                </div>
+              </div>
+              <div class="data-card">
+                <div class="section-heading"><div><p class="eyebrow">Yêu cầu OTP</p><h2>Trạng thái request</h2></div><button class="btn-secondary" id="mobile-create-otp-request" type="button">Tạo request thử</button></div>
+                <div class="table-scroll"><table><thead><tr><th>Request</th><th>Service</th><th>Trạng thái</th><th>Nguồn</th><th>Thời gian</th><th class="table-action-column">Thao tác</th></tr></thead><tbody id="mobile-otp-requests-table"></tbody></table></div>
+              </div>
+            </section>
+          </section>
+
+          <section class="mobile-gateway-panel" data-mobile-panel="notifications">
+            <section class="data-card"><div class="table-scroll"><table><thead><tr><th>Thời gian</th><th>Thiết bị</th><th>Package</th><th>Tiêu đề</th><th>Nội dung</th><th>OTP</th></tr></thead><tbody id="mobile-notifications-table"></tbody></table></div></section>
+          </section>
+
+          <section class="mobile-gateway-panel" data-mobile-panel="commands">
+            <section class="data-card">
+              <div class="admin-inline-toolbar">
+                <label>Thiết bị<select class="form-control" id="mobile-command-device"></select></label>
+                <label>Lệnh<select class="form-control" id="mobile-command-type"><option value="sync_sms">sync_sms</option><option value="sync_notifications">sync_notifications</option><option value="refresh_status">refresh_status</option><option value="refresh_policy">refresh_policy</option><option value="upload_diagnostics">upload_diagnostics</option><option value="clear_synced_local_queue">clear_synced_local_queue</option></select></label>
+                <button class="btn-primary" id="mobile-send-command" type="button">Gửi lệnh</button>
+              </div>
+              <div class="table-scroll"><table><thead><tr><th>Thời gian</th><th>Thiết bị</th><th>Lệnh</th><th>Trạng thái</th><th>Hết hạn</th><th>Lỗi</th></tr></thead><tbody id="mobile-commands-table"></tbody></table></div>
+            </section>
+          </section>
+
+          <section class="mobile-gateway-panel" data-mobile-panel="logs">
+            <section class="data-card"><div class="section-heading"><div><p class="eyebrow">Diagnostics</p><h2>Chẩn đoán thiết bị</h2></div></div><div class="table-scroll"><table><thead><tr><th>Thời gian</th><th>Thiết bị</th><th>Phiên bản</th><th>Lỗi</th><th>Payload</th></tr></thead><tbody id="mobile-diagnostics-table"></tbody></table></div></section>
+            <section class="data-card mt-4"><div class="section-heading"><div><p class="eyebrow">OTP</p><h2>Sự kiện OTP</h2></div></div><div class="table-scroll"><table><thead><tr><th>Thời gian</th><th>Request</th><th>Sự kiện</th><th>Nguồn</th></tr></thead><tbody id="mobile-otp-events-table"></tbody></table></div></section>
+          </section>
+
+          <section class="mobile-gateway-panel" data-mobile-panel="settings">
+            <section class="data-card">
+              <div class="section-heading"><div><p class="eyebrow">Policy</p><h2>Cấu hình thiết bị</h2></div><button class="btn-primary" id="mobile-save-policy" type="button">Lưu policy</button></div>
+              <form id="mobile-policy-form" class="mobile-form-grid">
+                <label>Thiết bị<select class="form-control" id="mobile-policy-device" name="device_id"></select></label>
+                <label>Heartbeat<input class="form-control" name="heartbeat_interval_minutes" type="number" value="15" /></label>
+                <label>Đồng bộ<input class="form-control" name="sync_interval_minutes" type="number" value="15" /></label>
+                <label>Batch size<input class="form-control" name="batch_size" type="number" value="50" /></label>
+                <label>Retention<input class="form-control" name="local_retention_days" type="number" value="14" /></label>
+                <label>Minimum app<input class="form-control" name="minimum_app_version" value="1.1.0" /></label>
+                <label>Allowlist<textarea class="form-control" name="notification_allowlist" rows="3" placeholder="com.vnp.onebss&#10;com.example.app"></textarea></label>
+                <label class="checkbox-label"><input type="checkbox" name="sms_enabled" checked /> SMS</label>
+                <label class="checkbox-label"><input type="checkbox" name="notifications_enabled" /> Notification</label>
+                <label class="checkbox-label"><input type="checkbox" name="clipboard_enabled" /> Clipboard</label>
+                <label class="checkbox-label"><input type="checkbox" name="diagnostics_enabled" checked /> Diagnostics</label>
+                <label class="checkbox-label"><input type="checkbox" name="force_update" /> Force update</label>
+              </form>
+            </section>
+          </section>
+        </section>
+
         <section class="app-view" id="view-audit">
           <div class="page-header"><div><p class="eyebrow">Kiểm soát truy cập</p><h1>Nhật ký hoạt động</h1><p class="subtitle">100 sự kiện gần nhất của hệ thống.</p></div><button class="btn-secondary" id="refresh-audit">Làm mới</button></div>
           <section class="data-card"><div class="table-scroll"><table><thead><tr><th>Thời gian</th><th>Người thực hiện</th><th>Hành động</th><th>Chi tiết</th></tr></thead><tbody id="audit-table"></tbody></table></div></section>
@@ -516,6 +644,6 @@
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script src="/static/app.js?v=106"></script>
+    <script src="/static/app.js?v=108"></script>
   </body>
 </html>

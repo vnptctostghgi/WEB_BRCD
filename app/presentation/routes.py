@@ -2015,8 +2015,15 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
             "message": f"Loi khi khoi chay OneBSS: {error}",
             "parameters": run_parameters,
         }
-    if result.get("status") in {"otp_required", "otp_invalid"} and result.get("session_id"):
-        return {"ok": False, "status": result.get("status"), "message": result.get("message"), "session_id": result.get("session_id"), "parameters": result.get("parameters") or run_parameters}
+    if result.get("status") in {"otp_required", "otp_invalid", "manual_otp_required"} and result.get("session_id"):
+        return {
+            "ok": False,
+            "status": result.get("status"),
+            "message": result.get("message"),
+            "session_id": result.get("session_id"),
+            "parameters": result.get("parameters") or run_parameters,
+            "otp_request_id": result.get("otp_request_id") or "",
+        }
     finished_at = result.get("finished_at") or datetime.now().isoformat(timespec="seconds")
     try:
         run = repository.save_onebss_report_run({

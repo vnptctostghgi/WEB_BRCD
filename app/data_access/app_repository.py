@@ -11,10 +11,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app.modules.mobile_gateway.migrations import MOBILE_GATEWAY_FEATURE_ROWS, ensure_mobile_gateway_sqlite_schema
+
 
 FEATURE_ROWS = [
     ("dashboard", "Tổng quan", None, 10),
-    ("quantriweb", "Quản trị web", None, 20),
+    ("quantriweb", "Quản trị hệ thống", None, 20),
     ("quantringuoidung", "Quản trị người dùng", "quantriweb", 21),
     ("quantriketnoi", "Quản trị kết nối", "quantriweb", 22),
     ("phanquyennguoidung", "Phân quyền người dùng", "quantriweb", 23),
@@ -34,6 +36,7 @@ FEATURE_ROWS = [
     ("nhatkyhoatdong", "Nhật ký hoạt động", "quantriweb", 90),
     ("quantrisql", "Quản trị SQL", "quantriketnoi", 23),
     ("quantridulieuonebss", "Quản trị dữ liệu OneBSS", "quantriketnoi", 24),
+    *MOBILE_GATEWAY_FEATURE_ROWS,
 ]
 
 FEATURE_CODE_ALIASES = {
@@ -487,6 +490,7 @@ class AppRepository:
                 )
             connection.execute("UPDATE features SET name='Truy vấn SQL' WHERE code='truyvansql'")
             connection.execute("UPDATE features SET name='Báo cáo mới' WHERE code='baocaomoi'")
+            connection.execute("UPDATE features SET name='Quản trị hệ thống' WHERE code='quantriweb'")
             connection.execute(
                 "UPDATE features SET parent_code='baocaomoi', sort_order=36 WHERE code='thietkelayoutbaocao' AND parent_code='truyvansql'"
             )
@@ -552,6 +556,7 @@ class AppRepository:
                     now,
                 ),
             )
+            ensure_mobile_gateway_sqlite_schema(connection)
 
     def _migrate_feature_codes(self, connection: sqlite3.Connection) -> None:
         rows = connection.execute(
