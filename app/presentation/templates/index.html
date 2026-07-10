@@ -25,7 +25,7 @@
       };
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=74" />
+    <link rel="stylesheet" href="/static/styles.css?v=75" />
   </head>
   <body class="app-dark min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'themvasuataikhoan' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'xemmatkhaudaluu' in user.permissions }}">
     <svg class="icon-sprite" aria-hidden="true">
@@ -49,6 +49,7 @@
             <img class="brand-logo" src="/static/images/system-logo.png" alt="Logo hệ thống" />
             <div class="min-w-0">
               <p class="brand-title">Hệ thống quản trị đặc biệt</p>
+              <span class="brand-version">LIVE 10.07 · Optimized</span>
             </div>
           </a>
           <button class="menu-button lg:hidden" id="menu-button" type="button" aria-label="Mở menu điều hướng" aria-controls="main-navigation" aria-expanded="false"><span></span><span></span><span></span></button>
@@ -145,6 +146,18 @@
           {% if user.must_change_password %}
           <div class="notice warning"><strong>Cần đổi mật khẩu.</strong> Đây là mật khẩu khởi tạo hoặc vừa được đặt lại. Hãy đổi mật khẩu trước khi sử dụng lâu dài.</div>
           {% endif %}
+          <section class="release-banner">
+            <div>
+              <span class="release-kicker">Bản nâng cấp đang chạy</span>
+              <h1>VNPT CTO · Production 10.07</h1>
+              <p>Giao diện đã được làm mới, các lớp bảo mật và kiểm thử vận hành đã được bật trên web live.</p>
+            </div>
+            <div class="release-metrics" aria-label="Trạng thái bản nâng cấp">
+              <span><strong>62</strong><small>kiểm thử xanh</small></span>
+              <span><strong>401</strong><small>khóa API test public</small></span>
+              <span><strong>LIVE</strong><small>Render production</small></span>
+            </div>
+          </section>
           <section class="dashboard-runtime-home">
             <section class="data-card" id="dashboard-designed-section">
               <div class="section-heading">
@@ -503,6 +516,6 @@
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script src="/static/app.js?v=105"></script>
+    <script src="/static/app.js?v=106"></script>
   </body>
 </html>
