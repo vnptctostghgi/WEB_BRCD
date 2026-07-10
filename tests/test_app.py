@@ -1105,6 +1105,7 @@ def test_onebss_each_parameter_builds_multiple_payloads() -> None:
             "P_LOAI_NGAY": "1",
             "P_TUNGAY": "01/07/2026",
             "P_DENNGAY": "09/07/2026",
+            "baocao_id": 41668,
             "$merge_excel": {"mode": "append", "sheet": "DATA", "source_column": "P_PHANVUNG_ID"},
         }
     )
@@ -1113,7 +1114,25 @@ def test_onebss_each_parameter_builds_multiple_payloads() -> None:
     assert merge_config["sheet"] == "DATA"
     assert [run.parameters["P_PHANVUNG_ID"] for run in runs] == ["13", "14", "15"]
     assert all("$merge_excel" not in run.parameters for run in runs)
+    assert all("baocao_id" not in run.parameters for run in runs)
     assert all("$each" not in run.parameters["P_PHANVUNG_ID"] for run in runs)
+
+
+def test_onebss_report_id_uses_configured_meta_value() -> None:
+    from app.application.onebss_report_service import OneBssApiToken, onebss_export_parameters, onebss_report_id
+
+    token = OneBssApiToken(
+        access_token="token",
+        token_type="Bearer",
+        username="test@vnpt.vn",
+        mobile_id="mobile",
+        device_id="device",
+        expires_at=9999999999,
+    )
+    parameters = {"$baocao_id": 41668, "baocao_id": 123, "P_PHANVUNG_ID": "13"}
+
+    assert onebss_report_id({"report_url": "https://onebss.vnpt.vn/#/report/bi?path=UNKNOWN"}, parameters, token) == 41668
+    assert onebss_export_parameters(parameters) == {"P_PHANVUNG_ID": "13"}
 
 
 def test_onebss_merge_excel_files_appends_rows_with_source_column(tmp_path) -> None:

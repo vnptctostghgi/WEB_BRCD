@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import logging
 import re
 import threading
@@ -10,6 +13,9 @@ from datetime import datetime
 from itertools import product
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, unquote, urlparse
+
+import httpx
 
 from app.application.onebss_data_mining_service import (
     EXPORT_DIRECT_SCRIPT,
@@ -30,6 +36,14 @@ from app.settings import Settings
 logger = logging.getLogger(__name__)
 OTP_PATTERN = re.compile(r"^\d{6}$")
 PENDING_SESSION_TTL_SECONDS = 10 * 60
+ONEBSS_API_BASE_URL = "https://api-onebss.vnpt.vn"
+ONEBSS_API_TOKEN_ID = "97388db0-6ce9-11ea-bc55-0242ac130003"
+ONEBSS_API_CLIENT_ID = "clientapp"
+ONEBSS_API_CLIENT_SECRET = "password"
+ONEBSS_API_META_KEYS = {"baocao_id"}
+KNOWN_ONEBSS_REPORT_IDS = {
+    "PHATTRIENTHUEBAO/BIENDONGPHATTRIENTHUEBAO/RP_BSS_28429": 41668,
+}
 OTP_TEXT_NEEDLES = ["OTP", "mã OTP", "ma OTP", "mã xác thực", "ma xac thuc", "mã xác nhận", "ma xac nhan"]
 OTP_INVALID_TEXT_NEEDLES = ["Số OTP không hợp lệ", "OTP không hợp lệ", "OTP khong hop le"]
 OTP_REQUEST_TEXT_NEEDLES = [
@@ -84,6 +98,29 @@ class PendingOneBssSession:
 
 
 @dataclass
+class PendingOneBssApiSession:
+    session_id: str
+    secret_code: str
+    report: dict[str, Any]
+    parameters: dict[str, Any]
+    username: str
+    mobile_id: str
+    device_id: str
+    created_by: str
+    created_at: float
+
+
+@dataclass
+class OneBssApiToken:
+    access_token: str
+    token_type: str
+    username: str
+    mobile_id: str
+    device_id: str
+    expires_at: float
+
+
+@dataclass
 class OneBssParameterRun:
     parameters: dict[str, Any]
     source_values: dict[str, Any]
@@ -99,6 +136,8 @@ class OneBssDownloadedFile:
 
 
 PENDING_ONEBSS_SESSIONS: dict[str, PendingOneBssSession] = {}
+PENDING_ONEBSS_API_SESSIONS: dict[str, PendingOneBssApiSession] = {}
+ONEBSS_API_TOKENS: dict[str, OneBssApiToken] = {}
 PENDING_ONEBSS_LOCK = threading.Lock()
 
 
@@ -113,9 +152,136 @@ def run_onebss_report_request(
 ) -> dict[str, Any]:
     cleanup_expired_onebss_sessions()
     resolved_parameters = with_resolved_schedule_parameters({"parameters": parameters if isinstance(parameters, dict) else {}})["parameters"]
+    if session_id.startswith("api-"):
+        return continue_onebss_api_session(settings, session_id, otp, resolved_parameters)
     if session_id:
         return continue_onebss_report_session(settings, session_id, otp, resolved_parameters)
-    return start_onebss_report_session(settings, report, resolved_parameters, created_by=created_by)
+    return start_onebss_api_session(settings, report, resolved_parameters, created_by=created_by)
+
+
+def start_onebss_api_session(
+    settings: Settings,
+    report: dict[str, Any],
+    parameters: dict[str, Any],
+    *,
+    created_by: str = "",
+) -> dict[str, Any]:
+    try:
+        report_url = normalize_onebss_report_url(report.get("report_url"))
+    except OneBssDownloadError as error:
+        return {"ok": False, "status": "invalid_report_url", "message": str(error), "parameters": parameters}
+    credentials = onebss_api_credentials(settings)
+    if not credentials:
+        return {"ok": False, "status": "missing_credentials", "message": "Chua cau hinh ONEBSS_USERNAME/ONEBSS_PASSWORD.", "parameters": parameters}
+    username, password = credentials
+    mobile_id, device_id = onebss_api_device_ids(username)
+    cached_token = get_valid_onebss_api_token(username)
+    if cached_token:
+        try:
+            return finish_onebss_report_download_api(settings, cached_token, report, parameters)
+        except OneBssDownloadError as error:
+            if onebss_error_looks_auth_related(error):
+                forget_onebss_api_token(username)
+            return {"ok": False, "status": "failed", "message": str(error)[:1000], "parameters": parameters}
+
+    try:
+        with httpx.Client(timeout=onebss_api_timeout(settings, minimum_seconds=30)) as client:
+            response = client.post(
+                f"{ONEBSS_API_BASE_URL}/quantri/user/xacthuc_tapdoan_v2",
+                headers=onebss_api_base_headers(),
+                json={
+                    "username": username,
+                    "password": password,
+                    "mobile_id": mobile_id,
+                    "device_id": device_id,
+                },
+            )
+    except httpx.HTTPError as error:
+        logger.exception("Cannot start OneBSS API login")
+        return {"ok": False, "status": "login_failed", "message": f"Khong ket noi duoc API dang nhap OneBSS: {error}", "parameters": parameters}
+
+    data = parse_onebss_json_response(response)
+    secret_code = str(((data.get("data") if isinstance(data, dict) else {}) or {}).get("secretCode") or "").strip()
+    if response.status_code == 200 and secret_code:
+        pending = keep_onebss_api_session(secret_code, report, parameters, username, mobile_id, device_id, created_by)
+        return {
+            "ok": False,
+            "status": "otp_required",
+            "message": "OneBSS da gui OTP ve dien thoai. Hay nhap du 6 so OTP.",
+            "session_id": pending.session_id,
+            "parameters": parameters,
+            "report_url": report_url,
+        }
+    return {
+        "ok": False,
+        "status": "login_failed",
+        "message": onebss_api_error_message(data, response, fallback="Dang nhap OneBSS chua thanh cong."),
+        "parameters": parameters,
+        "report_url": report_url,
+    }
+
+
+def continue_onebss_api_session(
+    settings: Settings,
+    session_id: str,
+    otp: str,
+    parameters: dict[str, Any],
+) -> dict[str, Any]:
+    pending = get_onebss_api_session(session_id)
+    if not pending:
+        return {"ok": False, "status": "otp_session_expired", "message": "Phien OTP OneBSS da het han, hay bam lay bao cao lai."}
+    if not OTP_PATTERN.fullmatch(str(otp or "").strip()):
+        return {"ok": False, "status": "otp_required", "message": "OTP phai du 6 chu so.", "session_id": session_id, "parameters": pending.parameters}
+
+    effective_parameters = parameters if parameters else pending.parameters
+    try:
+        with httpx.Client(timeout=onebss_api_timeout(settings, minimum_seconds=30)) as client:
+            response = client.post(
+                f"{ONEBSS_API_BASE_URL}/quantri/oauth/token",
+                headers=onebss_api_base_headers(),
+                json={
+                    "grant_type": "password",
+                    "client_id": ONEBSS_API_CLIENT_ID,
+                    "client_secret": ONEBSS_API_CLIENT_SECRET,
+                    "otp": str(otp).strip(),
+                    "secretCode": pending.secret_code,
+                },
+            )
+    except httpx.HTTPError as error:
+        logger.exception("Cannot verify OneBSS API OTP")
+        return {
+            "ok": False,
+            "status": "otp_invalid",
+            "message": f"Khong kiem tra duoc OTP OneBSS: {error}",
+            "session_id": session_id,
+            "parameters": effective_parameters,
+        }
+
+    data = parse_onebss_json_response(response)
+    token_payload = onebss_token_payload(data)
+    access_token = str(token_payload.get("access_token") or "").strip()
+    if response.status_code != 200 or not access_token:
+        status = "otp_invalid" if response.status_code in {400, 401, 403} else "login_failed"
+        return {
+            "ok": False,
+            "status": status,
+            "message": onebss_api_error_message(data, response, fallback="OTP OneBSS khong hop le hoac da het han."),
+            "session_id": session_id,
+            "parameters": effective_parameters,
+        }
+
+    token = remember_onebss_api_token(
+        pending.username,
+        token_payload,
+        mobile_id=pending.mobile_id,
+        device_id=pending.device_id,
+    )
+    pop_onebss_api_session(session_id)
+    try:
+        return finish_onebss_report_download_api(settings, token, pending.report, effective_parameters)
+    except Exception as error:
+        logger.exception("Cannot finish OneBSS API report request")
+        return {"ok": False, "status": "failed", "message": str(error)[:1000], "parameters": effective_parameters}
 
 
 def start_onebss_report_session(
@@ -266,6 +432,160 @@ def continue_onebss_report_session(
         return {"ok": False, "status": "failed", "message": str(error)[:1000], "parameters": pending.parameters}
 
 
+def finish_onebss_report_download_api(
+    settings: Settings,
+    token: OneBssApiToken,
+    report: dict[str, Any],
+    parameters: dict[str, Any],
+) -> dict[str, Any]:
+    started = time.monotonic()
+    report_url = normalize_onebss_report_url(report.get("report_url"))
+    schedule_like = {
+        "report_url": report_url,
+        "storage_link": report.get("storage_link") or "",
+        "file_name_template": report.get("ten_bao_cao") or report.get("ma_bao_cao") or "",
+    }
+    parameter_runs, merge_config, each_keys = build_onebss_parameter_runs(parameters)
+    downloaded_files: list[OneBssDownloadedFile] = []
+    temporary_files: list[Path] = []
+    try:
+        if len(parameter_runs) == 1:
+            downloaded = download_onebss_report_file_api(
+                settings,
+                token,
+                report,
+                parameter_runs[0].parameters,
+                source_values=parameter_runs[0].source_values,
+            )
+            downloaded_files.append(downloaded)
+            target_file = downloaded.file_path
+            storage_result = save_downloaded_file(settings, target_file, str(report.get("storage_link") or ""))
+            ok = bool(storage_result.get("ok", True))
+            export_info = downloaded.export_info
+            return {
+                "ok": ok,
+                "status": "success" if ok else str(storage_result.get("status") or "storage_failed"),
+                "message": storage_result.get("message") or "Da tai bao cao OneBSS.",
+                "file_name": target_file.name,
+                "file_path": str(target_file),
+                "storage_link": storage_result.get("storage_link") or str(report.get("storage_link") or ""),
+                "storage_status": storage_result.get("storage_status") or "",
+                "report_id": export_info.get("report_id") or "",
+                "report_title": export_info.get("title") or report.get("ten_bao_cao") or "",
+                "parameters": export_info.get("params") or parameter_runs[0].parameters,
+                "duration_ms": int((time.monotonic() - started) * 1000),
+                "finished_at": datetime.now(LOCAL_TIMEZONE).isoformat(timespec="seconds"),
+            }
+
+        for index, parameter_run in enumerate(parameter_runs, start=1):
+            target_file = build_onebss_temp_file_path(settings, index)
+            temporary_files.append(target_file)
+            downloaded_files.append(
+                download_onebss_report_file_api(
+                    settings,
+                    token,
+                    report,
+                    parameter_run.parameters,
+                    target_file=target_file,
+                    source_values=parameter_run.source_values,
+                )
+            )
+
+        first_export = downloaded_files[0].export_info if downloaded_files else {}
+        target_file = build_target_file_path(
+            settings,
+            schedule_like,
+            suggested_filename=merged_excel_suggested_filename(downloaded_files[0].suggested_filename if downloaded_files else ".xlsx"),
+            report_title=str(first_export.get("title") or report.get("ten_bao_cao") or ""),
+        )
+        merge_onebss_excel_files(downloaded_files, target_file, merge_config, each_keys)
+        storage_result = save_downloaded_file(settings, target_file, str(report.get("storage_link") or ""))
+        ok = bool(storage_result.get("ok", True))
+        status = "success" if ok else str(storage_result.get("status") or "storage_failed")
+        storage_message = storage_result.get("message") or "Da tai bao cao OneBSS."
+        merged_message = f"Da tai va gop {len(downloaded_files)} file OneBSS thanh 1 file."
+        message = f"{merged_message} {storage_message}" if ok else storage_message
+        return {
+            "ok": ok,
+            "status": status,
+            "message": message,
+            "file_name": target_file.name,
+            "file_path": str(target_file),
+            "storage_link": storage_result.get("storage_link") or str(report.get("storage_link") or ""),
+            "storage_status": storage_result.get("storage_status") or "",
+            "report_id": first_export.get("report_id") or "",
+            "report_title": first_export.get("title") or report.get("ten_bao_cao") or "",
+            "parameters": parameters,
+            "run_parameters": [downloaded.parameters for downloaded in downloaded_files],
+            "merged_file_count": len(downloaded_files),
+            "duration_ms": int((time.monotonic() - started) * 1000),
+            "finished_at": datetime.now(LOCAL_TIMEZONE).isoformat(timespec="seconds"),
+        }
+    finally:
+        for temporary_file in temporary_files:
+            try:
+                temporary_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
+def download_onebss_report_file_api(
+    settings: Settings,
+    token: OneBssApiToken,
+    report: dict[str, Any],
+    parameters: dict[str, Any],
+    *,
+    target_file: Path | None = None,
+    source_values: dict[str, Any] | None = None,
+) -> OneBssDownloadedFile:
+    report_url = normalize_onebss_report_url(report.get("report_url"))
+    report_id = onebss_report_id(report, parameters, token)
+    export_params = onebss_export_parameters(parameters)
+    request_id = datetime.now(LOCAL_TIMEZONE).strftime("%d%m%y%H%M%S") + str(int(time.time() * 1000) % 1000).zfill(3)
+    headers = {**onebss_api_auth_headers(token), "apiKey": "x"}
+    timeout = onebss_api_timeout(settings, minimum_seconds=int(getattr(settings, "onebss_download_timeout_seconds", 180) or 180))
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            response = client.post(
+                f"{ONEBSS_API_BASE_URL}/web-report/report/bi/run_v5",
+                params={"requestId": request_id},
+                headers=headers,
+                json={"baocao_id": report_id, "params": export_params},
+            )
+            response = poll_onebss_export_if_needed(client, response, headers, settings)
+    except httpx.HTTPError as error:
+        raise OneBssDownloadError(f"Khong goi duoc API xuat OneBSS: {error}") from error
+
+    ensure_onebss_file_response(response)
+    suggested_filename = onebss_response_filename(response, fallback=f"onebss_{report_id}.xlsx")
+    if target_file is None:
+        schedule_like = {
+            "report_url": report_url,
+            "storage_link": report.get("storage_link") or "",
+            "file_name_template": report.get("ten_bao_cao") or report.get("ma_bao_cao") or "",
+        }
+        target_file = build_target_file_path(
+            settings,
+            schedule_like,
+            suggested_filename=suggested_filename,
+            report_title=str(report.get("ten_bao_cao") or ""),
+        )
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    target_file.write_bytes(response.content)
+    return OneBssDownloadedFile(
+        file_path=target_file,
+        suggested_filename=suggested_filename,
+        export_info={
+            "ok": True,
+            "report_id": report_id,
+            "title": report.get("ten_bao_cao") or "",
+            "params": export_params,
+        },
+        parameters=export_params,
+        source_values=source_values or {},
+    )
+
+
 def finish_onebss_report_download(
     settings: Settings,
     helper: OneBssReportDownloader,
@@ -410,6 +730,276 @@ def download_onebss_report_file(
     )
 
 
+def onebss_api_credentials(settings: Settings) -> tuple[str, str] | None:
+    username = str(getattr(settings, "onebss_username", "") or "").strip()
+    password = settings.onebss_password.get_secret_value() if getattr(settings, "onebss_password", None) else ""
+    if not username or not password:
+        return None
+    if "@" not in username:
+        username = f"{username}@vnpt.vn"
+    return username, password
+
+
+def onebss_api_device_ids(username: str) -> tuple[str, str]:
+    normalized = username.strip().lower()
+    if normalized.startswith("quyennt.cto"):
+        return "9568FAAF6355", "DEV-1c4cef88"
+    digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()
+    return digest[:12].upper(), f"DEV-{digest[12:20]}"
+
+
+def onebss_api_timeout(settings: Settings, *, minimum_seconds: int = 30) -> httpx.Timeout:
+    configured = int(getattr(settings, "onebss_download_timeout_seconds", 180) or 180)
+    total = max(minimum_seconds, configured, 30)
+    return httpx.Timeout(float(total), connect=20.0)
+
+
+def onebss_api_base_headers() -> dict[str, str]:
+    return {
+        "Content-Type": "application/json",
+        "Token-id": ONEBSS_API_TOKEN_ID,
+        "Mac-address": "WEB",
+    }
+
+
+def onebss_api_auth_headers(token: OneBssApiToken) -> dict[str, str]:
+    token_type = token.token_type.capitalize() if token.token_type else "Bearer"
+    return {
+        **onebss_api_base_headers(),
+        "Authorization": f"{token_type} {token.access_token}",
+        "SelectedMenuId": "",
+        "SelectedPath": "",
+        "App-secret": onebss_app_secret(token.username, token.device_id),
+    }
+
+
+def onebss_app_secret(username: str, device_id: str) -> str:
+    device_info = {
+        "device_id": device_id,
+        "device_ip": "Unknown",
+        "device_name": "Chrome 124",
+        "mac_address": "Unknown",
+        "mobile_id": "Unknown",
+        "app_id": 3,
+        "app_version": "Unknown",
+        "os_version": "Windows 10",
+    }
+    text = json.dumps(device_info, ensure_ascii=False, separators=(",", ":"))
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
+
+
+def parse_onebss_json_response(response: httpx.Response) -> dict[str, Any]:
+    try:
+        data = response.json()
+    except ValueError:
+        return {"message": response.text[:1000], "status_code": response.status_code}
+    return data if isinstance(data, dict) else {"data": data}
+
+
+def onebss_token_payload(data: dict[str, Any]) -> dict[str, Any]:
+    payload: Any = data.get("data") if isinstance(data, dict) and "data" in data else data
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except ValueError:
+            return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def onebss_api_error_message(data: dict[str, Any], response: httpx.Response, *, fallback: str) -> str:
+    for key in ("message", "error_description", "error"):
+        value = data.get(key) if isinstance(data, dict) else ""
+        if value:
+            return str(value).strip()[:1000]
+    nested = data.get("data") if isinstance(data, dict) else None
+    if isinstance(nested, dict):
+        for key in ("message", "error_description", "error"):
+            value = nested.get(key)
+            if value:
+                return str(value).strip()[:1000]
+    if response.status_code >= 400:
+        return f"{fallback} HTTP {response.status_code}."
+    return fallback
+
+
+def onebss_error_looks_auth_related(error: Exception) -> bool:
+    text = str(error).lower()
+    return any(needle in text for needle in ("401", "403", "token", "unauthorized", "forbidden", "het han", "dang nhap"))
+
+
+def remember_onebss_api_token(
+    username: str,
+    token_payload: dict[str, Any],
+    *,
+    mobile_id: str,
+    device_id: str,
+) -> OneBssApiToken:
+    expires_in = token_payload.get("expires_in") or token_payload.get("expires")
+    try:
+        expires_after = int(expires_in)
+    except (TypeError, ValueError):
+        expires_after = 20 * 60
+    token = OneBssApiToken(
+        access_token=str(token_payload.get("access_token") or ""),
+        token_type=str(token_payload.get("token_type") or "Bearer"),
+        username=username,
+        mobile_id=mobile_id,
+        device_id=device_id,
+        expires_at=time.time() + max(60, expires_after - 60),
+    )
+    with PENDING_ONEBSS_LOCK:
+        ONEBSS_API_TOKENS[username] = token
+    return token
+
+
+def get_valid_onebss_api_token(username: str) -> OneBssApiToken | None:
+    with PENDING_ONEBSS_LOCK:
+        token = ONEBSS_API_TOKENS.get(username)
+        if token and token.expires_at > time.time() + 30:
+            return token
+        if token:
+            ONEBSS_API_TOKENS.pop(username, None)
+    return None
+
+
+def forget_onebss_api_token(username: str) -> None:
+    with PENDING_ONEBSS_LOCK:
+        ONEBSS_API_TOKENS.pop(username, None)
+
+
+def onebss_export_parameters(parameters: dict[str, Any]) -> dict[str, Any]:
+    output: dict[str, Any] = {}
+    for key, value in parameters.items():
+        key_text = str(key)
+        if key_text.startswith("$") or key_text in ONEBSS_API_META_KEYS:
+            continue
+        output[key_text] = value
+    return output
+
+
+def onebss_report_id(report: dict[str, Any], parameters: dict[str, Any], token: OneBssApiToken) -> int:
+    for candidate in (
+        parameters.get("$baocao_id"),
+        parameters.get("baocao_id"),
+        report.get("baocao_id"),
+        report.get("report_id"),
+    ):
+        if candidate not in {None, ""}:
+            try:
+                return int(candidate)
+            except (TypeError, ValueError):
+                break
+    path = onebss_report_path(normalize_onebss_report_url(report.get("report_url")))
+    if path in KNOWN_ONEBSS_REPORT_IDS:
+        return KNOWN_ONEBSS_REPORT_IDS[path]
+    return resolve_onebss_report_id_api(report, token)
+
+
+def resolve_onebss_report_id_api(report: dict[str, Any], token: OneBssApiToken) -> int:
+    report_url = normalize_onebss_report_url(report.get("report_url"))
+    path = onebss_report_path(report_url)
+    if not path:
+        raise OneBssDownloadError("Chua co $baocao_id va khong doc duoc path bao cao OneBSS tu link.")
+    headers = onebss_api_auth_headers(token)
+    try:
+        with httpx.Client(timeout=httpx.Timeout(60.0, connect=20.0)) as client:
+            response = client.post(f"{ONEBSS_API_BASE_URL}/web-quantri/nguoidung/report_list", headers=headers, json={})
+    except httpx.HTTPError as error:
+        raise OneBssDownloadError(f"Khong lay duoc danh sach bao cao OneBSS de tim ma bao cao: {error}") from error
+    data = parse_onebss_json_response(response)
+    if response.status_code >= 400:
+        raise OneBssDownloadError(onebss_api_error_message(data, response, fallback="Khong lay duoc danh sach bao cao OneBSS."))
+    for item in iter_onebss_dicts(data):
+        item_path = str(item.get("path") or item.get("report_path") or item.get("duong_dan") or "").strip()
+        if item_path and item_path == path:
+            for key in ("report_id", "baocao_id", "id"):
+                value = item.get(key)
+                if value not in {None, ""}:
+                    return int(value)
+    raise OneBssDownloadError("Khong tim thay ma bao cao OneBSS tu link. Hay them \"$baocao_id\": 41668 vao cau hinh tham so.")
+
+
+def onebss_report_path(report_url: str) -> str:
+    parsed = urlparse(report_url)
+    query_text = parsed.fragment.split("?", 1)[1] if "?" in parsed.fragment else parsed.query
+    query = parse_qs(query_text)
+    return unquote(str(query.get("path", [""])[0] or "")).strip()
+
+
+def iter_onebss_dicts(value: Any):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from iter_onebss_dicts(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from iter_onebss_dicts(child)
+
+
+def poll_onebss_export_if_needed(
+    client: httpx.Client,
+    response: httpx.Response,
+    headers: dict[str, str],
+    settings: Settings,
+) -> httpx.Response:
+    if response.status_code != 202:
+        return response
+    location = response.headers.get("location", "").strip() or response.text.strip().strip('"')
+    if not location:
+        raise OneBssDownloadError("OneBSS dang tao file nhung khong tra link kiem tra file.")
+    poll_url = onebss_export_poll_url(location)
+    deadline = time.monotonic() + max(60, int(getattr(settings, "onebss_download_timeout_seconds", 180) or 180))
+    last_response = response
+    while time.monotonic() < deadline:
+        time.sleep(10)
+        last_response = client.get(poll_url, headers=headers)
+        if last_response.status_code != 202:
+            return last_response
+    raise OneBssDownloadError(f"OneBSS chua tao xong file sau thoi gian cho. HTTP cuoi: {last_response.status_code}.")
+
+
+def onebss_export_poll_url(location: str) -> str:
+    if location.startswith("http://") or location.startswith("https://"):
+        return location
+    if location.startswith("/web-report/"):
+        return f"{ONEBSS_API_BASE_URL}{location}"
+    if location.startswith("/"):
+        return f"{ONEBSS_API_BASE_URL}/web-report{location}"
+    return f"{ONEBSS_API_BASE_URL}/web-report/{location}"
+
+
+def ensure_onebss_file_response(response: httpx.Response) -> None:
+    if response.status_code >= 400:
+        data = parse_onebss_json_response(response)
+        raise OneBssDownloadError(onebss_api_error_message(data, response, fallback="OneBSS khong tra file bao cao."))
+    content_type = response.headers.get("content-type", "").lower()
+    body = response.content or b""
+    if not body:
+        raise OneBssDownloadError("OneBSS tra file rong.")
+    looks_like_file = (
+        b"PK\x03\x04" in body[:8]
+        or body[:8].startswith(b"\xd0\xcf\x11\xe0")
+        or "attachment" in response.headers.get("content-disposition", "").lower()
+        or "spreadsheet" in content_type
+        or "octet-stream" in content_type
+    )
+    if looks_like_file:
+        return
+    text = response.text[:1000] if response.encoding else body[:1000].decode("utf-8", errors="ignore")
+    raise OneBssDownloadError(f"OneBSS chua tra file Excel: {text}")
+
+
+def onebss_response_filename(response: httpx.Response, *, fallback: str) -> str:
+    disposition = response.headers.get("content-disposition", "")
+    match = re.search(r"filename\*=UTF-8''([^;]+)", disposition, flags=re.IGNORECASE)
+    if match:
+        return unquote(match.group(1).strip().strip('"')) or fallback
+    match = re.search(r"filename=\"?([^\";]+)\"?", disposition, flags=re.IGNORECASE)
+    if match:
+        return unquote(match.group(1).strip()) or fallback
+    return fallback
+
+
 def build_onebss_temp_file_path(settings: Settings, index: int) -> Path:
     base_dir = Path(str(getattr(settings, "data_mining_download_dir", "data/data_mining_downloads") or "data/data_mining_downloads"))
     base_dir.mkdir(parents=True, exist_ok=True)
@@ -429,7 +1019,8 @@ def build_onebss_parameter_runs(parameters: dict[str, Any]) -> tuple[list[OneBss
     base_parameters: dict[str, Any] = {}
     each_items: list[tuple[str, list[Any]]] = []
     for key, value in parameters.items():
-        if str(key).startswith("$"):
+        key_text = str(key)
+        if key_text.startswith("$") or key_text in ONEBSS_API_META_KEYS:
             continue
         if isinstance(value, dict) and "$each" in value:
             each_values = value.get("$each")
@@ -621,14 +1212,49 @@ def keep_onebss_session(
     return session
 
 
+def keep_onebss_api_session(
+    secret_code: str,
+    report: dict[str, Any],
+    parameters: dict[str, Any],
+    username: str,
+    mobile_id: str,
+    device_id: str,
+    created_by: str,
+) -> PendingOneBssApiSession:
+    session = PendingOneBssApiSession(
+        session_id=f"api-{uuid.uuid4().hex}",
+        secret_code=secret_code,
+        report=report,
+        parameters=parameters,
+        username=username,
+        mobile_id=mobile_id,
+        device_id=device_id,
+        created_by=created_by,
+        created_at=time.time(),
+    )
+    with PENDING_ONEBSS_LOCK:
+        PENDING_ONEBSS_API_SESSIONS[session.session_id] = session
+    return session
+
+
 def get_onebss_session(session_id: str) -> PendingOneBssSession | None:
     with PENDING_ONEBSS_LOCK:
         return PENDING_ONEBSS_SESSIONS.get(session_id)
 
 
+def get_onebss_api_session(session_id: str) -> PendingOneBssApiSession | None:
+    with PENDING_ONEBSS_LOCK:
+        return PENDING_ONEBSS_API_SESSIONS.get(session_id)
+
+
 def pop_onebss_session(session_id: str) -> PendingOneBssSession | None:
     with PENDING_ONEBSS_LOCK:
         return PENDING_ONEBSS_SESSIONS.pop(session_id, None)
+
+
+def pop_onebss_api_session(session_id: str) -> PendingOneBssApiSession | None:
+    with PENDING_ONEBSS_LOCK:
+        return PENDING_ONEBSS_API_SESSIONS.pop(session_id, None)
 
 
 def cleanup_expired_onebss_sessions() -> None:
@@ -638,6 +1264,12 @@ def cleanup_expired_onebss_sessions() -> None:
         for key, session in list(PENDING_ONEBSS_SESSIONS.items()):
             if now - session.created_at > PENDING_SESSION_TTL_SECONDS:
                 expired.append(PENDING_ONEBSS_SESSIONS.pop(key))
+        for key, session in list(PENDING_ONEBSS_API_SESSIONS.items()):
+            if now - session.created_at > PENDING_SESSION_TTL_SECONDS:
+                PENDING_ONEBSS_API_SESSIONS.pop(key, None)
+        for key, token in list(ONEBSS_API_TOKENS.items()):
+            if token.expires_at <= now:
+                ONEBSS_API_TOKENS.pop(key, None)
     for session in expired:
         close_browser_stack(session.browser, session.context, session.playwright)
 
