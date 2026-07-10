@@ -426,12 +426,16 @@ def admin_sms(
         otp_only=otp_only,
     )
     can_view_content = has_mobile_permission(user, "mobile_gateway.sms.view_content")
-    if not has_mobile_permission(user, "mobile_gateway.sms.view_content"):
+    if not can_view_content:
         for item in data["items"]:
-            item["body"] = item.get("body_masked") or security.mask_otp_text(item.get("body") or "")
+            masked = security.mask_otp_text(item.get("body") or item.get("body_masked") or "")
+            item["body"] = masked
+            item["body_masked"] = masked
     elif can_view_content:
         for item in data["items"]:
-            item["body"] = security.mask_otp_text(item.get("body") or item.get("body_masked") or "")
+            body = item.get("body") or item.get("body_masked") or ""
+            item["body"] = body
+            item["body_masked"] = body
     return {"ok": True, **data}
 
 
@@ -442,10 +446,14 @@ def admin_notifications(request: Request, page: int = 1, page_size: int = 50, de
     items = data["items"]
     if not has_mobile_permission(user, "mobile_gateway.notifications.view_content"):
         for item in items:
-            item["text"] = item.get("text_masked") or security.mask_otp_text(item.get("text") or "")
+            masked = security.mask_otp_text(item.get("text") or item.get("text_masked") or "")
+            item["text"] = masked
+            item["text_masked"] = masked
     else:
         for item in items:
-            item["text"] = security.mask_otp_text(item.get("text") or item.get("text_masked") or "")
+            text = item.get("text") or item.get("text_masked") or ""
+            item["text"] = text
+            item["text_masked"] = text
     return {"ok": True, **data}
 
 
