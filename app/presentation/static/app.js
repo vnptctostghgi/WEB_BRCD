@@ -139,7 +139,10 @@ let dashboardChartRenderToken = 0;
 let dashboardSheetRenderToken = 0;
 let dashboardRuntimeTheme = localStorage.getItem("dashboardRuntimeTheme") === "light" ? "light" : "dark";
 let activeViewLoadToken = 0;
+const VIEW_TRANSITION_MS = 320;
+const VIEW_SETTLE_MS = 140;
 let viewTransitionTimer = 0;
+let viewTransitionHoldTimer = 0;
 const dataCacheTimestamps = new Map();
 const dashboardViewerLayoutCache = new Map();
 const dashboardBuilderLayoutCache = new Map();
@@ -168,26 +171,69 @@ function nextPaint() {
   });
 }
 
-async function runActiveViewLoader(token, loader) {
+function getViewTransitionHeight(...views) {
+  const measuredHeights = views
+    .map((view) => Math.ceil(view?.getBoundingClientRect?.().height || 0))
+    .filter(Boolean);
+  const viewportFloor = Math.min(Math.max(window.innerHeight * 0.66, 360), 720);
+  return Math.max(360, viewportFloor, ...measuredHeights);
+}
+
+function holdAppViewHeight(...views) {
+  const main = $(".app-main");
+  if (!main) return;
+  window.clearTimeout(viewTransitionHoldTimer);
+  main.style.setProperty("--view-transition-min-height", `${getViewTransitionHeight(...views)}px`);
+  main.classList.add("view-transitioning");
+}
+
+function releaseAppViewHeight(delay = VIEW_SETTLE_MS) {
+  const main = $(".app-main");
+  window.clearTimeout(viewTransitionHoldTimer);
+  viewTransitionHoldTimer = window.setTimeout(() => {
+    if (document.body.classList.contains("view-loading")) {
+      releaseAppViewHeight(VIEW_SETTLE_MS);
+      return;
+    }
+    main?.classList.remove("view-transitioning");
+    main?.style.removeProperty("--view-transition-min-height");
+  }, delay);
+}
+
+function markViewSettled(view) {
+  if (!view?.classList.contains("active")) return;
+  view.classList.add("view-settled");
+  window.setTimeout(() => view.classList.remove("view-settled"), 320);
+}
+
+async function runActiveViewLoader(token, loader, activeView) {
   await nextPaint();
   if (token !== activeViewLoadToken) return;
+  const loadingView = activeView || document.querySelector(".app-view.active");
+  loadingView?.classList.add("view-preparing");
+  holdAppViewHeight(document.querySelector(".app-view.view-exiting"), loadingView);
   const loadingTimer = window.setTimeout(() => {
     if (token === activeViewLoadToken) document.body.classList.add("view-loading");
-  }, 120);
+  }, 90);
   try {
     await loader();
   } catch (error) {
     if (token === activeViewLoadToken) showToast(error.message || "Không tải được dữ liệu.", "error");
   } finally {
     window.clearTimeout(loadingTimer);
-    if (token === activeViewLoadToken) document.body.classList.remove("view-loading");
+    if (token === activeViewLoadToken) {
+      document.body.classList.remove("view-loading");
+      loadingView?.classList.remove("view-preparing");
+      markViewSettled(loadingView);
+      await nextPaint();
+      releaseAppViewHeight();
+    }
   }
 }
 
 function setActiveAppView(viewName) {
   const nextView = $(`#view-${viewName}`);
-  if (!nextView) return;
-  const main = $(".app-main");
+  if (!nextView) return null;
   const currentView = document.querySelector(".app-view.active");
   window.clearTimeout(viewTransitionTimer);
   document.querySelectorAll(".app-view.view-exiting, .app-view.view-entering").forEach((view) => {
@@ -200,22 +246,19 @@ function setActiveAppView(viewName) {
   if (!currentView || currentView === nextView || reduceMotion) {
     document.querySelectorAll(".app-view").forEach((view) => view.classList.remove("active", "view-exiting", "view-entering"));
     nextView.classList.add("active");
-    main?.classList.remove("view-transitioning");
-    main?.style.removeProperty("--view-transition-min-height");
-    return;
+    releaseAppViewHeight(0);
+    return nextView;
   }
-  const currentHeight = Math.ceil(currentView.getBoundingClientRect().height || 0);
-  main?.style.setProperty("--view-transition-min-height", `${Math.max(currentHeight, 320)}px`);
-  main?.classList.add("view-transitioning");
+  holdAppViewHeight(currentView, nextView);
   currentView.classList.remove("active");
   currentView.classList.add("view-exiting");
   nextView.classList.add("active", "view-entering");
   viewTransitionTimer = window.setTimeout(() => {
     currentView.classList.remove("view-exiting");
     nextView.classList.remove("view-entering");
-    main?.classList.remove("view-transitioning");
-    main?.style.removeProperty("--view-transition-min-height");
-  }, 260);
+    releaseAppViewHeight();
+  }, VIEW_TRANSITION_MS);
+  return nextView;
 }
 
 const navFeatureConfig = {
@@ -402,14 +445,14 @@ async function activateNavItem(item, options = {}) {
   document.querySelectorAll(".nav-item").forEach((element) => element.classList.remove("active"));
   item.classList.add("active");
   openNavParents(item);
-  setActiveAppView(nextView);
+  const activeView = setActiveAppView(nextView);
   const moduleTitle = $("#module-title");
   if (moduleTitle) moduleTitle.textContent = item.dataset.title || item.textContent.trim();
   $("#sidebar").classList.remove("menu-open");
   $("#menu-button")?.setAttribute("aria-expanded", "false");
   if (updateUrl) updateFeatureUrl(item.dataset.featureCode, { replace: replaceUrl });
   const loader = viewLoaderForNav(nextView, dashboardPageId);
-  if (loader) runActiveViewLoader(loadToken, loader);
+  if (loader) runActiveViewLoader(loadToken, loader, activeView);
   else document.body.classList.remove("view-loading");
 }
 
