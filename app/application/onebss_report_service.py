@@ -34,7 +34,7 @@ from app.data_access.repository_factory import build_repository
 from app.modules.mobile_gateway.exceptions import OtpServiceError
 from app.modules.mobile_gateway.otp_service import OtpService
 from app.modules.mobile_gateway.repository import MobileGatewayRepository
-from app.settings import Settings
+from app.settings import Settings, get_settings
 
 
 logger = logging.getLogger(__name__)
@@ -1735,16 +1735,40 @@ def click_onebss_button(page: Any, helper: OneBssReportDownloader, texts: list[s
 
 
 def handle_onebss_otp_request(
-    settings: Settings,
+    settings: Settings | Any,
     page: Any,
     helper: OneBssReportDownloader,
     playwright: Any,
     browser: Any,
     context: Any,
     report: dict[str, Any],
-    parameters: dict[str, Any],
-    created_by: str,
+    parameters: dict[str, Any] | str,
+    created_by: str | None = None,
 ) -> dict[str, Any] | None:
+    legacy_manual_otp = False
+    if not isinstance(settings, Settings):
+        old_page = settings
+        old_helper = page
+        old_playwright = helper
+        old_browser = playwright
+        old_context = browser
+        old_report = context
+        old_parameters = report
+        old_created_by = parameters
+        settings = get_settings()
+        page = old_page
+        helper = old_helper
+        playwright = old_playwright
+        browser = old_browser
+        context = old_context
+        report = old_report if isinstance(old_report, dict) else {}
+        parameters = old_parameters if isinstance(old_parameters, dict) else {}
+        created_by = str(old_created_by or "system")
+        legacy_manual_otp = True
+    else:
+        parameters = parameters if isinstance(parameters, dict) else {}
+        created_by = str(created_by or "system")
+
     if page_contains(page, LOGIN_ERROR_TEXT_NEEDLES):
         return None
     url = str(getattr(page, "url", "") or "").lower()
@@ -1766,6 +1790,13 @@ def handle_onebss_otp_request(
         return None
 
     pending = keep_onebss_session(playwright, browser, context, page, report, parameters, created_by)
+    if legacy_manual_otp:
+        return onebss_manual_otp_response(
+            pending.session_id,
+            parameters,
+            "OneBSS da gui yeu cau OTP. Hay nhap ma OTP khi dien thoai nhan duoc.",
+            status="otp_required",
+        )
     return resolve_onebss_otp_with_mobile_gateway(
         settings,
         pending.session_id,
