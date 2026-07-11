@@ -231,19 +231,32 @@ class OtpService:
 
     @staticmethod
     def _extract_code_for_filter(text: str, otp_filter: dict[str, Any]) -> str:
-        start_prefix = str(otp_filter.get("start_prefix") or "")
+        start_value = str(otp_filter.get("start_prefix") or "").strip()
         search_text = str(text or "")
         otp_length = int(otp_filter.get("otp_length") or 0)
+        if start_value and re.fullmatch(r"\d+", start_value):
+            start_index = max(0, int(start_value))
+            if start_index >= len(search_text):
+                return ""
+            search_text = search_text[start_index:]
+            if otp_length > 0:
+                candidate = search_text[:otp_length] if len(search_text) >= otp_length else ""
+                if candidate.isdigit():
+                    return candidate
+                match = re.search(rf"(?<!\d)(\d{{{otp_length}}})(?!\d)", search_text)
+                return match.group(1) if match else ""
+            match = re.search(r"\d+", search_text)
+            return match.group(0) if match else ""
         if otp_length > 0:
-            if start_prefix:
-                if len(start_prefix) > otp_length:
+            if start_value:
+                if len(start_value) > otp_length:
                     return ""
-                match = re.search(rf"(?<!\d)({re.escape(start_prefix)}\d{{{otp_length - len(start_prefix)}}})(?!\d)", search_text)
+                match = re.search(rf"(?<!\d)({re.escape(start_value)}\d{{{otp_length - len(start_value)}}})(?!\d)", search_text)
             else:
                 match = re.search(rf"(?<!\d)(\d{{{otp_length}}})(?!\d)", search_text)
             return match.group(1) if match else ""
-        if start_prefix:
-            match = re.search(rf"(?<!\d)({re.escape(start_prefix)}\d+)(?!\d)", search_text)
+        if start_value:
+            match = re.search(rf"(?<!\d)({re.escape(start_value)}\d+)(?!\d)", search_text)
             return match.group(1) if match else ""
         return security.extract_otp(
             search_text,

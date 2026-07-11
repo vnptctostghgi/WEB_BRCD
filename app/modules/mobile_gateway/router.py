@@ -549,7 +549,30 @@ def admin_save_otp_filter(request: Request, payload: OtpFilterPayload) -> dict[s
 @admin_router.get("/otp/latest")
 def admin_otp_latest(request: Request, limit: int = 100) -> dict[str, Any]:
     require_mobile_permission(request, "mobile_gateway.otp.view")
-    return {"ok": True, "items": mobile_repository().list_otp_latest_values(limit)}
+    repository = mobile_repository()
+    repository.ensure_defaults()
+    items = repository.list_otp_latest_values(limit)
+    seen_filter_ids = {str(item.get("filter_id") or item.get("service_code") or "") for item in items}
+    for otp_filter in repository.list_otp_filters():
+        filter_id = str(otp_filter.get("filter_id") or otp_filter.get("service_code") or "")
+        if filter_id and filter_id not in seen_filter_ids:
+            items.append(
+                {
+                    "filter_id": filter_id,
+                    "service_code": otp_filter.get("service_code") or filter_id,
+                    "rule_name": otp_filter.get("rule_name") or filter_id,
+                    "sender": otp_filter.get("sender_pattern") or "",
+                    "code_masked": None,
+                    "code": None,
+                    "received_at": None,
+                    "expires_at": None,
+                    "status": "missing",
+                    "source_type": "sms",
+                    "source_id": None,
+                    "otp_request_id": "",
+                }
+            )
+    return {"ok": True, "items": items[:limit]}
 
 
 @admin_router.post("/otp/configurations")

@@ -64,10 +64,10 @@ function normalizeMobileGatewayUi() {
             <label>Mã OTP<input class="form-control" name="filter_id" value="onebss" required /></label>
             <label>Người gửi<input class="form-control" name="sender_pattern" value="293" required /></label>
             <label>Số lượng ký tự OTP<input class="form-control" name="otp_length" type="number" value="6" min="1" max="12" /></label>
-            <label>Ký tự bắt đầu<input class="form-control" name="start_prefix" placeholder="Ví dụ: 1364" /></label>
+            <label>Cắt từ vị trí<input class="form-control" name="start_prefix" type="number" min="0" value="0" /></label>
             <label class="checkbox-label"><input type="checkbox" name="enabled" checked /> Cho phép sử dụng tự động</label>
           </form>
-          <div class="table-scroll mt-4"><table><thead><tr><th>Mã OTP</th><th>Người gửi</th><th>Số ký tự</th><th>Bắt đầu</th><th>Tự động</th></tr></thead><tbody id="mobile-otp-filters-table"></tbody></table></div>
+          <div class="table-scroll mt-4"><table><thead><tr><th>Mã OTP</th><th>Người gửi</th><th>Số ký tự</th><th>Cắt từ vị trí</th><th>Tự động</th></tr></thead><tbody id="mobile-otp-filters-table"></tbody></table></div>
         </div>
         <div class="data-card">
           <div class="section-heading"><div><p class="eyebrow">OTP</p><h2>OTP mới nhất theo mã</h2></div><button class="btn-secondary" id="mobile-refresh-otp" type="button">Làm mới</button></div>
@@ -341,7 +341,7 @@ function renderMobileOtpFilterForm() {
   form.elements.namedItem("filter_id").value = otpFilter.filter_id || otpFilter.service_code || "onebss";
   form.elements.namedItem("sender_pattern").value = otpFilter.sender_pattern || "";
   form.elements.namedItem("otp_length").value = otpFilter.otp_length || 6;
-  form.elements.namedItem("start_prefix").value = otpFilter.start_prefix || "";
+  form.elements.namedItem("start_prefix").value = otpFilter.start_prefix || "0";
   form.elements.namedItem("enabled").checked = Boolean(otpFilter.enabled);
 }
 
@@ -352,7 +352,7 @@ function renderMobileOtpFilters() {
     <td><strong>${escapeHtml(item.filter_id || item.service_code || item.id || "")}</strong></td>
     <td>${escapeHtml(item.sender_pattern || "")}</td>
     <td>${escapeHtml(String(item.otp_length || 6))}</td>
-    <td>${escapeHtml(item.start_prefix || "-")}</td>
+    <td>${escapeHtml(item.start_prefix || "0")}</td>
     <td><span class="status ${item.enabled ? "viewer" : "inactive"}">${item.enabled ? "Có" : "Không"}</span></td>
   </tr>`).join("") : emptyRow(5, "Chưa có quy tắc OTP");
 }
@@ -381,8 +381,19 @@ async function saveMobileOtpFilter() {
   };
   const response = await api("/api/admin/mobile-gateway/otp/filters", { method: "POST", body: JSON.stringify(payload) });
   form.dataset.loaded = "";
-  showToast(response.latest ? `Đã lưu và tìm thấy OTP ${response.latest.code}` : "Đã lưu quy tắc OTP.");
+  showToast(response.latest ? `Đã lưu và tìm thấy OTP ${response.latest.code}` : "Đã lưu quy tắc OTP, kết quả hiện là null.");
   await loadMobileOtpData();
+}
+
+function mobileOtpLatestStatus(item) {
+  if (!item || item.status === "missing" || !(item.code || item.code_masked)) {
+    return { text: "Không tìm thấy SMS", className: "inactive", ttl: "null" };
+  }
+  if (item.status === "used") return { text: "Đã sử dụng", className: "viewer", ttl: "-" };
+  const expiresAt = Date.parse(item.expires_at || "");
+  const remaining = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+  if (!expiresAt || remaining <= 0 || item.status === "expired") return { text: "Đã hết hiệu lực", className: "inactive", ttl: "0 giây" };
+  return { text: "Còn hiệu lực", className: "pending", ttl: `${remaining} giây` };
 }
 
 function renderMobileOtpLatest() {
@@ -390,11 +401,12 @@ function renderMobileOtpLatest() {
   if (!table) return;
   table.innerHTML = mobileGatewayOtpLatest.length ? mobileGatewayOtpLatest.map((item) => {
     const statusInfo = mobileOtpLatestStatus(item);
+    const code = item.code || item.code_masked || "null";
     return `<tr>
       <td><strong>${escapeHtml(item.filter_id || item.service_code || "")}</strong></td>
       <td>${escapeHtml(item.sender || "")}</td>
-      <td><strong>${escapeHtml(item.code || item.code_masked || "")}</strong></td>
-      <td>${escapeHtml(mobileFormatTime(item.received_at))}</td>
+      <td><strong>${escapeHtml(code)}</strong></td>
+      <td>${escapeHtml(item.received_at ? mobileFormatTime(item.received_at) : "null")}</td>
       <td><span class="status ${statusInfo.className}">${escapeHtml(statusInfo.text)}${statusInfo.ttl !== "-" ? ` · ${escapeHtml(statusInfo.ttl)}` : ""}</span></td>
     </tr>`;
   }).join("") : emptyRow(5, "Chưa có OTP mới");
