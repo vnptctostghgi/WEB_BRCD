@@ -1177,6 +1177,89 @@ def test_onebss_login_deviceid_screen_requests_otp() -> None:
     assert playwright.stopped is True
 
 
+def test_onebss_mobile_gateway_default_filter_matches_vnpt_sms() -> None:
+    from app.modules.mobile_gateway.otp_service import OtpService
+    from app.modules.mobile_gateway.repository import MobileGatewayRepository
+    from app.modules.mobile_gateway.schemas import SmsMessageIn
+
+    with TestClient(app) as client:
+        login(client)
+        repository = MobileGatewayRepository(routes.build_app_repository(), get_settings())
+        config = repository.get_otp_configuration("onebss")
+        onebss_filter = next(item for item in repository.list_otp_filters("onebss", enabled_only=True) if item["filter_id"] == "onebss")
+        assert config["sender_pattern"] == "VNPT"
+        assert onebss_filter["sender_pattern"] == "VNPT"
+        assert onebss_filter["start_prefix"] == ""
+
+        service = OtpService(repository)
+        request = service.create_request("onebss", job_id="onebss-vnpt-test")
+        inserted, skipped = repository.save_sms_messages(
+            "test-device-onebss",
+            [
+                SmsMessageIn(
+                    external_id=f"vnpt-{request['request_id']}",
+                    sender="VNPT",
+                    body="Ma OTP dang nhap OneBSS cua Quy khach la 654321. Tran trong.",
+                    received_at=repository.now(),
+                )
+            ],
+        )
+        assert skipped == 0
+        assert inserted
+        matched = service.match_incoming_sms(inserted[0])
+        assert matched is not None
+        assert service.consume_code(request["request_id"]) == "654321"
+
+
+def test_onebss_mobile_gateway_resolver_auto_submits_otp(monkeypatch) -> None:
+    from app.application import onebss_report_service as service
+
+    events = {}
+
+    class FakeRepository:
+        def __init__(self, base_repository, settings):
+            events["repository_created"] = True
+
+        def ensure_defaults(self):
+            events["defaults_ensured"] = True
+
+        def get_otp_configuration(self, service_code):
+            assert service_code == "onebss"
+            return {"manual_fallback_enabled": True, "auto_fill_enabled": True, "wait_timeout_seconds": 3}
+
+    class FakeOtpService:
+        def __init__(self, repository):
+            events["otp_service_created"] = True
+
+        def create_request(self, service_code, job_id=""):
+            events["service_code"] = service_code
+            events["job_id"] = job_id
+            return {"request_id": "OTP-AUTO-001"}
+
+        def wait_for_code(self, request_id, timeout_seconds):
+            events["request_id"] = request_id
+            events["timeout_seconds"] = timeout_seconds
+            return "654321"
+
+    def fake_continue(settings, session_id, otp, parameters):
+        events["continued"] = (session_id, otp, parameters)
+        return {"ok": True, "status": "success", "message": "auto otp ok", "parameters": parameters}
+
+    monkeypatch.setattr(service, "MobileGatewayRepository", FakeRepository)
+    monkeypatch.setattr(service, "OtpService", FakeOtpService)
+    monkeypatch.setattr(service, "build_repository", lambda settings=None: object())
+    monkeypatch.setattr(service, "continue_onebss_api_session", fake_continue)
+
+    result = service.resolve_onebss_otp_with_mobile_gateway(get_settings(), "api-session-001", {"P_DENNGAY": "11/07/2026"})
+
+    assert result["ok"] is True
+    assert events["service_code"] == "onebss"
+    assert events["job_id"] == "api-session-001"
+    assert events["request_id"] == "OTP-AUTO-001"
+    assert events["timeout_seconds"] == 3
+    assert events["continued"] == ("api-session-001", "654321", {"P_DENNGAY": "11/07/2026"})
+
+
 def test_onebss_auth_transition_waits_for_delayed_otp() -> None:
     from app.application.onebss_report_service import page_contains, wait_for_onebss_auth_transition
 

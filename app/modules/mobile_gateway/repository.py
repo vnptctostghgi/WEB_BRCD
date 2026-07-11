@@ -115,26 +115,36 @@ class MobileGatewayRepository:
         except RuntimeError:
             pass
         try:
-            self._upsert(
-                "otp_filter_configurations",
-                {
-                    "filter_id": "onebss",
-                    "rule_name": "OneBSS mac dinh",
-                    "service_code": "onebss",
-                    "sender_pattern": "293",
-                    "sender_match_type": "contains",
-                    "otp_length": 6,
-                    "start_prefix": "1364",
-                    "validity_seconds": 60,
-                    "enabled": True,
-                    "device_id": "",
-                    "sim_slot": None,
-                    "priority": 10,
-                    "created_at": now,
-                    "updated_at": now,
-                },
-                "filter_id",
+            existing_filter = next(
+                (item for item in self.list_otp_filters(service_code="onebss") if item.get("filter_id") == "onebss"),
+                None,
             )
+            legacy_filter = (
+                existing_filter
+                and str(existing_filter.get("sender_pattern") or "").strip() == "293"
+                and str(existing_filter.get("start_prefix") or "").strip() == "1364"
+            )
+            if not existing_filter or legacy_filter:
+                self._upsert(
+                    "otp_filter_configurations",
+                    {
+                        "filter_id": "onebss",
+                        "rule_name": "OneBSS mac dinh",
+                        "service_code": "onebss",
+                        "sender_pattern": "VNPT",
+                        "sender_match_type": "contains",
+                        "otp_length": 6,
+                        "start_prefix": "",
+                        "validity_seconds": 60,
+                        "enabled": True,
+                        "device_id": "",
+                        "sim_slot": None,
+                        "priority": 10,
+                        "created_at": now,
+                        "updated_at": now,
+                    },
+                    "filter_id",
+                )
         except RuntimeError:
             pass
 

@@ -351,8 +351,8 @@ insert into public.otp_filter_configurations
 (filter_id, rule_name, service_code, sender_pattern, sender_match_type, otp_length,
  start_prefix, validity_seconds, enabled, priority, created_at, updated_at)
 values
-('onebss', 'OneBSS mac dinh', 'onebss', '293', 'contains', 6,
- '1364', 60, true, 10, now(), now())
+('onebss', 'OneBSS mac dinh', 'onebss', 'VNPT', 'contains', 6,
+ '', 60, true, 10, now(), now())
 on conflict (filter_id) do update
 set rule_name = excluded.rule_name,
     service_code = excluded.service_code,
