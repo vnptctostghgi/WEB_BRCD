@@ -4987,6 +4987,7 @@ function renderOneBssReports() {
   const selectedReport = pickedCode ? oneBssReports.find((report) => report.ma_bao_cao === pickedCode) : null;
   const draft = oneBssReportDrafts[0] || createOneBssReportDraft();
   editor.innerHTML = renderOneBssReportEditor(selectedReport || draft, !selectedReport);
+  ensureOneBssOtpServiceCodeField(editor, selectedReport || draft);
   document.querySelectorAll("[data-inline-onebss-field]").forEach((field) => {
     field.addEventListener("input", () => markOneBssReportDirty(field.closest("[data-onebss-row]")));
   });
@@ -4996,6 +4997,15 @@ function renderOneBssReports() {
   document.querySelectorAll("[data-delete-onebss-report]").forEach((button) => {
     button.addEventListener("click", () => deleteInlineOneBssReport(button.dataset.deleteOnebssReport));
   });
+}
+
+function ensureOneBssOtpServiceCodeField(editor, report) {
+  const row = editor?.querySelector("[data-onebss-row]");
+  if (!row || row.querySelector('[data-inline-onebss-field="otp_service_code"]')) return;
+  const before = row.querySelector('[data-inline-onebss-field="danh_sach_bien"]')?.closest("label");
+  const label = document.createElement("label");
+  label.innerHTML = `Ma OTP tu dong<input class="form-control inline-admin-input" data-inline-onebss-field="otp_service_code" value="${escapeHtml(report?.otp_service_code || "onebss")}" placeholder="onebss" /><small class="cell-note">Nhap dung Ma OTP trong Mobile Gateway. OneBSS chi goi ma nay; nguoi gui, so ky tu va vi tri cat lay theo cau hinh OTP Mobile Gateway.</small>`;
+  row.insertBefore(label, before || null);
 }
 
 function renderOneBssReportEditorLoading(text) {
@@ -5034,6 +5044,7 @@ function createOneBssReportDraft() {
       P_LOAI_BIENDONG: "1",
       $merge_excel: { sheet: "DATA", source_column: "P_PHANVUNG_ID" },
     },
+    otp_service_code: "onebss",
     report_url: "",
     storage_link: "",
   };
@@ -5095,6 +5106,7 @@ async function saveInlineOneBssReport(rowKey, button) {
     ten_bao_cao: row.querySelector('[data-inline-onebss-field="ten_bao_cao"]')?.value.trim() || "",
     danh_sach_bien: variables,
     parameters,
+    otp_service_code: row.querySelector('[data-inline-onebss-field="otp_service_code"]')?.value.trim().toLowerCase() || "onebss",
     report_url: row.querySelector('[data-inline-onebss-field="report_url"]')?.value.trim() || "",
     storage_link: row.querySelector('[data-inline-onebss-field="storage_link"]')?.value.trim() || "",
   };
@@ -5512,14 +5524,25 @@ async function clearOneBssRunHistory() {
   const select = $("#onebss-run-report-select");
   const code = select?.value || "";
   const message = $("#onebss-run-message");
+  const button = $("#clear-onebss-run-history");
   if (!confirm("X\u00f3a l\u1ecbch s\u1eed l\u1ea5y d\u1eef li\u1ec7u OneBSS \u0111ang hi\u1ec3n th\u1ecb?")) return;
   const query = code ? `?ma_bao_cao=${encodeURIComponent(code)}` : "";
   try {
-    const response = await api(`/api/onebss-reports/runs${query}`, { method: "DELETE" });
+    if (button) setButtonLoading(button, true);
+    let response;
+    try {
+      response = await api(`/api/onebss-reports/runs${query}`, { method: "DELETE" });
+    } catch (deleteError) {
+      response = await api(`/api/onebss-reports/runs/clear${query}`, { method: "POST" });
+    }
     showMessage(message, `\u0110\u00e3 d\u1ecdn ${response.deleted || 0} d\u00f2ng l\u1ecbch s\u1eed.`);
+    oneBssReportRuns = [];
+    renderOneBssRunHistory();
     await refreshOneBssRunHistory(code);
   } catch (error) {
     showMessage(message, error.message, "error");
+  } finally {
+    if (button) setButtonLoading(button, false);
   }
 }
 
@@ -5621,12 +5644,23 @@ function normalizeMobileGatewayUi() {
         <div class="mt-4 flex items-center justify-between gap-3"><span id="mobile-notification-page-info">Trang 1</span><div class="action-group"><button class="btn-secondary" id="mobile-notification-prev" type="button">Trang trước</button><button class="btn-secondary" id="mobile-notification-next" type="button">Trang sau</button></div></div>
       </section>`;
   }
+  normalizeMobileOtpFormDefaults(root);
   root.querySelector('[data-mobile-panel="commands"]')?.remove();
   root.querySelector('[data-mobile-panel="logs"]')?.remove();
   root.querySelector('[data-mobile-panel="settings"]')?.remove();
   root.querySelector('[data-mobile-panel="notifications"]')?.remove();
   root.querySelector('[data-mobile-panel="media"]')?.remove();
   $("#mobile-refresh-inline")?.addEventListener("click", () => loadMobileGateway({ force: true }));
+}
+
+function normalizeMobileOtpFormDefaults(root) {
+  const form = root?.querySelector("#mobile-otp-filter-form");
+  if (!form || form.dataset.defaultNormalized === "true") return;
+  form.dataset.defaultNormalized = "true";
+  const sender = form.elements.namedItem("sender_pattern");
+  const startPrefix = form.elements.namedItem("start_prefix");
+  if (sender && String(sender.value || "").trim() === "293") sender.value = "VNPT";
+  if (startPrefix && String(startPrefix.value || "").trim() === "1364") startPrefix.value = "0";
 }
 
 function mobileDeviceLabel(deviceId) {

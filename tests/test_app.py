@@ -1048,6 +1048,7 @@ def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
             "ten_bao_cao": "Bien dong PTTB",
             "danh_sach_bien": ["P_TUNGAY", "P_DENNGAY"],
             "parameters": {"P_TUNGAY": "{{month_start}}", "P_DENNGAY": "{{today}}"},
+            "otp_service_code": "otp_onebss",
             "report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST&name=Test",
             "storage_link": "https://drive.google.com/drive/folders/test-folder",
         }
@@ -1061,6 +1062,7 @@ def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
         report = next(item for item in configs.json()["reports"] if item["ma_bao_cao"] == code)
         assert report["danh_sach_bien"] == ["P_TUNGAY", "P_DENNGAY"]
         assert report["parameters"] == {"P_TUNGAY": "{{month_start}}", "P_DENNGAY": "{{today}}"}
+        assert report["otp_service_code"] == "otp_onebss"
 
         first_run = client.post(
             "/api/onebss-reports/run",
@@ -1092,6 +1094,9 @@ def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
         assert cleared.json()["deleted"] == 1
         runs_after_clear = client.get(f"/api/onebss-reports/runs?ma_bao_cao={code}").json()["runs"]
         assert runs_after_clear == []
+        post_clear = client.post(f"/api/onebss-reports/runs/clear?ma_bao_cao={code}")
+        assert post_clear.status_code == 200
+        assert post_clear.json()["deleted"] == 0
 
 
 def test_onebss_login_deviceid_screen_requests_otp() -> None:
@@ -1220,11 +1225,8 @@ def test_onebss_mobile_gateway_resolver_auto_submits_otp(monkeypatch) -> None:
         def __init__(self, base_repository, settings):
             events["repository_created"] = True
 
-        def ensure_defaults(self):
-            events["defaults_ensured"] = True
-
         def get_otp_configuration(self, service_code):
-            assert service_code == "onebss"
+            assert service_code == "otp_onebss"
             return {"manual_fallback_enabled": True, "auto_fill_enabled": True, "wait_timeout_seconds": 3}
 
     class FakeOtpService:
@@ -1250,10 +1252,15 @@ def test_onebss_mobile_gateway_resolver_auto_submits_otp(monkeypatch) -> None:
     monkeypatch.setattr(service, "build_repository", lambda settings=None: object())
     monkeypatch.setattr(service, "continue_onebss_api_session", fake_continue)
 
-    result = service.resolve_onebss_otp_with_mobile_gateway(get_settings(), "api-session-001", {"P_DENNGAY": "11/07/2026"})
+    result = service.resolve_onebss_otp_with_mobile_gateway(
+        get_settings(),
+        "api-session-001",
+        {"P_DENNGAY": "11/07/2026"},
+        otp_service_code="otp_onebss",
+    )
 
     assert result["ok"] is True
-    assert events["service_code"] == "onebss"
+    assert events["service_code"] == "otp_onebss"
     assert events["job_id"] == "api-session-001"
     assert events["request_id"] == "OTP-AUTO-001"
     assert events["timeout_seconds"] == 3
@@ -1448,6 +1455,30 @@ def test_supabase_onebss_run_uses_parameters_json_column(monkeypatch) -> None:
     assert "parameters_json" in captured["payload"]
     assert "parameters" not in captured["payload"]
     assert run["parameters"] == {"P_TUNGAY": "01/07/2026"}
+
+
+def test_supabase_clear_onebss_report_runs_uses_run_id(monkeypatch) -> None:
+    repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
+    calls = []
+
+    def fake_get(table, params):
+        calls.append(("get", table, params))
+        return [{"run_id": "RUN1"}, {"run_id": "RUN2"}]
+
+    def fake_delete(table, params):
+        calls.append(("delete", table, params))
+
+    monkeypatch.setattr(repository, "_get", fake_get)
+    monkeypatch.setattr(repository, "_delete", fake_delete)
+
+    assert repository.clear_onebss_report_runs("ONEBSS01") == 2
+    assert calls[0] == ("get", "onebss_report_runs", {"select": "run_id", "ma_bao_cao": "eq.ONEBSS01"})
+    assert calls[1] == ("delete", "onebss_report_runs", {"ma_bao_cao": "eq.ONEBSS01"})
+
+    calls.clear()
+    assert repository.clear_onebss_report_runs() == 2
+    assert calls[0] == ("get", "onebss_report_runs", {"select": "run_id"})
+    assert calls[1] == ("delete", "onebss_report_runs", {"run_id": "not.is.null"})
 
 
 def test_dynamic_report_expands_comma_values_for_in_bind_params() -> None:

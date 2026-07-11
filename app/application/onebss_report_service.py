@@ -164,6 +164,11 @@ def run_onebss_report_request(
     return start_onebss_api_session(settings, report, resolved_parameters, created_by=created_by)
 
 
+def onebss_report_otp_service_code(report: dict[str, Any] | None) -> str:
+    value = str((report or {}).get("otp_service_code") or "onebss").strip().lower()
+    return value or "onebss"
+
+
 def onebss_manual_otp_response(
     session_id: str,
     parameters: dict[str, Any],
@@ -192,6 +197,7 @@ def resolve_onebss_otp_with_mobile_gateway(
     session_id: str,
     parameters: dict[str, Any],
     *,
+    otp_service_code: str = "onebss",
     report_url: str = "",
     fallback_message: str = "OneBSS da gui OTP ve dien thoai. Hay nhap OTP neu Mobile Gateway chua tu lay duoc.",
 ) -> dict[str, Any]:
@@ -200,15 +206,15 @@ def resolve_onebss_otp_with_mobile_gateway(
 
     request_id = ""
     manual_fallback_enabled = True
+    service_code = str(otp_service_code or "onebss").strip().lower() or "onebss"
     try:
         repository = MobileGatewayRepository(build_repository(settings), settings)
-        repository.ensure_defaults()
-        config = repository.get_otp_configuration("onebss") or {}
+        config = repository.get_otp_configuration(service_code) or {}
         manual_fallback_enabled = bool(config.get("manual_fallback_enabled", True))
         if config and not bool(config.get("auto_fill_enabled", True)):
             return onebss_manual_otp_response(session_id, parameters, fallback_message, report_url=report_url)
         service = OtpService(repository)
-        otp_request = service.create_request("onebss", job_id=session_id)
+        otp_request = service.create_request(service_code, job_id=session_id)
         request_id = str(otp_request.get("request_id") or "")
         timeout_seconds = int((config or {}).get("wait_timeout_seconds") or otp_request.get("wait_timeout_seconds") or 120)
         code = service.wait_for_code(request_id, timeout_seconds)
@@ -289,6 +295,7 @@ def start_onebss_api_session(
             settings,
             pending.session_id,
             parameters,
+            otp_service_code=onebss_report_otp_service_code(report),
             report_url=report_url,
             fallback_message="OneBSS da gui OTP ve dien thoai. Hay nhap OTP.",
         )
@@ -432,7 +439,13 @@ def start_onebss_report_session(
             wait_for_onebss_auth_transition(page, helper, timeout_ms=30000)
             if page_contains(page, OTP_TEXT_NEEDLES):
                 pending = keep_onebss_session(playwright, browser, context, page, report, parameters, created_by)
-                return resolve_onebss_otp_with_mobile_gateway(settings, pending.session_id, parameters, fallback_message="OneBSS yeu cau OTP. Hay nhap OTP neu Mobile Gateway chua tu lay duoc.")
+                return resolve_onebss_otp_with_mobile_gateway(
+                    settings,
+                    pending.session_id,
+                    parameters,
+                    otp_service_code=onebss_report_otp_service_code(report),
+                    fallback_message="OneBSS yeu cau OTP. Hay nhap OTP neu Mobile Gateway chua tu lay duoc.",
+                )
             device_result = handle_onebss_device_registration(page, helper, parameters)
             if device_result:
                 close_browser_stack(browser, context, playwright)
@@ -1801,6 +1814,7 @@ def handle_onebss_otp_request(
         settings,
         pending.session_id,
         parameters,
+        otp_service_code=onebss_report_otp_service_code(report),
         fallback_message="OneBSS da gui yeu cau OTP. Hay nhap ma OTP khi dien thoai nhan duoc.",
     )
 

@@ -607,12 +607,14 @@ class SupabaseRepository:
         parameters: dict[str, Any],
         report_url: str,
         storage_link: str,
+        otp_service_code: str = "onebss",
     ) -> int:
         payload = {
             "ma_bao_cao": ma_bao_cao,
             "ten_bao_cao": ten_bao_cao,
             "danh_sach_bien": danh_sach_bien,
             "parameters": parameters if isinstance(parameters, dict) else {},
+            "otp_service_code": str(otp_service_code or "onebss").strip().lower() or "onebss",
             "report_url": report_url,
             "storage_link": storage_link,
             "updated_at": self._now(),
@@ -656,11 +658,11 @@ class SupabaseRepository:
 
     def clear_onebss_report_runs(self, ma_bao_cao: str = "") -> int:
         if ma_bao_cao:
-            existing = self._get("onebss_report_runs", {"select": "id", "ma_bao_cao": f"eq.{ma_bao_cao}"})
+            existing = self._get("onebss_report_runs", {"select": "run_id", "ma_bao_cao": f"eq.{ma_bao_cao}"})
             self._delete("onebss_report_runs", {"ma_bao_cao": f"eq.{ma_bao_cao}"})
         else:
-            existing = self._get("onebss_report_runs", {"select": "id"})
-            self._delete("onebss_report_runs", {"id": "gt.0"})
+            existing = self._get("onebss_report_runs", {"select": "run_id"})
+            self._delete("onebss_report_runs", {"run_id": "not.is.null"})
         return len(existing)
 
     def list_dashboard_layouts(self) -> list[dict[str, Any]]:
@@ -1125,6 +1127,7 @@ class SupabaseRepository:
             "ten_bao_cao": row.get("ten_bao_cao") or "",
             "danh_sach_bien": variables if isinstance(variables, list) else [],
             "parameters": parameters if isinstance(parameters, dict) else {},
+            "otp_service_code": row.get("otp_service_code") or "onebss",
             "report_url": row.get("report_url") or "",
             "storage_link": row.get("storage_link") or "",
             "created_at": row.get("created_at"),

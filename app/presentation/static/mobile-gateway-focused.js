@@ -75,8 +75,19 @@ function normalizeMobileGatewayUi() {
         </div>
       </section>`;
   }
+  normalizeMobileOtpFormDefaults(root);
   ["commands", "logs", "settings", "notifications", "media"].forEach((name) => root.querySelector(`[data-mobile-panel="${name}"]`)?.remove());
   bindMobileGatewayFocusedEvents();
+}
+
+function normalizeMobileOtpFormDefaults(root) {
+  const form = root?.querySelector("#mobile-otp-filter-form");
+  if (!form || form.dataset.defaultNormalized === "true") return;
+  form.dataset.defaultNormalized = "true";
+  const sender = form.elements.namedItem("sender_pattern");
+  const startPrefix = form.elements.namedItem("start_prefix");
+  if (sender && String(sender.value || "").trim() === "293") sender.value = "VNPT";
+  if (startPrefix && String(startPrefix.value || "").trim() === "1364") startPrefix.value = "0";
 }
 
 function bindMobileGatewayFocusedEvents() {

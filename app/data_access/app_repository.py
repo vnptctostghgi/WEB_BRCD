@@ -274,6 +274,7 @@ class AppRepository:
                     ten_bao_cao TEXT NOT NULL,
                     danh_sach_bien_json TEXT NOT NULL DEFAULT '[]',
                     parameters_json TEXT NOT NULL DEFAULT '{}',
+                    otp_service_code TEXT NOT NULL DEFAULT 'onebss',
                     report_url TEXT NOT NULL,
                     storage_link TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
@@ -473,6 +474,10 @@ class AppRepository:
                     pass
             try:
                 connection.execute("ALTER TABLE onebss_reports ADD COLUMN parameters_json TEXT NOT NULL DEFAULT '{}'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                connection.execute("ALTER TABLE onebss_reports ADD COLUMN otp_service_code TEXT NOT NULL DEFAULT 'onebss'")
             except sqlite3.OperationalError:
                 pass
             legacy_menu = connection.execute(
@@ -1108,28 +1113,30 @@ class AppRepository:
         parameters: dict[str, Any],
         report_url: str,
         storage_link: str,
+        otp_service_code: str = "onebss",
     ) -> int:
         now = self._now()
         params_payload = json.dumps(danh_sach_bien, ensure_ascii=False)
         parameters_payload = json.dumps(parameters if isinstance(parameters, dict) else {}, ensure_ascii=False)
+        otp_code = str(otp_service_code or "onebss").strip().lower() or "onebss"
         with self.connect() as connection:
             if report_id:
                 connection.execute(
                     """
                     UPDATE onebss_reports
-                    SET ma_bao_cao=?, ten_bao_cao=?, danh_sach_bien_json=?, parameters_json=?, report_url=?, storage_link=?, updated_at=?
+                    SET ma_bao_cao=?, ten_bao_cao=?, danh_sach_bien_json=?, parameters_json=?, report_url=?, storage_link=?, otp_service_code=?, updated_at=?
                     WHERE id=?
                     """,
-                    (ma_bao_cao, ten_bao_cao, params_payload, parameters_payload, report_url, storage_link, now, report_id),
+                    (ma_bao_cao, ten_bao_cao, params_payload, parameters_payload, report_url, storage_link, otp_code, now, report_id),
                 )
                 return int(report_id)
             cursor = connection.execute(
                 """
                 INSERT INTO onebss_reports
-                (ma_bao_cao, ten_bao_cao, danh_sach_bien_json, parameters_json, report_url, storage_link, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (ma_bao_cao, ten_bao_cao, danh_sach_bien_json, parameters_json, report_url, storage_link, otp_service_code, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (ma_bao_cao, ten_bao_cao, params_payload, parameters_payload, report_url, storage_link, now, now),
+                (ma_bao_cao, ten_bao_cao, params_payload, parameters_payload, report_url, storage_link, otp_code, now, now),
             )
             return int(cursor.lastrowid)
 
@@ -1873,6 +1880,7 @@ class AppRepository:
             "ten_bao_cao": row.get("ten_bao_cao") or "",
             "danh_sach_bien": variables if isinstance(variables, list) else [],
             "parameters": parameters if isinstance(parameters, dict) else {},
+            "otp_service_code": row.get("otp_service_code") or "onebss",
             "report_url": row.get("report_url") or "",
             "storage_link": row.get("storage_link") or "",
             "created_at": row.get("created_at"),

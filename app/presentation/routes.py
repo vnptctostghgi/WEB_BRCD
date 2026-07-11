@@ -266,6 +266,7 @@ class OneBssReportPayload(BaseModel):
     ten_bao_cao: str
     danh_sach_bien: list[str] = Field(default_factory=list)
     parameters: dict[str, Any] = Field(default_factory=dict)
+    otp_service_code: str = "onebss"
     report_url: str
     storage_link: str = ""
 
@@ -1724,6 +1725,7 @@ def save_admin_onebss_report(request: Request, payload: OneBssReportPayload) -> 
             payload.parameters if isinstance(payload.parameters, dict) else {},
             report_url,
             payload.storage_link.strip(),
+            payload.otp_service_code.strip().lower() or "onebss",
         )
     except sqlite3.IntegrityError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ma bao cao OneBSS da ton tai.") from error
@@ -1969,6 +1971,7 @@ def list_onebss_report_runs(request: Request, ma_bao_cao: str = "", limit: int =
 
 
 @router.delete("/api/onebss-reports/runs")
+@router.post("/api/onebss-reports/runs/clear")
 def clear_onebss_report_runs(request: Request, ma_bao_cao: str = "") -> dict:
     actor = admin_user(request)
     repository = build_app_repository()
