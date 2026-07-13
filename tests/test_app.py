@@ -1131,6 +1131,21 @@ def test_dynamic_report_search_and_excel_export_use_full_result_set(monkeypatch)
         assert sheet.max_row == 3
         assert {sheet.cell(row=index, column=1).value for index in range(2, sheet.max_row + 1)} == {"tb001", "tb003"}
 
+        loaded_export = client.post(
+            "/api/reports/export-loaded",
+            json={
+                "ma_bao_cao": "BC_SEARCH_EXPORT",
+                "columns": ["MA_TB", "TEN_TB", "DIACHI_LD"],
+                "rows": [rows[2]],
+                "search": "phan thuy",
+            },
+        )
+        assert loaded_export.status_code == 200
+        loaded_workbook = openpyxl.load_workbook(BytesIO(loaded_export.content))
+        loaded_sheet = loaded_workbook.active
+        assert loaded_sheet.max_row == 2
+        assert loaded_sheet["A2"].value == "tb003"
+
 
 def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
     calls = []

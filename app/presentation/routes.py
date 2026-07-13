@@ -279,6 +279,13 @@ class RunReportPayload(BaseModel):
     search: str = ""
 
 
+class ExportLoadedReportPayload(BaseModel):
+    ma_bao_cao: str
+    columns: list[str] = Field(default_factory=list)
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    search: str = ""
+
+
 class RunOneBssReportPayload(BaseModel):
     ma_bao_cao: str
     parameters: dict[str, Any] = Field(default_factory=dict)
@@ -2016,6 +2023,29 @@ def export_dynamic_report(request: Request, payload: RunReportPayload) -> Respon
     if not result.get("ok"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.get("message") or "Không xuất được file Excel.")
 
+    workbook = _dynamic_report_excel_workbook(result)
+    stream = BytesIO()
+    workbook.save(stream)
+    stream.seek(0)
+    filename = _dynamic_report_export_filename(result)
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
+@router.post("/api/reports/export-loaded")
+def export_loaded_dynamic_report(request: Request, payload: ExportLoadedReportPayload) -> Response:
+    admin_user(request)
+    max_rows = get_settings().dynamic_report_export_max_rows
+    rows = payload.rows[:max_rows]
+    result = {
+        "ok": True,
+        "report": {"ma_bao_cao": payload.ma_bao_cao.strip().upper() or "TRUY_VAN_SQL"},
+        "columns": payload.columns,
+        "rows": rows,
+    }
     workbook = _dynamic_report_excel_workbook(result)
     stream = BytesIO()
     workbook.save(stream)
