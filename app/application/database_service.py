@@ -100,6 +100,7 @@ class DatabaseService:
         page: int,
         page_size: int,
         search: str = "",
+        search_columns: list[str] | None = None,
         report_id: Any = None,
         report_name: Any = None,
     ) -> dict[str, Any]:
@@ -144,66 +145,12 @@ class DatabaseService:
         search_text = str(search or "").strip()
 
         if search_text:
-            try:
-                fetched = self._fetch_dynamic_report_rows(
-                    ten_bao_cao=report["ten_bao_cao"],
-                    ma_bao_cao=safe_report_code,
-                    cau_lenh_sql=compiled_sql,
-                    tham_so=executable_filters,
-                    max_rows=self._dynamic_report_export_max_rows(),
-                )
-            except httpx.TimeoutException as error:
-                logger.exception("Dynamic report search timeout: %s", error)
-                return self._failed_report("API dữ liệu nội bộ phản hồi quá lâu.", safe_page, safe_page_size, str(error), compiled_sql, executable_filters, define_details)
-            except httpx.HTTPStatusError as error:
-                logger.exception("Dynamic report search HTTP error: %s", error)
-                return self._failed_report(
-                    f"API dữ liệu nội bộ trả lỗi HTTP {error.response.status_code}.",
-                    safe_page,
-                    safe_page_size,
-                    error.response.text[:300],
-                    compiled_sql,
-                    executable_filters,
-                    define_details,
-                )
-            except httpx.HTTPError as error:
-                logger.exception("Dynamic report search connection error: %s", error)
-                return self._failed_report(self._internal_api_connection_message(error), safe_page, safe_page_size, str(error), compiled_sql, executable_filters, define_details)
-            except RuntimeError as error:
-                logger.exception("Dynamic report search API error: %s", error)
-                return self._failed_report("API dữ liệu nội bộ trả lỗi khi chạy báo cáo.", safe_page, safe_page_size, str(error), compiled_sql, executable_filters, define_details)
-
-            columns = fetched["columns"]
-            matched_rows = self._filter_rows_by_search(fetched["rows"], columns, search_text)
-            start = (safe_page - 1) * safe_page_size
-            rows = matched_rows[start:start + safe_page_size]
-            details = {
-                "search": search_text,
-                "fetched_total": fetched["fetched_total"],
-                "fetched_rows": len(fetched["rows"]),
-                "truncated": fetched["truncated"],
-            }
-            if ignored_filters:
-                details = {**details, "ignored_filters": ignored_filters, "allowed_params": allowed_params}
-            if define_details:
-                details = {**details, **define_details, "sent_params": executable_filters}
-            return {
-                "ok": True,
-                "message": f"Đã tìm thấy {len(matched_rows)} dòng phù hợp.",
-                "details": details,
-                "report": {
-                    "ten_bao_cao": report["ten_bao_cao"],
-                    "ma_bao_cao": report["ma_bao_cao"],
-                    "cac_tham_so": report.get("cac_tham_so") or [],
-                },
-                "columns": columns,
-                "rows": rows,
-                "pagination": {
-                    "page": safe_page,
-                    "page_size": safe_page_size,
-                    "total": len(matched_rows),
-                },
-            }
+            compiled_sql, executable_filters = self._wrap_sql_for_search(
+                compiled_sql,
+                executable_filters,
+                search_columns or [],
+                search_text,
+            )
 
         try:
             result = self.internal_api.run_sql_report(
@@ -270,6 +217,7 @@ class DatabaseService:
         ma_bao_cao: str,
         filters: dict[str, Any],
         search: str = "",
+        search_columns: list[str] | None = None,
         report_id: Any = None,
         report_name: Any = None,
     ) -> dict[str, Any]:
@@ -304,6 +252,14 @@ class DatabaseService:
             or self._normalized_report_code(ma_bao_cao)
             or str(report.get("ma_bao_cao") or ma_bao_cao).strip()
         )
+        search_text = str(search or "").strip()
+        if search_text:
+            compiled_sql, executable_filters = self._wrap_sql_for_search(
+                compiled_sql,
+                executable_filters,
+                search_columns or [],
+                search_text,
+            )
 
         try:
             fetched = self._fetch_dynamic_report_rows(
@@ -334,8 +290,7 @@ class DatabaseService:
             logger.exception("Dynamic report export API error: %s", error)
             return self._failed_report("API dữ liệu nội bộ trả lỗi khi chạy báo cáo.", 1, fetch_page_size, str(error), compiled_sql, executable_filters, define_details)
 
-        search_text = str(search or "").strip()
-        rows = self._filter_rows_by_search(fetched["rows"], fetched["columns"], search_text) if search_text else fetched["rows"]
+        rows = fetched["rows"]
         details = {
             "search": search_text,
             "fetched_total": fetched["fetched_total"],
@@ -361,6 +316,42 @@ class DatabaseService:
             "rows": rows,
             "pagination": {"page": 1, "page_size": len(rows), "total": len(rows)},
         }
+
+    @classmethod
+    def _wrap_sql_for_search(
+        cls,
+        sql: str,
+        filters: dict[str, Any],
+        search_columns: list[str],
+        search: str,
+    ) -> tuple[str, dict[str, Any]]:
+        columns = [str(column).strip() for column in search_columns if str(column).strip()]
+        if not columns:
+            raise RuntimeError("Chưa có danh sách cột để tìm kiếm. Hãy bấm Lấy dữ liệu trước, sau đó bấm Tìm.")
+
+        terms = [term for term in re.split(r"\s+", str(search or "").casefold().strip()) if term]
+        if not terms:
+            return sql, filters
+
+        wrapped_filters = dict(filters)
+        term_clauses: list[str] = []
+        for term_index, term in enumerate(terms, start=1):
+            bind_name = f"__SEARCH_{term_index}"
+            wrapped_filters[bind_name] = f"%{term}%"
+            column_clauses = [
+                f"LOWER(TO_CHAR(Q.{cls._quote_oracle_identifier(column)})) LIKE :{bind_name}"
+                for column in columns
+            ]
+            term_clauses.append("(" + " OR ".join(column_clauses) + ")")
+
+        clean_sql = sql.strip()
+        while clean_sql.endswith(";"):
+            clean_sql = clean_sql[:-1].strip()
+        return f"SELECT * FROM ({clean_sql}) Q WHERE {' AND '.join(term_clauses)}", wrapped_filters
+
+    @staticmethod
+    def _quote_oracle_identifier(identifier: str) -> str:
+        return '"' + str(identifier).replace('"', '""') + '"'
 
     def _dynamic_report_fetch_page_size(self) -> int:
         settings = getattr(self.internal_api, "settings", None)

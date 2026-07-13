@@ -1079,19 +1079,26 @@ def test_admin_can_manage_sql_reports_and_run_dynamic_report() -> None:
 
 def test_dynamic_report_search_and_excel_export_use_full_result_set(monkeypatch) -> None:
     rows = [
-        {"MA_TB": "tb001", "TEN_TB": "Nguyễn Văn A", "DIACHI_LD": "Cần Thơ"},
-        {"MA_TB": "tb002", "TEN_TB": "Trần Bình", "DIACHI_LD": "Sóc Trăng"},
-        {"MA_TB": "tb003", "TEN_TB": "Phan Thúy Ngân", "DIACHI_LD": "Cần Thơ"},
+        {"MA_TB": "tb001", "TEN_TB": "Nguyen Van A", "DIACHI_LD": "Can Tho"},
+        {"MA_TB": "tb002", "TEN_TB": "Tran Binh", "DIACHI_LD": "Soc Trang"},
+        {"MA_TB": "tb003", "TEN_TB": "Phan Thuy Ngan", "DIACHI_LD": "Can Tho"},
     ]
     calls = []
 
     def fake_run_sql_report(self, **kwargs):
         calls.append(kwargs)
+        result_rows = rows
+        search_value = str(kwargs.get("tham_so", {}).get("__SEARCH_1", "")).strip("%").lower()
+        if search_value:
+            result_rows = [
+                row for row in rows
+                if search_value in " ".join(str(value).lower() for value in row.values())
+            ]
         return {
             "ok": True,
             "columns": ["MA_TB", "TEN_TB", "DIACHI_LD"],
-            "rows": rows,
-            "total": len(rows),
+            "rows": result_rows,
+            "total": len(result_rows),
             "page": kwargs["page"],
             "page_size": kwargs["page_size"],
             "message": "ok",
@@ -1111,17 +1118,32 @@ def test_dynamic_report_search_and_excel_export_use_full_result_set(monkeypatch)
 
         result = client.post(
             "/api/reports/run",
-            json={"ma_bao_cao": "BC_SEARCH_EXPORT", "filters": {}, "search": "phan thuy", "page": 1, "page_size": 20},
+            json={
+                "ma_bao_cao": "BC_SEARCH_EXPORT",
+                "filters": {},
+                "search": "phan thuy",
+                "search_columns": ["MA_TB", "TEN_TB", "DIACHI_LD"],
+                "page": 1,
+                "page_size": 20,
+            },
         )
         assert result.status_code == 200
         body = result.json()
         assert body["pagination"]["total"] == 1
         assert body["rows"][0]["MA_TB"] == "tb003"
-        assert calls[-1]["page_size"] == 500
+        assert calls[-1]["page_size"] == 20
+        assert "WHERE" in calls[-1]["cau_lenh_sql"]
 
         export = client.post(
             "/api/reports/export",
-            json={"ma_bao_cao": "BC_SEARCH_EXPORT", "filters": {}, "search": "can tho", "page": 1, "page_size": 20},
+            json={
+                "ma_bao_cao": "BC_SEARCH_EXPORT",
+                "filters": {},
+                "search": "can tho",
+                "search_columns": ["MA_TB", "TEN_TB", "DIACHI_LD"],
+                "page": 1,
+                "page_size": 20,
+            },
         )
         assert export.status_code == 200
         assert export.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")

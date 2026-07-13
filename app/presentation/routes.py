@@ -277,6 +277,7 @@ class RunReportPayload(BaseModel):
     page: int = 1
     page_size: int = 20
     search: str = ""
+    search_columns: list[str] = Field(default_factory=list)
 
 
 class ExportLoadedReportPayload(BaseModel):
@@ -2003,6 +2004,7 @@ def run_dynamic_report(request: Request, payload: RunReportPayload) -> dict:
             page=payload.page,
             page_size=payload.page_size,
             search=payload.search,
+            search_columns=payload.search_columns,
         )
     except RuntimeError as error:
         raise_sql_report_schema_error(error)
@@ -2016,6 +2018,7 @@ def export_dynamic_report(request: Request, payload: RunReportPayload) -> Respon
             ma_bao_cao=payload.ma_bao_cao.strip().upper(),
             filters=payload.filters,
             search=payload.search,
+            search_columns=payload.search_columns,
         )
     except RuntimeError as error:
         raise_sql_report_schema_error(error)

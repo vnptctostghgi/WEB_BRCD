@@ -1159,7 +1159,8 @@ if (role === "admin") {
   $("#dynamic-report-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     dynamicReportPage = 1;
-    await loadDynamicReportData();
+    dynamicReportSearchActive = false;
+    await loadDynamicReportData({ includeSearch: false });
   });
   $("#dynamic-report-search")?.addEventListener("input", () => {
     dynamicReportPage = 1;
@@ -1171,25 +1172,25 @@ if (role === "admin") {
     }
   });
   $("#search-dynamic-report")?.addEventListener("click", applyDynamicReportSearch);
-  $("#dynamic-report-page-size")?.addEventListener("change", () => {
+  $("#dynamic-report-page-size")?.addEventListener("change", async () => {
     dynamicReportPage = 1;
-    if (dynamicReportLoadedRows.length) renderDynamicReportLocalPage();
+    if (dynamicReportLoaded) await loadDynamicReportData();
   });
   $("#export-dynamic-report")?.addEventListener("click", exportDynamicReport);
   $("#dynamic-report-select")?.addEventListener("change", () => {
     clearDynamicReportCache();
     renderDynamicReportFilters();
   });
-  $("#dynamic-report-prev")?.addEventListener("click", () => {
+  $("#dynamic-report-prev")?.addEventListener("click", async () => {
     if (dynamicReportPage <= 1) return;
     dynamicReportPage -= 1;
-    renderDynamicReportLocalPage();
+    await loadDynamicReportData();
   });
-  $("#dynamic-report-next")?.addEventListener("click", () => {
+  $("#dynamic-report-next")?.addEventListener("click", async () => {
     const pageSize = Number($("#dynamic-report-page-size")?.value || 20);
     if (dynamicReportPage * pageSize >= dynamicReportTotal) return;
     dynamicReportPage += 1;
-    renderDynamicReportLocalPage();
+    await loadDynamicReportData();
   });
   $("#user-search")?.addEventListener("input", renderUsersTable);
   $("#user-import-file")?.addEventListener("change", importUserFile);
@@ -5235,16 +5236,15 @@ function dynamicReportFilters() {
   return filters;
 }
 
-const DYNAMIC_REPORT_FETCH_PAGE_SIZE = 500;
-const DYNAMIC_REPORT_MAX_LOADED_ROWS = 100000;
-
-function dynamicReportPayload({ page = dynamicReportPage, pageSize = DYNAMIC_REPORT_FETCH_PAGE_SIZE } = {}) {
+function dynamicReportPayload({ page = dynamicReportPage, includeSearch = dynamicReportSearchActive } = {}) {
+  const search = includeSearch ? ($("#dynamic-report-search")?.value || "").trim() : "";
   return {
     ma_bao_cao: $("#dynamic-report-select")?.value || "",
     filters: dynamicReportFilters(),
-    search: "",
+    search,
+    search_columns: search ? dynamicReportColumns : [],
     page,
-    page_size: pageSize,
+    page_size: Number($("#dynamic-report-page-size")?.value || 20),
   };
 }
 
@@ -5272,51 +5272,19 @@ function normalizeDynamicSearchText(value) {
     .trim();
 }
 
-function localDynamicReportMatches(row, columns, terms) {
-  const haystack = normalizeDynamicSearchText(columns.map((column) => row[column]).join(" "));
-  return terms.every((term) => haystack.includes(term));
-}
-
-function applyDynamicReportSearch() {
+async function applyDynamicReportSearch() {
   const message = $("#dynamic-report-message");
-  if (!dynamicReportLoadedRows.length) {
-    showMessage(message, "Bấm Lấy dữ liệu trước, sau đó mới tìm trên dữ liệu đã tải.", "error");
+  if (!dynamicReportColumns.length) {
+    showMessage(message, "Bấm Lấy dữ liệu trước để hệ thống nhận danh sách cột, sau đó mới Tìm.", "error");
     return;
   }
   const search = ($("#dynamic-report-search")?.value || "").trim();
-  const terms = normalizeDynamicSearchText(search).split(" ").filter(Boolean);
   dynamicReportPage = 1;
-  if (!terms.length) {
-    dynamicReportSearchActive = false;
-    dynamicReportFilteredRows = [];
-    renderDynamicReportLocalPage();
-    showMessage(message, `Đang hiển thị ${dynamicReportLoadedRows.length} dòng đã tải.`);
-    return;
-  }
-  dynamicReportSearchActive = true;
-  dynamicReportFilteredRows = dynamicReportLoadedRows.filter((row) => localDynamicReportMatches(row, dynamicReportColumns, terms));
-  renderDynamicReportLocalPage();
-  showMessage(message, `Đã tìm thấy ${dynamicReportFilteredRows.length} dòng trong ${dynamicReportLoadedRows.length} dòng đã tải.`);
+  dynamicReportSearchActive = Boolean(search);
+  await loadDynamicReportData({ includeSearch: dynamicReportSearchActive });
 }
 
-function renderDynamicReportLocalPage() {
-  const sourceRows = dynamicReportSearchActive ? dynamicReportFilteredRows : dynamicReportLoadedRows;
-  const pageSize = Number($("#dynamic-report-page-size")?.value || 20);
-  const totalPages = Math.max(1, Math.ceil(sourceRows.length / pageSize));
-  dynamicReportPage = Math.min(Math.max(1, dynamicReportPage), totalPages);
-  const start = (dynamicReportPage - 1) * pageSize;
-  renderDynamicReportTable({
-    columns: dynamicReportColumns,
-    rows: sourceRows.slice(start, start + pageSize),
-    pagination: {
-      page: dynamicReportPage,
-      page_size: pageSize,
-      total: sourceRows.length,
-    },
-  });
-}
-
-async function loadDynamicReportData() {
+async function loadDynamicReportData({ includeSearch = dynamicReportSearchActive } = {}) {
   const select = $("#dynamic-report-select");
   const message = $("#dynamic-report-message");
   const button = $("#run-dynamic-report");
@@ -5327,35 +5295,19 @@ async function loadDynamicReportData() {
   }
   setButtonLoading(button, true);
   try {
-    dynamicReportColumns = [];
-    dynamicReportLoadedRows = [];
+    const response = await api("/api/reports/run", {
+      method: "POST",
+      body: JSON.stringify(dynamicReportPayload({ includeSearch })),
+    });
+    if (response.ok === false) throw new Error(response.message || "Không tải được dữ liệu báo cáo.");
+    const rows = Array.isArray(response.rows) ? response.rows : [];
+    dynamicReportColumns = response.columns || dynamicReportColumns;
+    if (!dynamicReportColumns.length && rows[0]) dynamicReportColumns = Object.keys(rows[0]);
+    dynamicReportLoadedRows = rows;
     dynamicReportFilteredRows = [];
-    dynamicReportSearchActive = false;
-    dynamicReportLoaded = false;
-    let page = 1;
-    let total = 0;
-    while (dynamicReportLoadedRows.length < DYNAMIC_REPORT_MAX_LOADED_ROWS) {
-      const response = await api("/api/reports/run", {
-        method: "POST",
-        body: JSON.stringify(dynamicReportPayload({ page, pageSize: DYNAMIC_REPORT_FETCH_PAGE_SIZE })),
-      });
-      if (response.ok === false) throw new Error(response.message || "Không tải được dữ liệu báo cáo.");
-      const rows = Array.isArray(response.rows) ? response.rows : [];
-      if (!dynamicReportColumns.length) dynamicReportColumns = response.columns || [];
-      if (!dynamicReportColumns.length && rows[0]) dynamicReportColumns = Object.keys(rows[0]);
-      dynamicReportLoadedRows.push(...rows);
-      total = Number(response.pagination?.total || response.total || total || rows.length || 0);
-      showMessage(message, total ? `Đang tải ${dynamicReportLoadedRows.length}/${total} dòng...` : `Đang tải ${dynamicReportLoadedRows.length} dòng...`);
-
-      const responsePageSize = Math.max(1, Number(response.pagination?.page_size || rows.length || DYNAMIC_REPORT_FETCH_PAGE_SIZE));
-      if (!rows.length || (total && dynamicReportLoadedRows.length >= total) || rows.length < responsePageSize) break;
-      page += 1;
-    }
     dynamicReportLoaded = true;
-    dynamicReportPage = 1;
-    renderDynamicReportLocalPage();
-    const limited = dynamicReportLoadedRows.length >= DYNAMIC_REPORT_MAX_LOADED_ROWS ? ` Giới hạn tải ${DYNAMIC_REPORT_MAX_LOADED_ROWS} dòng.` : "";
-    showMessage(message, `Đã tải ${dynamicReportLoadedRows.length}${total ? `/${total}` : ""} dòng. Nhập từ khóa rồi bấm Tìm để lọc tại chỗ.${limited}`);
+    renderDynamicReportTable(response);
+    showMessage(message, response.message || (includeSearch ? "Đã tải kết quả tìm kiếm." : "Đã tải dữ liệu báo cáo."));
   } catch (error) {
     showMessage(message, error.message, "error");
   } finally {
@@ -5402,22 +5354,16 @@ async function exportDynamicReport() {
     showMessage(message, "Chọn loại báo cáo trước khi xuất file.", "error");
     return;
   }
-  const rows = dynamicReportSearchActive ? dynamicReportFilteredRows : dynamicReportLoadedRows;
-  if (!rows.length) {
+  if (!dynamicReportColumns.length) {
     showMessage(message, "Bấm Lấy dữ liệu trước, sau đó mới xuất file Excel.", "error");
     return;
   }
   setButtonLoading(button, true);
   try {
-    const response = await fetch("/api/reports/export-loaded", {
+    const response = await fetch("/api/reports/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ma_bao_cao: select.value,
-        columns: dynamicReportColumns,
-        rows,
-        search: dynamicReportSearchActive ? ($("#dynamic-report-search")?.value || "").trim() : "",
-      }),
+      body: JSON.stringify(dynamicReportPayload({ page: 1, includeSearch: dynamicReportSearchActive })),
     });
     if (response.status === 401) {
       window.location.href = "/login";
@@ -5434,7 +5380,7 @@ async function exportDynamicReport() {
     const blob = await response.blob();
     const filename = downloadFileNameFromDisposition(response.headers.get("Content-Disposition")) || dynamicReportFallbackFileName();
     downloadDynamicReportBlob(blob, filename);
-    showMessage(message, `Đã tạo file Excel từ ${rows.length} dòng ${dynamicReportSearchActive ? "đã lọc" : "đã tải"}.`);
+    showMessage(message, "Đã tạo file Excel theo điều kiện hiện tại.");
   } catch (error) {
     showMessage(message, error.message, "error");
   } finally {
