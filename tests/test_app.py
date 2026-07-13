@@ -1,8 +1,10 @@
 import os
 import json
+from io import BytesIO
 from datetime import datetime
 from pathlib import Path
 
+import openpyxl
 import pytest
 
 os.environ["DB_MOCK_MODE"] = "true"
@@ -1073,6 +1075,61 @@ def test_admin_can_manage_sql_reports_and_run_dynamic_report() -> None:
         body = result.json()
         assert body["columns"] == ["STT", "MA_BAO_CAO", "TEN_BAO_CAO", "THAM_SO"]
         assert body["pagination"]["page_size"] == 20
+
+
+def test_dynamic_report_search_and_excel_export_use_full_result_set(monkeypatch) -> None:
+    rows = [
+        {"MA_TB": "tb001", "TEN_TB": "Nguyễn Văn A", "DIACHI_LD": "Cần Thơ"},
+        {"MA_TB": "tb002", "TEN_TB": "Trần Bình", "DIACHI_LD": "Sóc Trăng"},
+        {"MA_TB": "tb003", "TEN_TB": "Phan Thúy Ngân", "DIACHI_LD": "Cần Thơ"},
+    ]
+    calls = []
+
+    def fake_run_sql_report(self, **kwargs):
+        calls.append(kwargs)
+        return {
+            "ok": True,
+            "columns": ["MA_TB", "TEN_TB", "DIACHI_LD"],
+            "rows": rows,
+            "total": len(rows),
+            "page": kwargs["page"],
+            "page_size": kwargs["page_size"],
+            "message": "ok",
+        }
+
+    monkeypatch.setattr(routes.InternalApiClient, "run_sql_report", fake_run_sql_report)
+
+    with TestClient(app) as client:
+        login(client)
+        payload = {
+            "ten_bao_cao": "Bao cao search export",
+            "ma_bao_cao": "BC_SEARCH_EXPORT",
+            "cau_lenh_sql": "SELECT ma_tb, ten_tb, diachi_ld FROM css_cto.db_thuebao;",
+            "cac_tham_so": [],
+        }
+        assert client.post("/api/admin/sql-reports", json=payload).status_code == 200
+
+        result = client.post(
+            "/api/reports/run",
+            json={"ma_bao_cao": "BC_SEARCH_EXPORT", "filters": {}, "search": "phan thuy", "page": 1, "page_size": 20},
+        )
+        assert result.status_code == 200
+        body = result.json()
+        assert body["pagination"]["total"] == 1
+        assert body["rows"][0]["MA_TB"] == "tb003"
+        assert calls[-1]["page_size"] == 500
+
+        export = client.post(
+            "/api/reports/export",
+            json={"ma_bao_cao": "BC_SEARCH_EXPORT", "filters": {}, "search": "can tho", "page": 1, "page_size": 20},
+        )
+        assert export.status_code == 200
+        assert export.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        workbook = openpyxl.load_workbook(BytesIO(export.content))
+        sheet = workbook.active
+        assert [cell.value for cell in sheet[1]] == ["MA_TB", "TEN_TB", "DIACHI_LD"]
+        assert sheet.max_row == 3
+        assert {sheet.cell(row=index, column=1).value for index in range(2, sheet.max_row + 1)} == {"tb001", "tb003"}
 
 
 def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:

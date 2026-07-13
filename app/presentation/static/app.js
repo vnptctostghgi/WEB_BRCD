@@ -1157,6 +1157,14 @@ if (role === "admin") {
     dynamicReportPage = 1;
     await runDynamicReport();
   });
+  $("#dynamic-report-search")?.addEventListener("input", () => {
+    dynamicReportPage = 1;
+  });
+  $("#dynamic-report-page-size")?.addEventListener("change", async () => {
+    dynamicReportPage = 1;
+    await runDynamicReport();
+  });
+  $("#export-dynamic-report")?.addEventListener("click", exportDynamicReport);
   $("#dynamic-report-select")?.addEventListener("change", async () => {
     dynamicReportPage = 1;
     renderDynamicReportFilters();
@@ -5210,6 +5218,24 @@ function renderDynamicReportFilters() {
   }).join("");
 }
 
+function dynamicReportFilters() {
+  const filters = {};
+  document.querySelectorAll(".dynamic-filter").forEach((input) => {
+    if (input.value) filters[input.name] = input.value;
+  });
+  return filters;
+}
+
+function dynamicReportPayload({ page = dynamicReportPage } = {}) {
+  return {
+    ma_bao_cao: $("#dynamic-report-select")?.value || "",
+    filters: dynamicReportFilters(),
+    search: ($("#dynamic-report-search")?.value || "").trim(),
+    page,
+    page_size: Number($("#dynamic-report-page-size")?.value || 20),
+  };
+}
+
 async function runDynamicReport() {
   const select = $("#dynamic-report-select");
   const message = $("#dynamic-report-message");
@@ -5219,20 +5245,80 @@ async function runDynamicReport() {
     $("#dynamic-report-body").innerHTML = emptyRow(1, "Chưa có báo cáo", "Hãy thêm cấu hình SQL trong Quản trị kết nối.");
     return;
   }
-  const filters = {};
-  document.querySelectorAll(".dynamic-filter").forEach((input) => {
-    if (input.value) filters[input.name] = input.value;
-  });
   setButtonLoading(button, true);
   try {
-    const response = await api("/api/reports/run", { method: "POST", body: JSON.stringify({
-      ma_bao_cao: select.value,
-      filters,
-      page: dynamicReportPage,
-      page_size: Number($("#dynamic-report-page-size")?.value || 20),
-    })});
+    const response = await api("/api/reports/run", { method: "POST", body: JSON.stringify(dynamicReportPayload()) });
     renderDynamicReportTable(response);
     showMessage(message, response.message || "Đã tải dữ liệu báo cáo.");
+  } catch (error) {
+    showMessage(message, error.message, "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+function downloadFileNameFromDisposition(headerValue) {
+  const value = String(headerValue || "");
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(value);
+  if (encoded?.[1]) {
+    try {
+      return decodeURIComponent(encoded[1].replace(/"/g, ""));
+    } catch {
+      return encoded[1].replace(/"/g, "");
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(value);
+  return plain?.[1] || "";
+}
+
+function dynamicReportFallbackFileName() {
+  const code = ($("#dynamic-report-select")?.value || "truy_van_sql").toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "truy_van_sql";
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
+  return `${code}_${stamp}.xlsx`;
+}
+
+function downloadDynamicReportBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename || dynamicReportFallbackFileName();
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function exportDynamicReport() {
+  const select = $("#dynamic-report-select");
+  const message = $("#dynamic-report-message");
+  const button = $("#export-dynamic-report");
+  if (!select || !select.value) {
+    showMessage(message, "Chọn loại báo cáo trước khi xuất file.", "error");
+    return;
+  }
+  setButtonLoading(button, true);
+  try {
+    const response = await fetch("/api/reports/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(dynamicReportPayload({ page: 1 })),
+    });
+    if (response.status === 401) {
+      window.location.href = "/login";
+      throw new Error("Phiên đăng nhập đã hết hạn.");
+    }
+    if (!response.ok) {
+      const text = await response.text();
+      let messageText = text;
+      try {
+        messageText = JSON.parse(text).detail || text;
+      } catch {}
+      throw new Error(messageText || `Không xuất được file Excel (HTTP ${response.status}).`);
+    }
+    const blob = await response.blob();
+    const filename = downloadFileNameFromDisposition(response.headers.get("Content-Disposition")) || dynamicReportFallbackFileName();
+    downloadDynamicReportBlob(blob, filename);
+    showMessage(message, "Đã tạo file Excel theo điều kiện hiện tại.");
   } catch (error) {
     showMessage(message, error.message, "error");
   } finally {

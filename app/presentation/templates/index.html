@@ -25,7 +25,7 @@
       };
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=81" />
+    <link rel="stylesheet" href="/static/styles.css?v=82" />
   </head>
   <body class="app-dark min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'themvasuataikhoan' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'xemmatkhaudaluu' in user.permissions }}">
     <svg class="icon-sprite" aria-hidden="true">
@@ -38,6 +38,8 @@
       <symbol id="icon-database" viewBox="0 0 24 24"><path d="M12 3C7 3 3 4.8 3 7v10c0 2.2 4 4 9 4s9-1.8 9-4V7c0-2.2-4-4-9-4Zm0 2c4.4 0 7 1.4 7 2s-2.6 2-7 2-7-1.4-7-2 2.6-2 7-2Zm0 14c-4.4 0-7-1.4-7-2v-2.2c1.6 1 4.1 1.7 7 1.7s5.4-.7 7-1.7V17c0 .6-2.6 2-7 2Z"/></symbol>
       <symbol id="icon-list" viewBox="0 0 24 24"><path d="M4 5h4v4H4V5Zm6 1h10v2H10V6ZM4 10h4v4H4v-4Zm6 1h10v2H10v-2ZM4 15h4v4H4v-4Zm6 1h10v2H10v-2Z"/></symbol>
       <symbol id="icon-chart" viewBox="0 0 24 24"><path d="M4 20V4h2v14h14v2H4Zm4-4V9h3v7H8Zm5 0V5h3v11h-3Zm5 0v-5h3v5h-3Z"/></symbol>
+      <symbol id="icon-search" viewBox="0 0 24 24"><path d="M10 4a6 6 0 0 1 4.7 9.7l4.8 4.8-1.4 1.4-4.8-4.8A6 6 0 1 1 10 4Zm0 2a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/></symbol>
+      <symbol id="icon-download" viewBox="0 0 24 24"><path d="M11 3h2v9l3.3-3.3 1.4 1.4L12 15.8l-5.7-5.7 1.4-1.4L11 12V3ZM5 18h14v2H5v-2Z"/></symbol>
       <symbol id="icon-audit" viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6V2Zm8 1.5V8h4.5L14 3.5ZM8 12h8v2H8v-2Zm0 4h8v2H8v-2Z"/></symbol>
       <symbol id="icon-sun" viewBox="0 0 24 24"><path d="M12 5a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10ZM11 1h2v3h-2V1Zm0 19h2v3h-2v-3ZM1 11h3v2H1v-2Zm19 0h3v2h-3v-2ZM4.2 2.8l2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4Zm14.9 14.9 2.1 2.1-1.4 1.4-2.1-2.1 1.4-1.4Zm0-11.4-1.4-1.4 2.1-2.1 1.4 1.4-2.1 2.1ZM4.9 17.7l1.4 1.4-2.1 2.1-1.4-1.4 2.1-2.1Z"/></symbol>
       <symbol id="icon-moon" viewBox="0 0 24 24"><path d="M20.8 15.4A8.5 8.5 0 0 1 8.6 3.2 9 9 0 1 0 20.8 15.4ZM6 12a7 7 0 0 1 6.2-7A10.5 10.5 0 0 0 19 11.8 7 7 0 1 1 6 12Z"/></symbol>
@@ -316,13 +318,19 @@
 
         <section class="app-view" id="view-reports">
           <div class="page-header"><div><p class="eyebrow">Truy vấn SQL</p><h1>Truy vấn SQL</h1><p class="subtitle">Dữ liệu được lấy theo thời gian thực qua API nội bộ và hiển thị có phân trang.</p></div></div>
-          <section class="data-card onebss-mining-panel">
-            <form id="dynamic-report-form" class="grid gap-3 xl:grid-cols-[1.2fr_2fr_auto]">
-              <label>Loại báo cáo<select class="form-control" id="dynamic-report-select" name="ma_bao_cao"></select></label>
-              <div id="dynamic-report-filters" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
-              <div class="flex flex-col gap-2 md:flex-row xl:flex-col xl:justify-end">
-                <label>Số dòng<select class="form-control" id="dynamic-report-page-size"><option value="20">20</option><option value="30">30</option><option value="50">50</option></select></label>
-                <button class="btn-primary" id="run-dynamic-report" type="submit"><span class="button-label">Xuất báo cáo</span><span class="spinner"></span></button>
+          <section class="data-card sql-query-panel">
+            <form id="dynamic-report-form" class="dynamic-report-form">
+              <div class="dynamic-report-controls">
+                <label class="dynamic-report-report">Loại báo cáo<select class="form-control" id="dynamic-report-select" name="ma_bao_cao"></select></label>
+                <label class="dynamic-report-search">Tìm kiếm gần đúng<input class="form-control" id="dynamic-report-search" name="search" placeholder="Nhập tên, mã thuê bao, địa chỉ..." autocomplete="off" /></label>
+                <label class="dynamic-report-page-size">Số dòng<select class="form-control" id="dynamic-report-page-size"><option value="20">20</option><option value="30">30</option><option value="50">50</option></select></label>
+              </div>
+              <div class="dynamic-report-filter-row">
+                <div id="dynamic-report-filters" class="dynamic-report-filters"></div>
+                <div class="dynamic-report-actions">
+                  <button class="btn-primary" id="run-dynamic-report" type="submit"><svg class="button-svg"><use href="#icon-search"></use></svg><span class="button-label">Tìm</span><span class="spinner"></span></button>
+                  <button class="btn-secondary" id="export-dynamic-report" type="button"><svg class="button-svg"><use href="#icon-download"></use></svg><span class="button-label">Xuất file Excel</span><span class="spinner"></span></button>
+                </div>
               </div>
             </form>
             <div id="dynamic-report-message" class="result hidden mt-4"></div>
@@ -631,7 +639,7 @@
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script src="/static/app.js?v=111"></script>
+    <script src="/static/app.js?v=112"></script>
     <script src="/static/mobile-gateway-focused.js?v=4"></script>
   </body>
 </html>

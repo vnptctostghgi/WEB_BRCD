@@ -276,6 +276,7 @@ class RunReportPayload(BaseModel):
     filters: dict[str, Any] = Field(default_factory=dict)
     page: int = 1
     page_size: int = 20
+    search: str = ""
 
 
 class RunOneBssReportPayload(BaseModel):
@@ -1937,6 +1938,54 @@ def list_report_configs(request: Request) -> dict:
     }
 
 
+def _excel_cell_value(value: Any) -> Any:
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, ensure_ascii=False, default=str)
+    return str(value)
+
+
+def _dynamic_report_excel_workbook(result: dict[str, Any]) -> openpyxl.Workbook:
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "TruyVanSQL"
+    columns = [str(column) for column in (result.get("columns") or [])]
+    rows = result.get("rows") or []
+    if not columns and rows and isinstance(rows[0], dict):
+        columns = list(rows[0].keys())
+    if not columns:
+        columns = ["Ket qua"]
+
+    sheet.append(columns)
+    for row in rows:
+        if isinstance(row, dict):
+            sheet.append([_excel_cell_value(row.get(column)) for column in columns])
+        else:
+            sheet.append([_excel_cell_value(row)])
+
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = sheet.dimensions
+    for cell in sheet[1]:
+        cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
+        cell.fill = openpyxl.styles.PatternFill("solid", fgColor="075FB0")
+        cell.alignment = openpyxl.styles.Alignment(vertical="center")
+
+    for column_cells in sheet.columns:
+        letter = column_cells[0].column_letter
+        width = max(len(str(cell.value or "")) for cell in column_cells[:200])
+        sheet.column_dimensions[letter].width = min(max(width + 2, 10), 42)
+    return workbook
+
+
+def _dynamic_report_export_filename(result: dict[str, Any]) -> str:
+    report = result.get("report") if isinstance(result.get("report"), dict) else {}
+    code = str(report.get("ma_bao_cao") or "truy_van_sql").strip().lower()
+    code = re.sub(r"[^a-z0-9_-]+", "_", code)
+    code = code.strip("_") or "truy_van_sql"
+    return f"{code}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+
 @router.post("/api/reports/run")
 def run_dynamic_report(request: Request, payload: RunReportPayload) -> dict:
     admin_user(request)
@@ -1946,9 +1995,37 @@ def run_dynamic_report(request: Request, payload: RunReportPayload) -> dict:
             filters=payload.filters,
             page=payload.page,
             page_size=payload.page_size,
+            search=payload.search,
         )
     except RuntimeError as error:
         raise_sql_report_schema_error(error)
+
+
+@router.post("/api/reports/export")
+def export_dynamic_report(request: Request, payload: RunReportPayload) -> Response:
+    admin_user(request)
+    try:
+        result = build_database_service().export_dynamic_report(
+            ma_bao_cao=payload.ma_bao_cao.strip().upper(),
+            filters=payload.filters,
+            search=payload.search,
+        )
+    except RuntimeError as error:
+        raise_sql_report_schema_error(error)
+
+    if not result.get("ok"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.get("message") or "Không xuất được file Excel.")
+
+    workbook = _dynamic_report_excel_workbook(result)
+    stream = BytesIO()
+    workbook.save(stream)
+    stream.seek(0)
+    filename = _dynamic_report_export_filename(result)
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quote(filename)}"},
+    )
 
 
 @router.get("/api/onebss-reports/configs")

@@ -2,6 +2,7 @@ import logging
 import hashlib
 import json
 import re
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -98,6 +99,7 @@ class DatabaseService:
         filters: dict[str, Any],
         page: int,
         page_size: int,
+        search: str = "",
         report_id: Any = None,
         report_name: Any = None,
     ) -> dict[str, Any]:
@@ -139,6 +141,69 @@ class DatabaseService:
             or self._normalized_report_code(ma_bao_cao)
             or str(report.get("ma_bao_cao") or ma_bao_cao).strip()
         )
+        search_text = str(search or "").strip()
+
+        if search_text:
+            try:
+                fetched = self._fetch_dynamic_report_rows(
+                    ten_bao_cao=report["ten_bao_cao"],
+                    ma_bao_cao=safe_report_code,
+                    cau_lenh_sql=compiled_sql,
+                    tham_so=executable_filters,
+                    max_rows=self._dynamic_report_export_max_rows(),
+                )
+            except httpx.TimeoutException as error:
+                logger.exception("Dynamic report search timeout: %s", error)
+                return self._failed_report("API dữ liệu nội bộ phản hồi quá lâu.", safe_page, safe_page_size, str(error), compiled_sql, executable_filters, define_details)
+            except httpx.HTTPStatusError as error:
+                logger.exception("Dynamic report search HTTP error: %s", error)
+                return self._failed_report(
+                    f"API dữ liệu nội bộ trả lỗi HTTP {error.response.status_code}.",
+                    safe_page,
+                    safe_page_size,
+                    error.response.text[:300],
+                    compiled_sql,
+                    executable_filters,
+                    define_details,
+                )
+            except httpx.HTTPError as error:
+                logger.exception("Dynamic report search connection error: %s", error)
+                return self._failed_report(self._internal_api_connection_message(error), safe_page, safe_page_size, str(error), compiled_sql, executable_filters, define_details)
+            except RuntimeError as error:
+                logger.exception("Dynamic report search API error: %s", error)
+                return self._failed_report("API dữ liệu nội bộ trả lỗi khi chạy báo cáo.", safe_page, safe_page_size, str(error), compiled_sql, executable_filters, define_details)
+
+            columns = fetched["columns"]
+            matched_rows = self._filter_rows_by_search(fetched["rows"], columns, search_text)
+            start = (safe_page - 1) * safe_page_size
+            rows = matched_rows[start:start + safe_page_size]
+            details = {
+                "search": search_text,
+                "fetched_total": fetched["fetched_total"],
+                "fetched_rows": len(fetched["rows"]),
+                "truncated": fetched["truncated"],
+            }
+            if ignored_filters:
+                details = {**details, "ignored_filters": ignored_filters, "allowed_params": allowed_params}
+            if define_details:
+                details = {**details, **define_details, "sent_params": executable_filters}
+            return {
+                "ok": True,
+                "message": f"Đã tìm thấy {len(matched_rows)} dòng phù hợp.",
+                "details": details,
+                "report": {
+                    "ten_bao_cao": report["ten_bao_cao"],
+                    "ma_bao_cao": report["ma_bao_cao"],
+                    "cac_tham_so": report.get("cac_tham_so") or [],
+                },
+                "columns": columns,
+                "rows": rows,
+                "pagination": {
+                    "page": safe_page,
+                    "page_size": safe_page_size,
+                    "total": len(matched_rows),
+                },
+            }
 
         try:
             result = self.internal_api.run_sql_report(
@@ -198,6 +263,211 @@ class DatabaseService:
                 "total": total,
             },
         }
+
+    def export_dynamic_report(
+        self,
+        *,
+        ma_bao_cao: str,
+        filters: dict[str, Any],
+        search: str = "",
+        report_id: Any = None,
+        report_name: Any = None,
+    ) -> dict[str, Any]:
+        report = self._find_sql_report(ma_bao_cao, report_id=report_id, report_name=report_name)
+        fetch_page_size = self._dynamic_report_fetch_page_size()
+        if not report:
+            return self._failed_report("Không tìm thấy cấu hình báo cáo.", 1, fetch_page_size, "")
+
+        allowed_params = [str(param).strip().lstrip(":") for param in (report.get("cac_tham_so") or []) if str(param).strip()]
+        allowed_param_by_upper = {param.upper(): param for param in allowed_params}
+        safe_filters: dict[str, Any] = {}
+        ignored_filters: list[str] = []
+        for key, value in (filters or {}).items():
+            normalized_key = str(key).strip().lstrip(":").upper()
+            if not normalized_key:
+                continue
+            if allowed_param_by_upper:
+                target_key = allowed_param_by_upper.get(normalized_key)
+                if not target_key:
+                    ignored_filters.append(str(key))
+                    continue
+                safe_filters[target_key] = value
+            else:
+                safe_filters[str(key).strip().lstrip(":")] = value
+
+        compiled_sql, define_details = self._compile_define_sql(report["cau_lenh_sql"], safe_filters)
+        compiled_sql, bind_filters = self._expand_in_list_bind_params(compiled_sql, safe_filters)
+        executable_filters = self._filters_for_compiled_sql(compiled_sql, bind_filters)
+        safe_report_code = (
+            self._normalized_report_code(report.get("ma_bao_cao"))
+            or self._normalized_report_code(report.get("ten_bao_cao"))
+            or self._normalized_report_code(ma_bao_cao)
+            or str(report.get("ma_bao_cao") or ma_bao_cao).strip()
+        )
+
+        try:
+            fetched = self._fetch_dynamic_report_rows(
+                ten_bao_cao=report["ten_bao_cao"],
+                ma_bao_cao=safe_report_code,
+                cau_lenh_sql=compiled_sql,
+                tham_so=executable_filters,
+                max_rows=self._dynamic_report_export_max_rows(),
+            )
+        except httpx.TimeoutException as error:
+            logger.exception("Dynamic report export timeout: %s", error)
+            return self._failed_report("API dữ liệu nội bộ phản hồi quá lâu.", 1, fetch_page_size, str(error), compiled_sql, executable_filters, define_details)
+        except httpx.HTTPStatusError as error:
+            logger.exception("Dynamic report export HTTP error: %s", error)
+            return self._failed_report(
+                f"API dữ liệu nội bộ trả lỗi HTTP {error.response.status_code}.",
+                1,
+                fetch_page_size,
+                error.response.text[:300],
+                compiled_sql,
+                executable_filters,
+                define_details,
+            )
+        except httpx.HTTPError as error:
+            logger.exception("Dynamic report export connection error: %s", error)
+            return self._failed_report(self._internal_api_connection_message(error), 1, fetch_page_size, str(error), compiled_sql, executable_filters, define_details)
+        except RuntimeError as error:
+            logger.exception("Dynamic report export API error: %s", error)
+            return self._failed_report("API dữ liệu nội bộ trả lỗi khi chạy báo cáo.", 1, fetch_page_size, str(error), compiled_sql, executable_filters, define_details)
+
+        search_text = str(search or "").strip()
+        rows = self._filter_rows_by_search(fetched["rows"], fetched["columns"], search_text) if search_text else fetched["rows"]
+        details = {
+            "search": search_text,
+            "fetched_total": fetched["fetched_total"],
+            "fetched_rows": len(fetched["rows"]),
+            "export_rows": len(rows),
+            "truncated": fetched["truncated"],
+        }
+        if ignored_filters:
+            details = {**details, "ignored_filters": ignored_filters, "allowed_params": allowed_params}
+        if define_details:
+            details = {**details, **define_details, "sent_params": executable_filters}
+
+        return {
+            "ok": True,
+            "message": f"Đã chuẩn bị {len(rows)} dòng để xuất Excel.",
+            "details": details,
+            "report": {
+                "ten_bao_cao": report["ten_bao_cao"],
+                "ma_bao_cao": report["ma_bao_cao"],
+                "cac_tham_so": report.get("cac_tham_so") or [],
+            },
+            "columns": fetched["columns"],
+            "rows": rows,
+            "pagination": {"page": 1, "page_size": len(rows), "total": len(rows)},
+        }
+
+    def _dynamic_report_fetch_page_size(self) -> int:
+        settings = getattr(self.internal_api, "settings", None)
+        configured = int(getattr(settings, "dynamic_report_fetch_page_size", 500) or 500)
+        return max(20, min(configured, 1000))
+
+    def _dynamic_report_export_max_rows(self) -> int:
+        settings = getattr(self.internal_api, "settings", None)
+        configured = int(getattr(settings, "dynamic_report_export_max_rows", 100000) or 100000)
+        return max(1, configured)
+
+    def _fetch_dynamic_report_rows(
+        self,
+        *,
+        ten_bao_cao: str,
+        ma_bao_cao: str,
+        cau_lenh_sql: str,
+        tham_so: dict[str, Any],
+        max_rows: int,
+    ) -> dict[str, Any]:
+        fetch_page_size = self._dynamic_report_fetch_page_size()
+        max_rows = max(1, max_rows)
+        rows: list[dict[str, Any]] = []
+        columns: list[str] = []
+        total = 0
+        page = 1
+        while len(rows) < max_rows:
+            result = self.internal_api.run_sql_report(
+                ten_bao_cao=ten_bao_cao,
+                ma_bao_cao=ma_bao_cao,
+                cau_lenh_sql=cau_lenh_sql,
+                tham_so=tham_so,
+                page=page,
+                page_size=fetch_page_size,
+            )
+            if result.get("ok") is False:
+                raise RuntimeError(str(result.get("message") or result.get("details") or "API dữ liệu nội bộ trả lỗi."))
+            page_rows = result.get("rows") or result.get("data") or []
+            if not isinstance(page_rows, list):
+                page_rows = []
+            if not columns:
+                columns = result.get("columns") or self._infer_columns(page_rows)
+            if not total:
+                try:
+                    total = int(result.get("total") or 0)
+                except (TypeError, ValueError):
+                    total = 0
+
+            remaining = max_rows - len(rows)
+            rows.extend(page_rows[:remaining])
+
+            try:
+                result_page_size = int(result.get("page_size") or fetch_page_size)
+            except (TypeError, ValueError):
+                result_page_size = fetch_page_size
+            result_page_size = max(1, result_page_size)
+
+            if not page_rows:
+                break
+            if total and len(rows) >= total:
+                break
+            if len(page_rows) < result_page_size and not total:
+                break
+            if len(rows) >= max_rows:
+                break
+            page += 1
+
+        if not columns:
+            columns = self._infer_columns(rows)
+        truncated = bool(total and len(rows) < total) or (not total and len(rows) >= max_rows)
+        return {
+            "columns": columns,
+            "rows": rows,
+            "fetched_total": total or len(rows),
+            "truncated": truncated,
+        }
+
+    @classmethod
+    def _filter_rows_by_search(cls, rows: list[dict[str, Any]], columns: list[str], search: str) -> list[dict[str, Any]]:
+        terms = [term for term in cls._normalize_search_text(search).split(" ") if term]
+        if not terms:
+            return rows
+        scored: list[tuple[int, int, dict[str, Any]]] = []
+        for index, row in enumerate(rows):
+            haystack = cls._normalize_search_text(" ".join(str(row.get(column, "")) for column in columns))
+            if all(term in haystack for term in terms):
+                scored.append((cls._search_score(haystack, terms), index, row))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        return [row for _, _, row in scored]
+
+    @staticmethod
+    def _normalize_search_text(value: Any) -> str:
+        text = unicodedata.normalize("NFD", str(value or "").casefold())
+        text = "".join(character for character in text if unicodedata.category(character) != "Mn")
+        return re.sub(r"\s+", " ", text).strip()
+
+    @staticmethod
+    def _search_score(haystack: str, terms: list[str]) -> int:
+        score = 0
+        full = " ".join(terms)
+        if full and full in haystack:
+            score += 1000
+        for term in terms:
+            position = haystack.find(term)
+            if position >= 0:
+                score += max(1, 200 - position)
+        return score
 
     @classmethod
     def _compile_define_sql(cls, sql: str, filters: dict[str, Any]) -> tuple[str, dict[str, Any]]:
