@@ -16,8 +16,19 @@ function safeNextPath() {
 }
 
 function showMessage(text, type = "error") {
-  message.className = `result ${type}`;
-  message.textContent = text;
+  message.className = "result hidden";
+  message.textContent = "";
+  showToast(text, type);
+}
+
+let toastTimer;
+function showToast(text, type = "success") {
+  const toast = document.querySelector("#toast");
+  if (!toast) return;
+  window.clearTimeout(toastTimer);
+  toast.textContent = text;
+  toast.className = `toast ${type === "error" ? "error" : ""}`.trim();
+  toastTimer = window.setTimeout(() => toast.classList.add("hidden"), 3500);
 }
 
 form.addEventListener("submit", async (event) => {

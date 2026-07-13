@@ -353,8 +353,12 @@ async function api(url, options = {}) {
 }
 
 function showMessage(element, text, type = "success") {
-  element.className = `result ${type}`;
-  element.textContent = repairTextEncoding(text);
+  if (element) {
+    element.textContent = "";
+    element.classList?.add("hidden");
+    element.setAttribute?.("aria-hidden", "true");
+  }
+  showToast(text, type);
 }
 
 let toastTimer;
@@ -364,7 +368,7 @@ function showToast(text, type = "success") {
   window.clearTimeout(toastTimer);
   toast.textContent = repairTextEncoding(text);
   toast.className = `toast ${type === "error" ? "error" : ""}`.trim();
-  toastTimer = window.setTimeout(() => toast.classList.add("hidden"), 3200);
+  toastTimer = window.setTimeout(() => toast.classList.add("hidden"), 3500);
 }
 
 function loadingRow(colspan, text = "Đang tải dữ liệu...") {
@@ -4360,16 +4364,15 @@ window.addEventListener("message", async (event) => {
 
 async function testConnection(code, button) {
   const resultBox = $(`#connection-result-${CSS.escape(code)}`);
-  resultBox.textContent = "Đang kiểm tra...";
+  if (resultBox) resultBox.textContent = "";
+  showToast("Đang kiểm tra kết nối...");
   setButtonLoading(button, true);
   try {
     const result = await api(`/api/admin/connections/${code}/test`, { method: "POST" });
     const details = result.details ? ` Chi tiết: ${JSON.stringify(result.details)}` : "";
-    resultBox.textContent = `${result.message}${details}`;
-    resultBox.style.color = result.ok ? "#166534" : "#991b1b";
+    showToast(`${result.message}${details}`.slice(0, 360), result.ok ? "success" : "error");
   } catch (error) {
-    resultBox.textContent = error.message;
-    resultBox.style.color = "#991b1b";
+    showToast(error.message, "error");
   } finally {
     setButtonLoading(button, false);
   }
