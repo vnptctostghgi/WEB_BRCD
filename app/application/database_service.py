@@ -336,7 +336,7 @@ class DatabaseService:
         wrapped_filters = dict(filters)
         term_clauses: list[str] = []
         for term_index, term in enumerate(terms, start=1):
-            bind_name = f"__SEARCH_{term_index}"
+            bind_name = f"SEARCH_TERM_{term_index}"
             wrapped_filters[bind_name] = f"%{term}%"
             column_clauses = [
                 f"LOWER(TO_CHAR(Q.{cls._quote_oracle_identifier(column)})) LIKE :{bind_name}"

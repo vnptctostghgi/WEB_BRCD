@@ -1088,7 +1088,7 @@ def test_dynamic_report_search_and_excel_export_use_full_result_set(monkeypatch)
     def fake_run_sql_report(self, **kwargs):
         calls.append(kwargs)
         result_rows = rows
-        search_value = str(kwargs.get("tham_so", {}).get("__SEARCH_1", "")).strip("%").lower()
+        search_value = str(kwargs.get("tham_so", {}).get("SEARCH_TERM_1", "")).strip("%").lower()
         if search_value:
             result_rows = [
                 row for row in rows
