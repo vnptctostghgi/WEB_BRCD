@@ -87,7 +87,7 @@ class DatabaseService:
             logger.exception("Cannot connect internal API: %s", error)
             return {
                 "ok": False,
-                "message": "Không kết nối được API dữ liệu nội bộ.",
+                "message": self._internal_api_connection_message(error),
                 "details": {"error": str(error)},
             }
 
@@ -165,7 +165,7 @@ class DatabaseService:
             )
         except httpx.HTTPError as error:
             logger.exception("Dynamic report connection error: %s", error)
-            return self._failed_report("Không kết nối được API dữ liệu nội bộ.", safe_page, safe_page_size, str(error), compiled_sql, executable_filters, define_details)
+            return self._failed_report(self._internal_api_connection_message(error), safe_page, safe_page_size, str(error), compiled_sql, executable_filters, define_details)
 
         rows = result.get("rows") or result.get("data") or []
         if not isinstance(rows, list):
@@ -754,7 +754,7 @@ class DatabaseService:
             )
         except httpx.HTTPError as error:
             logger.exception("Dashboard datcoc connection error: %s", error)
-            return self._failed_report("Không kết nối được API dữ liệu nội bộ.", page, page_size, str(error))
+            return self._failed_report(self._internal_api_connection_message(error), page, page_size, str(error))
 
         rows = result.get("rows") or result.get("data") or []
         if not isinstance(rows, list):
@@ -779,6 +779,15 @@ class DatabaseService:
         if rows and isinstance(rows[0], dict):
             return list(rows[0].keys())
         return []
+
+    @staticmethod
+    def _internal_api_connection_message(error: Exception) -> str:
+        detail = str(error).lower()
+        if "getaddrinfo" in detail or "name or service not known" in detail or "nodename nor servname" in detail:
+            return "Không phân giải được tên miền API dữ liệu nội bộ. Hãy cập nhật URL tunnel/API nội bộ trong Quản trị kết nối."
+        if "connection refused" in detail or "actively refused" in detail:
+            return "API dữ liệu nội bộ đang từ chối kết nối. Kiểm tra máy chủ API hoặc tunnel đang chạy."
+        return "Không kết nối được API dữ liệu nội bộ."
 
     @staticmethod
     def _failed_report(
@@ -868,7 +877,7 @@ class DatabaseService:
             )
         except httpx.HTTPError as error:
             logger.exception("Dashboard fiber connection error: %s", error)
-            return self._failed_fiber_group("Không kết nối được API dữ liệu nội bộ.", str(error))
+            return self._failed_fiber_group(self._internal_api_connection_message(error), str(error))
 
         rows = result.get("rows") or result.get("data") or []
         if not isinstance(rows, list):

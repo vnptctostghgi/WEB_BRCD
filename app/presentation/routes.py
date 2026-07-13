@@ -389,7 +389,8 @@ def build_auth_service() -> AuthService:
 
 def build_database_service() -> DatabaseService:
     settings = get_settings()
-    return DatabaseService(InternalApiClient(settings), build_app_repository())
+    repository = build_app_repository()
+    return DatabaseService(InternalApiClient.from_repository(settings, repository), repository)
 
 
 def build_vault_service() -> VaultService:

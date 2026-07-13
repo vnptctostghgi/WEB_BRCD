@@ -10,13 +10,50 @@ from app.settings import Settings
 class InternalApiClient:
     """Client gọi máy chủ FastAPI nội bộ để lấy dữ liệu từ DB cơ quan."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, connection: dict[str, Any] | None = None) -> None:
         self.settings = settings
-        self.api_url = settings.internal_api_url
+        config = connection.get("config") if isinstance(connection, dict) else {}
+        config = config if isinstance(config, dict) else {}
+        use_connection = (
+            isinstance(connection, dict)
+            and connection.get("connection_type") == "internal_api"
+            and bool(connection.get("is_active"))
+        )
+        self.api_url = (
+            str(config.get("url") or config.get("api_url") or settings.internal_api_url).strip()
+            if use_connection
+            else settings.internal_api_url
+        )
+        self.mock_mode = self._bool_config(config.get("mock_mode"), settings.internal_api_mock_mode) if use_connection else settings.internal_api_mock_mode
+        token = str(config.get("token") or "").strip() if use_connection else ""
+        self.token = token or settings.internal_api_token.get_secret_value()
         self.timeout = settings.internal_api_timeout_seconds
 
+    @classmethod
+    def from_repository(cls, settings: Settings, repository: Any) -> "InternalApiClient":
+        connection = None
+        if hasattr(repository, "get_system_connection_by_code"):
+            try:
+                connection = repository.get_system_connection_by_code("internal_fastapi_api")
+            except Exception:
+                connection = None
+        return cls(settings, connection)
+
+    @staticmethod
+    def _bool_config(value: Any, default: bool) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+        return default
+
     def health_check(self) -> dict[str, Any]:
-        if self.settings.internal_api_mock_mode:
+        if self.mock_mode:
             return {
                 "ok": True,
                 "mode": "mock",
@@ -41,7 +78,7 @@ class InternalApiClient:
         page: int,
         page_size: int,
     ) -> dict[str, Any]:
-        if self.settings.internal_api_mock_mode:
+        if self.mock_mode:
             if ma_bao_cao in {"DASHBOARD_FIBER_VNPT", "DASHBOARD_FIBER_TTVT"}:
                 rows = self._mock_fiber_rows(ma_bao_cao)
                 return {
@@ -98,7 +135,7 @@ class InternalApiClient:
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}
-        token = self.settings.internal_api_token.get_secret_value()
+        token = self.token
         if token:
             headers["Authorization"] = f"Bearer {token}"
 

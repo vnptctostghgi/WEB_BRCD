@@ -176,7 +176,7 @@ def dashboard_page_id_for_schedule(repository: Any, schedule: dict[str, Any]) ->
 
 def refresh_schedule_data(repository: Any, settings: Settings, schedule: dict[str, Any]) -> dict[str, Any]:
     page_id = dashboard_page_id_for_schedule(repository, schedule)
-    result = DatabaseService(InternalApiClient(settings), repository).refresh_dashboard_chart_cache(page_id=page_id)
+    result = DatabaseService(InternalApiClient.from_repository(settings, repository), repository).refresh_dashboard_chart_cache(page_id=page_id)
     result["page_id"] = page_id
     return result
 

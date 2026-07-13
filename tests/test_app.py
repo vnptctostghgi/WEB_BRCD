@@ -465,6 +465,70 @@ def test_system_connections_include_zalo_bot() -> None:
         assert "zalo_bot" in codes
 
 
+def test_internal_api_client_uses_active_connection_config() -> None:
+    class FakeRepository:
+        def get_system_connection_by_code(self, code: str) -> dict:
+            assert code == "internal_fastapi_api"
+            return {
+                "connection_type": "internal_api",
+                "is_active": True,
+                "config": {
+                    "url": "https://current-internal-api.example/api/du-lieu-web",
+                    "mock_mode": "true",
+                    "token": "connection-token",
+                },
+            }
+
+    settings = Settings(
+        internal_api_url="https://old-env-url.example/api/du-lieu-web",
+        internal_api_mock_mode=False,
+        internal_api_token="env-token",
+    )
+
+    client = routes.InternalApiClient.from_repository(settings, FakeRepository())
+
+    assert client.api_url == "https://current-internal-api.example/api/du-lieu-web"
+    assert client.mock_mode is True
+    assert client.token == "connection-token"
+    assert client.health_check()["api_url"] == "https://current-internal-api.example/api/du-lieu-web"
+
+
+def test_internal_api_dns_error_message_points_to_tunnel_config() -> None:
+    message = DatabaseService._internal_api_connection_message(Exception("[Errno 11001] getaddrinfo failed"))
+
+    assert "Không phân giải được tên miền API dữ liệu nội bộ" in message
+    assert "URL tunnel" in message
+
+
+def test_seed_current_connections_preserves_internal_api_admin_config(tmp_path) -> None:
+    repository = routes.AppRepository(str(tmp_path / "app.db"))
+    repository.initialize("admin", "Admin@Brcd2026!")
+    repository.upsert_system_connection(
+        "internal_fastapi_api",
+        "API du lieu noi bo",
+        "internal_api",
+        "Custom internal API",
+        {
+            "url": "https://current-internal-api.example/api/du-lieu-web",
+            "mock_mode": False,
+            "secret_ref": "INTERNAL_API_TOKEN",
+        },
+        True,
+    )
+
+    routes.ConnectionService(
+        repository,
+        Settings(
+            internal_api_url="https://old-env-url.example/api/du-lieu-web",
+            internal_api_mock_mode=True,
+        ),
+    ).seed_current_connections()
+
+    stored = repository.get_system_connection_by_code("internal_fastapi_api")
+    assert stored["config"]["url"] == "https://current-internal-api.example/api/du-lieu-web"
+    assert stored["config"]["mock_mode"] is False
+
+
 def test_admin_can_manage_zalo_auto_messages_and_captures(monkeypatch) -> None:
     monkeypatch.setenv("APP_PUBLIC_URL", "https://vnptcto.com")
     get_settings.cache_clear()

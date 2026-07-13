@@ -16,17 +16,23 @@ class ConnectionService:
         self.settings = settings
 
     def seed_current_connections(self) -> None:
+        existing_internal = self.repository.get_system_connection_by_code("internal_fastapi_api") or {}
+        existing_internal_config = existing_internal.get("config") if isinstance(existing_internal.get("config"), dict) else {}
+        internal_url = existing_internal_config.get("url") or self.settings.internal_api_url
+        internal_mock_mode = existing_internal_config.get("mock_mode", self.settings.internal_api_mock_mode)
+        internal_config = {
+            "url": internal_url,
+            "mock_mode": internal_mock_mode,
+            "secret_ref": "INTERNAL_API_TOKEN",
+            **existing_internal_config,
+        }
         self.repository.upsert_system_connection(
             code="internal_fastapi_api",
             name="API dữ liệu nội bộ",
             connection_type="internal_api",
             description="Máy chủ FastAPI nội bộ nhận SQL được cấu hình trên web và truy vấn DB cơ quan.",
-            config={
-                "url": self.settings.internal_api_url,
-                "mock_mode": self.settings.internal_api_mock_mode,
-                "secret_ref": "INTERNAL_API_TOKEN",
-            },
-            is_active=bool(self.settings.internal_api_url),
+            config=internal_config,
+            is_active=bool(existing_internal.get("is_active") if existing_internal else internal_url),
         )
         self.repository.upsert_system_connection(
             code="supabase_web_db",
@@ -94,7 +100,7 @@ class ConnectionService:
             raise ValueError("Không tìm thấy kết nối.")
 
         if connection["connection_type"] == "internal_api":
-            service = DatabaseService(InternalApiClient(self.settings), self.repository)
+            service = DatabaseService(InternalApiClient(self.settings, connection), self.repository)
             return self._with_connection(service.get_connection_status(), connection)
 
         if connection["connection_type"] == "supabase":

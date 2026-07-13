@@ -168,7 +168,7 @@ class DashboardChartCacheScheduler:
     def refresh_once(self) -> dict[str, Any]:
         assert self.repository is not None
         assert self.settings is not None
-        service = DatabaseService(InternalApiClient(self.settings), self.repository)
+        service = DatabaseService(InternalApiClient.from_repository(self.settings, self.repository), self.repository)
         return service.refresh_dashboard_chart_cache()
 
 
