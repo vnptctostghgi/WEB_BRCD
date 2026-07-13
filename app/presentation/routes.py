@@ -39,7 +39,11 @@ from app.application.vault_service import VaultService
 from app.application.connection_service import ConnectionService
 from app.application.telegram_notifier import TelegramNotifier
 from app.application.onebss_data_mining_service import OneBssDownloadError, normalize_onebss_report_url, run_data_mining_schedule
-from app.application.onebss_report_service import run_onebss_report_request
+from app.application.onebss_report_service import (
+    cancel_onebss_mobile_gateway_otp,
+    consume_onebss_mobile_gateway_otp,
+    run_onebss_report_request,
+)
 from app.application.zalo_auto_message_service import capture_page_screenshot_bytes, capture_public_url, send_zalo_auto_message
 from app.application.zalo_bot import ZaloBotClient
 from app.data_access.app_repository import (
@@ -300,6 +304,8 @@ class RunOneBssReportPayload(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
     otp: str = ""
     session_id: str = ""
+    otp_request_id: str = ""
+    otp_source: str = ""
 
 
 class DashboardLayoutPayload(BaseModel):
@@ -2253,6 +2259,15 @@ def clear_onebss_report_runs(request: Request, ma_bao_cao: str = "") -> dict:
     return {"ok": True, "deleted": deleted}
 
 
+@router.get("/api/onebss-reports/otp-requests/{otp_request_id}")
+def get_onebss_otp_request(request: Request, otp_request_id: str) -> dict:
+    admin_user(request)
+    result = consume_onebss_mobile_gateway_otp(get_settings(), otp_request_id)
+    if result.get("status") == "missing":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result.get("message") or "Khong tim thay OTP request.")
+    return result
+
+
 @router.post("/api/onebss-reports/run")
 def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict:
     actor = admin_user(request)
@@ -2290,8 +2305,10 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
             "message": result.get("message"),
             "session_id": result.get("session_id"),
             "parameters": result.get("parameters") or run_parameters,
-            "otp_request_id": result.get("otp_request_id") or "",
+            "otp_request_id": result.get("otp_request_id") or payload.otp_request_id.strip(),
         }
+    if result.get("ok") and payload.otp_source.strip().lower() == "manual" and payload.otp_request_id.strip():
+        cancel_onebss_mobile_gateway_otp(get_settings(), payload.otp_request_id.strip(), "manual_otp_used")
     finished_at = result.get("finished_at") or datetime.now().isoformat(timespec="seconds")
     try:
         run = repository.save_onebss_report_run({

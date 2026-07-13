@@ -1490,6 +1490,111 @@ def test_onebss_mobile_gateway_resolver_auto_submits_otp(monkeypatch) -> None:
     assert events["continued"] == ("api-session-001", "654321", {"P_DENNGAY": "11/07/2026"})
 
 
+def test_onebss_mobile_gateway_request_returns_without_blocking(monkeypatch) -> None:
+    from app.application import onebss_report_service as service
+
+    events = {}
+
+    class FakeRepository:
+        def __init__(self, base_repository, settings):
+            events["repository_created"] = True
+
+        def get_otp_configuration(self, service_code):
+            assert service_code == "otp_onebss"
+            return {"manual_fallback_enabled": True, "auto_fill_enabled": True, "wait_timeout_seconds": 90}
+
+    class FakeOtpService:
+        def __init__(self, repository):
+            events["otp_service_created"] = True
+
+        def create_request(self, service_code, job_id=""):
+            events["service_code"] = service_code
+            events["job_id"] = job_id
+            return {"request_id": "OTP-POLL-001"}
+
+        def wait_for_code(self, request_id, timeout_seconds):
+            raise AssertionError("start_onebss_otp_mobile_gateway_request must not block waiting for OTP")
+
+    monkeypatch.setattr(service, "MobileGatewayRepository", FakeRepository)
+    monkeypatch.setattr(service, "OtpService", FakeOtpService)
+    monkeypatch.setattr(service, "build_repository", lambda settings=None: object())
+
+    result = service.start_onebss_otp_mobile_gateway_request(
+        get_settings(),
+        "api-session-002",
+        {"P_DENNGAY": "12/07/2026"},
+        otp_service_code="otp_onebss",
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "otp_required"
+    assert result["session_id"] == "api-session-002"
+    assert result["otp_request_id"] == "OTP-POLL-001"
+    assert events["service_code"] == "otp_onebss"
+    assert events["job_id"] == "api-session-002"
+
+
+def test_onebss_mobile_gateway_poll_consumes_matched_otp(monkeypatch) -> None:
+    from app.application import onebss_report_service as service
+
+    events = {}
+
+    class FakeRepository:
+        def __init__(self, base_repository, settings):
+            events["repository_created"] = True
+
+        def expire_otp_requests(self):
+            events["expired_checked"] = True
+
+        def get_otp_request(self, request_id):
+            events["request_id"] = request_id
+            return {
+                "request_id": request_id,
+                "status": "matched",
+                "matched_source_type": "sms",
+                "matched_source_id": "42",
+                "matched_at": "2026-07-12T08:00:00",
+            }
+
+    class FakeOtpService:
+        def __init__(self, repository):
+            events["otp_service_created"] = True
+
+        def consume_code(self, request_id):
+            events["consumed"] = request_id
+            return "654321"
+
+    monkeypatch.setattr(service, "MobileGatewayRepository", FakeRepository)
+    monkeypatch.setattr(service, "OtpService", FakeOtpService)
+    monkeypatch.setattr(service, "build_repository", lambda settings=None: object())
+
+    result = service.consume_onebss_mobile_gateway_otp(get_settings(), "OTP-POLL-001")
+
+    assert result["ok"] is True
+    assert result["status"] == "matched"
+    assert result["otp"] == "654321"
+    assert result["source_type"] == "sms"
+    assert result["source_id"] == "42"
+    assert events["expired_checked"] is True
+    assert events["consumed"] == "OTP-POLL-001"
+
+
+def test_onebss_otp_request_poll_route_returns_matched_code(monkeypatch) -> None:
+    def fake_consume(settings, request_id):
+        assert request_id == "OTP-POLL-001"
+        return {"ok": True, "status": "matched", "otp": "654321", "source_type": "sms"}
+
+    monkeypatch.setattr(routes, "consume_onebss_mobile_gateway_otp", fake_consume)
+
+    with TestClient(app) as client:
+        login(client)
+        response = client.get("/api/onebss-reports/otp-requests/OTP-POLL-001")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "matched"
+    assert response.json()["otp"] == "654321"
+
+
 def test_onebss_auth_transition_waits_for_delayed_otp() -> None:
     from app.application.onebss_report_service import page_contains, wait_for_onebss_auth_transition
 

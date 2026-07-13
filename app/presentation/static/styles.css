@@ -3527,6 +3527,22 @@ legend {
   background: rgba(127, 29, 29, .32);
 }
 
+.onebss-otp-status {
+  margin-top: .55rem;
+  min-height: 1.25rem;
+  color: #fde68a;
+  font-size: .84rem;
+  font-weight: 800;
+}
+
+.onebss-otp-status[data-tone="success"] {
+  color: #bbf7d0;
+}
+
+.onebss-otp-status[data-tone="warning"] {
+  color: #fed7aa;
+}
+
 .mobile-gateway-tabs {
   display: flex;
   flex-wrap: wrap;

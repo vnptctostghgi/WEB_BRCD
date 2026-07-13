@@ -246,6 +246,102 @@ def resolve_onebss_otp_with_mobile_gateway(
     )
 
 
+def start_onebss_otp_mobile_gateway_request(
+    settings: Settings,
+    session_id: str,
+    parameters: dict[str, Any],
+    *,
+    otp_service_code: str = "onebss",
+    report_url: str = "",
+    fallback_message: str = "OneBSS da gui OTP ve dien thoai. Hay nhap OTP neu Mobile Gateway chua tu lay duoc.",
+) -> dict[str, Any]:
+    if not bool(getattr(settings, "mobile_gateway_enabled", True)):
+        return onebss_manual_otp_response(session_id, parameters, fallback_message, report_url=report_url)
+
+    service_code = str(otp_service_code or "onebss").strip().lower() or "onebss"
+    try:
+        repository = MobileGatewayRepository(build_repository(settings), settings)
+        config = repository.get_otp_configuration(service_code) or {}
+        if config and not bool(config.get("auto_fill_enabled", True)):
+            return onebss_manual_otp_response(session_id, parameters, fallback_message, report_url=report_url)
+        service = OtpService(repository)
+        otp_request = service.create_request(service_code, job_id=session_id)
+        request_id = str(otp_request.get("request_id") or "")
+    except OtpServiceError as error:
+        logger.info("OneBSS Mobile Gateway OTP is not available: %s", str(error)[:160])
+        return onebss_manual_otp_response(session_id, parameters, fallback_message, report_url=report_url)
+    except Exception:
+        logger.exception("Cannot create OneBSS OTP request from Mobile Gateway")
+        return onebss_manual_otp_response(session_id, parameters, fallback_message, report_url=report_url)
+
+    message = "OneBSS da gui OTP ve dien thoai. He thong dang kiem tra tin nhan; co the nhap OTP thu cong neu nhan duoc truoc."
+    return onebss_manual_otp_response(
+        session_id,
+        parameters,
+        message,
+        status="otp_required",
+        report_url=report_url,
+        otp_request_id=request_id,
+    )
+
+
+def consume_onebss_mobile_gateway_otp(settings: Settings, request_id: str) -> dict[str, Any]:
+    request_id = str(request_id or "").strip()
+    if not request_id:
+        return {"ok": False, "status": "missing", "message": "Thieu OTP request."}
+    if not bool(getattr(settings, "mobile_gateway_enabled", True)):
+        return {"ok": False, "status": "disabled", "message": "Mobile Gateway chua duoc bat."}
+
+    try:
+        repository = MobileGatewayRepository(build_repository(settings), settings)
+        repository.expire_otp_requests()
+        otp_request = repository.get_otp_request(request_id)
+    except Exception:
+        logger.exception("Cannot inspect OneBSS OTP request")
+        return {"ok": False, "status": "failed", "message": "Khong kiem tra duoc OTP tu Mobile Gateway."}
+
+    if not otp_request:
+        return {"ok": False, "status": "missing", "message": "Khong tim thay OTP request."}
+
+    status_value = str(otp_request.get("status") or "waiting")
+    if status_value == "matched":
+        code = OtpService(repository).consume_code(request_id)
+        if code:
+            return {
+                "ok": True,
+                "status": "matched",
+                "otp": code,
+                "source_type": otp_request.get("matched_source_type") or "",
+                "source_id": otp_request.get("matched_source_id") or "",
+                "matched_at": otp_request.get("matched_at") or "",
+            }
+        return {"ok": False, "status": "consume_failed", "message": "Da nhan OTP nhung khong doc duoc ma."}
+
+    messages = {
+        "waiting": "Dang doi tin nhan OTP.",
+        "expired": "OTP request da het thoi gian cho.",
+        "cancelled": "OTP request da bi huy.",
+        "consumed": "OTP request da duoc su dung.",
+    }
+    return {
+        "ok": False,
+        "status": status_value,
+        "message": messages.get(status_value, "Chua co OTP moi."),
+        "code_masked": otp_request.get("code_masked") or "",
+    }
+
+
+def cancel_onebss_mobile_gateway_otp(settings: Settings, request_id: str, reason: str = "manual_otp_used") -> None:
+    request_id = str(request_id or "").strip()
+    if not request_id or not bool(getattr(settings, "mobile_gateway_enabled", True)):
+        return
+    try:
+        repository = MobileGatewayRepository(build_repository(settings), settings)
+        OtpService(repository).cancel_request(request_id, reason)
+    except Exception:
+        logger.exception("Cannot cancel OneBSS OTP request %s", request_id)
+
+
 def start_onebss_api_session(
     settings: Settings,
     report: dict[str, Any],
@@ -291,7 +387,7 @@ def start_onebss_api_session(
     secret_code = str(((data.get("data") if isinstance(data, dict) else {}) or {}).get("secretCode") or "").strip()
     if response.status_code == 200 and secret_code:
         pending = keep_onebss_api_session(secret_code, report, parameters, username, mobile_id, device_id, created_by)
-        return resolve_onebss_otp_with_mobile_gateway(
+        return start_onebss_otp_mobile_gateway_request(
             settings,
             pending.session_id,
             parameters,
@@ -439,7 +535,7 @@ def start_onebss_report_session(
             wait_for_onebss_auth_transition(page, helper, timeout_ms=30000)
             if page_contains(page, OTP_TEXT_NEEDLES):
                 pending = keep_onebss_session(playwright, browser, context, page, report, parameters, created_by)
-                return resolve_onebss_otp_with_mobile_gateway(
+                return start_onebss_otp_mobile_gateway_request(
                     settings,
                     pending.session_id,
                     parameters,
@@ -1810,7 +1906,7 @@ def handle_onebss_otp_request(
             "OneBSS da gui yeu cau OTP. Hay nhap ma OTP khi dien thoai nhan duoc.",
             status="otp_required",
         )
-    return resolve_onebss_otp_with_mobile_gateway(
+    return start_onebss_otp_mobile_gateway_request(
         settings,
         pending.session_id,
         parameters,

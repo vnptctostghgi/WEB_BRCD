@@ -19,6 +19,11 @@ let oneBssReports = [];
 let oneBssReportDrafts = [];
 let oneBssReportRuns = [];
 let oneBssPendingSessionId = "";
+let oneBssPendingOtpRequestId = "";
+let oneBssOtpPollTimer = null;
+let oneBssOtpPollToken = 0;
+let oneBssOtpManualSubmitStarted = false;
+let oneBssManualOtpTimer = null;
 let oneBssRunInProgress = false;
 let oneBssRunParameterEditing = false;
 let mobileGatewayLoaded = false;
@@ -1110,22 +1115,32 @@ if (role === "admin") {
   $("#onebss-run-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     oneBssPendingSessionId = "";
-    $("#onebss-otp-input") && ($("#onebss-otp-input").value = "");
-    $("#onebss-otp-panel")?.classList.add("hidden");
+    resetOneBssOtpState();
     await runOneBssReport();
   });
   $("#toggle-onebss-param-edit")?.addEventListener("click", toggleOneBssRunParameterEditing);
   $("#clear-onebss-run-history")?.addEventListener("click", clearOneBssRunHistory);
   $("#onebss-run-report-select")?.addEventListener("change", () => {
     oneBssPendingSessionId = "";
+    resetOneBssOtpState();
     oneBssRunParameterEditing = false;
-    $("#onebss-otp-panel")?.classList.add("hidden");
     renderOneBssRunParameters();
   });
   $("#onebss-otp-input")?.addEventListener("input", async (event) => {
     const value = event.currentTarget.value.replace(/\D/g, "").slice(0, 8);
     event.currentTarget.value = value;
-    if (value.length >= 4 && oneBssPendingSessionId && !oneBssRunInProgress) await runOneBssReport(value);
+    clearOneBssManualOtpTimer();
+    if (value.length >= 4 && oneBssPendingSessionId && !oneBssRunInProgress) {
+      const delay = value.length >= 6 ? 250 : 900;
+      oneBssManualOtpTimer = setTimeout(async () => {
+        const currentValue = $("#onebss-otp-input")?.value || "";
+        if (currentValue !== value || !oneBssPendingSessionId || oneBssRunInProgress) return;
+        oneBssOtpManualSubmitStarted = true;
+        stopOneBssOtpPolling();
+        setOneBssOtpStatus("Dang dung OTP nhap tay de dang nhap...", "info");
+        await runOneBssReport(value, { otpRequestId: oneBssPendingOtpRequestId, otpSource: "manual" });
+      }, delay);
+    }
   });
   $("#connection-search")?.addEventListener("input", renderConnectionsTable);
   $("#connection-picker")?.addEventListener("change", renderConnectionsTable);
@@ -5506,7 +5521,81 @@ function collectOneBssRunParameters() {
   return parameters;
 }
 
-async function runOneBssReport(otp = "") {
+function stopOneBssOtpPolling() {
+  oneBssOtpPollToken += 1;
+  if (oneBssOtpPollTimer) clearTimeout(oneBssOtpPollTimer);
+  oneBssOtpPollTimer = null;
+}
+
+function clearOneBssManualOtpTimer() {
+  if (oneBssManualOtpTimer) clearTimeout(oneBssManualOtpTimer);
+  oneBssManualOtpTimer = null;
+}
+
+function setOneBssOtpStatus(message = "", tone = "info") {
+  const status = $("#onebss-otp-status");
+  if (!status) return;
+  status.textContent = message;
+  status.dataset.tone = tone;
+  status.classList.toggle("hidden", !message);
+}
+
+function resetOneBssOtpState({ hidePanel = true } = {}) {
+  stopOneBssOtpPolling();
+  clearOneBssManualOtpTimer();
+  oneBssPendingOtpRequestId = "";
+  oneBssOtpManualSubmitStarted = false;
+  const input = $("#onebss-otp-input");
+  if (input) input.value = "";
+  setOneBssOtpStatus("");
+  if (hidePanel) $("#onebss-otp-panel")?.classList.add("hidden");
+}
+
+function showOneBssOtpPanel(message = "") {
+  $("#onebss-otp-panel")?.classList.remove("hidden");
+  if (message) setOneBssOtpStatus(message);
+  $("#onebss-otp-input")?.focus();
+}
+
+function startOneBssOtpPolling(otpRequestId) {
+  const requestId = String(otpRequestId || "").trim();
+  if (!requestId) return;
+  stopOneBssOtpPolling();
+  oneBssPendingOtpRequestId = requestId;
+  oneBssOtpManualSubmitStarted = false;
+  const token = oneBssOtpPollToken;
+  setOneBssOtpStatus("Dang doi OTP tu tin nhan. Anh co the nhap tay neu nhan duoc truoc.");
+
+  const poll = async () => {
+    if (token !== oneBssOtpPollToken || oneBssOtpManualSubmitStarted || !oneBssPendingSessionId) return;
+    try {
+      const response = await api(`/api/onebss-reports/otp-requests/${encodeURIComponent(requestId)}`);
+      if (token !== oneBssOtpPollToken || oneBssOtpManualSubmitStarted || !oneBssPendingSessionId) return;
+      if (response.status === "matched" && response.otp) {
+        clearOneBssManualOtpTimer();
+        const input = $("#onebss-otp-input");
+        if (input) input.value = String(response.otp).replace(/\D/g, "").slice(0, 8);
+        setOneBssOtpStatus("Da boc tach OTP tu tin nhan. Dang dang nhap...", "success");
+        stopOneBssOtpPolling();
+        await runOneBssReport(response.otp, { otpRequestId: requestId, otpSource: "auto" });
+        return;
+      }
+      if (["waiting", "created"].includes(response.status || "")) {
+        oneBssOtpPollTimer = setTimeout(poll, 2000);
+        return;
+      }
+      setOneBssOtpStatus(response.message || "Chua nhan duoc OTP tu tin nhan.", "warning");
+    } catch (error) {
+      if (token !== oneBssOtpPollToken || oneBssOtpManualSubmitStarted || !oneBssPendingSessionId) return;
+      setOneBssOtpStatus(error.message || "Khong kiem tra duoc tin nhan OTP.", "warning");
+      oneBssOtpPollTimer = setTimeout(poll, 4000);
+    }
+  };
+
+  oneBssOtpPollTimer = setTimeout(poll, 900);
+}
+
+async function runOneBssReport(otp = "", options = {}) {
   const select = $("#onebss-run-report-select");
   const button = $("#run-onebss-report");
   const message = $("#onebss-run-message");
@@ -5532,18 +5621,21 @@ async function runOneBssReport(otp = "") {
         parameters,
         otp,
         session_id: oneBssPendingSessionId,
+        otp_request_id: options.otpRequestId || oneBssPendingOtpRequestId,
+        otp_source: options.otpSource || "",
       }),
     });
     if (response.status === "otp_required" || response.status === "otp_invalid" || response.status === "manual_otp_required") {
       oneBssPendingSessionId = response.session_id || oneBssPendingSessionId;
-      $("#onebss-otp-panel")?.classList.remove("hidden");
-      $("#onebss-otp-input")?.focus();
+      oneBssPendingOtpRequestId = response.otp_request_id || oneBssPendingOtpRequestId;
+      if (response.status === "otp_invalid") oneBssOtpManualSubmitStarted = false;
+      showOneBssOtpPanel(oneBssPendingOtpRequestId ? "Dang doi OTP tu tin nhan. Anh co the nhap tay neu nhan duoc truoc." : "");
+      if (oneBssPendingOtpRequestId && !oneBssOtpManualSubmitStarted) startOneBssOtpPolling(oneBssPendingOtpRequestId);
       showMessage(message, response.message || "OneBSS yêu cầu OTP.", response.status === "otp_invalid" ? "error" : "info");
       return;
     }
     oneBssPendingSessionId = "";
-    $("#onebss-otp-panel")?.classList.add("hidden");
-    $("#onebss-otp-input") && ($("#onebss-otp-input").value = "");
+    resetOneBssOtpState();
     showMessage(message, response.message || (response.ok ? "Đã lấy báo cáo OneBSS." : "Lấy báo cáo OneBSS lỗi."), response.ok ? "success" : "error");
     await refreshOneBssRunHistory(select.value);
   } catch (error) {
