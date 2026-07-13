@@ -77,6 +77,7 @@ class InternalApiClient:
         tham_so: dict[str, Any],
         page: int,
         page_size: int,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         if self.mock_mode:
             if ma_bao_cao in {"DASHBOARD_FIBER_VNPT", "DASHBOARD_FIBER_TTVT"}:
@@ -122,7 +123,8 @@ class InternalApiClient:
                     "page": page,
                     "page_size": page_size,
                 },
-            }
+            },
+            timeout=timeout,
         )
 
     @staticmethod
@@ -133,13 +135,13 @@ class InternalApiClient:
             for index in range(1, 14)
         ]
 
-    def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _post(self, payload: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}
         token = self.token
         if token:
             headers["Authorization"] = f"Bearer {token}"
 
-        with httpx.Client(timeout=self.timeout) as client:
+        with httpx.Client(timeout=timeout or self.timeout) as client:
             response = client.post(self.api_url, json=payload, headers=headers)
             response.raise_for_status()
             data = response.json()

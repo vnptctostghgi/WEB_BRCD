@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from io import BytesIO
 from datetime import datetime
 from pathlib import Path
@@ -1167,6 +1168,70 @@ def test_dynamic_report_search_and_excel_export_use_full_result_set(monkeypatch)
         loaded_sheet = loaded_workbook.active
         assert loaded_sheet.max_row == 2
         assert loaded_sheet["A2"].value == "tb003"
+
+
+def test_dynamic_report_export_job_downloads_full_result_set(monkeypatch) -> None:
+    rows = [
+        {"MA_TB": f"tb{index:04d}", "TEN_TB": f"Thue bao {index:04d}"}
+        for index in range(1205)
+    ]
+    calls = []
+
+    def fake_run_sql_report(self, **kwargs):
+        calls.append(kwargs)
+        page = int(kwargs["page"])
+        page_size = int(kwargs["page_size"])
+        start = (page - 1) * page_size
+        return {
+            "ok": True,
+            "columns": ["MA_TB", "TEN_TB"],
+            "rows": rows[start:start + page_size],
+            "total": len(rows),
+            "page": page,
+            "page_size": page_size,
+            "message": "ok",
+        }
+
+    monkeypatch.setattr(routes.InternalApiClient, "run_sql_report", fake_run_sql_report)
+
+    with TestClient(app) as client:
+        login(client)
+        payload = {
+            "ten_bao_cao": "Bao cao export job",
+            "ma_bao_cao": "BC_EXPORT_JOB",
+            "cau_lenh_sql": "SELECT ma_tb, ten_tb FROM css_cto.db_thuebao;",
+            "cac_tham_so": [],
+        }
+        assert client.post("/api/admin/sql-reports", json=payload).status_code == 200
+
+        started = client.post(
+            "/api/reports/export-jobs",
+            json={"ma_bao_cao": "BC_EXPORT_JOB", "filters": {}, "page": 1, "page_size": 20},
+        )
+        assert started.status_code == 200
+        job_id = started.json()["job_id"]
+
+        status_body = {}
+        for _ in range(80):
+            status_response = client.get(f"/api/reports/export-jobs/{job_id}")
+            assert status_response.status_code == 200
+            status_body = status_response.json()
+            if status_body["status"] == "complete":
+                break
+            time.sleep(0.05)
+
+        assert status_body["status"] == "complete"
+        assert status_body["rows"] == len(rows)
+        assert [call["page"] for call in calls] == [1, 2, 3]
+        assert all(call.get("timeout", 0) >= 20 for call in calls)
+
+        download = client.get(status_body["download_url"])
+        assert download.status_code == 200
+        workbook = openpyxl.load_workbook(BytesIO(download.content), read_only=True)
+        sheet = workbook.active
+        assert sheet.max_row == len(rows) + 1
+        assert [cell.value for cell in sheet[1]] == ["MA_TB", "TEN_TB"]
+        assert sheet["A1206"].value == "tb1204"
 
 
 def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:

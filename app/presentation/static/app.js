@@ -5349,6 +5349,41 @@ function downloadDynamicReportBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+async function waitDynamicReportExportJob(jobId, button) {
+  let lastMessage = "";
+  for (let attempt = 0; attempt < 900; attempt += 1) {
+    await sleep(attempt === 0 ? 1000 : 2000);
+    const job = await api(`/api/reports/export-jobs/${encodeURIComponent(jobId)}`);
+    if (job.message && job.message !== lastMessage) {
+      lastMessage = job.message;
+      button?.setAttribute("title", repairTextEncoding(job.message));
+    }
+    if (job.status === "complete") return job;
+    if (job.status === "failed") throw new Error(job.message || "Không xuất được file Excel.");
+  }
+  throw new Error("Tạo file Excel quá lâu. Hãy kiểm tra lại job xuất hoặc thu hẹp điều kiện báo cáo.");
+}
+
+async function downloadDynamicReportExportJob(job) {
+  if (!job.download_url) throw new Error("Job xuất Excel chưa có link tải file.");
+  const response = await fetch(job.download_url);
+  if (response.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Phiên đăng nhập đã hết hạn.");
+  }
+  if (!response.ok) {
+    const text = await response.text();
+    let messageText = text;
+    try {
+      messageText = JSON.parse(text).detail || text;
+    } catch {}
+    throw new Error(messageText || `Không tải được file Excel (HTTP ${response.status}).`);
+  }
+  const blob = await response.blob();
+  const filename = downloadFileNameFromDisposition(response.headers.get("Content-Disposition")) || job.filename || dynamicReportFallbackFileName();
+  downloadDynamicReportBlob(blob, filename);
+}
+
 async function exportDynamicReport() {
   const select = $("#dynamic-report-select");
   const message = $("#dynamic-report-message");
@@ -5363,30 +5398,18 @@ async function exportDynamicReport() {
   }
   setButtonLoading(button, true);
   try {
-    const response = await fetch("/api/reports/export", {
+    const started = await api("/api/reports/export-jobs", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(dynamicReportPayload({ page: 1, includeSearch: dynamicReportSearchActive })),
     });
-    if (response.status === 401) {
-      window.location.href = "/login";
-      throw new Error("Phiên đăng nhập đã hết hạn.");
-    }
-    if (!response.ok) {
-      const text = await response.text();
-      let messageText = text;
-      try {
-        messageText = JSON.parse(text).detail || text;
-      } catch {}
-      throw new Error(messageText || `Không xuất được file Excel (HTTP ${response.status}).`);
-    }
-    const blob = await response.blob();
-    const filename = downloadFileNameFromDisposition(response.headers.get("Content-Disposition")) || dynamicReportFallbackFileName();
-    downloadDynamicReportBlob(blob, filename);
-    showMessage(message, "Đã tạo file Excel theo điều kiện hiện tại.");
+    showMessage(message, started.message || "Đang xuất file Excel ở chế độ nền.");
+    const job = await waitDynamicReportExportJob(started.job_id, button);
+    await downloadDynamicReportExportJob(job);
+    showMessage(message, job.message || "Đã tạo file Excel đầy đủ theo điều kiện hiện tại.");
   } catch (error) {
     showMessage(message, error.message, "error");
   } finally {
+    button?.removeAttribute("title");
     setButtonLoading(button, false);
   }
 }

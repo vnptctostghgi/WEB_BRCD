@@ -220,6 +220,7 @@ class DatabaseService:
         search_columns: list[str] | None = None,
         report_id: Any = None,
         report_name: Any = None,
+        progress_callback: Any | None = None,
     ) -> dict[str, Any]:
         report = self._find_sql_report(ma_bao_cao, report_id=report_id, report_name=report_name)
         fetch_page_size = self._dynamic_report_fetch_page_size()
@@ -262,12 +263,15 @@ class DatabaseService:
             )
 
         try:
+            export_max_rows = self._dynamic_report_export_max_rows()
             fetched = self._fetch_dynamic_report_rows(
                 ten_bao_cao=report["ten_bao_cao"],
                 ma_bao_cao=safe_report_code,
                 cau_lenh_sql=compiled_sql,
                 tham_so=executable_filters,
-                max_rows=self._dynamic_report_export_max_rows(),
+                max_rows=export_max_rows,
+                timeout=self._dynamic_report_export_timeout_seconds(),
+                progress_callback=progress_callback,
             )
         except httpx.TimeoutException as error:
             logger.exception("Dynamic report export timeout: %s", error)
@@ -296,12 +300,23 @@ class DatabaseService:
             "fetched_total": fetched["fetched_total"],
             "fetched_rows": len(fetched["rows"]),
             "export_rows": len(rows),
+            "export_max_rows": export_max_rows,
             "truncated": fetched["truncated"],
         }
         if ignored_filters:
             details = {**details, "ignored_filters": ignored_filters, "allowed_params": allowed_params}
         if define_details:
             details = {**details, **define_details, "sent_params": executable_filters}
+        if fetched["truncated"]:
+            return self._failed_report(
+                self._truncated_export_message(fetched["fetched_total"], export_max_rows),
+                1,
+                fetch_page_size,
+                f"Export stopped at {len(rows)} rows.",
+                compiled_sql,
+                executable_filters,
+                details,
+            )
 
         return {
             "ok": True,
@@ -360,8 +375,19 @@ class DatabaseService:
 
     def _dynamic_report_export_max_rows(self) -> int:
         settings = getattr(self.internal_api, "settings", None)
-        configured = int(getattr(settings, "dynamic_report_export_max_rows", 100000) or 100000)
+        configured = int(getattr(settings, "dynamic_report_export_max_rows", 500000) or 500000)
         return max(1, configured)
+
+    def _dynamic_report_export_timeout_seconds(self) -> int:
+        settings = getattr(self.internal_api, "settings", None)
+        configured = int(getattr(settings, "dynamic_report_export_timeout_seconds", 180) or 180)
+        return max(20, configured)
+
+    @staticmethod
+    def _truncated_export_message(fetched_total: int, max_rows: int) -> str:
+        if fetched_total and fetched_total > max_rows:
+            return f"Dữ liệu có {fetched_total:,} dòng, vượt giới hạn xuất hiện tại {max_rows:,} dòng. Tăng DYNAMIC_REPORT_EXPORT_MAX_ROWS để xuất đủ 100%."
+        return f"Dữ liệu vượt giới hạn xuất hiện tại {max_rows:,} dòng. Tăng DYNAMIC_REPORT_EXPORT_MAX_ROWS để xuất đủ 100%."
 
     def _fetch_dynamic_report_rows(
         self,
@@ -371,6 +397,8 @@ class DatabaseService:
         cau_lenh_sql: str,
         tham_so: dict[str, Any],
         max_rows: int,
+        timeout: float | None = None,
+        progress_callback: Any | None = None,
     ) -> dict[str, Any]:
         fetch_page_size = self._dynamic_report_fetch_page_size()
         max_rows = max(1, max_rows)
@@ -386,6 +414,7 @@ class DatabaseService:
                 tham_so=tham_so,
                 page=page,
                 page_size=fetch_page_size,
+                timeout=timeout,
             )
             if result.get("ok") is False:
                 raise RuntimeError(str(result.get("message") or result.get("details") or "API dữ liệu nội bộ trả lỗi."))
@@ -402,6 +431,15 @@ class DatabaseService:
 
             remaining = max_rows - len(rows)
             rows.extend(page_rows[:remaining])
+            if progress_callback:
+                progress_callback({
+                    "page": page,
+                    "rows": len(rows),
+                    "total": total or 0,
+                    "page_rows": len(page_rows),
+                    "page_size": fetch_page_size,
+                    "max_rows": max_rows,
+                })
 
             try:
                 result_page_size = int(result.get("page_size") or fetch_page_size)

@@ -4,6 +4,10 @@ import binascii
 import hmac
 import json
 import logging
+import tempfile
+import threading
+import time
+import uuid
 from datetime import datetime
 from html import escape as html_escape
 from html.parser import HTMLParser
@@ -16,7 +20,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 import httpx
 import openpyxl
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
-from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pydantic import BaseModel, Field
@@ -54,6 +58,10 @@ templates = Jinja2Templates(directory=Path("app/presentation/templates"))
 logger = logging.getLogger(__name__)
 FAILED_LOGIN_COUNTS: dict[str, int] = {}
 MAX_USER_IMPORT_BYTES = 2 * 1024 * 1024
+DYNAMIC_REPORT_EXPORT_JOBS: dict[str, dict[str, Any]] = {}
+DYNAMIC_REPORT_EXPORT_JOBS_LOCK = threading.Lock()
+DYNAMIC_REPORT_EXPORT_JOB_TTL_SECONDS = 60 * 60
+DYNAMIC_REPORT_EXPORT_DIR = Path(tempfile.gettempdir()) / "vnptcto_dynamic_report_exports"
 ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
 DASHBOARD_LAYOUT_TYPES = {
     "1_column": 1,
@@ -1994,6 +2002,89 @@ def _dynamic_report_export_filename(result: dict[str, Any]) -> str:
     return f"{code}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
 
+def _cleanup_dynamic_report_export_jobs() -> None:
+    now = time.time()
+    expired_paths: list[str] = []
+    with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+        expired_ids = [
+            job_id
+            for job_id, job in DYNAMIC_REPORT_EXPORT_JOBS.items()
+            if job.get("status") != "running"
+            and now - float(job.get("updated_at") or job.get("created_at") or now) > DYNAMIC_REPORT_EXPORT_JOB_TTL_SECONDS
+        ]
+        for job_id in expired_ids:
+            job = DYNAMIC_REPORT_EXPORT_JOBS.pop(job_id, {})
+            if job.get("path"):
+                expired_paths.append(str(job["path"]))
+    for path_text in expired_paths:
+        try:
+            Path(path_text).unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Cannot remove old dynamic report export file: %s", path_text)
+
+
+def _set_dynamic_report_export_job(job_id: str, **updates: Any) -> None:
+    with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+        job = DYNAMIC_REPORT_EXPORT_JOBS.get(job_id)
+        if not job:
+            return
+        job.update(updates)
+        job["updated_at"] = time.time()
+
+
+def _get_dynamic_report_export_job(job_id: str) -> dict[str, Any] | None:
+    with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+        job = DYNAMIC_REPORT_EXPORT_JOBS.get(job_id)
+        return dict(job) if job else None
+
+
+def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> None:
+    def progress_callback(progress: dict[str, Any]) -> None:
+        rows = int(progress.get("rows") or 0)
+        total = int(progress.get("total") or 0)
+        message = f"Đang xuất Excel: đã lấy {rows:,}" + (f"/{total:,} dòng." if total else " dòng.")
+        _set_dynamic_report_export_job(job_id, status="running", message=message, progress=progress)
+
+    _set_dynamic_report_export_job(job_id, status="running", message="Đang chuẩn bị dữ liệu xuất Excel.")
+    try:
+        result = build_database_service().export_dynamic_report(
+            ma_bao_cao=payload.ma_bao_cao.strip().upper(),
+            filters=payload.filters,
+            search=payload.search,
+            search_columns=payload.search_columns,
+            progress_callback=progress_callback,
+        )
+        if not result.get("ok"):
+            _set_dynamic_report_export_job(
+                job_id,
+                status="failed",
+                message=result.get("message") or "Không xuất được file Excel.",
+                details=result.get("details") or {},
+            )
+            return
+
+        workbook = _dynamic_report_excel_workbook(result)
+        DYNAMIC_REPORT_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+        filename = _dynamic_report_export_filename(result)
+        target_path = DYNAMIC_REPORT_EXPORT_DIR / f"{job_id}_{filename}"
+        workbook.save(target_path)
+        details = result.get("details") if isinstance(result.get("details"), dict) else {}
+        rows = len(result.get("rows") or [])
+        _set_dynamic_report_export_job(
+            job_id,
+            status="complete",
+            message=f"Đã tạo file Excel đủ {rows:,} dòng.",
+            filename=filename,
+            path=str(target_path),
+            rows=rows,
+            total=int(details.get("fetched_total") or rows),
+            details=details,
+        )
+    except Exception as error:
+        logger.exception("Dynamic report export job failed: %s", error)
+        _set_dynamic_report_export_job(job_id, status="failed", message=f"Không xuất được file Excel: {error}")
+
+
 @router.post("/api/reports/run")
 def run_dynamic_report(request: Request, payload: RunReportPayload) -> dict:
     admin_user(request)
@@ -2035,6 +2126,69 @@ def export_dynamic_report(request: Request, payload: RunReportPayload) -> Respon
         stream,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
+@router.post("/api/reports/export-jobs")
+def start_dynamic_report_export_job(request: Request, payload: RunReportPayload) -> dict:
+    admin_user(request)
+    _cleanup_dynamic_report_export_jobs()
+    job_id = uuid.uuid4().hex
+    now = time.time()
+    with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+        DYNAMIC_REPORT_EXPORT_JOBS[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "message": "Đã đưa yêu cầu xuất Excel vào hàng đợi.",
+            "created_at": now,
+            "updated_at": now,
+            "progress": {},
+        }
+    thread = threading.Thread(target=_run_dynamic_report_export_job, args=(job_id, payload), daemon=True)
+    thread.start()
+    return {"ok": True, "job_id": job_id, "status": "queued", "message": "Đang xuất file Excel ở chế độ nền."}
+
+
+@router.get("/api/reports/export-jobs/{job_id}")
+def get_dynamic_report_export_job(request: Request, job_id: str) -> dict:
+    admin_user(request)
+    _cleanup_dynamic_report_export_jobs()
+    job = _get_dynamic_report_export_job(job_id)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy job xuất Excel.")
+    status_value = str(job.get("status") or "queued")
+    response = {
+        "ok": status_value != "failed",
+        "job_id": job_id,
+        "status": status_value,
+        "message": job.get("message") or "",
+        "progress": job.get("progress") or {},
+        "rows": int(job.get("rows") or 0),
+        "total": int(job.get("total") or 0),
+    }
+    if status_value == "complete":
+        response["download_url"] = f"/api/reports/export-jobs/{job_id}/download"
+        response["filename"] = job.get("filename") or ""
+    if status_value == "failed":
+        response["details"] = job.get("details") or {}
+    return response
+
+
+@router.get("/api/reports/export-jobs/{job_id}/download")
+def download_dynamic_report_export_job(request: Request, job_id: str) -> Response:
+    admin_user(request)
+    job = _get_dynamic_report_export_job(job_id)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy job xuất Excel.")
+    if job.get("status") != "complete":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="File Excel chưa tạo xong.")
+    file_path = Path(str(job.get("path") or ""))
+    if not file_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File Excel không còn tồn tại. Hãy xuất lại.")
+    return FileResponse(
+        file_path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=str(job.get("filename") or file_path.name),
     )
 
 
