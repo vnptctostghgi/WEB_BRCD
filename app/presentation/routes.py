@@ -19,6 +19,8 @@ from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 import httpx
 import openpyxl
+from openpyxl.cell import WriteOnlyCell
+from openpyxl.utils import get_column_letter
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -66,6 +68,7 @@ DYNAMIC_REPORT_EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 DYNAMIC_REPORT_EXPORT_JOBS_LOCK = threading.Lock()
 DYNAMIC_REPORT_EXPORT_JOB_TTL_SECONDS = 60 * 60
 DYNAMIC_REPORT_EXPORT_DIR = Path(tempfile.gettempdir()) / "vnptcto_dynamic_report_exports"
+EXCEL_MAX_ROWS_PER_SHEET = 1_048_576
 ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
 DASHBOARD_LAYOUT_TYPES = {
     "1_column": 1,
@@ -2000,6 +2003,61 @@ def _dynamic_report_excel_workbook(result: dict[str, Any]) -> openpyxl.Workbook:
     return workbook
 
 
+class DynamicReportStreamingWorkbook:
+    def __init__(self) -> None:
+        self.workbook = openpyxl.Workbook(write_only=True)
+        self.columns: list[str] = []
+        self.sheet = None
+        self.sheet_index = 0
+        self.sheet_rows = 0
+        self.total_rows = 0
+        self.header_font = openpyxl.styles.Font(bold=True, color="FFFFFF")
+        self.header_fill = openpyxl.styles.PatternFill("solid", fgColor="075FB0")
+        self.header_alignment = openpyxl.styles.Alignment(vertical="center")
+
+    def append_rows(self, rows: list[dict[str, Any]], columns: list[str]) -> None:
+        if not rows:
+            return
+        if not self.columns:
+            self.columns = [str(column) for column in columns]
+            if not self.columns and isinstance(rows[0], dict):
+                self.columns = list(rows[0].keys())
+            if not self.columns:
+                self.columns = ["Ket qua"]
+        for row in rows:
+            if self.sheet is None or self.sheet_rows >= EXCEL_MAX_ROWS_PER_SHEET:
+                self._start_sheet()
+            if isinstance(row, dict):
+                self.sheet.append([_excel_cell_value(row.get(column)) for column in self.columns])
+            else:
+                self.sheet.append([_excel_cell_value(row)])
+            self.sheet_rows += 1
+            self.total_rows += 1
+
+    def _start_sheet(self) -> None:
+        self.sheet_index += 1
+        title = "TruyVanSQL" if self.sheet_index == 1 else f"TruyVanSQL_{self.sheet_index}"
+        self.sheet = self.workbook.create_sheet(title[:31])
+        self.sheet.freeze_panes = "A2"
+        self.sheet_rows = 0
+        header = []
+        for index, column in enumerate(self.columns, start=1):
+            cell = WriteOnlyCell(self.sheet, value=column)
+            cell.font = self.header_font
+            cell.fill = self.header_fill
+            cell.alignment = self.header_alignment
+            header.append(cell)
+            self.sheet.column_dimensions[get_column_letter(index)].width = min(max(len(str(column)) + 2, 10), 42)
+        self.sheet.append(header)
+        self.sheet_rows = 1
+
+    def save(self, target_path: Path) -> None:
+        if self.sheet is None:
+            self.columns = self.columns or ["Ket qua"]
+            self._start_sheet()
+        self.workbook.save(target_path)
+
+
 def _dynamic_report_export_filename(result: dict[str, Any]) -> str:
     report = result.get("report") if isinstance(result.get("report"), dict) else {}
     code = str(report.get("ma_bao_cao") or "truy_van_sql").strip().lower()
@@ -2045,6 +2103,8 @@ def _get_dynamic_report_export_job(job_id: str) -> dict[str, Any] | None:
 
 
 def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> None:
+    writer = DynamicReportStreamingWorkbook()
+
     def progress_callback(progress: dict[str, Any]) -> None:
         rows = int(progress.get("rows") or 0)
         total = int(progress.get("total") or 0)
@@ -2053,14 +2113,20 @@ def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> No
 
     _set_dynamic_report_export_job(job_id, status="running", message="Đang chuẩn bị dữ liệu xuất Excel.")
     try:
+        DYNAMIC_REPORT_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+        target_path = DYNAMIC_REPORT_EXPORT_DIR / f"{job_id}.xlsx"
+
         result = build_database_service().export_dynamic_report(
             ma_bao_cao=payload.ma_bao_cao.strip().upper(),
             filters=payload.filters,
             search=payload.search,
             search_columns=payload.search_columns,
             progress_callback=progress_callback,
+            page_callback=writer.append_rows,
+            collect_rows=False,
         )
         if not result.get("ok"):
+            target_path.unlink(missing_ok=True)
             _set_dynamic_report_export_job(
                 job_id,
                 status="failed",
@@ -2069,13 +2135,10 @@ def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> No
             )
             return
 
-        workbook = _dynamic_report_excel_workbook(result)
-        DYNAMIC_REPORT_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
         filename = _dynamic_report_export_filename(result)
-        target_path = DYNAMIC_REPORT_EXPORT_DIR / f"{job_id}_{filename}"
-        workbook.save(target_path)
+        writer.save(target_path)
         details = result.get("details") if isinstance(result.get("details"), dict) else {}
-        rows = len(result.get("rows") or [])
+        rows = int(details.get("export_rows") or writer.total_rows)
         _set_dynamic_report_export_job(
             job_id,
             status="complete",
@@ -2088,6 +2151,10 @@ def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> No
         )
     except Exception as error:
         logger.exception("Dynamic report export job failed: %s", error)
+        try:
+            target_path.unlink(missing_ok=True)  # type: ignore[name-defined]
+        except Exception:
+            pass
         _set_dynamic_report_export_job(job_id, status="failed", message=f"Không xuất được file Excel: {error}")
 
 

@@ -1229,9 +1229,10 @@ def test_dynamic_report_export_job_downloads_full_result_set(monkeypatch) -> Non
         assert download.status_code == 200
         workbook = openpyxl.load_workbook(BytesIO(download.content), read_only=True)
         sheet = workbook.active
-        assert sheet.max_row == len(rows) + 1
-        assert [cell.value for cell in sheet[1]] == ["MA_TB", "TEN_TB"]
-        assert sheet["A1206"].value == "tb1204"
+        exported_rows = list(sheet.iter_rows(values_only=True))
+        assert len(exported_rows) == len(rows) + 1
+        assert list(exported_rows[0]) == ["MA_TB", "TEN_TB"]
+        assert exported_rows[-1][0] == "tb1204"
 
 
 def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:

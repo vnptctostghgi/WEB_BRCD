@@ -221,6 +221,8 @@ class DatabaseService:
         report_id: Any = None,
         report_name: Any = None,
         progress_callback: Any | None = None,
+        page_callback: Any | None = None,
+        collect_rows: bool = True,
     ) -> dict[str, Any]:
         report = self._find_sql_report(ma_bao_cao, report_id=report_id, report_name=report_name)
         fetch_page_size = self._dynamic_report_fetch_page_size()
@@ -272,6 +274,8 @@ class DatabaseService:
                 max_rows=export_max_rows,
                 timeout=self._dynamic_report_export_timeout_seconds(),
                 progress_callback=progress_callback,
+                page_callback=page_callback,
+                collect_rows=collect_rows,
             )
         except httpx.TimeoutException as error:
             logger.exception("Dynamic report export timeout: %s", error)
@@ -295,11 +299,12 @@ class DatabaseService:
             return self._failed_report("API dữ liệu nội bộ trả lỗi khi chạy báo cáo.", 1, fetch_page_size, str(error), compiled_sql, executable_filters, define_details)
 
         rows = fetched["rows"]
+        exported_rows = int(fetched.get("fetched_rows") or len(rows))
         details = {
             "search": search_text,
             "fetched_total": fetched["fetched_total"],
-            "fetched_rows": len(fetched["rows"]),
-            "export_rows": len(rows),
+            "fetched_rows": exported_rows,
+            "export_rows": exported_rows,
             "export_max_rows": export_max_rows,
             "truncated": fetched["truncated"],
         }
@@ -312,7 +317,7 @@ class DatabaseService:
                 self._truncated_export_message(fetched["fetched_total"], export_max_rows),
                 1,
                 fetch_page_size,
-                f"Export stopped at {len(rows)} rows.",
+                f"Export stopped at {exported_rows} rows.",
                 compiled_sql,
                 executable_filters,
                 details,
@@ -320,7 +325,7 @@ class DatabaseService:
 
         return {
             "ok": True,
-            "message": f"Đã chuẩn bị {len(rows)} dòng để xuất Excel.",
+            "message": f"Đã chuẩn bị {exported_rows} dòng để xuất Excel.",
             "details": details,
             "report": {
                 "ten_bao_cao": report["ten_bao_cao"],
@@ -329,7 +334,7 @@ class DatabaseService:
             },
             "columns": fetched["columns"],
             "rows": rows,
-            "pagination": {"page": 1, "page_size": len(rows), "total": len(rows)},
+            "pagination": {"page": 1, "page_size": exported_rows, "total": exported_rows},
         }
 
     @classmethod
@@ -375,7 +380,7 @@ class DatabaseService:
 
     def _dynamic_report_export_max_rows(self) -> int:
         settings = getattr(self.internal_api, "settings", None)
-        configured = int(getattr(settings, "dynamic_report_export_max_rows", 500000) or 500000)
+        configured = int(getattr(settings, "dynamic_report_export_max_rows", 1000000) or 1000000)
         return max(1, configured)
 
     def _dynamic_report_export_timeout_seconds(self) -> int:
@@ -399,14 +404,17 @@ class DatabaseService:
         max_rows: int,
         timeout: float | None = None,
         progress_callback: Any | None = None,
+        page_callback: Any | None = None,
+        collect_rows: bool = True,
     ) -> dict[str, Any]:
         fetch_page_size = self._dynamic_report_fetch_page_size()
         max_rows = max(1, max_rows)
         rows: list[dict[str, Any]] = []
         columns: list[str] = []
         total = 0
+        fetched_rows = 0
         page = 1
-        while len(rows) < max_rows:
+        while fetched_rows < max_rows:
             result = self.internal_api.run_sql_report(
                 ten_bao_cao=ten_bao_cao,
                 ma_bao_cao=ma_bao_cao,
@@ -429,12 +437,17 @@ class DatabaseService:
                 except (TypeError, ValueError):
                     total = 0
 
-            remaining = max_rows - len(rows)
-            rows.extend(page_rows[:remaining])
+            remaining = max_rows - fetched_rows
+            export_page_rows = page_rows[:remaining]
+            if collect_rows:
+                rows.extend(export_page_rows)
+            if page_callback and export_page_rows:
+                page_callback(export_page_rows, columns)
+            fetched_rows += len(export_page_rows)
             if progress_callback:
                 progress_callback({
                     "page": page,
-                    "rows": len(rows),
+                    "rows": fetched_rows,
                     "total": total or 0,
                     "page_rows": len(page_rows),
                     "page_size": fetch_page_size,
@@ -449,21 +462,22 @@ class DatabaseService:
 
             if not page_rows:
                 break
-            if total and len(rows) >= total:
+            if total and fetched_rows >= total:
                 break
             if len(page_rows) < result_page_size and not total:
                 break
-            if len(rows) >= max_rows:
+            if fetched_rows >= max_rows:
                 break
             page += 1
 
         if not columns:
             columns = self._infer_columns(rows)
-        truncated = bool(total and len(rows) < total) or (not total and len(rows) >= max_rows)
+        truncated = bool(total and fetched_rows < total) or (not total and fetched_rows >= max_rows)
         return {
             "columns": columns,
             "rows": rows,
-            "fetched_total": total or len(rows),
+            "fetched_rows": fetched_rows,
+            "fetched_total": total or fetched_rows,
             "truncated": truncated,
         }
 
