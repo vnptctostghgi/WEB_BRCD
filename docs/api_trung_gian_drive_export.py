@@ -217,11 +217,23 @@ def home():
 
 @app.get("/test-oracle")
 def test_oracle():
-    with oracle_connect() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT SYSDATE FROM DUAL")
-            row = cursor.fetchone()
-    return {"status": "ok", "oracle_time": str(row[0])}
+    try:
+        missing = [key for key in ["DB_HOST", "DB_SERVICE", "DB_USER", "DB_PASS"] if not os.getenv(key)]
+        if missing:
+            return {
+                "status": "error",
+                "message": f"Thieu bien moi truong Oracle: {', '.join(missing)}",
+            }
+        with oracle_connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT SYSDATE FROM DUAL")
+                row = cursor.fetchone()
+        return {"status": "ok", "oracle_time": str(row[0])}
+    except Exception as error:
+        return {
+            "status": "error",
+            "message": f"{type(error).__name__}: {error}",
+        }
 
 
 @app.get("/test-drive")
