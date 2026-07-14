@@ -44,6 +44,10 @@ class OtpService:
                 return ""
             if request.get("status") == "matched":
                 return self.repository.consume_otp_request(request_id)
+            self.match_latest_for_request(request)
+            request = self.repository.get_otp_request(request_id)
+            if request and request.get("status") == "matched":
+                return self.repository.consume_otp_request(request_id)
             if request.get("status") not in {"waiting", "matched"}:
                 return ""
             time.sleep(max(0.5, poll_seconds))
@@ -51,6 +55,9 @@ class OtpService:
         return ""
 
     def consume_code(self, request_id: str) -> str:
+        request = self.repository.get_otp_request(request_id)
+        if request and request.get("status") == "waiting":
+            self.match_latest_for_request(request)
         return self.repository.consume_otp_request(request_id)
 
     def cancel_request(self, request_id: str, reason: str = "cancelled") -> None:
@@ -120,6 +127,43 @@ class OtpService:
                 request_id="",
             )
             return {"filter_id": otp_filter.get("filter_id"), "code": code}
+        return None
+
+    def match_latest_for_request(self, request: dict[str, Any] | str) -> dict[str, Any] | None:
+        if isinstance(request, str):
+            request = self.repository.get_otp_request(request) or {}
+        request_id = str(request.get("request_id") or "").strip()
+        service_code = str(request.get("service_code") or "").strip().lower()
+        if not request_id or not service_code or request.get("status") != "waiting":
+            return None
+        self.repository.expire_otp_latest_values()
+        for latest in self.repository.list_otp_latest_values(limit=100):
+            if str(latest.get("service_code") or "").strip().lower() != service_code:
+                continue
+            if str(latest.get("status") or "").lower() != "valid":
+                continue
+            existing_request_id = str(latest.get("otp_request_id") or "").strip()
+            if existing_request_id and existing_request_id != request_id:
+                continue
+            code = re.sub(r"\D+", "", str(latest.get("code_masked") or ""))
+            if not code:
+                continue
+            if self.repository.match_otp_request(
+                request_id,
+                str(latest.get("source_type") or "latest"),
+                str(latest.get("source_id") or latest.get("id") or ""),
+                code,
+            ):
+                latest_id = latest.get("id")
+                if latest_id is not None:
+                    self.repository.bind_otp_latest_to_request(latest_id, request_id)
+                source_type = str(latest.get("source_type") or "")
+                source_id = str(latest.get("source_id") or "")
+                if source_type == "sms" and source_id:
+                    self.repository.mark_sms_matched(source_id, request_id, used=False)
+                if source_type == "notification" and source_id:
+                    self.repository.mark_notification_matched(source_id, request_id, used=False)
+                return {"request_id": request_id, "code_masked": security.code_mask(code), "source_type": source_type, "source_id": source_id}
         return None
 
     def rematch_latest_for_filter(self, otp_filter: dict[str, Any]) -> dict[str, Any] | None:

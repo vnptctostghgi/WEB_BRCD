@@ -1197,6 +1197,17 @@ class MobileGatewayRepository:
             return
         self._patch("otp_latest_values", {"otp_request_id": f"eq.{request_id}"}, {"status": "used", "used_at": now, "updated_at": now})
 
+    def bind_otp_latest_to_request(self, latest_id: str | int, request_id: str) -> None:
+        now = self.now()
+        if self.is_sqlite:
+            with self.base.connect() as connection:
+                connection.execute(
+                    "UPDATE otp_latest_values SET otp_request_id=?, updated_at=? WHERE id=? AND status='valid'",
+                    (request_id, now, latest_id),
+                )
+            return
+        self._patch("otp_latest_values", {"id": f"eq.{latest_id}", "status": "eq.valid"}, {"otp_request_id": request_id, "updated_at": now})
+
     def expire_otp_latest_values(self) -> int:
         now = self.now()
         if self.is_sqlite:

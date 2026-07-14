@@ -1685,6 +1685,39 @@ def test_onebss_mobile_gateway_default_filter_matches_vnpt_sms() -> None:
         assert service.consume_code(request["request_id"]) == "654321"
 
 
+def test_onebss_mobile_gateway_request_uses_latest_otp_received_before_request() -> None:
+    from app.modules.mobile_gateway.otp_service import OtpService
+    from app.modules.mobile_gateway.repository import MobileGatewayRepository
+    from app.modules.mobile_gateway.schemas import SmsMessageIn
+
+    with TestClient(app) as client:
+        login(client)
+        repository = MobileGatewayRepository(routes.build_app_repository(), get_settings())
+        service = OtpService(repository)
+        inserted, skipped = repository.save_sms_messages(
+            "test-device-onebss-latest",
+            [
+                SmsMessageIn(
+                    external_id=f"vnpt-latest-before-request-{time.time()}",
+                    sender="VNPT",
+                    body="Ma OTP dang nhap OneBSS cua Quy khach la 987654. Tran trong.",
+                    received_at=repository.now(),
+                )
+            ],
+        )
+        assert skipped == 0
+        assert inserted
+        latest = service.record_latest_from_sms(inserted[0])
+        assert latest is not None
+
+        request = service.create_request("onebss", job_id="onebss-latest-before-request")
+
+        assert service.consume_code(request["request_id"]) == "987654"
+        consumed = repository.get_otp_request(request["request_id"])
+        assert consumed is not None
+        assert consumed["status"] == "consumed"
+
+
 def test_onebss_mobile_gateway_resolver_auto_submits_otp(monkeypatch) -> None:
     from app.application import onebss_report_service as service
 

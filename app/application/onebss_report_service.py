@@ -297,6 +297,9 @@ def inspect_onebss_mobile_gateway_otp(settings: Settings, request_id: str) -> di
         repository = MobileGatewayRepository(build_repository(settings), settings)
         repository.expire_otp_requests()
         otp_request = repository.get_otp_request(request_id)
+        if otp_request and otp_request.get("status") == "waiting":
+            OtpService(repository).match_latest_for_request(otp_request)
+            otp_request = repository.get_otp_request(request_id)
     except Exception:
         logger.exception("Cannot inspect OneBSS OTP request")
         return {"ok": False, "status": "failed", "message": "Khong kiem tra duoc OTP tu Mobile Gateway."}
@@ -334,6 +337,9 @@ def consume_onebss_mobile_gateway_otp(settings: Settings, request_id: str) -> di
         repository = MobileGatewayRepository(build_repository(settings), settings)
         repository.expire_otp_requests()
         otp_request = repository.get_otp_request(request_id)
+        if otp_request and otp_request.get("status") == "waiting":
+            OtpService(repository).match_latest_for_request(otp_request)
+            otp_request = repository.get_otp_request(request_id)
     except Exception:
         logger.exception("Cannot inspect OneBSS OTP request")
         return {"ok": False, "status": "failed", "message": "Khong kiem tra duoc OTP tu Mobile Gateway."}
