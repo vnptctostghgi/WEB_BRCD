@@ -45,6 +45,7 @@ from app.application.onebss_data_mining_service import OneBssDownloadError, norm
 from app.application.onebss_report_service import (
     cancel_onebss_mobile_gateway_otp,
     consume_onebss_mobile_gateway_otp,
+    inspect_onebss_mobile_gateway_otp,
     run_onebss_report_request,
 )
 from app.application.zalo_auto_message_service import capture_page_screenshot_bytes, capture_public_url, send_zalo_auto_message
@@ -2486,7 +2487,7 @@ def clear_onebss_report_runs(request: Request, ma_bao_cao: str = "") -> dict:
 @router.get("/api/onebss-reports/otp-requests/{otp_request_id}")
 def get_onebss_otp_request(request: Request, otp_request_id: str) -> dict:
     admin_user(request)
-    result = consume_onebss_mobile_gateway_otp(get_settings(), otp_request_id)
+    result = inspect_onebss_mobile_gateway_otp(get_settings(), otp_request_id)
     if result.get("status") == "missing":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result.get("message") or "Khong tim thay OTP request.")
     return result
@@ -2505,12 +2506,29 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay cau hinh bao cao OneBSS.")
     started_at = datetime.now().isoformat(timespec="seconds")
     run_parameters = payload.parameters if isinstance(payload.parameters, dict) and payload.parameters else report.get("parameters") or {}
+    settings = get_settings()
+    otp_value = payload.otp.strip()
+    otp_request_id = payload.otp_request_id.strip()
+    otp_source = payload.otp_source.strip().lower()
+    if payload.session_id.strip() and otp_request_id and not otp_value and otp_source in {"auto", "mobile_gateway", "otp_request"}:
+        otp_result = consume_onebss_mobile_gateway_otp(settings, otp_request_id)
+        if otp_result.get("ok") and otp_result.get("otp"):
+            otp_value = str(otp_result.get("otp") or "").strip()
+        else:
+            return {
+                "ok": False,
+                "status": "otp_required" if otp_result.get("status") in {"waiting", "matched"} else "manual_otp_required",
+                "message": otp_result.get("message") or "Chua lay duoc OTP tu Mobile Gateway. Hay nhap OTP thu cong.",
+                "session_id": payload.session_id.strip(),
+                "parameters": run_parameters,
+                "otp_request_id": otp_request_id,
+            }
     try:
         result = run_onebss_report_request(
-            get_settings(),
+            settings,
             report,
             run_parameters,
-            otp=payload.otp.strip(),
+            otp=otp_value,
             session_id=payload.session_id.strip(),
             created_by=actor["username"],
         )
@@ -2529,10 +2547,10 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
             "message": result.get("message"),
             "session_id": result.get("session_id"),
             "parameters": result.get("parameters") or run_parameters,
-            "otp_request_id": result.get("otp_request_id") or payload.otp_request_id.strip(),
+            "otp_request_id": result.get("otp_request_id") or otp_request_id,
         }
-    if result.get("ok") and payload.otp_source.strip().lower() == "manual" and payload.otp_request_id.strip():
-        cancel_onebss_mobile_gateway_otp(get_settings(), payload.otp_request_id.strip(), "manual_otp_used")
+    if result.get("ok") and otp_source == "manual" and otp_request_id:
+        cancel_onebss_mobile_gateway_otp(settings, otp_request_id, "manual_otp_used")
     finished_at = result.get("finished_at") or datetime.now().isoformat(timespec="seconds")
     try:
         run = repository.save_onebss_report_run({

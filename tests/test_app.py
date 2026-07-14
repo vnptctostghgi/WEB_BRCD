@@ -1722,12 +1722,12 @@ def test_onebss_mobile_gateway_poll_consumes_matched_otp(monkeypatch) -> None:
     assert events["consumed"] == "OTP-POLL-001"
 
 
-def test_onebss_otp_request_poll_route_returns_matched_code(monkeypatch) -> None:
-    def fake_consume(settings, request_id):
+def test_onebss_otp_request_poll_route_reports_matched_without_consuming(monkeypatch) -> None:
+    def fake_inspect(settings, request_id):
         assert request_id == "OTP-POLL-001"
-        return {"ok": True, "status": "matched", "otp": "654321", "source_type": "sms"}
+        return {"ok": True, "status": "matched", "code_masked": "******", "source_type": "sms"}
 
-    monkeypatch.setattr(routes, "consume_onebss_mobile_gateway_otp", fake_consume)
+    monkeypatch.setattr(routes, "inspect_onebss_mobile_gateway_otp", fake_inspect)
 
     with TestClient(app) as client:
         login(client)
@@ -1735,7 +1735,60 @@ def test_onebss_otp_request_poll_route_returns_matched_code(monkeypatch) -> None
 
     assert response.status_code == 200
     assert response.json()["status"] == "matched"
-    assert response.json()["otp"] == "654321"
+    assert "otp" not in response.json()
+
+
+def test_onebss_run_uses_otp_bound_to_request_id(monkeypatch) -> None:
+    calls = []
+
+    def fake_consume(settings, request_id):
+        assert request_id == "OTP-POLL-001"
+        return {"ok": True, "status": "matched", "otp": "654321", "source_type": "sms"}
+
+    def fake_run_onebss_report_request(settings, report, parameters, **kwargs):
+        calls.append({
+            "report": report["ma_bao_cao"],
+            "otp": kwargs.get("otp"),
+            "session_id": kwargs.get("session_id"),
+            "parameters": parameters,
+        })
+        return {
+            "ok": True,
+            "status": "success",
+            "message": "auto otp ok",
+            "file_name": "onebss.xlsx",
+            "file_path": "data/data_mining_downloads/onebss.xlsx",
+            "parameters": parameters,
+        }
+
+    monkeypatch.setattr(routes, "consume_onebss_mobile_gateway_otp", fake_consume)
+    monkeypatch.setattr(routes, "run_onebss_report_request", fake_run_onebss_report_request)
+
+    with TestClient(app) as client:
+        login(client)
+        created = client.post(
+            "/api/admin/onebss-reports",
+            json={
+                "ten_bao_cao": "Bien dong PTTB",
+                "parameters": {"P_DENNGAY": "12/07/2026"},
+                "report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST&name=Test",
+            },
+        )
+        assert created.status_code == 200
+        response = client.post(
+            "/api/onebss-reports/run",
+            json={
+                "ma_bao_cao": created.json()["ma_bao_cao"],
+                "session_id": "api-session-001",
+                "otp_request_id": "OTP-POLL-001",
+                "otp_source": "auto",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert calls[-1]["otp"] == "654321"
+    assert calls[-1]["session_id"] == "api-session-001"
 
 
 def test_onebss_auth_transition_waits_for_delayed_otp() -> None:
@@ -1813,6 +1866,50 @@ def test_onebss_report_id_uses_configured_meta_value() -> None:
     assert onebss_export_parameters(parameters) == {"P_PHANVUNG_ID": "13"}
 
 
+def test_onebss_download_falls_back_when_grid_has_no_rows(monkeypatch, tmp_path) -> None:
+    from app.application import onebss_report_service as service
+    from app.application.onebss_report_service import OneBssDownloadError, OneBssDownloadedFile, OneBssApiToken
+
+    events = []
+    token = OneBssApiToken(
+        access_token="token",
+        token_type="Bearer",
+        username="test@vnpt.vn",
+        mobile_id="mobile",
+        device_id="device",
+        expires_at=9999999999,
+    )
+
+    def fake_grid(*args, **kwargs):
+        events.append("grid")
+        raise OneBssDownloadError("OneBSS run_v7 grid khong co du lieu")
+
+    def fake_export(settings, token, report, parameters, **kwargs):
+        events.append("export")
+        target = kwargs.get("target_file") or tmp_path / "fallback.xlsx"
+        target.write_bytes(b"PK\x03\x04")
+        return OneBssDownloadedFile(
+            file_path=target,
+            suggested_filename="fallback.xlsx",
+            export_info={"params": parameters},
+            parameters=parameters,
+            source_values=kwargs.get("source_values") or {},
+        )
+
+    monkeypatch.setattr(service, "download_onebss_grid_file_api", fake_grid)
+    monkeypatch.setattr(service, "download_onebss_export_file_api", fake_export)
+
+    result = service.download_onebss_report_file_api(
+        get_settings(),
+        token,
+        {"report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST&name=Test"},
+        {"P_PHANVUNG_ID": "13"},
+    )
+
+    assert events == ["grid", "export"]
+    assert result.suggested_filename == "fallback.xlsx"
+
+
 def test_onebss_grid_rows_are_written_to_excel(tmp_path) -> None:
     from openpyxl import load_workbook
 
@@ -1828,6 +1925,76 @@ def test_onebss_grid_rows_are_written_to_excel(tmp_path) -> None:
         assert [sheet.cell(row=1, column=index).value for index in range(1, 4)] == ["MA_TB", "DOANH_THU", "GOI"]
         assert sheet.cell(row=2, column=1).value == "TB1"
         assert sheet.cell(row=3, column=3).value == "FIBER"
+    finally:
+        workbook.close()
+
+
+def test_onebss_finish_api_splits_regions_and_merges_excel(monkeypatch, tmp_path) -> None:
+    from openpyxl import Workbook, load_workbook
+
+    from app.application import onebss_report_service as service
+    from app.application.onebss_report_service import OneBssApiToken, OneBssDownloadedFile
+
+    settings = get_settings().model_copy(update={"data_mining_download_dir": str(tmp_path)})
+    token = OneBssApiToken(
+        access_token="token",
+        token_type="Bearer",
+        username="test@vnpt.vn",
+        mobile_id="mobile",
+        device_id="device",
+        expires_at=9999999999,
+    )
+    regions = []
+
+    def fake_download(settings, token, report, parameters, **kwargs):
+        region = str(parameters["P_PHANVUNG_ID"])
+        regions.append(region)
+        target = kwargs.get("target_file") or tmp_path / f"part_{region}.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "DATA"
+        sheet.append(["MA_TB", "DOANH_THU"])
+        sheet.append([f"TB{region}", int(region)])
+        workbook.save(target)
+        workbook.close()
+        return OneBssDownloadedFile(
+            file_path=target,
+            suggested_filename=f"part_{region}.xlsx",
+            export_info={"report_id": 41668, "title": "Bao cao phat trien moi", "params": parameters},
+            parameters=parameters,
+            source_values=kwargs.get("source_values") or {},
+        )
+
+    monkeypatch.setattr(service, "download_onebss_report_file_api", fake_download)
+    monkeypatch.setattr(service, "save_downloaded_file", lambda settings, target, storage: {"ok": True, "storage_link": str(target), "storage_status": "local"})
+
+    result = service.finish_onebss_report_download_api(
+        settings,
+        token,
+        {
+            "ma_bao_cao": "ONEBSS_PTM",
+            "ten_bao_cao": "Bao cao phat trien moi",
+            "report_url": "https://onebss.vnpt.vn/#/report/bi?path=PHATTRIENTHUEBAO%2FBIENDONGPHATTRIENTHUEBAO%2FRP_BSS_28429&name=Test",
+        },
+        {
+            "P_PHANVUNG_ID": {"$each": ["13", "14", "15"]},
+            "P_LOAI_NGAY": "1",
+            "P_TUNGAY": "01/07/2026",
+            "P_DENNGAY": "14/07/2026",
+            "$merge_excel": {"sheet": "DATA", "source_column": "P_PHANVUNG_ID"},
+        },
+    )
+
+    assert result["ok"] is True
+    assert result["merged_file_count"] == 3
+    assert regions == ["13", "14", "15"]
+
+    workbook = load_workbook(result["file_path"], data_only=True)
+    try:
+        sheet = workbook["DATA"]
+        assert sheet.max_row == 4
+        assert [cell.value for cell in sheet[1]] == ["MA_TB", "DOANH_THU", "P_PHANVUNG_ID"]
+        assert [sheet.cell(row=row, column=3).value for row in range(2, 5)] == ["13", "14", "15"]
     finally:
         workbook.close()
 

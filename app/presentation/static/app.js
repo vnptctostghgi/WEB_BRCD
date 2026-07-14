@@ -5658,7 +5658,10 @@ function resetOneBssOtpState({ hidePanel = true } = {}) {
   oneBssPendingOtpRequestId = "";
   oneBssOtpManualSubmitStarted = false;
   const input = $("#onebss-otp-input");
-  if (input) input.value = "";
+  if (input) {
+    input.value = "";
+    input.placeholder = "Nhap OTP";
+  }
   setOneBssOtpStatus("");
   if (hidePanel) $("#onebss-otp-panel")?.classList.add("hidden");
 }
@@ -5683,13 +5686,16 @@ function startOneBssOtpPolling(otpRequestId) {
     try {
       const response = await api(`/api/onebss-reports/otp-requests/${encodeURIComponent(requestId)}`);
       if (token !== oneBssOtpPollToken || oneBssOtpManualSubmitStarted || !oneBssPendingSessionId) return;
-      if (response.status === "matched" && response.otp) {
+      if (response.status === "matched") {
         clearOneBssManualOtpTimer();
         const input = $("#onebss-otp-input");
-        if (input) input.value = String(response.otp).replace(/\D/g, "").slice(0, 8);
+        if (input) {
+          input.value = response.otp ? String(response.otp).replace(/\D/g, "").slice(0, 8) : "";
+          input.placeholder = response.code_masked ? `OTP ${response.code_masked}` : "OTP tu dong da san sang";
+        }
         setOneBssOtpStatus("Da boc tach OTP tu tin nhan. Dang dang nhap...", "success");
         stopOneBssOtpPolling();
-        await runOneBssReport(response.otp, { otpRequestId: requestId, otpSource: "auto" });
+        await runOneBssReport(response.otp || "", { otpRequestId: requestId, otpSource: "auto" });
         return;
       }
       if (["waiting", "created"].includes(response.status || "")) {

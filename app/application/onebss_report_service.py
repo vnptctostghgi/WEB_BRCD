@@ -285,6 +285,43 @@ def start_onebss_otp_mobile_gateway_request(
     )
 
 
+def inspect_onebss_mobile_gateway_otp(settings: Settings, request_id: str) -> dict[str, Any]:
+    request_id = str(request_id or "").strip()
+    if not request_id:
+        return {"ok": False, "status": "missing", "message": "Thieu OTP request."}
+    if not bool(getattr(settings, "mobile_gateway_enabled", True)):
+        return {"ok": False, "status": "disabled", "message": "Mobile Gateway chua duoc bat."}
+
+    try:
+        repository = MobileGatewayRepository(build_repository(settings), settings)
+        repository.expire_otp_requests()
+        otp_request = repository.get_otp_request(request_id)
+    except Exception:
+        logger.exception("Cannot inspect OneBSS OTP request")
+        return {"ok": False, "status": "failed", "message": "Khong kiem tra duoc OTP tu Mobile Gateway."}
+
+    if not otp_request:
+        return {"ok": False, "status": "missing", "message": "Khong tim thay OTP request."}
+
+    status_value = str(otp_request.get("status") or "waiting")
+    messages = {
+        "waiting": "Dang doi tin nhan OTP.",
+        "matched": "Da boc tach OTP tu Mobile Gateway.",
+        "expired": "OTP request da het thoi gian cho.",
+        "cancelled": "OTP request da bi huy.",
+        "consumed": "OTP request da duoc su dung.",
+    }
+    return {
+        "ok": status_value == "matched",
+        "status": status_value,
+        "message": messages.get(status_value, "Chua co OTP moi."),
+        "code_masked": otp_request.get("code_masked") or "",
+        "source_type": otp_request.get("matched_source_type") or "",
+        "source_id": otp_request.get("matched_source_id") or "",
+        "matched_at": otp_request.get("matched_at") or "",
+    }
+
+
 def consume_onebss_mobile_gateway_otp(settings: Settings, request_id: str) -> dict[str, Any]:
     request_id = str(request_id or "").strip()
     if not request_id:
@@ -778,6 +815,8 @@ def download_onebss_grid_file_api(
 
     data = parse_onebss_json_response(response)
     rows = onebss_grid_rows(data, response)
+    if not rows:
+        raise OneBssDownloadError("OneBSS run_v7 grid khong co du lieu; fallback sang export Excel truc tiep.")
     suggested_filename = f"onebss_grid_{report_id}.xlsx"
     if target_file is None:
         schedule_like = {
@@ -1382,7 +1421,7 @@ def excel_cell_value(value: Any) -> Any:
 
 def should_fallback_to_onebss_excel_export(error: Exception) -> bool:
     text = str(error).lower()
-    fallback_needles = ("chưa hỗ trợ", "chua ho tro", "header", "run_v7", "404", "not found")
+    fallback_needles = ("chưa hỗ trợ", "chua ho tro", "header", "run_v7", "404", "not found", "khong co du lieu", "no data")
     return any(needle in text for needle in fallback_needles)
 
 
