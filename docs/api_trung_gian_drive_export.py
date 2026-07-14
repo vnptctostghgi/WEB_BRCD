@@ -79,7 +79,22 @@ def load_service_account_info() -> dict[str, Any]:
         raw_json = Path(file_path).read_text(encoding="utf-8")
     if not raw_json:
         raise RuntimeError("Chua cau hinh Google Drive service account tren may tram.")
-    return json.loads(raw_json)
+    info = json.loads(raw_json)
+    validate_service_account_info(info)
+    return info
+
+
+def validate_service_account_info(info: dict[str, Any]) -> None:
+    if not isinstance(info, dict):
+        raise RuntimeError("File Google Drive service account khong phai JSON object.")
+    if info.get("type") != "service_account":
+        raise RuntimeError("File JSON Google Drive khong phai service account key. Hay tai dung key JSON cua Service Account.")
+    required = ["client_email", "private_key", "token_uri"]
+    missing = [key for key in required if not str(info.get(key) or "").strip()]
+    if missing:
+        raise RuntimeError(f"Service account JSON thieu: {', '.join(missing)}.")
+    if "BEGIN PRIVATE KEY" not in str(info.get("private_key") or ""):
+        raise RuntimeError("Service account JSON co private_key khong hop le.")
 
 
 def upload_to_drive(local_path: Path, file_name: str, folder_id: str) -> dict[str, Any]:
@@ -106,6 +121,15 @@ def upload_to_drive(local_path: Path, file_name: str, folder_id: str) -> dict[st
         "web_view_link": uploaded.get("webViewLink") or "",
         "web_content_link": uploaded.get("webContentLink") or "",
     }
+
+
+def drive_client():
+    info = load_service_account_info()
+    credentials = service_account.Credentials.from_service_account_info(
+        info,
+        scopes=["https://www.googleapis.com/auth/drive"],
+    )
+    return build("drive", "v3", credentials=credentials, cache_discovery=False), info
 
 
 def count_rows(cursor, sql: str, binds: dict[str, Any]) -> int:
@@ -200,61 +224,95 @@ def test_oracle():
     return {"status": "ok", "oracle_time": str(row[0])}
 
 
+@app.get("/test-drive")
+def test_drive():
+    try:
+        drive, info = drive_client()
+        folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip()
+        folder: dict[str, Any] = {}
+        if folder_id:
+            folder = drive.files().get(
+                fileId=folder_id,
+                fields="id,name,mimeType",
+                supportsAllDrives=True,
+            ).execute()
+        return {
+            "status": "ok",
+            "client_email": info.get("client_email") or "",
+            "folder_id": folder_id,
+            "folder_name": folder.get("name") or "",
+        }
+    except Exception as error:
+        return {
+            "status": "error",
+            "message": f"{type(error).__name__}: {error}",
+        }
+
+
 @app.post("/api/du-lieu-web")
 def du_lieu_web(payload: dict[str, Any], authorization: str = Header(default="")):
-    require_token(authorization)
-    action = str(payload.get("action") or "").strip()
-    if action == "health_check":
-        return {"ok": True, "status": "ok"}
+    try:
+        require_token(authorization)
+        action = str(payload.get("action") or "").strip()
+        if action == "health_check":
+            return {"ok": True, "status": "ok"}
 
-    sql = clean_sql(payload.get("cau_lenh_sql") or "")
-    binds = payload.get("tham_so") if isinstance(payload.get("tham_so"), dict) else {}
-    if not sql:
-        raise HTTPException(status_code=400, detail="Thieu cau_lenh_sql.")
+        sql = clean_sql(payload.get("cau_lenh_sql") or "")
+        binds = payload.get("tham_so") if isinstance(payload.get("tham_so"), dict) else {}
+        if not sql:
+            raise HTTPException(status_code=400, detail="Thieu cau_lenh_sql.")
 
-    if action == "run_sql_report":
-        pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
-        page = int(pagination.get("page") or 1)
-        page_size = int(pagination.get("page_size") or 20)
-        with oracle_connect() as conn:
-            with conn.cursor() as cursor:
-                total = count_rows(cursor, sql, binds)
-                columns, rows = fetch_page(cursor, sql, binds, page, page_size)
+        if action == "run_sql_report":
+            pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
+            page = int(pagination.get("page") or 1)
+            page_size = int(pagination.get("page_size") or 20)
+            with oracle_connect() as conn:
+                with conn.cursor() as cursor:
+                    total = count_rows(cursor, sql, binds)
+                    columns, rows = fetch_page(cursor, sql, binds, page, page_size)
+            return {
+                "ok": True,
+                "columns": columns,
+                "rows": rows,
+                "total": total or len(rows),
+                "page": page,
+                "page_size": page_size,
+            }
+
+        if action == "export_sql_report_to_drive":
+            folder_id = str(payload.get("drive_folder_id") or os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
+            if not folder_id:
+                raise HTTPException(status_code=400, detail="Thieu drive_folder_id.")
+            pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
+            page_size = int(pagination.get("page_size") or os.getenv("EXPORT_PAGE_SIZE", "5000"))
+            max_rows = int(pagination.get("max_rows") or os.getenv("EXPORT_MAX_ROWS", "1000000"))
+            file_name = safe_file_name(payload.get("file_name") or f"{payload.get('ma_bao_cao')}_{datetime.now():%Y%m%d_%H%M%S}.xlsx")
+            export_dir = Path(os.getenv("EXPORT_DIR", str(Path(tempfile.gettempdir()) / "vnptcto_exports")))
+            export_dir.mkdir(parents=True, exist_ok=True)
+            target_path = export_dir / file_name
+            with oracle_connect() as conn:
+                with conn.cursor() as cursor:
+                    result = write_export_to_excel(cursor, sql, binds, target_path, page_size, max_rows)
+            uploaded = upload_to_drive(target_path, file_name, folder_id)
+            return {
+                "ok": True,
+                "status": "uploaded_google_drive",
+                "message": "Da xuat Excel tren may tram va upload Google Drive.",
+                "file_id": uploaded.get("file_id") or "",
+                "file_name": uploaded.get("file_name") or file_name,
+                "drive_url": uploaded.get("web_view_link") or uploaded.get("web_content_link") or "",
+                "storage_link": uploaded.get("web_view_link") or uploaded.get("web_content_link") or "",
+                "rows": result["rows"],
+                "total": result["total"],
+                "columns": result["columns"],
+            }
+
+        raise HTTPException(status_code=400, detail=f"Action khong ho tro: {action}")
+    except HTTPException:
+        raise
+    except Exception as error:
         return {
-            "ok": True,
-            "columns": columns,
-            "rows": rows,
-            "total": total or len(rows),
-            "page": page,
-            "page_size": page_size,
+            "ok": False,
+            "status": "error",
+            "message": f"{type(error).__name__}: {error}",
         }
-
-    if action == "export_sql_report_to_drive":
-        folder_id = str(payload.get("drive_folder_id") or os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
-        if not folder_id:
-            raise HTTPException(status_code=400, detail="Thieu drive_folder_id.")
-        pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
-        page_size = int(pagination.get("page_size") or os.getenv("EXPORT_PAGE_SIZE", "5000"))
-        max_rows = int(pagination.get("max_rows") or os.getenv("EXPORT_MAX_ROWS", "1000000"))
-        file_name = safe_file_name(payload.get("file_name") or f"{payload.get('ma_bao_cao')}_{datetime.now():%Y%m%d_%H%M%S}.xlsx")
-        export_dir = Path(os.getenv("EXPORT_DIR", str(Path(tempfile.gettempdir()) / "vnptcto_exports")))
-        export_dir.mkdir(parents=True, exist_ok=True)
-        target_path = export_dir / file_name
-        with oracle_connect() as conn:
-            with conn.cursor() as cursor:
-                result = write_export_to_excel(cursor, sql, binds, target_path, page_size, max_rows)
-        uploaded = upload_to_drive(target_path, file_name, folder_id)
-        return {
-            "ok": True,
-            "status": "uploaded_google_drive",
-            "message": "Da xuat Excel tren may tram va upload Google Drive.",
-            "file_id": uploaded.get("file_id") or "",
-            "file_name": uploaded.get("file_name") or file_name,
-            "drive_url": uploaded.get("web_view_link") or uploaded.get("web_content_link") or "",
-            "storage_link": uploaded.get("web_view_link") or uploaded.get("web_content_link") or "",
-            "rows": result["rows"],
-            "total": result["total"],
-            "columns": result["columns"],
-        }
-
-    raise HTTPException(status_code=400, detail=f"Action khong ho tro: {action}")
