@@ -43,6 +43,15 @@ FEATURE_ROWS = [
     {"code": "nhatkyhoatdong", "name": "Nhật ký hoạt động", "parent_code": "quantriweb", "sort_order": 90},
 ]
 
+ONEBSS_WORKER_META_KEY = "$worker"
+ONEBSS_WORKER_COLUMNS = {
+    "worker_id",
+    "worker_session_id",
+    "otp_request_id",
+    "claimed_at",
+    "updated_at",
+}
+
 FEATURE_ROWS.append({"code": "quantrisql", "name": "Quản trị SQL", "parent_code": "quantriketnoi", "sort_order": 23})
 FEATURE_ROWS.append({"code": "quantridulieuonebss", "name": "Quản trị dữ liệu OneBSS", "parent_code": "quantriketnoi", "sort_order": 24})
 FEATURE_ROWS.extend(
@@ -651,7 +660,14 @@ class SupabaseRepository:
             "claimed_at": str(payload.get("claimed_at") or ""),
             "updated_at": str(payload.get("updated_at") or self._now()),
         }
-        self._insert("onebss_report_runs", row)
+        try:
+            self._insert("onebss_report_runs", row)
+        except RuntimeError as error:
+            if not self._is_missing_onebss_worker_column(error):
+                raise
+            legacy_row = self._onebss_legacy_run_payload(row)
+            self._insert("onebss_report_runs", legacy_row)
+            row = legacy_row
         return self._decode_onebss_report_run(row)
 
     def get_onebss_report_run(self, run_id: str) -> dict[str, Any] | None:
@@ -664,17 +680,25 @@ class SupabaseRepository:
             return None
         run_id = str(rows[0].get("run_id") or "")
         now = self._now()
-        self._patch(
-            "onebss_report_runs",
-            {"run_id": f"eq.{run_id}", "status": "eq.queued"},
-            {
-                "status": "running",
-                "message": "May tram da nhan task va dang xu ly OneBSS.",
-                "worker_id": str(worker_id or "")[:120],
-                "claimed_at": now,
-                "updated_at": now,
-            },
-        )
+        payload = {
+            "status": "running",
+            "message": "May tram da nhan task va dang xu ly OneBSS.",
+            "worker_id": str(worker_id or "")[:120],
+            "claimed_at": now,
+            "updated_at": now,
+        }
+        try:
+            self._patch("onebss_report_runs", {"run_id": f"eq.{run_id}", "status": "eq.queued"}, payload)
+        except RuntimeError as error:
+            if not self._is_missing_onebss_worker_column(error):
+                raise
+            current = self._decode_onebss_report_run(rows[0])
+            legacy_payload = {
+                "status": payload["status"],
+                "message": payload["message"],
+                "parameters_json": self._onebss_parameters_with_worker_meta(current.get("parameters"), payload),
+            }
+            self._patch("onebss_report_runs", {"run_id": f"eq.{run_id}", "status": "eq.queued"}, legacy_payload)
         return self.get_onebss_report_run(run_id)
 
     def update_onebss_report_run(self, run_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
@@ -702,7 +726,22 @@ class SupabaseRepository:
                 payload[key] = value
         payload["updated_at"] = str(payload.get("updated_at") or self._now())
         if payload:
-            self._patch("onebss_report_runs", {"run_id": f"eq.{run_id}"}, payload)
+            try:
+                self._patch("onebss_report_runs", {"run_id": f"eq.{run_id}"}, payload)
+            except RuntimeError as error:
+                if not self._is_missing_onebss_worker_column(error):
+                    raise
+                current = self.get_onebss_report_run(run_id) or {}
+                legacy_payload = {key: value for key, value in payload.items() if key not in ONEBSS_WORKER_COLUMNS}
+                parameters = legacy_payload.get("parameters_json")
+                if not isinstance(parameters, dict):
+                    parameters = current.get("parameters") if isinstance(current.get("parameters"), dict) else {}
+                worker_meta = {
+                    key: payload.get(key) or current.get(key) or ""
+                    for key in ONEBSS_WORKER_COLUMNS
+                }
+                legacy_payload["parameters_json"] = self._onebss_parameters_with_worker_meta(parameters, worker_meta)
+                self._patch("onebss_report_runs", {"run_id": f"eq.{run_id}"}, legacy_payload)
         return self.get_onebss_report_run(run_id)
 
     def list_onebss_report_runs(self, ma_bao_cao: str = "", limit: int = 50) -> list[dict[str, Any]]:
@@ -1198,6 +1237,12 @@ class SupabaseRepository:
                 parameters = json.loads(parameters)
             except json.JSONDecodeError:
                 parameters = {}
+        if not isinstance(parameters, dict):
+            parameters = {}
+        public_parameters = dict(parameters)
+        worker_meta = public_parameters.pop(ONEBSS_WORKER_META_KEY, {})
+        if not isinstance(worker_meta, dict):
+            worker_meta = {}
         return {
             "run_id": row.get("run_id"),
             "ma_bao_cao": row.get("ma_bao_cao") or "",
@@ -1208,17 +1253,50 @@ class SupabaseRepository:
             "file_path": row.get("file_path") or "",
             "storage_link": row.get("storage_link") or "",
             "storage_status": row.get("storage_status") or "",
-            "parameters": parameters if isinstance(parameters, dict) else {},
+            "parameters": public_parameters,
             "started_at": row.get("started_at") or "",
             "finished_at": row.get("finished_at") or "",
             "duration_ms": int(row.get("duration_ms") or 0),
             "created_by": row.get("created_by") or "",
-            "worker_id": row.get("worker_id") or "",
-            "worker_session_id": row.get("worker_session_id") or "",
-            "otp_request_id": row.get("otp_request_id") or "",
-            "claimed_at": row.get("claimed_at") or "",
-            "updated_at": row.get("updated_at") or "",
+            "worker_id": row.get("worker_id") or worker_meta.get("worker_id") or "",
+            "worker_session_id": row.get("worker_session_id") or worker_meta.get("worker_session_id") or "",
+            "otp_request_id": row.get("otp_request_id") or worker_meta.get("otp_request_id") or "",
+            "claimed_at": row.get("claimed_at") or worker_meta.get("claimed_at") or "",
+            "updated_at": row.get("updated_at") or worker_meta.get("updated_at") or "",
         }
+
+    @staticmethod
+    def _is_missing_onebss_worker_column(error: Exception) -> bool:
+        text = str(error)
+        return (
+            "PGRST204" in text
+            and "onebss_report_runs" in text
+            and any(column in text for column in ONEBSS_WORKER_COLUMNS)
+        )
+
+    @staticmethod
+    def _onebss_parameters_with_worker_meta(parameters: Any, worker_values: dict[str, Any]) -> dict[str, Any]:
+        base = dict(parameters) if isinstance(parameters, dict) else {}
+        meta = base.get(ONEBSS_WORKER_META_KEY) if isinstance(base.get(ONEBSS_WORKER_META_KEY), dict) else {}
+        merged_meta = {
+            **meta,
+            **{
+                key: str(worker_values.get(key) or "")
+                for key in ONEBSS_WORKER_COLUMNS
+                if worker_values.get(key)
+            },
+        }
+        if merged_meta:
+            base[ONEBSS_WORKER_META_KEY] = merged_meta
+        else:
+            base.pop(ONEBSS_WORKER_META_KEY, None)
+        return base
+
+    @classmethod
+    def _onebss_legacy_run_payload(cls, row: dict[str, Any]) -> dict[str, Any]:
+        legacy = {key: value for key, value in row.items() if key not in ONEBSS_WORKER_COLUMNS}
+        legacy["parameters_json"] = cls._onebss_parameters_with_worker_meta(row.get("parameters_json"), row)
+        return legacy
 
     @staticmethod
     def _decode_data_mining_schedule(row: dict[str, Any]) -> dict[str, Any]:
