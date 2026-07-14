@@ -18,7 +18,9 @@ python -m pip install fastapi uvicorn oracledb python-dotenv openpyxl google-api
 C:\VNPTCTO\api-trung-gian\drive-service-account.json
 ```
 
-4. Tạo thư mục Drive để chứa báo cáo, bấm Share thư mục đó cho email `client_email` trong file service account JSON quyền Editor.
+4. Tạo **Google Shared Drive** để chứa báo cáo, không dùng thư mục thường trong My Drive. Thêm email `client_email` trong file service account JSON vào Shared Drive với quyền Content manager/Manager, rồi tạo một thư mục bên trong Shared Drive đó.
+
+> Service Account không có quota lưu trữ riêng. Nếu upload vào My Drive hoặc một folder thường được share cho Service Account, Google Drive sẽ trả lỗi `Service Accounts do not have storage quota`.
 
 5. Cập nhật `.env` trên máy trạm:
 
@@ -30,7 +32,7 @@ DB_USER=...
 DB_PASS=...
 
 GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE=C:\VNPTCTO\api-trung-gian\drive-service-account.json
-GOOGLE_DRIVE_FOLDER_ID=ID_THU_MUC_DRIVE
+GOOGLE_DRIVE_FOLDER_ID=ID_THU_MUC_TRONG_SHARED_DRIVE
 EXPORT_DIR=C:\VNPTCTO\exports
 EXPORT_PAGE_SIZE=5000
 EXPORT_MAX_ROWS=1000000
@@ -44,11 +46,11 @@ API_TOKEN=...
 
 6. Trên web, cấu hình cùng thư mục Drive để web biết cần dùng luồng xuất trên máy trạm:
 
-- Cách 1: đặt biến môi trường Render `GOOGLE_DRIVE_FOLDER_ID=ID_THU_MUC_DRIVE`.
+- Cách 1: đặt biến môi trường Render `GOOGLE_DRIVE_FOLDER_ID=ID_THU_MUC_TRONG_SHARED_DRIVE`.
 - Cách 2: vào `Quản trị kết nối` > dòng `Google Drive`/`drive_storage`, cập nhật cấu hình JSON:
 
 ```json
-{"folder":"ID_THU_MUC_DRIVE"}
+{"folder":"ID_THU_MUC_TRONG_SHARED_DRIVE"}
 ```
 
 7. Chạy thử:
@@ -57,6 +59,7 @@ API_TOKEN=...
 cd C:\VNPTCTO\api-trung-gian
 python -m uvicorn main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips="*"
 Invoke-RestMethod https://api.vnptcto.com/test-oracle
+Invoke-RestMethod https://api.vnptcto.com/test-drive
 ```
 
 Khi web xuất Excel, kết quả hoàn tất sẽ là link Google Drive thay vì file tải trực tiếp từ Render.

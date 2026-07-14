@@ -97,6 +97,38 @@ def validate_service_account_info(info: dict[str, Any]) -> None:
         raise RuntimeError("Service account JSON co private_key khong hop le.")
 
 
+def service_account_quota_message() -> str:
+    return (
+        "Google Drive dang dung Service Account nhung thu muc dich khong nam trong Shared Drive. "
+        "Service Account khong co dung luong luu tru rieng nen khong the upload vao My Drive/thu muc Drive thuong. "
+        "Hay tao Google Shared Drive, them client_email cua service account lam Content manager/Manager, "
+        "tao thu muc trong Shared Drive do va cap nhat GOOGLE_DRIVE_FOLDER_ID bang ID thu muc moi."
+    )
+
+
+def is_service_account_quota_error(error: Exception) -> bool:
+    detail = str(error).lower()
+    return "service accounts do not have storage quota" in detail or "storagequotaexceeded" in detail
+
+
+def drive_folder(drive: Any, folder_id: str) -> dict[str, Any]:
+    if not folder_id:
+        raise RuntimeError("Chua cau hinh GOOGLE_DRIVE_FOLDER_ID.")
+    folder = drive.files().get(
+        fileId=folder_id,
+        fields="id,name,mimeType,driveId",
+        supportsAllDrives=True,
+    ).execute()
+    if folder.get("mimeType") != "application/vnd.google-apps.folder":
+        raise RuntimeError("GOOGLE_DRIVE_FOLDER_ID khong phai ID cua thu muc Google Drive.")
+    return folder
+
+
+def ensure_shared_drive_folder(folder: dict[str, Any]) -> None:
+    if not str(folder.get("driveId") or "").strip():
+        raise RuntimeError(service_account_quota_message())
+
+
 def upload_to_drive(local_path: Path, file_name: str, folder_id: str) -> dict[str, Any]:
     info = load_service_account_info()
     credentials = service_account.Credentials.from_service_account_info(
@@ -104,22 +136,31 @@ def upload_to_drive(local_path: Path, file_name: str, folder_id: str) -> dict[st
         scopes=["https://www.googleapis.com/auth/drive"],
     )
     drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
+    folder = drive_folder(drive, folder_id)
+    ensure_shared_drive_folder(folder)
     media = MediaFileUpload(
         str(local_path),
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         resumable=True,
     )
-    uploaded = drive.files().create(
-        body={"name": file_name, "parents": [folder_id]},
-        media_body=media,
-        fields="id,name,webViewLink,webContentLink",
-        supportsAllDrives=True,
-    ).execute()
+    try:
+        uploaded = drive.files().create(
+            body={"name": file_name, "parents": [folder_id]},
+            media_body=media,
+            fields="id,name,webViewLink,webContentLink",
+            supportsAllDrives=True,
+        ).execute()
+    except Exception as error:
+        if is_service_account_quota_error(error):
+            raise RuntimeError(service_account_quota_message()) from error
+        raise
     return {
         "file_id": uploaded.get("id") or "",
         "file_name": uploaded.get("name") or file_name,
         "web_view_link": uploaded.get("webViewLink") or "",
         "web_content_link": uploaded.get("webContentLink") or "",
+        "drive_id": folder.get("driveId") or "",
+        "folder_name": folder.get("name") or "",
     }
 
 
@@ -243,16 +284,23 @@ def test_drive():
         folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip()
         folder: dict[str, Any] = {}
         if folder_id:
-            folder = drive.files().get(
-                fileId=folder_id,
-                fields="id,name,mimeType",
-                supportsAllDrives=True,
-            ).execute()
+            folder = drive_folder(drive, folder_id)
+            if not folder.get("driveId"):
+                return {
+                    "status": "error",
+                    "message": service_account_quota_message(),
+                    "client_email": info.get("client_email") or "",
+                    "folder_id": folder_id,
+                    "folder_name": folder.get("name") or "",
+                    "drive_type": "my_drive",
+                }
         return {
             "status": "ok",
             "client_email": info.get("client_email") or "",
             "folder_id": folder_id,
             "folder_name": folder.get("name") or "",
+            "drive_id": folder.get("driveId") or "",
+            "drive_type": "shared_drive" if folder.get("driveId") else "",
         }
     except Exception as error:
         return {
@@ -292,7 +340,7 @@ def du_lieu_web(payload: dict[str, Any], authorization: str = Header(default="")
             }
 
         if action == "export_sql_report_to_drive":
-            folder_id = str(payload.get("drive_folder_id") or os.getenv("GOOGLE_DRIVE_FOLDER_ID") or "").strip()
+            folder_id = str(os.getenv("GOOGLE_DRIVE_FOLDER_ID") or payload.get("drive_folder_id") or "").strip()
             if not folder_id:
                 raise HTTPException(status_code=400, detail="Thieu drive_folder_id.")
             pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
