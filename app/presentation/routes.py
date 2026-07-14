@@ -632,9 +632,12 @@ def raise_onebss_report_schema_error(error: RuntimeError) -> None:
             detail="Supabase chua co bang onebss_reports/onebss_report_runs. Hay chay lai file sql/supabase_upgrade_admin_modules.sql.",
         ) from error
     if ("onebss_report_runs" in error_text or "worker_id" in error_text or "otp_request_id" in error_text) and is_missing_column_error:
+        detail = error_text.replace("\n", " ").strip()
+        if len(detail) > 220:
+            detail = f"{detail[:217]}..."
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Bang lich su OneBSS chua co cac cot hang doi may tram. Hay chay migration moi nhat hoac khoi dong lai ung dung de SQLite tu nang cap.",
+            detail=f"Bang lich su OneBSS chua co cac cot hang doi may tram. Hay chay migration moi nhat hoac khoi dong lai ung dung de SQLite tu nang cap. Chi tiet: {detail}",
         ) from error
     raise error
 

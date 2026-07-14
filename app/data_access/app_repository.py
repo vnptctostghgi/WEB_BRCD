@@ -182,8 +182,9 @@ class AppRepository:
         }.items():
             try:
                 connection.execute(f"ALTER TABLE onebss_report_runs ADD COLUMN {column} {definition}")
-            except sqlite3.OperationalError:
-                pass
+            except sqlite3.OperationalError as error:
+                if "duplicate column name" not in str(error).lower():
+                    raise
 
     def initialize(self, admin_username: str, admin_password: str) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
