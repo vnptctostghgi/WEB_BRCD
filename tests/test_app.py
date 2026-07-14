@@ -1236,6 +1236,97 @@ def test_dynamic_report_export_job_downloads_full_result_set(monkeypatch) -> Non
         assert exported_rows[-1][0] == "tb5204"
 
 
+def test_dynamic_report_export_job_can_return_drive_link(monkeypatch) -> None:
+    calls = []
+
+    def fake_drive_folder_id(settings, storage_link=""):
+        return "drive-folder-001"
+
+    def fake_export_to_drive(self, **kwargs):
+        calls.append(kwargs)
+        return {
+            "ok": True,
+            "drive_url": "https://drive.google.com/file/d/export-file/view",
+            "file_name": "crs_export.xlsx",
+            "rows": 145433,
+            "total": 145433,
+        }
+
+    monkeypatch.setattr(routes, "google_drive_folder_id", fake_drive_folder_id)
+    monkeypatch.setattr(DatabaseService, "export_dynamic_report_to_drive", fake_export_to_drive)
+
+    with TestClient(app) as client:
+        login(client)
+        started = client.post(
+            "/api/reports/export-jobs",
+            json={"ma_bao_cao": "CRS", "filters": {}, "page": 1, "page_size": 20},
+        )
+        assert started.status_code == 200
+        job_id = started.json()["job_id"]
+
+        status_body = {}
+        for _ in range(80):
+            status_response = client.get(f"/api/reports/export-jobs/{job_id}")
+            assert status_response.status_code == 200
+            status_body = status_response.json()
+            if status_body["status"] == "complete":
+                break
+            time.sleep(0.05)
+
+        assert status_body["status"] == "complete"
+        assert status_body["drive_url"] == "https://drive.google.com/file/d/export-file/view"
+        assert status_body["download_url"] == status_body["drive_url"]
+        assert status_body["rows"] == 145433
+        assert calls[0]["drive_folder_id"] == "drive-folder-001"
+        assert calls[0]["ma_bao_cao"] == "CRS"
+
+
+def test_dynamic_report_drive_export_sends_compiled_sql_to_internal_api() -> None:
+    captured = {}
+
+    class FakeInternalApi:
+        settings = get_settings()
+
+        def export_sql_report_to_drive(self, **kwargs):
+            captured.update(kwargs)
+            return {"ok": True, "drive_url": "https://drive.google.com/file/d/sql-export/view", "rows": 2, "total": 2}
+
+    class FakeRepository:
+        def get_sql_report_by_code(self, code):
+            return {
+                "ten_bao_cao": "CRS",
+                "ma_bao_cao": "CRS",
+                "cau_lenh_sql": "SELECT ma_tb, ten_tb FROM css_cto.db_thuebao WHERE trang_thai = :STATUS;",
+                "cac_tham_so": ["STATUS"],
+            }
+
+        def get_sql_report_by_id(self, report_id):
+            return None
+
+        def list_sql_reports(self):
+            return []
+
+    service = DatabaseService(FakeInternalApi(), FakeRepository())
+    result = service.export_dynamic_report_to_drive(
+        ma_bao_cao="CRS",
+        filters={"STATUS": "1", "IGNORED": "x"},
+        search="nguyen",
+        search_columns=["TEN_TB"],
+        drive_folder_id="drive-folder-001",
+        file_name="crs.xlsx",
+    )
+
+    assert result["ok"] is True
+    assert captured["drive_folder_id"] == "drive-folder-001"
+    assert captured["file_name"] == "crs.xlsx"
+    assert captured["page_size"] == 5000
+    assert captured["max_rows"] >= 1000000
+    assert captured["tham_so"]["STATUS"] == "1"
+    assert "SEARCH_TERM_1" in captured["tham_so"]
+    assert "SELECT * FROM (" in captured["cau_lenh_sql"]
+    assert result["ignored_filters"] == ["IGNORED"]
+
+
 def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
     calls = []
 

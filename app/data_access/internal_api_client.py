@@ -127,6 +127,43 @@ class InternalApiClient:
             timeout=timeout,
         )
 
+    def export_sql_report_to_drive(
+        self,
+        *,
+        ten_bao_cao: str,
+        ma_bao_cao: str,
+        cau_lenh_sql: str,
+        tham_so: dict[str, Any],
+        drive_folder_id: str,
+        file_name: str,
+        page_size: int,
+        max_rows: int,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        if self.mock_mode:
+            return {
+                "ok": False,
+                "status": "mock_mode",
+                "message": "API dữ liệu nội bộ đang ở chế độ mock, chưa thể xuất file trên máy trạm.",
+            }
+
+        return self._post(
+            {
+                "action": "export_sql_report_to_drive",
+                "ten_bao_cao": ten_bao_cao,
+                "ma_bao_cao": ma_bao_cao,
+                "cau_lenh_sql": cau_lenh_sql,
+                "tham_so": tham_so,
+                "drive_folder_id": drive_folder_id,
+                "file_name": file_name,
+                "pagination": {
+                    "page_size": page_size,
+                    "max_rows": max_rows,
+                },
+            },
+            timeout=timeout,
+        )
+
     @staticmethod
     def _mock_fiber_rows(ma_bao_cao: str) -> list[dict[str, Any]]:
         prefix = "VNPT" if ma_bao_cao == "DASHBOARD_FIBER_VNPT" else "TTVT"

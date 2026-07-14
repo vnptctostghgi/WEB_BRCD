@@ -5401,6 +5401,12 @@ async function waitDynamicReportExportJob(jobId, button) {
 
 function downloadDynamicReportExportJob(job) {
   if (!job.download_url) throw new Error("Job xuất Excel chưa có link tải file.");
+  if (job.drive_url) {
+    setDynamicReportExportStatus(job.message || "Đã xuất file Excel lên Google Drive.", "success", job);
+    const opened = window.open(job.drive_url, "_blank", "noopener");
+    if (!opened) window.location.href = job.drive_url;
+    return;
+  }
   setDynamicReportExportStatus(
     `${job.message || "Đã tạo file Excel."} Nếu trình duyệt chưa tự tải, bấm link này:`,
     "success",

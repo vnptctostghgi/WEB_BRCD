@@ -338,6 +338,98 @@ class DatabaseService:
             "pagination": {"page": 1, "page_size": exported_rows, "total": exported_rows},
         }
 
+    def export_dynamic_report_to_drive(
+        self,
+        *,
+        ma_bao_cao: str,
+        filters: dict[str, Any],
+        drive_folder_id: str,
+        file_name: str,
+        search: str = "",
+        search_columns: list[str] | None = None,
+    ) -> dict[str, Any]:
+        report = self._find_sql_report(ma_bao_cao)
+        fetch_page_size = self._dynamic_report_export_page_size()
+        if not report:
+            return self._failed_report("Không tìm thấy cấu hình báo cáo.", 1, fetch_page_size, "")
+
+        allowed_params = [str(param).strip().lstrip(":") for param in (report.get("cac_tham_so") or []) if str(param).strip()]
+        allowed_param_by_upper = {param.upper(): param for param in allowed_params}
+        safe_filters: dict[str, Any] = {}
+        ignored_filters: list[str] = []
+        for key, value in (filters or {}).items():
+            normalized_key = str(key).strip().lstrip(":").upper()
+            if not normalized_key:
+                continue
+            if allowed_param_by_upper:
+                target_key = allowed_param_by_upper.get(normalized_key)
+                if not target_key:
+                    ignored_filters.append(str(key))
+                    continue
+                safe_filters[target_key] = value
+            else:
+                safe_filters[str(key).strip().lstrip(":")] = value
+
+        compiled_sql, define_details = self._compile_define_sql(report["cau_lenh_sql"], safe_filters)
+        compiled_sql, bind_filters = self._expand_in_list_bind_params(compiled_sql, safe_filters)
+        executable_filters = self._filters_for_compiled_sql(compiled_sql, bind_filters)
+        search_text = str(search or "").strip()
+        if search_text:
+            try:
+                compiled_sql, executable_filters = self._wrap_sql_for_search(
+                    compiled_sql,
+                    executable_filters,
+                    search_columns or [],
+                    search_text,
+                )
+            except RuntimeError as error:
+                return self._failed_report(str(error), 1, fetch_page_size, "", compiled_sql, executable_filters, define_details)
+
+        safe_report_code = (
+            self._normalized_report_code(report.get("ma_bao_cao"))
+            or self._normalized_report_code(report.get("ten_bao_cao"))
+            or self._normalized_report_code(ma_bao_cao)
+            or str(report.get("ma_bao_cao") or ma_bao_cao).strip()
+        )
+        try:
+            result = self.internal_api.export_sql_report_to_drive(
+                ten_bao_cao=report["ten_bao_cao"],
+                ma_bao_cao=safe_report_code,
+                cau_lenh_sql=compiled_sql,
+                tham_so=executable_filters,
+                drive_folder_id=drive_folder_id,
+                file_name=file_name,
+                page_size=fetch_page_size,
+                max_rows=self._dynamic_report_export_max_rows(),
+                timeout=self._dynamic_report_export_timeout_seconds(),
+            )
+        except httpx.TimeoutException as error:
+            logger.exception("Remote dynamic report export timeout: %s", error)
+            return self._failed_report("Máy trạm xuất Excel phản hồi quá lâu.", 1, fetch_page_size, str(error), compiled_sql, executable_filters, define_details)
+        except httpx.HTTPStatusError as error:
+            logger.exception("Remote dynamic report export HTTP error: %s", error)
+            return self._failed_report(
+                f"Máy trạm chưa xuất được Excel lên Drive, HTTP {error.response.status_code}.",
+                1,
+                fetch_page_size,
+                error.response.text[:300],
+                compiled_sql,
+                executable_filters,
+                define_details,
+            )
+        except httpx.HTTPError as error:
+            logger.exception("Remote dynamic report export connection error: %s", error)
+            return self._failed_report(self._internal_api_connection_message(error), 1, fetch_page_size, str(error), compiled_sql, executable_filters, define_details)
+
+        if not isinstance(result, dict):
+            result = {"ok": False, "message": "Máy trạm trả phản hồi xuất Excel không hợp lệ."}
+        if ignored_filters:
+            result["ignored_filters"] = ignored_filters
+        if define_details:
+            result["define_details"] = define_details
+        result.setdefault("report", {"ten_bao_cao": report["ten_bao_cao"], "ma_bao_cao": report["ma_bao_cao"]})
+        return result
+
     @classmethod
     def _wrap_sql_for_search(
         cls,

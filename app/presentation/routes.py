@@ -33,6 +33,7 @@ from app.application.google_drive_service import (
     GOOGLE_DRIVE_OAUTH_SCOPES,
     GoogleDriveConfigurationError,
     clear_google_drive_oauth_tokens,
+    google_drive_folder_id,
     google_drive_oauth_client_configured,
     google_drive_oauth_status,
     save_google_drive_oauth_tokens,
@@ -2139,6 +2140,47 @@ def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> No
         _set_dynamic_report_export_job(job_id, status="running", message="Đang chuẩn bị dữ liệu xuất Excel.")
         DYNAMIC_REPORT_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
         target_path = DYNAMIC_REPORT_EXPORT_DIR / f"{job_id}.xlsx"
+        drive_folder_id = google_drive_folder_id(get_settings(), "")
+
+        if drive_folder_id:
+            filename = _dynamic_report_export_filename({"report": {"ma_bao_cao": payload.ma_bao_cao.strip().upper()}})
+            _set_dynamic_report_export_job(job_id, status="running", message="Đang yêu cầu máy trạm xuất Excel và upload Google Drive.")
+            remote_result = build_database_service().export_dynamic_report_to_drive(
+                ma_bao_cao=payload.ma_bao_cao.strip().upper(),
+                filters=payload.filters,
+                search=payload.search,
+                search_columns=payload.search_columns,
+                drive_folder_id=drive_folder_id,
+                file_name=filename,
+            )
+            if remote_result.get("ok"):
+                drive_url = str(
+                    remote_result.get("drive_url")
+                    or remote_result.get("storage_link")
+                    or remote_result.get("web_view_link")
+                    or remote_result.get("web_content_link")
+                    or ""
+                ).strip()
+                rows = int(remote_result.get("rows") or remote_result.get("export_rows") or remote_result.get("row_count") or 0)
+                total = int(remote_result.get("total") or rows)
+                _set_dynamic_report_export_job(
+                    job_id,
+                    status="complete",
+                    message=f"Đã xuất Excel trên máy trạm và upload Google Drive{f' đủ {rows:,} dòng' if rows else ''}.",
+                    filename=str(remote_result.get("file_name") or filename),
+                    drive_url=drive_url,
+                    rows=rows,
+                    total=total,
+                    details=remote_result,
+                )
+                return
+            _set_dynamic_report_export_job(
+                job_id,
+                status="failed",
+                message=remote_result.get("message") or "Máy trạm chưa xuất được file Excel lên Google Drive.",
+                details=remote_result,
+            )
+            return
 
         result = build_database_service().export_dynamic_report(
             ma_bao_cao=payload.ma_bao_cao.strip().upper(),
@@ -2268,7 +2310,9 @@ def get_dynamic_report_export_job(request: Request, job_id: str) -> dict:
         "total": int(job.get("total") or 0),
     }
     if status_value == "complete":
-        response["download_url"] = f"/api/reports/export-jobs/{job_id}/download"
+        drive_url = str(job.get("drive_url") or "")
+        response["download_url"] = drive_url or f"/api/reports/export-jobs/{job_id}/download"
+        response["drive_url"] = drive_url
         response["filename"] = job.get("filename") or ""
     if status_value == "failed":
         response["details"] = job.get("details") or {}
