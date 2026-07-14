@@ -49,6 +49,7 @@ let dynamicReportColumns = [];
 let dynamicReportLoadedRows = [];
 let dynamicReportFilteredRows = [];
 let dynamicReportSearchActive = false;
+let dynamicReportExportJobs = [];
 let menuLayoutState = [];
 let auditLogs = [];
 let dashboardFiberLoaded = false;
@@ -1205,6 +1206,7 @@ if (role === "admin") {
     if (dynamicReportLoaded) await loadDynamicReportData();
   });
   $("#export-dynamic-report")?.addEventListener("click", exportDynamicReport);
+  renderDynamicReportExportJobs();
   $("#dynamic-report-select")?.addEventListener("change", () => {
     clearDynamicReportCache();
     renderDynamicReportFilters();
@@ -5373,6 +5375,79 @@ function downloadDynamicReportBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+function dynamicReportExportStatusLabel(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "complete") return "Hoàn tất";
+  if (normalized === "failed") return "Lỗi";
+  if (normalized === "running") return "Đang chạy";
+  if (normalized === "queued") return "Đang chờ";
+  return status || "-";
+}
+
+function dynamicReportExportStatusClass(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "complete") return "active";
+  if (normalized === "failed") return "inactive";
+  if (normalized === "running") return "admin";
+  return "pending";
+}
+
+function dynamicReportExportRowsText(job) {
+  const progressRows = Number(job.progress?.rows || 0);
+  const progressTotal = Number(job.progress?.total || 0);
+  const rows = Number(job.rows || progressRows || 0);
+  const total = Number(job.total || progressTotal || 0);
+  if (!rows && !total) return "-";
+  return total && total !== rows ? `${rows.toLocaleString("vi-VN")}/${total.toLocaleString("vi-VN")}` : rows.toLocaleString("vi-VN");
+}
+
+function upsertDynamicReportExportJob(job) {
+  const current = repairDataEncoding(job || {});
+  const jobId = current.job_id || current.local_id || `local-${Date.now()}`;
+  const existing = dynamicReportExportJobs.find((item) => item.job_id === jobId || item.local_id === jobId) || {};
+  const selected = $("#dynamic-report-select");
+  const merged = {
+    ...existing,
+    ...current,
+    job_id: jobId,
+    created_at: current.created_at || existing.created_at || new Date().toISOString(),
+    report_code: current.report_code || existing.report_code || selected?.value || "",
+    report_name: current.report_name || existing.report_name || selected?.selectedOptions?.[0]?.textContent || "",
+  };
+  dynamicReportExportJobs = [
+    merged,
+    ...dynamicReportExportJobs.filter((item) => item.job_id !== jobId && item.local_id !== jobId),
+  ].slice(0, 12);
+  renderDynamicReportExportJobs();
+  return merged;
+}
+
+function renderDynamicReportExportJobs() {
+  const body = $("#dynamic-report-export-results");
+  if (!body) return;
+  if (!dynamicReportExportJobs.length) {
+    body.innerHTML = emptyRow(5, "Chưa có job xuất file", "Kết quả xuất file sẽ xuất hiện ở đây.");
+    return;
+  }
+  body.innerHTML = dynamicReportExportJobs.map((job) => {
+    const createdAt = job.created_at ? new Date(job.created_at).toLocaleString("vi-VN") : "-";
+    const status = String(job.status || "queued").toLowerCase();
+    const link = job.drive_url || job.download_url || "";
+    const result = link
+      ? `<a class="table-action" href="${escapeHtml(link)}" target="_blank" rel="noopener">Mở file</a>`
+      : escapeHtml(job.message || (status === "failed" ? "Xuất file lỗi" : "Đang xử lý"));
+    return `
+      <tr>
+        <td>${escapeHtml(createdAt)}</td>
+        <td><strong>${escapeHtml(job.report_code || "-")}</strong><small class="cell-note">${escapeHtml(job.report_name || "")}</small></td>
+        <td><span class="status ${dynamicReportExportStatusClass(status)}">${escapeHtml(dynamicReportExportStatusLabel(status))}</span></td>
+        <td>${escapeHtml(dynamicReportExportRowsText(job))}</td>
+        <td class="table-action-cell">${result}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
 function setDynamicReportExportStatus(text, type = "success", job = null) {
   const box = $("#dynamic-report-message");
   if (box) {
@@ -5387,7 +5462,8 @@ async function waitDynamicReportExportJob(jobId, button) {
   let lastMessage = "";
   for (let attempt = 0; attempt < 900; attempt += 1) {
     await sleep(attempt === 0 ? 1000 : 2000);
-    const job = await api(`/api/reports/export-jobs/${encodeURIComponent(jobId)}`);
+    const job = repairDataEncoding(await api(`/api/reports/export-jobs/${encodeURIComponent(jobId)}`));
+    upsertDynamicReportExportJob(job);
     if (job.message && job.message !== lastMessage) {
       lastMessage = job.message;
       button?.setAttribute("title", repairTextEncoding(job.message));
@@ -5419,6 +5495,7 @@ async function exportDynamicReport() {
   const select = $("#dynamic-report-select");
   const message = $("#dynamic-report-message");
   const button = $("#export-dynamic-report");
+  let activeExportJob = null;
   if (!select || !select.value) {
     showMessage(message, "Chọn loại báo cáo trước khi xuất file.", "error");
     return;
@@ -5429,16 +5506,33 @@ async function exportDynamicReport() {
   }
   setButtonLoading(button, true);
   try {
-    const started = await api("/api/reports/export-jobs", {
+    const started = repairDataEncoding(await api("/api/reports/export-jobs", {
       method: "POST",
       body: JSON.stringify(dynamicReportPayload({ page: 1, includeSearch: dynamicReportSearchActive })),
+    }));
+    activeExportJob = upsertDynamicReportExportJob({
+      ...started,
+      report_code: select.value,
+      report_name: select.selectedOptions?.[0]?.textContent || "",
+      created_at: new Date().toISOString(),
     });
+    if (!started.job_id) throw new Error("Không thấy job xuất file.");
     showMessage(message, started.message || "Đang xuất file Excel ở chế độ nền.");
     setDynamicReportExportStatus(started.message || "Đang xuất file Excel ở chế độ nền.");
     const job = await waitDynamicReportExportJob(started.job_id, button);
     downloadDynamicReportExportJob(job);
     showMessage(message, job.message || "Đã tạo file Excel đầy đủ theo điều kiện hiện tại.");
   } catch (error) {
+    upsertDynamicReportExportJob({
+      ...(activeExportJob || {
+        local_id: `local-${Date.now()}`,
+        report_code: select?.value || "",
+        report_name: select?.selectedOptions?.[0]?.textContent || "",
+        created_at: new Date().toISOString(),
+      }),
+      status: "failed",
+      message: error.message,
+    });
     setDynamicReportExportStatus(error.message, "error");
     showMessage(message, error.message, "error");
   } finally {

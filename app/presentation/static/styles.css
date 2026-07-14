@@ -3428,6 +3428,34 @@ legend {
   white-space: nowrap;
 }
 
+.dynamic-report-export-results {
+  display: grid;
+  gap: .7rem;
+  margin-top: 1rem;
+}
+
+.dynamic-report-export-heading h2 {
+  margin: 0;
+  color: #dff7ff;
+  font-size: .98rem;
+  font-weight: 900;
+}
+
+.dynamic-report-export-table {
+  min-width: 760px;
+}
+
+.dynamic-report-export-table .table-action {
+  min-height: 32px;
+  border-radius: 10px;
+  padding: .36rem .62rem;
+}
+
+.dynamic-report-export-table .cell-note {
+  display: block;
+  margin-top: .18rem;
+}
+
 #view-onebss-mining .page-header {
   margin-bottom: .75rem;
 }
