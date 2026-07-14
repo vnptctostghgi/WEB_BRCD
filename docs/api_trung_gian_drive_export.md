@@ -60,3 +60,27 @@ Invoke-RestMethod https://api.vnptcto.com/test-oracle
 ```
 
 Khi web xuất Excel, kết quả hoàn tất sẽ là link Google Drive thay vì file tải trực tiếp từ Render.
+
+## Auto run on workstation
+
+Run PowerShell as Administrator on the workstation:
+
+```powershell
+Invoke-WebRequest `
+  -Uri "https://raw.githubusercontent.com/vnptctostghgi/WEB_BRCD/main/docs/install_api_trung_gian_task.ps1" `
+  -OutFile "C:\VNPTCTO\install_api_trung_gian_task.ps1"
+
+powershell -ExecutionPolicy Bypass -File "C:\VNPTCTO\install_api_trung_gian_task.ps1"
+```
+
+The script creates:
+
+- `VNPTCTO API Trung Gian`: starts the local FastAPI middleware at boot.
+- `VNPTCTO API Watchdog`: checks every 5 minutes and restarts the API/cloudflared if needed.
+
+After it finishes, these checks must return `status: ok`:
+
+```powershell
+Invoke-RestMethod https://api.vnptcto.com/test-oracle
+Invoke-RestMethod https://api.vnptcto.com/test-drive
+```
