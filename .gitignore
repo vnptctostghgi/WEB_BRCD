@@ -1,5 +1,8 @@
 .env
 .venv/
+.venv-onebss-worker/
+ONEBSS_WORKER_SECRET_CONFIG.zip
+_onebss_secret_config/
 __pycache__/
 .pytest_cache/
 *.pyc

@@ -5952,13 +5952,15 @@ function upsertOneBssRun(run) {
   oneBssReportRuns = oneBssReportRuns.slice(0, 30);
 }
 
-function handleOneBssJobResponse(response) {
+function handleOneBssJobResponse(response, { interactive = true } = {}) {
   const job = repairDataEncoding(response || {});
   const status = String(job.status || "").toLowerCase();
   const message = $("#onebss-run-message");
-  if (job.job_id) oneBssPendingJobId = job.job_id;
+  if (interactive && job.job_id) oneBssPendingJobId = job.job_id;
   upsertOneBssRun(job.run || job);
   renderOneBssRunHistory();
+
+  if (!interactive) return;
 
   if (["otp_required", "otp_invalid", "manual_otp_required"].includes(status) && job.session_id) {
     oneBssPendingSessionId = job.session_id || oneBssPendingSessionId;
@@ -5985,18 +5987,18 @@ function handleOneBssJobResponse(response) {
   }
 }
 
-function startOneBssJobPolling(jobId) {
+function startOneBssJobPolling(jobId, { interactive = true } = {}) {
   const id = String(jobId || "").trim();
   if (!id) return;
   stopOneBssJobPolling();
-  oneBssPendingJobId = id;
+  if (interactive) oneBssPendingJobId = id;
   const token = oneBssJobPollToken;
   const poll = async () => {
     if (token !== oneBssJobPollToken) return;
     try {
       const response = await api(`/api/onebss-reports/jobs/${encodeURIComponent(id)}`);
       if (token !== oneBssJobPollToken) return;
-      handleOneBssJobResponse(response);
+      handleOneBssJobResponse(response, { interactive });
       if (oneBssJobIsActive(response.status)) {
         const status = String(response.status || "").toLowerCase();
         oneBssJobPollTimer = setTimeout(poll, ["otp_required", "otp_invalid", "manual_otp_required"].includes(status) ? 4000 : 2500);
@@ -6005,7 +6007,7 @@ function startOneBssJobPolling(jobId) {
       }
     } catch (error) {
       if (token !== oneBssJobPollToken) return;
-      showMessage($("#onebss-run-message"), error.message || "Khong kiem tra duoc job OneBSS.", "warning");
+      if (interactive) showMessage($("#onebss-run-message"), error.message || "Khong kiem tra duoc job OneBSS.", "warning");
       oneBssJobPollTimer = setTimeout(poll, 5000);
     }
   };
@@ -6013,13 +6015,9 @@ function startOneBssJobPolling(jobId) {
 }
 
 function resumeOneBssActiveJobPolling() {
-  if (oneBssJobPollTimer) return;
-  const job = oneBssReportRuns.find((run) => (run.job_id || run.run_id) && oneBssJobIsActive(run.status));
-  if (!job) return;
-  if (["otp_required", "otp_invalid", "manual_otp_required"].includes(String(job.status || "").toLowerCase())) {
-    handleOneBssJobResponse(job);
-  }
-  startOneBssJobPolling(job.job_id || job.run_id);
+  // Old active rows are shown in history only. Auto-resuming them on page load
+  // can reopen OTP prompts and keep warning the user before a new run starts.
+  return;
 }
 
 async function runOneBssReport(otp = "", options = {}) {
@@ -6055,7 +6053,7 @@ async function runOneBssReport(otp = "", options = {}) {
     });
     if (response.job_id) {
       handleOneBssJobResponse(response);
-      if (oneBssJobIsActive(response.status)) startOneBssJobPolling(response.job_id);
+      if (oneBssJobIsActive(response.status)) startOneBssJobPolling(response.job_id, { interactive: true });
       return;
     }
     if (response.status === "otp_required" || response.status === "otp_invalid" || response.status === "manual_otp_required") {
