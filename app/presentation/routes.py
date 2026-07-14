@@ -4,6 +4,7 @@ import binascii
 import hmac
 import json
 import logging
+import shutil
 import tempfile
 import threading
 import time
@@ -41,7 +42,13 @@ from app.application.google_drive_service import (
 from app.application.vault_service import VaultService
 from app.application.connection_service import ConnectionService
 from app.application.telegram_notifier import TelegramNotifier
-from app.application.onebss_data_mining_service import OneBssDownloadError, normalize_onebss_report_url, run_data_mining_schedule
+from app.application.onebss_data_mining_service import (
+    OneBssDownloadError,
+    normalize_onebss_report_url,
+    run_data_mining_schedule,
+    safe_filename_part,
+    save_downloaded_file,
+)
 from app.application.onebss_report_service import (
     cancel_onebss_mobile_gateway_otp,
     consume_onebss_mobile_gateway_otp,
@@ -3541,6 +3548,65 @@ def get_onebss_worker_task_otp(request: Request, run_id: str) -> dict:
         )
         return {"ok": True, "status": "matched", "otp": result.get("otp"), "run": _decorate_onebss_report_run(updated or run)}
     return {"ok": False, "status": result.get("status") or "waiting", "message": result.get("message") or "Chua co OTP.", "otp": ""}
+
+
+@router.post("/api/onebss-worker/tasks/{run_id}/file")
+async def upload_onebss_worker_task_file(request: Request, run_id: str, file: UploadFile = File(...)) -> dict:
+    onebss_worker_token(request)
+    repository = build_app_repository()
+    run = repository.get_onebss_report_run(run_id.strip())
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task OneBSS.")
+
+    original_name = Path(str(file.filename or "onebss_result.xlsx")).name
+    safe_name = safe_filename_part(original_name, "onebss_result.xlsx")
+    if not Path(safe_name).suffix:
+        safe_name = f"{safe_name}.xlsx"
+    stored_name = safe_filename_part(f"{run_id.strip()}_{safe_name}", f"{run_id.strip()}_onebss_result.xlsx")
+    target_dir = Path(str(getattr(get_settings(), "data_mining_download_dir", "data/data_mining_downloads") or "data/data_mining_downloads"))
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_file = (target_dir / stored_name).resolve()
+    with target_file.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    if target_file.stat().st_size <= 0:
+        target_file.unlink(missing_ok=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File ket qua OneBSS rong.")
+
+    storage_link = ""
+    storage_status = "uploaded_worker_file"
+    storage_message = "Da nhan file ket qua tu may tram."
+    report = repository.get_onebss_report_by_code(str(run.get("ma_bao_cao") or "")) or {}
+    if report.get("storage_link"):
+        storage_result = save_downloaded_file(get_settings(), target_file, str(report.get("storage_link") or ""))
+        if storage_result.get("ok") and str(storage_result.get("storage_status") or "").startswith("uploaded_google_drive:"):
+            storage_link = str(storage_result.get("storage_link") or "")
+            storage_status = str(storage_result.get("storage_status") or storage_status)
+            storage_message = str(storage_result.get("message") or storage_message)
+        elif storage_result.get("storage_status"):
+            storage_status = f"uploaded_worker_file:{storage_result.get('storage_status')}"
+            storage_message = f"{storage_message} {storage_result.get('message') or ''}".strip()
+
+    updated = repository.update_onebss_report_run(
+        run_id.strip(),
+        {
+            "file_name": safe_name,
+            "file_path": str(target_file),
+            "storage_link": storage_link,
+            "storage_status": storage_status,
+            "message": storage_message,
+        },
+    )
+    return {
+        "ok": True,
+        "file": {
+            "file_name": safe_name,
+            "file_path": str(target_file),
+            "storage_link": storage_link,
+            "storage_status": storage_status,
+            "message": storage_message,
+        },
+        "run": _decorate_onebss_report_run(updated or run),
+    }
 
 
 @router.post("/api/onebss-worker/tasks/{run_id}/result")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import mimetypes
 import os
 import sys
 import time
@@ -30,6 +31,45 @@ def wait_for_otp(client: httpx.Client, run_id: str, poll_seconds: float) -> str:
         if data.get("ok") and data.get("otp"):
             return str(data["otp"])
         time.sleep(poll_seconds)
+
+
+def upload_result_file(client: httpx.Client, run_id: str, file_path: str) -> dict[str, Any]:
+    source = Path(str(file_path or ""))
+    if not source.exists() or not source.is_file() or source.stat().st_size <= 0:
+        return {}
+    mime_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+    with source.open("rb") as handle:
+        response = client.post(
+            f"/api/onebss-worker/tasks/{run_id}/file",
+            files={"file": (source.name, handle, mime_type)},
+        )
+    response.raise_for_status()
+    data = response.json()
+    uploaded = data.get("file") if isinstance(data.get("file"), dict) else {}
+    return uploaded if isinstance(uploaded, dict) else {}
+
+
+def attach_worker_file_if_needed(client: httpx.Client, run_id: str, result: dict[str, Any]) -> dict[str, Any]:
+    storage_status = str(result.get("storage_status") or "").lower()
+    if storage_status.startswith("uploaded_google_drive:"):
+        return result
+    uploaded = upload_result_file(client, run_id, str(result.get("file_path") or ""))
+    if not uploaded:
+        return result
+    merged = {**result}
+    for key in ("file_name", "file_path", "storage_link", "storage_status"):
+        if uploaded.get(key):
+            merged[key] = uploaded.get(key)
+    failed_only_at_storage = str(result.get("status") or "").lower() in {
+        "google_drive_upload_failed",
+        "google_drive_not_configured",
+        "storage_failed",
+    }
+    if failed_only_at_storage:
+        merged["ok"] = True
+        merged["status"] = "success"
+        merged["message"] = uploaded.get("message") or "Da tai bao cao OneBSS va gui file ve web."
+    return merged
 
 
 def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, poll_seconds: float) -> None:
@@ -68,6 +108,8 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
             continue
 
         duration_ms = int((time.monotonic() - started) * 1000)
+        result = attach_worker_file_if_needed(client, run_id, result)
+        status = str(result.get("status") or ("success" if result.get("ok") else "failed")).lower()
         request_json(
             client,
             "POST",
@@ -98,7 +140,7 @@ def main() -> int:
     if not args.token:
         raise SystemExit("Missing INTERNAL_API_TOKEN or --token.")
 
-    headers = {"Authorization": f"Bearer {args.token}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {args.token}"}
     with httpx.Client(base_url=args.base_url.rstrip("/"), headers=headers, timeout=httpx.Timeout(60.0, connect=20.0)) as client:
         while True:
             claim = request_json(client, "POST", "/api/onebss-worker/tasks/claim", json={"worker_id": args.worker_id})
