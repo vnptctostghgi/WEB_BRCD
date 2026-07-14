@@ -225,7 +225,7 @@ class DatabaseService:
         collect_rows: bool = True,
     ) -> dict[str, Any]:
         report = self._find_sql_report(ma_bao_cao, report_id=report_id, report_name=report_name)
-        fetch_page_size = self._dynamic_report_fetch_page_size()
+        fetch_page_size = self._dynamic_report_export_page_size()
         if not report:
             return self._failed_report("Không tìm thấy cấu hình báo cáo.", 1, fetch_page_size, "")
 
@@ -276,6 +276,7 @@ class DatabaseService:
                 progress_callback=progress_callback,
                 page_callback=page_callback,
                 collect_rows=collect_rows,
+                page_size=fetch_page_size,
             )
         except httpx.TimeoutException as error:
             logger.exception("Dynamic report export timeout: %s", error)
@@ -378,6 +379,11 @@ class DatabaseService:
         configured = int(getattr(settings, "dynamic_report_fetch_page_size", 500) or 500)
         return max(20, min(configured, 1000))
 
+    def _dynamic_report_export_page_size(self) -> int:
+        settings = getattr(self.internal_api, "settings", None)
+        configured = int(getattr(settings, "dynamic_report_export_page_size", 5000) or 5000)
+        return max(1000, min(configured, 20000))
+
     def _dynamic_report_export_max_rows(self) -> int:
         settings = getattr(self.internal_api, "settings", None)
         configured = int(getattr(settings, "dynamic_report_export_max_rows", 1000000) or 1000000)
@@ -406,8 +412,9 @@ class DatabaseService:
         progress_callback: Any | None = None,
         page_callback: Any | None = None,
         collect_rows: bool = True,
+        page_size: int | None = None,
     ) -> dict[str, Any]:
-        fetch_page_size = self._dynamic_report_fetch_page_size()
+        fetch_page_size = max(1, int(page_size or self._dynamic_report_fetch_page_size()))
         max_rows = max(1, max_rows)
         rows: list[dict[str, Any]] = []
         columns: list[str] = []

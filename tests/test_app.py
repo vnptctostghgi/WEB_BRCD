@@ -1173,7 +1173,7 @@ def test_dynamic_report_search_and_excel_export_use_full_result_set(monkeypatch)
 def test_dynamic_report_export_job_downloads_full_result_set(monkeypatch) -> None:
     rows = [
         {"MA_TB": f"tb{index:04d}", "TEN_TB": f"Thue bao {index:04d}"}
-        for index in range(1205)
+        for index in range(5205)
     ]
     calls = []
 
@@ -1222,7 +1222,8 @@ def test_dynamic_report_export_job_downloads_full_result_set(monkeypatch) -> Non
 
         assert status_body["status"] == "complete"
         assert status_body["rows"] == len(rows)
-        assert [call["page"] for call in calls] == [1, 2, 3]
+        assert [call["page"] for call in calls] == [1, 2]
+        assert all(call["page_size"] == 5000 for call in calls)
         assert all(call.get("timeout", 0) >= 20 for call in calls)
 
         download = client.get(status_body["download_url"])
@@ -1232,7 +1233,7 @@ def test_dynamic_report_export_job_downloads_full_result_set(monkeypatch) -> Non
         exported_rows = list(sheet.iter_rows(values_only=True))
         assert len(exported_rows) == len(rows) + 1
         assert list(exported_rows[0]) == ["MA_TB", "TEN_TB"]
-        assert exported_rows[-1][0] == "tb1204"
+        assert exported_rows[-1][0] == "tb5204"
 
 
 def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:

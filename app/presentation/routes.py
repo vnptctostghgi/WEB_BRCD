@@ -66,6 +66,9 @@ FAILED_LOGIN_COUNTS: dict[str, int] = {}
 MAX_USER_IMPORT_BYTES = 2 * 1024 * 1024
 DYNAMIC_REPORT_EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 DYNAMIC_REPORT_EXPORT_JOBS_LOCK = threading.Lock()
+DYNAMIC_REPORT_EXPORT_SEMAPHORE_LOCK = threading.Lock()
+DYNAMIC_REPORT_EXPORT_SEMAPHORE: threading.Semaphore | None = None
+DYNAMIC_REPORT_EXPORT_SEMAPHORE_WORKERS = 0
 DYNAMIC_REPORT_EXPORT_JOB_TTL_SECONDS = 60 * 60
 DYNAMIC_REPORT_EXPORT_DIR = Path(tempfile.gettempdir()) / "vnptcto_dynamic_report_exports"
 EXCEL_MAX_ROWS_PER_SHEET = 1_048_576
@@ -2066,6 +2069,21 @@ def _dynamic_report_export_filename(result: dict[str, Any]) -> str:
     return f"{code}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
 
+def _dynamic_report_export_max_workers() -> int:
+    configured = int(getattr(get_settings(), "dynamic_report_export_max_workers", 1) or 1)
+    return max(1, min(configured, 4))
+
+
+def _dynamic_report_export_semaphore() -> threading.Semaphore:
+    global DYNAMIC_REPORT_EXPORT_SEMAPHORE, DYNAMIC_REPORT_EXPORT_SEMAPHORE_WORKERS
+    workers = _dynamic_report_export_max_workers()
+    with DYNAMIC_REPORT_EXPORT_SEMAPHORE_LOCK:
+        if DYNAMIC_REPORT_EXPORT_SEMAPHORE is None or DYNAMIC_REPORT_EXPORT_SEMAPHORE_WORKERS != workers:
+            DYNAMIC_REPORT_EXPORT_SEMAPHORE = threading.Semaphore(workers)
+            DYNAMIC_REPORT_EXPORT_SEMAPHORE_WORKERS = workers
+        return DYNAMIC_REPORT_EXPORT_SEMAPHORE
+
+
 def _cleanup_dynamic_report_export_jobs() -> None:
     now = time.time()
     expired_paths: list[str] = []
@@ -2073,7 +2091,7 @@ def _cleanup_dynamic_report_export_jobs() -> None:
         expired_ids = [
             job_id
             for job_id, job in DYNAMIC_REPORT_EXPORT_JOBS.items()
-            if job.get("status") != "running"
+            if job.get("status") not in {"queued", "running"}
             and now - float(job.get("updated_at") or job.get("created_at") or now) > DYNAMIC_REPORT_EXPORT_JOB_TTL_SECONDS
         ]
         for job_id in expired_ids:
@@ -2104,6 +2122,9 @@ def _get_dynamic_report_export_job(job_id: str) -> dict[str, Any] | None:
 
 def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> None:
     writer = DynamicReportStreamingWorkbook()
+    target_path: Path | None = None
+    semaphore = _dynamic_report_export_semaphore()
+    acquired = False
 
     def progress_callback(progress: dict[str, Any]) -> None:
         rows = int(progress.get("rows") or 0)
@@ -2111,8 +2132,11 @@ def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> No
         message = f"Đang xuất Excel: đã lấy {rows:,}" + (f"/{total:,} dòng." if total else " dòng.")
         _set_dynamic_report_export_job(job_id, status="running", message=message, progress=progress)
 
-    _set_dynamic_report_export_job(job_id, status="running", message="Đang chuẩn bị dữ liệu xuất Excel.")
+    _set_dynamic_report_export_job(job_id, status="queued", message="Đang chờ lượt xuất Excel để tránh quá tải API dữ liệu nội bộ.")
     try:
+        semaphore.acquire()
+        acquired = True
+        _set_dynamic_report_export_job(job_id, status="running", message="Đang chuẩn bị dữ liệu xuất Excel.")
         DYNAMIC_REPORT_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
         target_path = DYNAMIC_REPORT_EXPORT_DIR / f"{job_id}.xlsx"
 
@@ -2151,11 +2175,15 @@ def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> No
         )
     except Exception as error:
         logger.exception("Dynamic report export job failed: %s", error)
-        try:
-            target_path.unlink(missing_ok=True)  # type: ignore[name-defined]
-        except Exception:
-            pass
+        if target_path:
+            try:
+                target_path.unlink(missing_ok=True)
+            except Exception:
+                pass
         _set_dynamic_report_export_job(job_id, status="failed", message=f"Không xuất được file Excel: {error}")
+    finally:
+        if acquired:
+            semaphore.release()
 
 
 @router.post("/api/reports/run")

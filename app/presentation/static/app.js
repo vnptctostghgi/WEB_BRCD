@@ -321,6 +321,15 @@ function repairTextEncoding(value) {
   }
 }
 
+function repairDataEncoding(value) {
+  if (typeof value === "string") return repairTextEncoding(value);
+  if (Array.isArray(value)) return value.map((item) => repairDataEncoding(item));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [repairTextEncoding(key), repairDataEncoding(item)]));
+  }
+  return value;
+}
+
 function escapeHtml(value) {
   return repairTextEncoding(value).replace(/[&<>"']/g, (character) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
@@ -5366,16 +5375,12 @@ function downloadDynamicReportBlob(blob, filename) {
 
 function setDynamicReportExportStatus(text, type = "success", job = null) {
   const box = $("#dynamic-report-message");
-  if (!box) return;
-  const downloadUrl = job?.download_url || "";
-  const safeText = escapeHtml(repairTextEncoding(text || ""));
-  box.className = `result ${type === "error" ? "error" : "success"} mt-4`;
-  box.removeAttribute("aria-hidden");
-  if (downloadUrl) {
-    box.innerHTML = `${safeText} <a href="${escapeHtml(downloadUrl)}">Tải file Excel</a>`;
-  } else {
-    box.textContent = repairTextEncoding(text || "");
+  if (box) {
+    box.textContent = "";
+    box.classList.add("hidden");
+    box.setAttribute("aria-hidden", "true");
   }
+  showToast(text || job?.message || "", type);
 }
 
 async function waitDynamicReportExportJob(jobId, button) {
@@ -5386,7 +5391,7 @@ async function waitDynamicReportExportJob(jobId, button) {
     if (job.message && job.message !== lastMessage) {
       lastMessage = job.message;
       button?.setAttribute("title", repairTextEncoding(job.message));
-      setDynamicReportExportStatus(job.message, job.status === "failed" ? "error" : "success");
+      if (job.status === "queued") setDynamicReportExportStatus(job.message);
     }
     if (job.status === "complete") return job;
     if (job.status === "failed") throw new Error(job.message || "Không xuất được file Excel.");
@@ -5465,8 +5470,8 @@ async function loadOneBssMining({ force = false } = {}) {
       api("/api/onebss-reports/configs"),
       api("/api/onebss-reports/runs?limit=30"),
     ]);
-    oneBssReports = configData.reports || [];
-    oneBssReportRuns = runData.runs || [];
+    oneBssReports = (configData.reports || []).map((report) => repairDataEncoding(report));
+    oneBssReportRuns = (runData.runs || []).map((run) => repairDataEncoding(run));
     markDataFresh("oneBssReports");
     markDataFresh("oneBssMining");
     fillOneBssRunSelect();
@@ -5656,7 +5661,7 @@ async function runOneBssReport(otp = "", options = {}) {
 async function refreshOneBssRunHistory(maBaoCao = "") {
   const query = maBaoCao ? `?ma_bao_cao=${encodeURIComponent(maBaoCao)}&limit=30` : "?limit=30";
   const data = await api(`/api/onebss-reports/runs${query}`);
-  oneBssReportRuns = data.runs || [];
+  oneBssReportRuns = (data.runs || []).map((run) => repairDataEncoding(run));
   renderOneBssRunHistory();
 }
 
@@ -5669,6 +5674,7 @@ function renderOneBssRunHistory() {
 }
 
 function renderOneBssRunRow(run) {
+  run = repairDataEncoding(run);
   const startedAt = run.started_at ? new Date(run.started_at).toLocaleString("vi-VN") : "-";
   const ok = run.status === "success";
   const storageStatus = run.storage_status || "";
@@ -5767,6 +5773,7 @@ function renderOneBssRunHistory() {
 }
 
 function renderOneBssRunRow(run) {
+  run = repairDataEncoding(run);
   const startedAt = run.started_at ? new Date(run.started_at).toLocaleString("vi-VN") : "-";
   const ok = run.status === "success";
   const storageStatus = run.storage_status || "";

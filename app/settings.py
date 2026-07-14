@@ -36,8 +36,10 @@ class Settings(BaseSettings):
     internal_api_timeout_seconds: int = 20
     internal_api_token: SecretStr = Field(default=SecretStr(""))
     dynamic_report_fetch_page_size: int = 500
+    dynamic_report_export_page_size: int = 5000
     dynamic_report_export_max_rows: int = 1000000
-    dynamic_report_export_timeout_seconds: int = 180
+    dynamic_report_export_timeout_seconds: int = 300
+    dynamic_report_export_max_workers: int = 1
     dashboard_tab_max_workers: int = 10
     dashboard_chart_cache_enabled: bool = True
     dashboard_chart_cache_report_ids: str = "*"
