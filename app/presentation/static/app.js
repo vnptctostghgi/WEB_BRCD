@@ -378,6 +378,57 @@ function showMessage(element, text, type = "success") {
 }
 
 let toastTimer;
+async function copyTextToClipboard(text) {
+  const value = String(text || "");
+  if (!value) throw new Error("Khong co noi dung de sao chep.");
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  const ok = document.execCommand("copy");
+  textarea.remove();
+  if (!ok) throw new Error("Trinh duyet chan sao chep clipboard.");
+}
+
+async function copyMobileOtpFromButton(button) {
+  const code = button?.dataset.mobileCopyOtp || "";
+  if (!code || code === "null") return;
+  try {
+    await copyTextToClipboard(code);
+    showToast(`Da sao chep OTP ${code}.`);
+  } catch (error) {
+    showToast(error.message || "Khong sao chep duoc OTP.", "error");
+  }
+}
+
+function selectElementText(element) {
+  if (!element) return;
+  const selection = window.getSelection?.();
+  if (!selection) return;
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function renderMobileOtpCopyCell(code) {
+  const value = String(code || "").trim();
+  const canCopy = value && value !== "null" && !/^\*+$/.test(value);
+  return `
+    <div class="mobile-otp-copy-cell">
+      <code class="mobile-otp-code" data-mobile-otp-code tabindex="0">${escapeHtml(value || "null")}</code>
+      <button class="table-action mobile-otp-copy-button" data-mobile-copy-otp="${escapeHtml(value)}" type="button" ${canCopy ? "" : "disabled"}>Copy</button>
+    </div>`;
+}
 function showToast(text, type = "success") {
   const toast = $("#toast");
   if (!toast) return;
@@ -1076,6 +1127,14 @@ if (role === "admin") {
   });
   $("#mobile-save-otp-filter")?.addEventListener("click", saveMobileOtpFilter);
   $("#mobile-refresh-otp")?.addEventListener("click", loadMobileOtpData);
+  $("#mobile-otp-latest-table")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-mobile-copy-otp]");
+    if (button) copyMobileOtpFromButton(button);
+  });
+  $("#mobile-otp-latest-table")?.addEventListener("dblclick", (event) => {
+    const code = event.target.closest("[data-mobile-otp-code]");
+    if (code) selectElementText(code);
+  });
   ["#mobile-notification-device-filter", "#mobile-notification-app-filter", "#mobile-notification-query-filter"].forEach((selector) => {
     $(selector)?.addEventListener("input", () => {
       mobileGatewayNotificationPage = 1;
@@ -6790,10 +6849,11 @@ function renderMobileOtpLatest() {
   if (!table) return;
   table.innerHTML = mobileGatewayOtpLatest.length ? mobileGatewayOtpLatest.map((item) => {
     const statusInfo = mobileOtpLatestStatus(item);
+    const code = item.code || item.code_masked || "null";
     return `<tr>
       <td>${escapeHtml(item.sender || "")}</td>
       <td>${escapeHtml(item.rule_name || item.filter_id || "")}</td>
-      <td><strong>${escapeHtml(item.code_masked || "")}</strong></td>
+      <td>${renderMobileOtpCopyCell(code)}</td>
       <td>${escapeHtml(mobileFormatTime(item.received_at))}</td>
       <td>${escapeHtml(statusInfo.ttl)}</td>
       <td><span class="status ${statusInfo.className}">${escapeHtml(statusInfo.text)}</span></td>

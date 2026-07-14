@@ -2758,6 +2758,36 @@ td {
   background: rgba(15, 23, 42, .85);
   color: #dbeafe;
 }
+.mobile-otp-copy-cell {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  min-width: 9rem;
+}
+
+.mobile-otp-code {
+  display: inline-flex;
+  min-width: 4.5rem;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, .08);
+  padding: .38rem .55rem;
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-weight: 800;
+  letter-spacing: 0;
+  user-select: text;
+  cursor: text;
+}
+
+.dark .mobile-otp-code,
+.app-dark .mobile-otp-code {
+  background: rgba(125, 211, 252, .12);
+  color: #e0f2fe;
+}
+
+.mobile-otp-copy-button {
+  white-space: nowrap;
+}
 
 .dark th,
 .dark td {

@@ -126,6 +126,14 @@ function bindMobileGatewayFocusedEvents() {
   });
   bind("#mobile-save-otp-filter", "click", saveMobileOtpFilter);
   bind("#mobile-refresh-otp", "click", loadMobileOtpData);
+  bind("#mobile-otp-latest-table", "click", (event) => {
+    const button = event.target.closest("[data-mobile-copy-otp]");
+    if (button) copyMobileOtpFromButton(button);
+  });
+  bind("#mobile-otp-latest-table", "dblclick", (event) => {
+    const code = event.target.closest("[data-mobile-otp-code]");
+    if (code) selectElementText(code);
+  });
 }
 
 async function loadMobileGateway({ force = false } = {}) {
@@ -416,7 +424,7 @@ function renderMobileOtpLatest() {
     return `<tr>
       <td><strong>${escapeHtml(item.filter_id || item.service_code || "")}</strong></td>
       <td>${escapeHtml(item.sender || "")}</td>
-      <td><strong>${escapeHtml(code)}</strong></td>
+      <td>${renderMobileOtpCopyCell(code)}</td>
       <td>${escapeHtml(item.received_at ? mobileFormatTime(item.received_at) : "null")}</td>
       <td><span class="status ${statusInfo.className}">${escapeHtml(statusInfo.text)}${statusInfo.ttl !== "-" ? ` · ${escapeHtml(statusInfo.ttl)}` : ""}</span></td>
     </tr>`;
