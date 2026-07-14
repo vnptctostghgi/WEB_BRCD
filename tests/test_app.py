@@ -1,5 +1,6 @@
 import os
 import json
+import threading
 import time
 from io import BytesIO
 from datetime import datetime
@@ -1078,6 +1079,45 @@ def test_admin_can_manage_sql_reports_and_run_dynamic_report() -> None:
         assert body["pagination"]["page_size"] == 20
 
 
+def test_dynamic_report_history_records_loaded_result(monkeypatch) -> None:
+    def fake_run_sql_report(self, **kwargs):
+        return {
+            "ok": True,
+            "columns": ["MA_TB", "TEN_TB"],
+            "rows": [{"MA_TB": "tb-history", "TEN_TB": "Thue bao history"}],
+            "total": 1,
+            "page": kwargs["page"],
+            "page_size": kwargs["page_size"],
+            "message": "ok",
+        }
+
+    monkeypatch.setattr(routes.InternalApiClient, "run_sql_report", fake_run_sql_report)
+
+    with TestClient(app) as client:
+        login(client)
+        payload = {
+            "ten_bao_cao": "Bao cao lich su",
+            "ma_bao_cao": "BC_HISTORY_LOAD",
+            "cau_lenh_sql": "SELECT ma_tb, ten_tb FROM css_cto.db_thuebao;",
+            "cac_tham_so": [],
+        }
+        assert client.post("/api/admin/sql-reports", json=payload).status_code == 200
+        result = client.post(
+            "/api/reports/run",
+            json={"ma_bao_cao": "BC_HISTORY_LOAD", "filters": {}, "page": 1, "page_size": 20},
+        )
+        assert result.status_code == 200
+
+        history = client.get("/api/reports/history?limit=20")
+        assert history.status_code == 200
+        items = history.json()["items"]
+        item = next(row for row in items if row["ma_bao_cao"] == "BC_HISTORY_LOAD")
+        assert item["event_type"] == "load"
+        assert item["status"] == "success"
+        assert item["rows"] == 1
+        assert item["total"] == 1
+
+
 def test_dynamic_report_search_and_excel_export_use_full_result_set(monkeypatch) -> None:
     rows = [
         {"MA_TB": "tb001", "TEN_TB": "Nguyen Van A", "DIACHI_LD": "Can Tho"},
@@ -1234,6 +1274,57 @@ def test_dynamic_report_export_job_downloads_full_result_set(monkeypatch) -> Non
         assert len(exported_rows) == len(rows) + 1
         assert list(exported_rows[0]) == ["MA_TB", "TEN_TB"]
         assert exported_rows[-1][0] == "tb5204"
+
+
+def test_dynamic_report_export_queue_can_cancel_waiting_job(monkeypatch) -> None:
+    started_first = threading.Event()
+    release_first = threading.Event()
+    calls = []
+
+    def fake_export_dynamic_report(self, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            started_first.set()
+            release_first.wait(2)
+        return {
+            "ok": True,
+            "report": {"ma_bao_cao": kwargs["ma_bao_cao"], "ten_bao_cao": kwargs["ma_bao_cao"]},
+            "columns": ["MA_TB"],
+            "rows": [],
+            "details": {"export_rows": 1, "fetched_total": 1},
+        }
+
+    monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings, storage_link="": "")
+    monkeypatch.setattr(DatabaseService, "export_dynamic_report", fake_export_dynamic_report)
+
+    with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+        routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
+
+    try:
+        with TestClient(app) as client:
+            login(client)
+            first = client.post("/api/reports/export-jobs", json={"ma_bao_cao": "QUEUE_A", "filters": {}, "page": 1, "page_size": 20})
+            assert first.status_code == 200
+            assert started_first.wait(1)
+
+            second = client.post("/api/reports/export-jobs", json={"ma_bao_cao": "QUEUE_B", "filters": {}, "page": 1, "page_size": 20})
+            assert second.status_code == 200
+            second_job_id = second.json()["job_id"]
+
+            queue = client.get("/api/reports/export-jobs?limit=10")
+            assert queue.status_code == 200
+            queued_job = next(job for job in queue.json()["jobs"] if job["job_id"] == second_job_id)
+            assert queued_job["status"] == "queued"
+            assert queued_job["queue_position"] >= 1
+            assert queued_job["can_cancel"] is True
+
+            cancelled = client.delete(f"/api/reports/export-jobs/{second_job_id}")
+            assert cancelled.status_code == 200
+            cancelled_body = cancelled.json()
+            assert cancelled_body["status"] == "cancelled"
+            assert cancelled_body["can_cancel"] is False
+    finally:
+        release_first.set()
 
 
 def test_dynamic_report_export_job_can_return_drive_link(monkeypatch) -> None:

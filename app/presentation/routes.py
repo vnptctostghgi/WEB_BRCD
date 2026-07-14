@@ -75,6 +75,9 @@ DYNAMIC_REPORT_EXPORT_SEMAPHORE_WORKERS = 0
 DYNAMIC_REPORT_EXPORT_JOB_TTL_SECONDS = 60 * 60
 DYNAMIC_REPORT_EXPORT_DIR = Path(tempfile.gettempdir()) / "vnptcto_dynamic_report_exports"
 DYNAMIC_REPORT_EXPORT_JOB_DIR = DYNAMIC_REPORT_EXPORT_DIR / "jobs"
+DYNAMIC_REPORT_HISTORY_ACTION = "dynamic_report_history"
+DYNAMIC_REPORT_EXPORT_ACTIVE_STATUSES = {"queued", "running", "cancel_requested"}
+DYNAMIC_REPORT_EXPORT_FINAL_STATUSES = {"complete", "failed", "cancelled"}
 EXCEL_MAX_ROWS_PER_SHEET = 1_048_576
 ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
 DASHBOARD_LAYOUT_TYPES = {
@@ -113,6 +116,10 @@ DASHBOARD_LAYOUT_PARENT_EXCLUDED_FEATURE_CODES = {
     "reports",
     "new_reports",
 }
+
+
+class DynamicReportExportCancelled(Exception):
+    pass
 
 
 class GoogleSheetTableExtractor(HTMLParser):
@@ -587,6 +594,148 @@ def raise_dashboard_layout_schema_error(error: RuntimeError) -> None:
             detail="Supabase chưa có bảng dashboard_layouts. Hãy chạy lại file sql/supabase_upgrade_admin_modules.sql.",
         ) from error
     raise error
+
+
+def _dynamic_report_history_int(value: Any, default: int = 0) -> int:
+    try:
+        return max(0, int(value or default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _dynamic_report_history_report(ma_bao_cao: str, report: dict[str, Any] | None = None) -> dict[str, str]:
+    source = report if isinstance(report, dict) else {}
+    code = str(source.get("ma_bao_cao") or ma_bao_cao or "").strip().upper()
+    name = str(source.get("ten_bao_cao") or "").strip()
+    if code and name:
+        return {"ma_bao_cao": code, "ten_bao_cao": name}
+    try:
+        stored = build_app_repository().get_sql_report_by_code(code or ma_bao_cao.strip().upper())
+        if stored:
+            code = str(stored.get("ma_bao_cao") or code or ma_bao_cao).strip().upper()
+            name = str(stored.get("ten_bao_cao") or name or code).strip()
+    except Exception:
+        logger.exception("Cannot resolve dynamic report history metadata")
+    return {"ma_bao_cao": code or str(ma_bao_cao or "").strip().upper(), "ten_bao_cao": name or code}
+
+
+def _record_dynamic_report_history(
+    *,
+    actor: str,
+    event_type: str,
+    status_value: str,
+    ma_bao_cao: str,
+    report: dict[str, Any] | None = None,
+    report_name: str = "",
+    rows: Any = 0,
+    total: Any = 0,
+    message: str = "",
+    filters: dict[str, Any] | None = None,
+    search: str = "",
+    search_columns: list[str] | None = None,
+    history_id: str = "",
+    job_id: str = "",
+    drive_url: str = "",
+    download_url: str = "",
+    file_name: str = "",
+    details: dict[str, Any] | None = None,
+) -> None:
+    try:
+        report_info = _dynamic_report_history_report(ma_bao_cao, report)
+        if report_name:
+            report_info["ten_bao_cao"] = report_name
+        safe_history_id = history_id or job_id or uuid.uuid4().hex
+        safe_rows = _dynamic_report_history_int(rows)
+        safe_total = _dynamic_report_history_int(total, safe_rows)
+        payload = {
+            "history_id": safe_history_id,
+            "event_type": str(event_type or "load").strip().lower() or "load",
+            "status": str(status_value or "").strip().lower() or "unknown",
+            "ma_bao_cao": report_info["ma_bao_cao"],
+            "report_code": report_info["ma_bao_cao"],
+            "ten_bao_cao": report_info["ten_bao_cao"],
+            "report_name": report_info["ten_bao_cao"],
+            "rows": safe_rows,
+            "total": safe_total,
+            "message": compact_log_text(message, 800),
+            "filters": filters if isinstance(filters, dict) else {},
+            "search": compact_log_text(search, 300),
+            "search_columns": search_columns or [],
+            "job_id": job_id,
+            "drive_url": drive_url,
+            "download_url": download_url,
+            "file_name": file_name,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "details": details if isinstance(details, dict) else {},
+        }
+        build_app_repository().add_audit_log(
+            actor or "system",
+            DYNAMIC_REPORT_HISTORY_ACTION,
+            json.dumps(payload, ensure_ascii=False, default=str),
+        )
+    except Exception:
+        logger.exception("Cannot write dynamic report history")
+
+
+def _parse_dynamic_report_history_log(row: dict[str, Any]) -> dict[str, Any] | None:
+    if row.get("action") != DYNAMIC_REPORT_HISTORY_ACTION:
+        return None
+    raw_details = row.get("details")
+    if isinstance(raw_details, dict):
+        details = raw_details
+    else:
+        try:
+            details = json.loads(raw_details or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return None
+    if not isinstance(details, dict):
+        return None
+    history_id = str(details.get("history_id") or details.get("job_id") or row.get("id") or "").strip()
+    rows = _dynamic_report_history_int(details.get("rows"))
+    total = _dynamic_report_history_int(details.get("total"), rows)
+    return {
+        "id": row.get("id"),
+        "history_id": history_id,
+        "job_id": details.get("job_id") or "",
+        "event_type": details.get("event_type") or "load",
+        "status": details.get("status") or "unknown",
+        "ma_bao_cao": details.get("ma_bao_cao") or details.get("report_code") or "",
+        "report_code": details.get("report_code") or details.get("ma_bao_cao") or "",
+        "ten_bao_cao": details.get("ten_bao_cao") or details.get("report_name") or "",
+        "report_name": details.get("report_name") or details.get("ten_bao_cao") or "",
+        "rows": rows,
+        "total": total,
+        "message": details.get("message") or "",
+        "drive_url": details.get("drive_url") or "",
+        "download_url": details.get("download_url") or "",
+        "file_name": details.get("file_name") or "",
+        "created_by": row.get("actor") or "",
+        "created_at": details.get("created_at") or row.get("created_at") or "",
+    }
+
+
+def _list_dynamic_report_history(limit: int = 30) -> list[dict[str, Any]]:
+    safe_limit = min(max(int(limit or 30), 1), 100)
+    active_jobs = [
+        _dynamic_report_export_job_response(str(job.get("job_id") or ""), job)
+        for job in _list_dynamic_report_export_job_snapshots(limit=50)
+        if str(job.get("status") or "").lower() in DYNAMIC_REPORT_EXPORT_ACTIVE_STATUSES
+    ]
+    rows = build_app_repository().list_audit_logs(limit=min(max(safe_limit * 8, 100), 800))
+    items: list[dict[str, Any]] = active_jobs[:safe_limit]
+    seen: set[str] = {str(item.get("history_id") or item.get("job_id") or item.get("id") or "") for item in items}
+    for row in rows:
+        item = _parse_dynamic_report_history_log(row)
+        if not item:
+            continue
+        key = item.get("history_id") or str(item.get("id") or "")
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(item)
+        if len(items) >= safe_limit:
+            break
+    return items
 
 
 TIME_PATTERN = re.compile(r"^\d{2}:\d{2}$")
@@ -2140,7 +2289,7 @@ def _cleanup_dynamic_report_export_jobs() -> None:
         expired_ids = [
             job_id
             for job_id, job in DYNAMIC_REPORT_EXPORT_JOBS.items()
-            if job.get("status") not in {"queued", "running"}
+            if job.get("status") not in DYNAMIC_REPORT_EXPORT_ACTIVE_STATUSES
             and now - float(job.get("updated_at") or job.get("created_at") or now) > DYNAMIC_REPORT_EXPORT_JOB_TTL_SECONDS
         ]
         for job_id in expired_ids:
@@ -2166,7 +2315,7 @@ def _cleanup_dynamic_report_export_jobs() -> None:
                 loaded = json.loads(job_path.read_text(encoding="utf-8"))
                 if (
                     isinstance(loaded, dict)
-                    and loaded.get("status") not in {"queued", "running"}
+                    and loaded.get("status") not in DYNAMIC_REPORT_EXPORT_ACTIVE_STATUSES
                     and now - float(loaded.get("updated_at") or loaded.get("created_at") or now) > DYNAMIC_REPORT_EXPORT_JOB_TTL_SECONDS
                 ):
                     expired_job_paths.append(job_path)
@@ -2205,22 +2354,123 @@ def _get_dynamic_report_export_job(job_id: str) -> dict[str, Any] | None:
     return dict(loaded)
 
 
-def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> None:
+def _dynamic_report_job_sort_value(job: dict[str, Any]) -> float:
+    value = job.get("created_at") or job.get("updated_at") or 0
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _is_dynamic_report_export_cancelled(job_id: str) -> bool:
+    job = _get_dynamic_report_export_job(job_id) or {}
+    return str(job.get("status") or "").lower() in {"cancel_requested", "cancelled"}
+
+
+def _dynamic_report_export_cancelled_result(job_id: str, payload: RunReportPayload, actor: str) -> None:
+    message = "Lenh xuat file da bi ngung."
+    _set_dynamic_report_export_job(job_id, status="cancelled", message=message, progress={})
+    _record_dynamic_report_history(
+        actor=actor,
+        event_type="export",
+        status_value="cancelled",
+        ma_bao_cao=payload.ma_bao_cao,
+        message=message,
+        filters=payload.filters,
+        search=payload.search,
+        search_columns=payload.search_columns,
+        history_id=job_id,
+        job_id=job_id,
+    )
+
+
+def _list_dynamic_report_export_job_snapshots(limit: int = 100) -> list[dict[str, Any]]:
+    jobs_by_id: dict[str, dict[str, Any]] = {}
+    with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+        for job_id, job in DYNAMIC_REPORT_EXPORT_JOBS.items():
+            jobs_by_id[job_id] = dict(job)
+    if DYNAMIC_REPORT_EXPORT_JOB_DIR.exists():
+        for job_path in DYNAMIC_REPORT_EXPORT_JOB_DIR.glob("*.json"):
+            try:
+                loaded = json.loads(job_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(loaded, dict):
+                continue
+            job_id = str(loaded.get("job_id") or job_path.stem)
+            current = jobs_by_id.get(job_id)
+            if not current or float(loaded.get("updated_at") or 0) >= float(current.get("updated_at") or 0):
+                jobs_by_id[job_id] = loaded
+    jobs = list(jobs_by_id.values())
+    active_jobs = sorted(
+        [job for job in jobs if str(job.get("status") or "").lower() in DYNAMIC_REPORT_EXPORT_ACTIVE_STATUSES],
+        key=_dynamic_report_job_sort_value,
+    )
+    for position, job in enumerate(active_jobs, start=1):
+        job["queue_position"] = position
+        if str(job.get("status") or "").lower() == "queued":
+            job["message"] = job.get("message") or f"Dang cho xu ly o vi tri {position}."
+    jobs.sort(key=_dynamic_report_job_sort_value, reverse=True)
+    return jobs[: min(max(int(limit or 100), 1), 200)]
+
+
+def _dynamic_report_export_job_response(job_id: str, job: dict[str, Any]) -> dict[str, Any]:
+    status_value = str(job.get("status") or "queued")
+    response = {
+        "ok": status_value not in {"failed", "cancelled"},
+        "job_id": job_id,
+        "history_id": job.get("history_id") or job_id,
+        "event_type": "export",
+        "status": status_value,
+        "message": job.get("message") or "",
+        "progress": job.get("progress") or {},
+        "rows": int(job.get("rows") or 0),
+        "total": int(job.get("total") or 0),
+        "report_code": job.get("report_code") or "",
+        "report_name": job.get("report_name") or "",
+        "ma_bao_cao": job.get("report_code") or "",
+        "ten_bao_cao": job.get("report_name") or "",
+        "created_at": job.get("created_at") or "",
+        "queue_position": int(job.get("queue_position") or 0),
+        "can_cancel": status_value in DYNAMIC_REPORT_EXPORT_ACTIVE_STATUSES,
+    }
+    if status_value == "complete":
+        drive_url = str(job.get("drive_url") or "")
+        response["download_url"] = drive_url or f"/api/reports/export-jobs/{job_id}/download"
+        response["drive_url"] = drive_url
+        response["filename"] = job.get("filename") or ""
+    if status_value in {"failed", "cancelled"}:
+        response["details"] = job.get("details") or {}
+    return response
+
+
+def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload, created_by: str = "system") -> None:
     writer = DynamicReportStreamingWorkbook()
     target_path: Path | None = None
     semaphore = _dynamic_report_export_semaphore()
     acquired = False
 
     def progress_callback(progress: dict[str, Any]) -> None:
+        if _is_dynamic_report_export_cancelled(job_id):
+            raise DynamicReportExportCancelled()
         rows = int(progress.get("rows") or 0)
         total = int(progress.get("total") or 0)
         message = f"Đang xuất Excel: đã lấy {rows:,}" + (f"/{total:,} dòng." if total else " dòng.")
         _set_dynamic_report_export_job(job_id, status="running", message=message, progress=progress)
 
+    if _is_dynamic_report_export_cancelled(job_id):
+        _dynamic_report_export_cancelled_result(job_id, payload, created_by)
+        return
+
     _set_dynamic_report_export_job(job_id, status="queued", message="Đang chờ lượt xuất Excel để tránh quá tải API dữ liệu nội bộ.")
     try:
         semaphore.acquire()
         acquired = True
+        if _is_dynamic_report_export_cancelled(job_id):
+            _dynamic_report_export_cancelled_result(job_id, payload, created_by)
+            return
         _set_dynamic_report_export_job(job_id, status="running", message="Đang chuẩn bị dữ liệu xuất Excel.")
         DYNAMIC_REPORT_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
         target_path = DYNAMIC_REPORT_EXPORT_DIR / f"{job_id}.xlsx"
@@ -2237,6 +2487,9 @@ def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> No
                 drive_folder_id=drive_folder_id,
                 file_name=filename,
             )
+            if _is_dynamic_report_export_cancelled(job_id):
+                _dynamic_report_export_cancelled_result(job_id, payload, created_by)
+                return
             if remote_result.get("ok"):
                 drive_url = str(
                     remote_result.get("drive_url")
@@ -2257,11 +2510,41 @@ def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> No
                     total=total,
                     details=remote_result,
                 )
+                _record_dynamic_report_history(
+                    actor=created_by,
+                    event_type="export",
+                    status_value="complete",
+                    ma_bao_cao=payload.ma_bao_cao,
+                    rows=rows,
+                    total=total,
+                    message=f"Da xuat Excel tren may tram va upload Google Drive{f' du {rows:,} dong' if rows else ''}.",
+                    filters=payload.filters,
+                    search=payload.search,
+                    search_columns=payload.search_columns,
+                    history_id=job_id,
+                    job_id=job_id,
+                    drive_url=drive_url,
+                    file_name=str(remote_result.get("file_name") or filename),
+                    details=remote_result,
+                )
                 return
             _set_dynamic_report_export_job(
                 job_id,
                 status="failed",
                 message=remote_result.get("message") or "Máy trạm chưa xuất được file Excel lên Google Drive.",
+                details=remote_result,
+            )
+            _record_dynamic_report_history(
+                actor=created_by,
+                event_type="export",
+                status_value="failed",
+                ma_bao_cao=payload.ma_bao_cao,
+                message=str(remote_result.get("message") or "May tram chua xuat duoc file Excel len Google Drive."),
+                filters=payload.filters,
+                search=payload.search,
+                search_columns=payload.search_columns,
+                history_id=job_id,
+                job_id=job_id,
                 details=remote_result,
             )
             return
@@ -2275,6 +2558,11 @@ def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> No
             page_callback=writer.append_rows,
             collect_rows=False,
         )
+        if _is_dynamic_report_export_cancelled(job_id):
+            _dynamic_report_export_cancelled_result(job_id, payload, created_by)
+            if target_path:
+                target_path.unlink(missing_ok=True)
+            return
         if not result.get("ok"):
             target_path.unlink(missing_ok=True)
             _set_dynamic_report_export_job(
@@ -2282,6 +2570,20 @@ def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> No
                 status="failed",
                 message=result.get("message") or "Không xuất được file Excel.",
                 details=result.get("details") or {},
+            )
+            _record_dynamic_report_history(
+                actor=created_by,
+                event_type="export",
+                status_value="failed",
+                ma_bao_cao=payload.ma_bao_cao,
+                report=result.get("report") if isinstance(result.get("report"), dict) else None,
+                message=str(result.get("message") or "Khong xuat duoc file Excel."),
+                filters=payload.filters,
+                search=payload.search,
+                search_columns=payload.search_columns,
+                history_id=job_id,
+                job_id=job_id,
+                details=result.get("details") if isinstance(result.get("details"), dict) else {},
             )
             return
 
@@ -2299,6 +2601,31 @@ def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> No
             total=int(details.get("fetched_total") or rows),
             details=details,
         )
+        _record_dynamic_report_history(
+            actor=created_by,
+            event_type="export",
+            status_value="complete",
+            ma_bao_cao=payload.ma_bao_cao,
+            report=result.get("report") if isinstance(result.get("report"), dict) else None,
+            rows=rows,
+            total=int(details.get("fetched_total") or rows),
+            message=f"Da tao file Excel du {rows:,} dong.",
+            filters=payload.filters,
+            search=payload.search,
+            search_columns=payload.search_columns,
+            history_id=job_id,
+            job_id=job_id,
+            download_url=f"/api/reports/export-jobs/{job_id}/download",
+            file_name=filename,
+            details=details,
+        )
+    except DynamicReportExportCancelled:
+        if target_path:
+            try:
+                target_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+        _dynamic_report_export_cancelled_result(job_id, payload, created_by)
     except Exception as error:
         logger.exception("Dynamic report export job failed: %s", error)
         if target_path:
@@ -2307,6 +2634,19 @@ def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> No
             except Exception:
                 pass
         _set_dynamic_report_export_job(job_id, status="failed", message=f"Không xuất được file Excel: {error}")
+        _record_dynamic_report_history(
+            actor=created_by,
+            event_type="export",
+            status_value="failed",
+            ma_bao_cao=payload.ma_bao_cao,
+            message=f"Khong xuat duoc file Excel: {error}",
+            filters=payload.filters,
+            search=payload.search,
+            search_columns=payload.search_columns,
+            history_id=job_id,
+            job_id=job_id,
+            details={"error": str(error)},
+        )
     finally:
         if acquired:
             semaphore.release()
@@ -2314,9 +2654,9 @@ def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> No
 
 @router.post("/api/reports/run")
 def run_dynamic_report(request: Request, payload: RunReportPayload) -> dict:
-    admin_user(request)
+    actor = admin_user(request)
     try:
-        return build_database_service().run_dynamic_report(
+        result = build_database_service().run_dynamic_report(
             ma_bao_cao=payload.ma_bao_cao.strip().upper(),
             filters=payload.filters,
             page=payload.page,
@@ -2326,6 +2666,29 @@ def run_dynamic_report(request: Request, payload: RunReportPayload) -> dict:
         )
     except RuntimeError as error:
         raise_sql_report_schema_error(error)
+    pagination = result.get("pagination") if isinstance(result.get("pagination"), dict) else {}
+    rows = result.get("rows") if isinstance(result.get("rows"), list) else []
+    _record_dynamic_report_history(
+        actor=actor["username"],
+        event_type="load",
+        status_value="success" if result.get("ok", True) else "failed",
+        ma_bao_cao=payload.ma_bao_cao,
+        report=result.get("report") if isinstance(result.get("report"), dict) else None,
+        rows=len(rows),
+        total=pagination.get("total") or len(rows),
+        message=str(result.get("message") or ""),
+        filters=payload.filters,
+        search=payload.search,
+        search_columns=payload.search_columns,
+    )
+    return result
+
+
+@router.get("/api/reports/history")
+def list_dynamic_report_history(request: Request, limit: int = 30) -> dict:
+    admin_user(request)
+    _cleanup_dynamic_report_export_jobs()
+    return {"items": _list_dynamic_report_history(limit)}
 
 
 @router.post("/api/reports/export")
@@ -2358,10 +2721,11 @@ def export_dynamic_report(request: Request, payload: RunReportPayload) -> Respon
 
 @router.post("/api/reports/export-jobs")
 def start_dynamic_report_export_job(request: Request, payload: RunReportPayload) -> dict:
-    admin_user(request)
+    actor = admin_user(request)
     _cleanup_dynamic_report_export_jobs()
     job_id = uuid.uuid4().hex
     now = time.time()
+    report_info = _dynamic_report_history_report(payload.ma_bao_cao)
     with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
         DYNAMIC_REPORT_EXPORT_JOBS[job_id] = {
             "job_id": job_id,
@@ -2370,12 +2734,94 @@ def start_dynamic_report_export_job(request: Request, payload: RunReportPayload)
             "created_at": now,
             "updated_at": now,
             "progress": {},
+            "created_by": actor["username"],
+            "report_code": report_info["ma_bao_cao"],
+            "report_name": report_info["ten_bao_cao"],
         }
         job_snapshot = dict(DYNAMIC_REPORT_EXPORT_JOBS[job_id])
     _persist_dynamic_report_export_job(job_id, job_snapshot)
-    thread = threading.Thread(target=_run_dynamic_report_export_job, args=(job_id, payload), daemon=True)
+    _record_dynamic_report_history(
+        actor=actor["username"],
+        event_type="export",
+        status_value="queued",
+        ma_bao_cao=report_info["ma_bao_cao"],
+        report_name=report_info["ten_bao_cao"],
+        message="Da dua yeu cau xuat Excel vao hang doi.",
+        filters=payload.filters,
+        search=payload.search,
+        search_columns=payload.search_columns,
+        history_id=job_id,
+        job_id=job_id,
+    )
+    thread = threading.Thread(target=_run_dynamic_report_export_job, args=(job_id, payload, actor["username"]), daemon=True)
     thread.start()
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "history_id": job_id,
+        "event_type": "export",
+        "status": "queued",
+        "message": "Dang xuat file Excel o che do nen.",
+        "report_code": report_info["ma_bao_cao"],
+        "report_name": report_info["ten_bao_cao"],
+        "queue_position": 0,
+        "can_cancel": True,
+    }
     return {"ok": True, "job_id": job_id, "status": "queued", "message": "Đang xuất file Excel ở chế độ nền."}
+
+
+@router.get("/api/reports/export-jobs")
+def list_dynamic_report_export_jobs(request: Request, limit: int = 100) -> dict:
+    admin_user(request)
+    _cleanup_dynamic_report_export_jobs()
+    jobs = [
+        _dynamic_report_export_job_response(str(job.get("job_id") or ""), job)
+        for job in _list_dynamic_report_export_job_snapshots(limit)
+    ]
+    return {"jobs": jobs}
+
+
+@router.delete("/api/reports/export-jobs/{job_id}")
+def cancel_dynamic_report_export_job(request: Request, job_id: str) -> dict:
+    actor = admin_user(request)
+    _cleanup_dynamic_report_export_jobs()
+    job = _get_dynamic_report_export_job(job_id)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay job xuat Excel.")
+    status_value = str(job.get("status") or "queued").lower()
+    if status_value in DYNAMIC_REPORT_EXPORT_FINAL_STATUSES:
+        return _dynamic_report_export_job_response(job_id, job)
+    now = time.time()
+    if status_value == "queued":
+        _set_dynamic_report_export_job(
+            job_id,
+            status="cancelled",
+            message="Lenh xuat file da bi xoa khoi hang doi.",
+            cancelled_by=actor["username"],
+            cancelled_at=now,
+            progress={},
+        )
+        job = _get_dynamic_report_export_job(job_id) or job
+        _record_dynamic_report_history(
+            actor=actor["username"],
+            event_type="export",
+            status_value="cancelled",
+            ma_bao_cao=str(job.get("report_code") or ""),
+            report_name=str(job.get("report_name") or ""),
+            message="Lenh xuat file da bi xoa khoi hang doi.",
+            history_id=job_id,
+            job_id=job_id,
+        )
+        return _dynamic_report_export_job_response(job_id, job)
+    _set_dynamic_report_export_job(
+        job_id,
+        status="cancel_requested",
+        message="Dang yeu cau ngung lenh xuat file nay, he thong se chuyen sang lenh tiep theo.",
+        cancelled_by=actor["username"],
+        cancelled_at=now,
+    )
+    job = _get_dynamic_report_export_job(job_id) or job
+    return _dynamic_report_export_job_response(job_id, job)
 
 
 @router.get("/api/reports/export-jobs/{job_id}")
@@ -2385,24 +2831,7 @@ def get_dynamic_report_export_job(request: Request, job_id: str) -> dict:
     job = _get_dynamic_report_export_job(job_id)
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy job xuất Excel.")
-    status_value = str(job.get("status") or "queued")
-    response = {
-        "ok": status_value != "failed",
-        "job_id": job_id,
-        "status": status_value,
-        "message": job.get("message") or "",
-        "progress": job.get("progress") or {},
-        "rows": int(job.get("rows") or 0),
-        "total": int(job.get("total") or 0),
-    }
-    if status_value == "complete":
-        drive_url = str(job.get("drive_url") or "")
-        response["download_url"] = drive_url or f"/api/reports/export-jobs/{job_id}/download"
-        response["drive_url"] = drive_url
-        response["filename"] = job.get("filename") or ""
-    if status_value == "failed":
-        response["details"] = job.get("details") or {}
-    return response
+    return _dynamic_report_export_job_response(job_id, job)
 
 
 @router.get("/api/reports/export-jobs/{job_id}/download")
