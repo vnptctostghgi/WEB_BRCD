@@ -67,11 +67,13 @@ FAILED_LOGIN_COUNTS: dict[str, int] = {}
 MAX_USER_IMPORT_BYTES = 2 * 1024 * 1024
 DYNAMIC_REPORT_EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 DYNAMIC_REPORT_EXPORT_JOBS_LOCK = threading.Lock()
+DYNAMIC_REPORT_EXPORT_JOB_FILE_LOCK = threading.Lock()
 DYNAMIC_REPORT_EXPORT_SEMAPHORE_LOCK = threading.Lock()
 DYNAMIC_REPORT_EXPORT_SEMAPHORE: threading.Semaphore | None = None
 DYNAMIC_REPORT_EXPORT_SEMAPHORE_WORKERS = 0
 DYNAMIC_REPORT_EXPORT_JOB_TTL_SECONDS = 60 * 60
 DYNAMIC_REPORT_EXPORT_DIR = Path(tempfile.gettempdir()) / "vnptcto_dynamic_report_exports"
+DYNAMIC_REPORT_EXPORT_JOB_DIR = DYNAMIC_REPORT_EXPORT_DIR / "jobs"
 EXCEL_MAX_ROWS_PER_SHEET = 1_048_576
 ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
 DASHBOARD_LAYOUT_TYPES = {
@@ -2085,9 +2087,54 @@ def _dynamic_report_export_semaphore() -> threading.Semaphore:
         return DYNAMIC_REPORT_EXPORT_SEMAPHORE
 
 
+def _dynamic_report_export_job_path(job_id: str) -> Path:
+    safe_id = re.sub(r"[^A-Za-z0-9_-]+", "", str(job_id or ""))
+    return DYNAMIC_REPORT_EXPORT_JOB_DIR / f"{safe_id or 'unknown'}.json"
+
+
+def _dynamic_report_export_json_value(value: Any) -> Any:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _dynamic_report_export_json_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_dynamic_report_export_json_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_dynamic_report_export_json_value(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _persist_dynamic_report_export_job(job_id: str, job: dict[str, Any]) -> None:
+    try:
+        with DYNAMIC_REPORT_EXPORT_JOB_FILE_LOCK:
+            DYNAMIC_REPORT_EXPORT_JOB_DIR.mkdir(parents=True, exist_ok=True)
+            target_path = _dynamic_report_export_job_path(job_id)
+            target_path.write_text(
+                json.dumps(_dynamic_report_export_json_value(job), ensure_ascii=False, default=str),
+                encoding="utf-8",
+            )
+    except Exception as error:
+        logger.warning("Cannot persist dynamic report export job %s: %s", job_id, error)
+
+
+def _load_dynamic_report_export_job(job_id: str) -> dict[str, Any] | None:
+    path = _dynamic_report_export_job_path(job_id)
+    if not path.exists():
+        return None
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as error:
+        logger.warning("Cannot load dynamic report export job %s: %s", job_id, error)
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
 def _cleanup_dynamic_report_export_jobs() -> None:
     now = time.time()
     expired_paths: list[str] = []
+    expired_job_paths: list[Path] = []
     with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
         expired_ids = [
             job_id
@@ -2099,26 +2146,62 @@ def _cleanup_dynamic_report_export_jobs() -> None:
             job = DYNAMIC_REPORT_EXPORT_JOBS.pop(job_id, {})
             if job.get("path"):
                 expired_paths.append(str(job["path"]))
+            expired_job_paths.append(_dynamic_report_export_job_path(job_id))
     for path_text in expired_paths:
         try:
             Path(path_text).unlink(missing_ok=True)
         except OSError:
             logger.warning("Cannot remove old dynamic report export file: %s", path_text)
+    if DYNAMIC_REPORT_EXPORT_JOB_DIR.exists():
+        for temp_job_path in DYNAMIC_REPORT_EXPORT_JOB_DIR.glob("*.tmp"):
+            try:
+                temp_job_path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Cannot remove old dynamic report export temp metadata: %s", temp_job_path)
+        for job_path in DYNAMIC_REPORT_EXPORT_JOB_DIR.glob("*.json"):
+            if job_path in expired_job_paths:
+                continue
+            try:
+                loaded = json.loads(job_path.read_text(encoding="utf-8"))
+                if (
+                    isinstance(loaded, dict)
+                    and loaded.get("status") not in {"queued", "running"}
+                    and now - float(loaded.get("updated_at") or loaded.get("created_at") or now) > DYNAMIC_REPORT_EXPORT_JOB_TTL_SECONDS
+                ):
+                    expired_job_paths.append(job_path)
+            except Exception:
+                expired_job_paths.append(job_path)
+    for job_path in expired_job_paths:
+        try:
+            job_path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Cannot remove old dynamic report export job metadata: %s", job_path)
 
 
 def _set_dynamic_report_export_job(job_id: str, **updates: Any) -> None:
+    snapshot: dict[str, Any] | None = None
     with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
         job = DYNAMIC_REPORT_EXPORT_JOBS.get(job_id)
         if not job:
             return
         job.update(updates)
         job["updated_at"] = time.time()
+        snapshot = dict(job)
+    if snapshot:
+        _persist_dynamic_report_export_job(job_id, snapshot)
 
 
 def _get_dynamic_report_export_job(job_id: str) -> dict[str, Any] | None:
     with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
         job = DYNAMIC_REPORT_EXPORT_JOBS.get(job_id)
-        return dict(job) if job else None
+        if job:
+            return dict(job)
+    loaded = _load_dynamic_report_export_job(job_id)
+    if not loaded:
+        return None
+    with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+        DYNAMIC_REPORT_EXPORT_JOBS[job_id] = dict(loaded)
+    return dict(loaded)
 
 
 def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload) -> None:
@@ -2287,6 +2370,8 @@ def start_dynamic_report_export_job(request: Request, payload: RunReportPayload)
             "updated_at": now,
             "progress": {},
         }
+        job_snapshot = dict(DYNAMIC_REPORT_EXPORT_JOBS[job_id])
+    _persist_dynamic_report_export_job(job_id, job_snapshot)
     thread = threading.Thread(target=_run_dynamic_report_export_job, args=(job_id, payload), daemon=True)
     thread.start()
     return {"ok": True, "job_id": job_id, "status": "queued", "message": "Đang xuất file Excel ở chế độ nền."}

@@ -1281,6 +1281,56 @@ def test_dynamic_report_export_job_can_return_drive_link(monkeypatch) -> None:
         assert calls[0]["ma_bao_cao"] == "CRS"
 
 
+def test_dynamic_report_export_job_status_recovers_from_persisted_metadata(monkeypatch, tmp_path) -> None:
+    def fake_drive_folder_id(settings, storage_link=""):
+        return "drive-folder-001"
+
+    def fake_export_to_drive(self, **kwargs):
+        return {
+            "ok": True,
+            "drive_url": "https://drive.google.com/file/d/recovered-export/view",
+            "file_name": "crs_export.xlsx",
+            "rows": 12,
+            "total": 12,
+        }
+
+    monkeypatch.setattr(routes, "DYNAMIC_REPORT_EXPORT_DIR", tmp_path / "exports")
+    monkeypatch.setattr(routes, "DYNAMIC_REPORT_EXPORT_JOB_DIR", tmp_path / "exports" / "jobs")
+    monkeypatch.setattr(routes, "google_drive_folder_id", fake_drive_folder_id)
+    monkeypatch.setattr(DatabaseService, "export_dynamic_report_to_drive", fake_export_to_drive)
+    with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+        routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
+
+    with TestClient(app) as client:
+        login(client)
+        started = client.post(
+            "/api/reports/export-jobs",
+            json={"ma_bao_cao": "CRS", "filters": {}, "page": 1, "page_size": 20},
+        )
+        assert started.status_code == 200
+        job_id = started.json()["job_id"]
+
+        status_body = {}
+        for _ in range(80):
+            status_response = client.get(f"/api/reports/export-jobs/{job_id}")
+            assert status_response.status_code == 200
+            status_body = status_response.json()
+            if status_body["status"] == "complete":
+                break
+            time.sleep(0.05)
+
+        assert status_body["status"] == "complete"
+        with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+            routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
+
+        recovered = client.get(f"/api/reports/export-jobs/{job_id}")
+        assert recovered.status_code == 200
+        recovered_body = recovered.json()
+        assert recovered_body["status"] == "complete"
+        assert recovered_body["drive_url"] == "https://drive.google.com/file/d/recovered-export/view"
+        assert recovered_body["download_url"] == recovered_body["drive_url"]
+
+
 def test_dynamic_report_drive_export_sends_compiled_sql_to_internal_api() -> None:
     captured = {}
 
