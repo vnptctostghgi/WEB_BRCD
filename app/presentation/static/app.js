@@ -99,15 +99,15 @@ const dashboardColorScaleStops = [
 const dashboardPiePalette = [
   "#2563eb",
   "#f59e0b",
-  "#22c55e",
+  "#06b6d4",
   "#a855f7",
   "#ef4444",
   "#14b8a6",
   "#eab308",
   "#ec4899",
-  "#06b6d4",
+  "#60a5fa",
   "#f97316",
-  "#84cc16",
+  "#6366f1",
   "#8b5cf6",
 ];
 const dashboardRuntimeThemes = {
@@ -123,7 +123,7 @@ const dashboardRuntimeThemes = {
     lineColor: "#2563eb",
     lineFill: "rgba(37, 99, 235, .22)",
     pieBorder: "#082f49",
-    seriesPalette: ["#38bdf8", "#f59e0b", "#22c55e", "#ef4444", "#a78bfa", "#14b8a6", "#f97316", "#60a5fa"],
+    seriesPalette: ["#38bdf8", "#f59e0b", "#6366f1", "#ef4444", "#a78bfa", "#14b8a6", "#f97316", "#60a5fa"],
     piePalette: dashboardPiePalette,
   },
   light: {
@@ -138,8 +138,8 @@ const dashboardRuntimeThemes = {
     lineColor: "#1d4ed8",
     lineFill: "rgba(29, 78, 216, .14)",
     pieBorder: "#ffffff",
-    seriesPalette: ["#2563eb", "#f97316", "#16a34a", "#dc2626", "#7c3aed", "#0891b2", "#ca8a04", "#db2777"],
-    piePalette: ["#2563eb", "#f97316", "#16a34a", "#7c3aed", "#dc2626", "#0891b2", "#ca8a04", "#db2777", "#0284c7", "#ea580c", "#65a30d", "#9333ea"],
+    seriesPalette: ["#2563eb", "#f97316", "#06b6d4", "#dc2626", "#7c3aed", "#0891b2", "#ca8a04", "#db2777"],
+    piePalette: ["#2563eb", "#f97316", "#06b6d4", "#7c3aed", "#dc2626", "#0891b2", "#ca8a04", "#db2777", "#0284c7", "#ea580c", "#6366f1", "#9333ea"],
   },
 };
 const chartJsSource = "https://cdn.jsdelivr.net/npm/chart.js";

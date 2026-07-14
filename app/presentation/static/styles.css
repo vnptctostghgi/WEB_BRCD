@@ -31,7 +31,7 @@ body::before {
   z-index: 120;
   width: 100%;
   height: 2px;
-  background: linear-gradient(90deg, rgba(56, 189, 248, .12), rgba(34, 197, 94, .82), rgba(14, 165, 233, .78), rgba(245, 158, 11, .18));
+  background: linear-gradient(90deg, rgba(56, 189, 248, .12), rgba(14, 165, 233, .84), rgba(99, 102, 241, .76), rgba(245, 158, 11, .18));
   opacity: 0;
   pointer-events: none;
   transform: scaleX(0);
@@ -227,7 +227,7 @@ body.view-loading .app-main::after {
   margin: -17px 0 0 -17px;
   border: 3px solid rgba(14, 165, 233, .18);
   border-top-color: #0284c7;
-  border-right-color: #22c55e;
+  border-right-color: #6366f1;
   border-radius: 999px;
   animation: app-spinner .92s linear infinite;
   will-change: transform;
@@ -244,7 +244,7 @@ body.view-loading .app-main::after {
 .dark body.view-loading .app-main::after {
   border-color: rgba(125, 211, 252, .2);
   border-top-color: #7dd3fc;
-  border-right-color: #22c55e;
+  border-right-color: #f59e0b;
 }
 
 .app-dark,
@@ -1141,7 +1141,7 @@ body.view-loading .app-view.active {
 
 .release-metrics span {
   min-width: 0;
-  border: 1px solid rgba(187, 247, 208, .18);
+  border: 1px solid rgba(186, 230, 253, .2);
   border-radius: 16px;
   background: rgba(2, 6, 23, .26);
   padding: .72rem .78rem;
@@ -1475,11 +1475,11 @@ body.view-loading .app-view.active {
 .login-logo {
   width: 74px;
   height: 74px;
-  border: 2px solid rgba(187, 247, 208, .48);
+  border: 2px solid rgba(186, 230, 253, .5);
   border-radius: 22px;
   background: #fff;
   object-fit: cover;
-  box-shadow: 0 20px 38px rgba(34, 197, 94, .18);
+  box-shadow: 0 20px 38px rgba(14, 165, 233, .18);
 }
 
 #login-form,
@@ -2618,9 +2618,9 @@ body.view-loading .app-view.active {
 }
 
 .result.success {
-  border: 1px solid #bbf7d0;
-  color: #166534;
-  background: #f0fdf4;
+  border: 1px solid #bae6fd;
+  color: #075985;
+  background: #f0f9ff;
 }
 
 .result.error {
@@ -2630,9 +2630,9 @@ body.view-loading .app-view.active {
 }
 
 .dark .result.success {
-  border-color: #166534;
-  color: #bbf7d0;
-  background: rgba(20, 83, 45, .35);
+  border-color: rgba(125, 211, 252, .48);
+  color: #bae6fd;
+  background: rgba(8, 47, 73, .44);
 }
 
 .dark .result.error {
@@ -2758,6 +2758,7 @@ td {
   background: rgba(15, 23, 42, .85);
   color: #dbeafe;
 }
+
 .mobile-otp-copy-cell {
   display: flex;
   align-items: center;
@@ -2830,8 +2831,8 @@ tbody tr:hover {
 }
 
 .status.active {
-  color: #166534;
-  background: #dcfce7;
+  color: #075985;
+  background: #e0f2fe;
 }
 
 .status.inactive {
@@ -2923,7 +2924,7 @@ tbody tr:hover {
   height: .55rem;
   margin-right: .55rem;
   border-radius: 999px;
-  background: #22c55e;
+  background: #0284c7;
 }
 
 .dark .check-item {
@@ -3286,13 +3287,13 @@ legend {
   justify-content: space-between;
   gap: 1rem;
   padding: .85rem;
-  border: 1px solid rgba(34, 197, 94, .28);
+  border: 1px solid rgba(14, 165, 233, .34);
   border-radius: 8px;
-  background: rgba(6, 78, 59, .24);
+  background: rgba(8, 47, 73, .32);
 }
 
 .drive-oauth-panel strong {
-  color: #dcfce7;
+  color: #bae6fd;
 }
 
 .drive-oauth-panel p {
@@ -3594,7 +3595,7 @@ legend {
 }
 
 .onebss-otp-status[data-tone="success"] {
-  color: #bbf7d0;
+  color: #bae6fd;
 }
 
 .onebss-otp-status[data-tone="warning"] {
@@ -3629,9 +3630,9 @@ legend {
 
 .mobile-gateway-tab:hover,
 .mobile-gateway-tab.active {
-  border-color: rgba(34, 197, 94, .55);
-  background: rgba(22, 101, 52, .22);
-  color: #f0fdf4;
+  border-color: rgba(14, 165, 233, .58);
+  background: rgba(8, 47, 73, .38);
+  color: #e0f2fe;
 }
 
 .mobile-gateway-panel {
@@ -3697,10 +3698,10 @@ legend {
 }
 
 .mobile-pairing-result {
-  border: 1px solid rgba(34, 197, 94, .42);
+  border: 1px solid rgba(14, 165, 233, .46);
   border-radius: 8px;
-  background: rgba(22, 101, 52, .2);
-  color: #dcfce7;
+  background: rgba(8, 47, 73, .34);
+  color: #bae6fd;
   font-family: "Courier New", monospace;
   font-size: .95rem;
   font-weight: 900;
