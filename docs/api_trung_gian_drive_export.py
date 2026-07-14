@@ -121,8 +121,45 @@ def google_drive_oauth_token_file() -> Path:
     return Path(os.getenv("GOOGLE_DRIVE_OAUTH_TOKEN_FILE", "drive-oauth-token.json")).expanduser()
 
 
+def google_drive_oauth_state_file() -> Path:
+    configured = os.getenv("GOOGLE_DRIVE_OAUTH_STATE_FILE", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    return google_drive_oauth_token_file().with_suffix(".state.json")
+
+
 def google_drive_oauth_redirect_uri() -> str:
     return os.getenv("GOOGLE_DRIVE_OAUTH_REDIRECT_URI", "http://127.0.0.1:8000/drive-oauth/callback").strip()
+
+
+def save_oauth_state(state: str, code_verifier: str) -> None:
+    state_file = google_drive_oauth_state_file()
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(
+        json.dumps(
+            {
+                "state": state,
+                "code_verifier": code_verifier,
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def load_oauth_state(state: str) -> dict[str, Any]:
+    state_file = google_drive_oauth_state_file()
+    if not state_file.exists():
+        raise RuntimeError("Khong tim thay OAuth state tren may tram. Hay mo lai /drive-oauth/start.")
+    data = json.loads(state_file.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise RuntimeError("OAuth state tren may tram khong hop le. Hay mo lai /drive-oauth/start.")
+    if state and data.get("state") != state:
+        raise RuntimeError("OAuth state khong khop. Hay mo lai /drive-oauth/start.")
+    if not str(data.get("code_verifier") or "").strip():
+        raise RuntimeError("OAuth state thieu code_verifier. Hay mo lai /drive-oauth/start.")
+    return data
 
 
 def load_oauth_credentials() -> Credentials:
@@ -392,19 +429,21 @@ def drive_oauth_start():
             str(client_file),
             scopes=GOOGLE_DRIVE_SCOPES,
             redirect_uri=google_drive_oauth_redirect_uri(),
+            autogenerate_code_verifier=True,
         )
-        authorization_url, _ = flow.authorization_url(
+        authorization_url, state = flow.authorization_url(
             access_type="offline",
             prompt="consent",
             include_granted_scopes="true",
         )
+        save_oauth_state(state, str(flow.code_verifier or ""))
         return RedirectResponse(authorization_url)
     except Exception as error:
         return HTMLResponse(f"<h3>Khong mo duoc OAuth Google Drive</h3><pre>{type(error).__name__}: {error}</pre>", status_code=500)
 
 
 @app.get("/drive-oauth/callback")
-def drive_oauth_callback(code: str = "", error: str = ""):
+def drive_oauth_callback(code: str = "", state: str = "", error: str = ""):
     try:
         if error:
             raise RuntimeError(f"Google tu choi cap quyen: {error}")
@@ -416,15 +455,20 @@ def drive_oauth_callback(code: str = "", error: str = ""):
             raise RuntimeError("Chua cai google-auth-oauthlib. Hay chay: python -m pip install google-auth-oauthlib") from module_error
 
         os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+        oauth_state = load_oauth_state(state)
         flow = Flow.from_client_secrets_file(
             str(google_drive_oauth_client_file()),
             scopes=GOOGLE_DRIVE_SCOPES,
             redirect_uri=google_drive_oauth_redirect_uri(),
+            state=state or oauth_state.get("state"),
+            code_verifier=str(oauth_state.get("code_verifier") or ""),
+            autogenerate_code_verifier=False,
         )
         flow.fetch_token(code=code)
         token_file = google_drive_oauth_token_file()
         token_file.parent.mkdir(parents=True, exist_ok=True)
         token_file.write_text(flow.credentials.to_json(), encoding="utf-8")
+        google_drive_oauth_state_file().unlink(missing_ok=True)
         return HTMLResponse(
             "<h3>Da ket noi Google Drive OAuth thanh cong.</h3>"
             "<p>Co the dong cua so nay, sau do chay lai /test-drive va xuat file tren web.</p>"
