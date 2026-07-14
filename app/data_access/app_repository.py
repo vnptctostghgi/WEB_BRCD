@@ -295,7 +295,12 @@ class AppRepository:
                     started_at TEXT NOT NULL,
                     finished_at TEXT NOT NULL DEFAULT '',
                     duration_ms INTEGER NOT NULL DEFAULT 0,
-                    created_by TEXT NOT NULL DEFAULT ''
+                    created_by TEXT NOT NULL DEFAULT '',
+                    worker_id TEXT NOT NULL DEFAULT '',
+                    worker_session_id TEXT NOT NULL DEFAULT '',
+                    otp_request_id TEXT NOT NULL DEFAULT '',
+                    claimed_at TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT ''
                 );
 
                 CREATE INDEX IF NOT EXISTS onebss_report_runs_report_idx
@@ -480,6 +485,17 @@ class AppRepository:
                 connection.execute("ALTER TABLE onebss_reports ADD COLUMN otp_service_code TEXT NOT NULL DEFAULT 'onebss'")
             except sqlite3.OperationalError:
                 pass
+            for column, definition in {
+                "worker_id": "TEXT NOT NULL DEFAULT ''",
+                "worker_session_id": "TEXT NOT NULL DEFAULT ''",
+                "otp_request_id": "TEXT NOT NULL DEFAULT ''",
+                "claimed_at": "TEXT NOT NULL DEFAULT ''",
+                "updated_at": "TEXT NOT NULL DEFAULT ''",
+            }.items():
+                try:
+                    connection.execute(f"ALTER TABLE onebss_report_runs ADD COLUMN {column} {definition}")
+                except sqlite3.OperationalError:
+                    pass
             legacy_menu = connection.execute(
                 "SELECT 1 FROM features WHERE code IN ('admin', 'admin.connections.test', 'admin.menu', 'new_reports') LIMIT 1"
             ).fetchone()
@@ -1163,19 +1179,91 @@ class AppRepository:
             "finished_at": str(payload.get("finished_at") or now),
             "duration_ms": int(payload.get("duration_ms") or 0),
             "created_by": str(payload.get("created_by") or ""),
+            "worker_id": str(payload.get("worker_id") or ""),
+            "worker_session_id": str(payload.get("worker_session_id") or ""),
+            "otp_request_id": str(payload.get("otp_request_id") or ""),
+            "claimed_at": str(payload.get("claimed_at") or ""),
+            "updated_at": str(payload.get("updated_at") or now),
         }
         with self.connect() as connection:
             connection.execute(
                 """
                 INSERT INTO onebss_report_runs
                 (run_id, ma_bao_cao, ten_bao_cao, status, message, file_name, file_path, storage_link,
-                 storage_status, parameters_json, started_at, finished_at, duration_ms, created_by)
+                 storage_status, parameters_json, started_at, finished_at, duration_ms, created_by,
+                 worker_id, worker_session_id, otp_request_id, claimed_at, updated_at)
                 VALUES (:run_id, :ma_bao_cao, :ten_bao_cao, :status, :message, :file_name, :file_path, :storage_link,
-                        :storage_status, :parameters_json, :started_at, :finished_at, :duration_ms, :created_by)
+                        :storage_status, :parameters_json, :started_at, :finished_at, :duration_ms, :created_by,
+                        :worker_id, :worker_session_id, :otp_request_id, :claimed_at, :updated_at)
                 """,
                 row,
             )
         return self._decode_onebss_report_run(row)
+
+    def get_onebss_report_run(self, run_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM onebss_report_runs WHERE run_id=?", (run_id,)).fetchone()
+            return self._decode_onebss_report_run(dict(row)) if row else None
+
+    def claim_next_onebss_report_run(self, worker_id: str) -> dict[str, Any] | None:
+        now = self._now()
+        worker = str(worker_id or "").strip()[:120]
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM onebss_report_runs
+                WHERE status='queued'
+                ORDER BY started_at ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            if not row:
+                return None
+            run_id = dict(row)["run_id"]
+            connection.execute(
+                """
+                UPDATE onebss_report_runs
+                SET status='running', message=?, worker_id=?, claimed_at=?, updated_at=?
+                WHERE run_id=? AND status='queued'
+                """,
+                ("May tram da nhan task va dang xu ly OneBSS.", worker, now, now, run_id),
+            )
+            updated = connection.execute("SELECT * FROM onebss_report_runs WHERE run_id=?", (run_id,)).fetchone()
+            return self._decode_onebss_report_run(dict(updated)) if updated else None
+
+    def update_onebss_report_run(self, run_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+        allowed = {
+            "status",
+            "message",
+            "file_name",
+            "file_path",
+            "storage_link",
+            "storage_status",
+            "parameters_json",
+            "finished_at",
+            "duration_ms",
+            "worker_id",
+            "worker_session_id",
+            "otp_request_id",
+            "claimed_at",
+            "updated_at",
+        }
+        now = self._now()
+        values: dict[str, Any] = {}
+        for key, value in updates.items():
+            if key == "parameters" and isinstance(value, dict):
+                values["parameters_json"] = json.dumps(value, ensure_ascii=False)
+            elif key in allowed:
+                values[key] = value
+        values["updated_at"] = values.get("updated_at") or now
+        if not values:
+            return self.get_onebss_report_run(run_id)
+        assignments = ", ".join(f"{key}=:{key}" for key in values.keys())
+        values["run_id"] = run_id
+        with self.connect() as connection:
+            connection.execute(f"UPDATE onebss_report_runs SET {assignments} WHERE run_id=:run_id", values)
+            row = connection.execute("SELECT * FROM onebss_report_runs WHERE run_id=?", (run_id,)).fetchone()
+            return self._decode_onebss_report_run(dict(row)) if row else None
 
     def list_onebss_report_runs(self, ma_bao_cao: str = "", limit: int = 50) -> list[dict[str, Any]]:
         safe_limit = min(max(int(limit or 50), 1), 200)
@@ -1908,6 +1996,11 @@ class AppRepository:
             "finished_at": row.get("finished_at") or "",
             "duration_ms": int(row.get("duration_ms") or 0),
             "created_by": row.get("created_by") or "",
+            "worker_id": row.get("worker_id") or "",
+            "worker_session_id": row.get("worker_session_id") or "",
+            "otp_request_id": row.get("otp_request_id") or "",
+            "claimed_at": row.get("claimed_at") or "",
+            "updated_at": row.get("updated_at") or "",
         }
 
     @staticmethod

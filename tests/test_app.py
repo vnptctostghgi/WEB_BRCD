@@ -12,6 +12,7 @@ import pytest
 os.environ["DB_MOCK_MODE"] = "true"
 os.environ["INTERNAL_API_MOCK_MODE"] = "true"
 os.environ["INTERNAL_API_URL"] = "http://10.92.17.88:8000/api/du-lieu-web"
+os.environ["INTERNAL_API_TOKEN"] = "test-worker-token"
 os.environ["APP_DATABASE_BACKEND"] = "sqlite"
 os.environ["APP_DATABASE_PATH"] = "data/test_app.db"
 os.environ["INITIAL_ADMIN_USERNAME"] = "admin"
@@ -1469,36 +1470,18 @@ def test_dynamic_report_drive_export_sends_compiled_sql_to_internal_api() -> Non
 
 
 def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
-    calls = []
-
-    def fake_run_onebss_report_request(settings, report, parameters, **kwargs):
-        calls.append({
-            "report": report["ma_bao_cao"],
-            "parameters": parameters,
-            "otp": kwargs.get("otp"),
-            "session_id": kwargs.get("session_id"),
-        })
-        if not kwargs.get("session_id"):
-            return {
-                "ok": False,
-                "status": "otp_required",
-                "message": "OneBSS yeu cau OTP.",
-                "session_id": "otp-session-001",
-                "parameters": parameters,
-            }
-        return {
-            "ok": True,
-            "status": "success",
-            "message": "Da tai bao cao OneBSS va upload Google Drive.",
-            "file_name": "onebss.xlsx",
-            "file_path": "data/data_mining_downloads/onebss.xlsx",
-            "storage_link": "https://drive.google.com/file/d/onebss-file/view",
-            "storage_status": "uploaded_google_drive:onebss-file",
-            "parameters": parameters,
-            "duration_ms": 1234,
-        }
-
-    monkeypatch.setattr(routes, "run_onebss_report_request", fake_run_onebss_report_request)
+    monkeypatch.setattr(
+        routes,
+        "start_onebss_otp_mobile_gateway_request",
+        lambda *args, **kwargs: {
+            "ok": False,
+            "status": "otp_required",
+            "message": "May tram dang doi OTP.",
+            "otp_request_id": "OTP-WORKER-001",
+        },
+    )
+    monkeypatch.setattr(routes, "match_onebss_mobile_gateway_manual_otp", lambda *args, **kwargs: {"ok": True, "status": "matched"})
+    monkeypatch.setattr(routes, "consume_onebss_mobile_gateway_otp", lambda *args, **kwargs: {"ok": True, "status": "matched", "otp": "123456"})
     with TestClient(app) as client:
         login(client)
         payload = {
@@ -1526,22 +1509,51 @@ def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
             json={"ma_bao_cao": code},
         )
         assert first_run.status_code == 200
-        assert first_run.json()["status"] == "otp_required"
-        assert first_run.json()["session_id"] == "otp-session-001"
-        assert calls[-1]["parameters"] == payload["parameters"]
+        assert first_run.json()["status"] == "queued"
+        job_id = first_run.json()["job_id"]
 
-        second_run = client.post(
-            "/api/onebss-reports/run",
-            json={
-                "ma_bao_cao": code,
-                "session_id": "otp-session-001",
-                "otp": "123456",
-            },
+        headers = {"Authorization": "Bearer test-worker-token"}
+        claim = client.post("/api/onebss-worker/tasks/claim", json={"worker_id": "ws-01"}, headers=headers)
+        assert claim.status_code == 200
+        task = claim.json()["task"]
+        assert task["run_id"] == job_id
+        assert task["parameters"] == payload["parameters"]
+
+        waiting_otp = client.post(
+            f"/api/onebss-worker/tasks/{job_id}/status",
+            json={"status": "otp_required", "message": "Can OTP", "worker_id": "ws-01", "worker_session_id": "worker-session-001"},
+            headers=headers,
         )
-        assert second_run.status_code == 200
-        assert second_run.json()["ok"] is True
-        assert calls[-1]["otp"] == "123456"
-        assert calls[-1]["parameters"] == payload["parameters"]
+        assert waiting_otp.status_code == 200
+        assert waiting_otp.json()["otp_request_id"] == "OTP-WORKER-001"
+
+        otp_submit = client.post(
+            f"/api/onebss-reports/jobs/{job_id}/otp",
+            json={"otp": "123456", "otp_request_id": "OTP-WORKER-001", "otp_source": "manual"},
+        )
+        assert otp_submit.status_code == 200
+        assert otp_submit.json()["ok"] is True
+
+        worker_otp = client.get(f"/api/onebss-worker/tasks/{job_id}/otp", headers=headers)
+        assert worker_otp.status_code == 200
+        assert worker_otp.json()["otp"] == "123456"
+
+        finished = client.post(
+            f"/api/onebss-worker/tasks/{job_id}/result",
+            json={
+                "ok": True,
+                "status": "success",
+                "message": "Da tai bao cao OneBSS va upload Google Drive.",
+                "file_name": "onebss.xlsx",
+                "storage_link": "https://drive.google.com/file/d/onebss-file/view",
+                "storage_status": "uploaded_google_drive:onebss-file",
+                "duration_ms": 1234,
+            },
+            headers=headers,
+        )
+        assert finished.status_code == 200
+        assert finished.json()["run"]["status"] == "success"
+
         runs = client.get(f"/api/onebss-reports/runs?ma_bao_cao={code}").json()["runs"]
         assert len(runs) == 1
         assert runs[0]["storage_link"] == "https://drive.google.com/file/d/onebss-file/view"
@@ -1829,31 +1841,21 @@ def test_onebss_otp_request_poll_route_reports_matched_without_consuming(monkeyp
     assert "otp" not in response.json()
 
 
-def test_onebss_run_uses_otp_bound_to_request_id(monkeypatch) -> None:
+def test_onebss_worker_consumes_otp_bound_to_request_id(monkeypatch) -> None:
     calls = []
 
     def fake_consume(settings, request_id):
         assert request_id == "OTP-POLL-001"
+        calls.append(("consume", request_id))
         return {"ok": True, "status": "matched", "otp": "654321", "source_type": "sms"}
 
-    def fake_run_onebss_report_request(settings, report, parameters, **kwargs):
-        calls.append({
-            "report": report["ma_bao_cao"],
-            "otp": kwargs.get("otp"),
-            "session_id": kwargs.get("session_id"),
-            "parameters": parameters,
-        })
-        return {
-            "ok": True,
-            "status": "success",
-            "message": "auto otp ok",
-            "file_name": "onebss.xlsx",
-            "file_path": "data/data_mining_downloads/onebss.xlsx",
-            "parameters": parameters,
-        }
+    def fake_inspect(settings, request_id):
+        assert request_id == "OTP-POLL-001"
+        calls.append(("inspect", request_id))
+        return {"ok": True, "status": "matched", "code_masked": "******", "source_type": "sms"}
 
+    monkeypatch.setattr(routes, "inspect_onebss_mobile_gateway_otp", fake_inspect)
     monkeypatch.setattr(routes, "consume_onebss_mobile_gateway_otp", fake_consume)
-    monkeypatch.setattr(routes, "run_onebss_report_request", fake_run_onebss_report_request)
 
     with TestClient(app) as client:
         login(client)
@@ -1866,20 +1868,28 @@ def test_onebss_run_uses_otp_bound_to_request_id(monkeypatch) -> None:
             },
         )
         assert created.status_code == 200
-        response = client.post(
+        queued = client.post(
             "/api/onebss-reports/run",
             json={
                 "ma_bao_cao": created.json()["ma_bao_cao"],
-                "session_id": "api-session-001",
-                "otp_request_id": "OTP-POLL-001",
-                "otp_source": "auto",
             },
+        )
+        assert queued.status_code == 200
+        job_id = queued.json()["job_id"]
+        response = client.post(
+            f"/api/onebss-reports/jobs/{job_id}/otp",
+            json={"otp_request_id": "OTP-POLL-001", "otp_source": "auto"},
+        )
+        worker_response = client.get(
+            f"/api/onebss-worker/tasks/{job_id}/otp",
+            headers={"Authorization": "Bearer test-worker-token"},
         )
 
     assert response.status_code == 200
-    assert response.json()["status"] == "success"
-    assert calls[-1]["otp"] == "654321"
-    assert calls[-1]["session_id"] == "api-session-001"
+    assert response.json()["ok"] is True
+    assert worker_response.status_code == 200
+    assert worker_response.json()["otp"] == "654321"
+    assert calls == [("inspect", "OTP-POLL-001"), ("consume", "OTP-POLL-001")]
 
 
 def test_onebss_auth_transition_waits_for_delayed_otp() -> None:
@@ -1994,7 +2004,7 @@ def test_onebss_download_falls_back_when_grid_has_no_rows(monkeypatch, tmp_path)
         get_settings(),
         token,
         {"report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST&name=Test"},
-        {"P_PHANVUNG_ID": "13"},
+        {"P_PHANVUNG_ID": "13", "$download_source": "grid"},
     )
 
     assert events == ["grid", "export"]
@@ -2072,7 +2082,7 @@ def test_onebss_finish_api_splits_regions_and_merges_excel(monkeypatch, tmp_path
             "P_LOAI_NGAY": "1",
             "P_TUNGAY": "01/07/2026",
             "P_DENNGAY": "14/07/2026",
-            "$merge_excel": {"sheet": "DATA", "source_column": "P_PHANVUNG_ID"},
+            "$merge_excel": {"mode": "append", "sheet": "DATA", "source_column": "P_PHANVUNG_ID"},
         },
     )
 
@@ -2088,6 +2098,64 @@ def test_onebss_finish_api_splits_regions_and_merges_excel(monkeypatch, tmp_path
         assert [sheet.cell(row=row, column=3).value for row in range(2, 5)] == ["13", "14", "15"]
     finally:
         workbook.close()
+
+
+def test_onebss_finish_api_splits_regions_to_zip_by_default(monkeypatch, tmp_path) -> None:
+    import zipfile
+    from openpyxl import Workbook
+
+    from app.application import onebss_report_service as service
+    from app.application.onebss_report_service import OneBssApiToken, OneBssDownloadedFile
+
+    settings = get_settings().model_copy(update={"data_mining_download_dir": str(tmp_path)})
+    token = OneBssApiToken(
+        access_token="token",
+        token_type="Bearer",
+        username="test@vnpt.vn",
+        mobile_id="mobile",
+        device_id="device",
+        expires_at=9999999999,
+    )
+
+    def fake_download(settings, token, report, parameters, **kwargs):
+        region = str(parameters["P_PHANVUNG_ID"])
+        target = kwargs.get("target_file") or tmp_path / f"part_{region}.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["MA_TB"])
+        sheet.append([f"TB{region}"])
+        workbook.save(target)
+        workbook.close()
+        return OneBssDownloadedFile(
+            file_path=target,
+            suggested_filename=f"part_{region}.xlsx",
+            export_info={"report_id": 41668, "title": "Bao cao phat trien moi", "params": parameters},
+            parameters=parameters,
+            source_values=kwargs.get("source_values") or {},
+        )
+
+    monkeypatch.setattr(service, "download_onebss_report_file_api", fake_download)
+    monkeypatch.setattr(service, "save_downloaded_file", lambda settings, target, storage: {"ok": True, "storage_link": str(target), "storage_status": "local"})
+
+    result = service.finish_onebss_report_download_api(
+        settings,
+        token,
+        {
+            "ma_bao_cao": "ONEBSS_PTM",
+            "ten_bao_cao": "Bao cao phat trien moi",
+            "report_url": "https://onebss.vnpt.vn/#/report/bi?path=PHATTRIENTHUEBAO%2FBIENDONGPHATTRIENTHUEBAO%2FRP_BSS_28429&name=Test",
+        },
+        {"P_PHANVUNG_ID": {"$each": ["13", "14", "15"]}},
+    )
+
+    assert result["ok"] is True
+    assert result["output_mode"] == "split_archive"
+    assert result["split_file_count"] == 3
+    assert result["file_name"].endswith(".zip")
+    with zipfile.ZipFile(result["file_path"]) as archive:
+        names = archive.namelist()
+    assert len(names) == 3
+    assert any("P_PHANVUNG_ID_13" in name for name in names)
 
 
 def test_onebss_merge_excel_files_appends_rows_with_source_column(tmp_path) -> None:
@@ -2134,11 +2202,7 @@ def test_onebss_merge_excel_files_appends_rows_with_source_column(tmp_path) -> N
     ]
 
 
-def test_onebss_report_run_records_unhandled_errors(monkeypatch) -> None:
-    def failing_run_onebss_report_request(settings, report, parameters, **kwargs):
-        raise RuntimeError("browser launch failed")
-
-    monkeypatch.setattr(routes, "run_onebss_report_request", failing_run_onebss_report_request)
+def test_onebss_report_run_records_worker_errors() -> None:
     with TestClient(app) as client:
         login(client)
         created = client.post(
@@ -2155,13 +2219,17 @@ def test_onebss_report_run_records_unhandled_errors(monkeypatch) -> None:
 
         response = client.post("/api/onebss-reports/run", json={"ma_bao_cao": code, "parameters": {"P_TUNGAY": "01/07/2026"}})
         assert response.status_code == 200
-        data = response.json()
-        assert data["ok"] is False
-        assert data["status"] == "failed"
-        assert "browser launch failed" in data["message"]
+        job_id = response.json()["job_id"]
+        failed = client.post(
+            f"/api/onebss-worker/tasks/{job_id}/result",
+            json={"ok": False, "status": "failed", "message": "browser launch failed"},
+            headers={"Authorization": "Bearer test-worker-token"},
+        )
+        assert failed.status_code == 200
         runs = client.get(f"/api/onebss-reports/runs?ma_bao_cao={code}").json()["runs"]
         assert len(runs) == 1
         assert runs[0]["status"] == "failed"
+        assert "browser launch failed" in runs[0]["message"]
 
 
 def test_supabase_onebss_run_uses_parameters_json_column(monkeypatch) -> None:

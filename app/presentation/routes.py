@@ -46,7 +46,9 @@ from app.application.onebss_report_service import (
     cancel_onebss_mobile_gateway_otp,
     consume_onebss_mobile_gateway_otp,
     inspect_onebss_mobile_gateway_otp,
+    match_onebss_mobile_gateway_manual_otp,
     run_onebss_report_request,
+    start_onebss_otp_mobile_gateway_request,
 )
 from app.application.zalo_auto_message_service import capture_page_screenshot_bytes, capture_public_url, send_zalo_auto_message
 from app.application.zalo_bot import ZaloBotClient
@@ -78,6 +80,14 @@ DYNAMIC_REPORT_EXPORT_JOB_DIR = DYNAMIC_REPORT_EXPORT_DIR / "jobs"
 DYNAMIC_REPORT_HISTORY_ACTION = "dynamic_report_history"
 DYNAMIC_REPORT_EXPORT_ACTIVE_STATUSES = {"queued", "running", "cancel_requested"}
 DYNAMIC_REPORT_EXPORT_FINAL_STATUSES = {"complete", "failed", "cancelled"}
+ONEBSS_REPORT_JOBS: dict[str, dict[str, Any]] = {}
+ONEBSS_REPORT_JOBS_LOCK = threading.Lock()
+ONEBSS_REPORT_JOB_FILE_LOCK = threading.Lock()
+ONEBSS_REPORT_SEMAPHORE = threading.Semaphore(1)
+ONEBSS_REPORT_JOB_TTL_SECONDS = 24 * 60 * 60
+ONEBSS_REPORT_JOB_DIR = Path(tempfile.gettempdir()) / "vnptcto_onebss_report_jobs"
+ONEBSS_REPORT_ACTIVE_STATUSES = {"queued", "running", "otp_required", "otp_invalid", "manual_otp_required"}
+ONEBSS_REPORT_FINAL_STATUSES = {"success", "failed", "cancelled", "storage_failed", "google_drive_not_configured", "google_drive_upload_failed"}
 EXCEL_MAX_ROWS_PER_SHEET = 1_048_576
 ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
 DASHBOARD_LAYOUT_TYPES = {
@@ -323,6 +333,37 @@ class RunOneBssReportPayload(BaseModel):
     session_id: str = ""
     otp_request_id: str = ""
     otp_source: str = ""
+    job_id: str = ""
+
+
+class OneBssTaskOtpPayload(BaseModel):
+    otp: str = ""
+    otp_request_id: str = ""
+    otp_source: str = "manual"
+
+
+class OneBssWorkerClaimPayload(BaseModel):
+    worker_id: str = "onebss-workstation"
+
+
+class OneBssWorkerStatusPayload(BaseModel):
+    status: str
+    message: str = ""
+    worker_id: str = ""
+    worker_session_id: str = ""
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class OneBssWorkerResultPayload(BaseModel):
+    ok: bool = True
+    status: str = ""
+    message: str = ""
+    file_name: str = ""
+    file_path: str = ""
+    storage_link: str = ""
+    storage_status: str = ""
+    duration_ms: int = 0
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class DashboardLayoutPayload(BaseModel):
@@ -1322,6 +1363,20 @@ def admin_user(request: Request) -> dict:
     if user["role"] != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ONLY_MESSAGE)
     return user
+
+
+def onebss_worker_token(request: Request) -> str:
+    settings = get_settings()
+    expected = settings.internal_api_token.get_secret_value().strip() if getattr(settings, "internal_api_token", None) else ""
+    if not expected:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Chua cau hinh INTERNAL_API_TOKEN cho may tram OneBSS.")
+    provided = request.headers.get("x-worker-token", "").strip()
+    authorization = request.headers.get("authorization", "").strip()
+    if not provided and authorization.lower().startswith("bearer "):
+        provided = authorization[7:].strip()
+    if not provided or not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token may tram OneBSS khong hop le.")
+    return provided
 
 
 def require_feature(request: Request, feature_code: str) -> dict:
@@ -2875,6 +2930,319 @@ def export_loaded_dynamic_report(request: Request, payload: ExportLoadedReportPa
     )
 
 
+def _onebss_report_job_path(job_id: str) -> Path:
+    safe_id = re.sub(r"[^A-Za-z0-9_-]+", "", str(job_id or ""))
+    return ONEBSS_REPORT_JOB_DIR / f"{safe_id or 'unknown'}.json"
+
+
+def _persist_onebss_report_job(job_id: str, job: dict[str, Any]) -> None:
+    try:
+        with ONEBSS_REPORT_JOB_FILE_LOCK:
+            ONEBSS_REPORT_JOB_DIR.mkdir(parents=True, exist_ok=True)
+            _onebss_report_job_path(job_id).write_text(
+                json.dumps(_dynamic_report_export_json_value(job), ensure_ascii=False, default=str),
+                encoding="utf-8",
+            )
+    except Exception as error:
+        logger.warning("Cannot persist OneBSS report job %s: %s", job_id, error)
+
+
+def _load_onebss_report_job(job_id: str) -> dict[str, Any] | None:
+    path = _onebss_report_job_path(job_id)
+    if not path.exists():
+        return None
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as error:
+        logger.warning("Cannot load OneBSS report job %s: %s", job_id, error)
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+def _set_onebss_report_job(job_id: str, **updates: Any) -> None:
+    snapshot: dict[str, Any] | None = None
+    with ONEBSS_REPORT_JOBS_LOCK:
+        job = ONEBSS_REPORT_JOBS.get(job_id)
+        if not job:
+            return
+        job.update(updates)
+        job["updated_at"] = time.time()
+        snapshot = dict(job)
+    if snapshot:
+        _persist_onebss_report_job(job_id, snapshot)
+
+
+def _get_onebss_report_job(job_id: str) -> dict[str, Any] | None:
+    with ONEBSS_REPORT_JOBS_LOCK:
+        job = ONEBSS_REPORT_JOBS.get(job_id)
+        if job:
+            return dict(job)
+    loaded = _load_onebss_report_job(job_id)
+    if not loaded:
+        return None
+    with ONEBSS_REPORT_JOBS_LOCK:
+        ONEBSS_REPORT_JOBS[job_id] = dict(loaded)
+    return dict(loaded)
+
+
+def _cleanup_onebss_report_jobs() -> None:
+    now = time.time()
+    expired_paths: list[Path] = []
+    with ONEBSS_REPORT_JOBS_LOCK:
+        expired_ids = [
+            job_id
+            for job_id, job in ONEBSS_REPORT_JOBS.items()
+            if str(job.get("status") or "").lower() not in ONEBSS_REPORT_ACTIVE_STATUSES
+            and now - float(job.get("updated_at") or job.get("created_at") or now) > ONEBSS_REPORT_JOB_TTL_SECONDS
+        ]
+        for job_id in expired_ids:
+            ONEBSS_REPORT_JOBS.pop(job_id, None)
+            expired_paths.append(_onebss_report_job_path(job_id))
+    if ONEBSS_REPORT_JOB_DIR.exists():
+        for job_path in ONEBSS_REPORT_JOB_DIR.glob("*.json"):
+            try:
+                loaded = json.loads(job_path.read_text(encoding="utf-8"))
+            except Exception:
+                expired_paths.append(job_path)
+                continue
+            if (
+                isinstance(loaded, dict)
+                and str(loaded.get("status") or "").lower() not in ONEBSS_REPORT_ACTIVE_STATUSES
+                and now - float(loaded.get("updated_at") or loaded.get("created_at") or now) > ONEBSS_REPORT_JOB_TTL_SECONDS
+            ):
+                expired_paths.append(job_path)
+    for path in expired_paths:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Cannot remove old OneBSS report job metadata: %s", path)
+
+
+def _list_onebss_report_job_snapshots(limit: int = 100) -> list[dict[str, Any]]:
+    jobs_by_id: dict[str, dict[str, Any]] = {}
+    with ONEBSS_REPORT_JOBS_LOCK:
+        for job_id, job in ONEBSS_REPORT_JOBS.items():
+            jobs_by_id[job_id] = dict(job)
+    if ONEBSS_REPORT_JOB_DIR.exists():
+        for job_path in ONEBSS_REPORT_JOB_DIR.glob("*.json"):
+            try:
+                loaded = json.loads(job_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(loaded, dict):
+                continue
+            job_id = str(loaded.get("job_id") or job_path.stem)
+            current = jobs_by_id.get(job_id)
+            if not current or float(loaded.get("updated_at") or 0) >= float(current.get("updated_at") or 0):
+                jobs_by_id[job_id] = loaded
+    jobs = list(jobs_by_id.values())
+    jobs.sort(key=_dynamic_report_job_sort_value, reverse=True)
+    return jobs[: min(max(int(limit or 100), 1), 200)]
+
+
+def _onebss_report_download_url(run: dict[str, Any]) -> str:
+    file_path = str(run.get("file_path") or "").strip()
+    run_id = str(run.get("run_id") or run.get("job_id") or "").strip()
+    if not file_path or not run_id:
+        return ""
+    storage_link = str(run.get("storage_link") or "")
+    storage_status = str(run.get("storage_status") or "")
+    if storage_link.startswith(("http://", "https://")) and (
+        storage_status.lower().startswith("uploaded_google_drive:")
+        or "/file/d/" in storage_link
+        or "/spreadsheets/d/" in storage_link
+        or "?id=" in storage_link
+        or "&id=" in storage_link
+    ):
+        return ""
+    return f"/api/onebss-reports/runs/{quote(run_id)}/download"
+
+
+def _decorate_onebss_report_run(run: dict[str, Any]) -> dict[str, Any]:
+    decorated = dict(run)
+    download_url = _onebss_report_download_url(decorated)
+    if download_url:
+        decorated["download_url"] = download_url
+    return decorated
+
+
+def _onebss_report_job_response(job_id: str, job: dict[str, Any]) -> dict[str, Any]:
+    status_value = str(job.get("status") or "queued")
+    response = {
+        "ok": status_value not in {"failed", "cancelled", "storage_failed", "google_drive_not_configured", "google_drive_upload_failed"},
+        "job_id": job_id,
+        "run_id": job.get("run_id") or job_id,
+        "status": status_value,
+        "message": job.get("message") or "",
+        "ma_bao_cao": job.get("ma_bao_cao") or "",
+        "ten_bao_cao": job.get("ten_bao_cao") or "",
+        "parameters": job.get("parameters") if isinstance(job.get("parameters"), dict) else {},
+        "started_at": job.get("started_at") or "",
+        "finished_at": job.get("finished_at") or "",
+        "created_by": job.get("created_by") or "",
+        "session_id": job.get("session_id") or job.get("worker_session_id") or "",
+        "worker_session_id": job.get("worker_session_id") or "",
+        "otp_request_id": job.get("otp_request_id") or "",
+        "can_resume_otp": status_value in {"otp_required", "otp_invalid", "manual_otp_required"},
+        "can_poll": status_value in ONEBSS_REPORT_ACTIVE_STATUSES,
+    }
+    result = job.get("result") if isinstance(job.get("result"), dict) else {}
+    run = job.get("run") if isinstance(job.get("run"), dict) else {}
+    for key in ("file_name", "file_path", "storage_link", "storage_status", "duration_ms"):
+        response[key] = run.get(key) or result.get(key) or job.get(key) or ""
+    download_url = _onebss_report_download_url(response)
+    if download_url:
+        response["download_url"] = download_url
+    if result:
+        response["result"] = result
+    if run:
+        response["run"] = _decorate_onebss_report_run(run)
+    return response
+
+
+def _onebss_job_matches(job: dict[str, Any], ma_bao_cao: str) -> bool:
+    return not ma_bao_cao or str(job.get("ma_bao_cao") or "").strip().upper() == ma_bao_cao
+
+
+def _active_onebss_job_runs(ma_bao_cao: str, limit: int = 50) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for job in _list_onebss_report_job_snapshots(limit=limit):
+        status_value = str(job.get("status") or "").lower()
+        if status_value not in ONEBSS_REPORT_ACTIVE_STATUSES:
+            continue
+        if not _onebss_job_matches(job, ma_bao_cao):
+            continue
+        rows.append(_decorate_onebss_report_run(_onebss_report_job_response(str(job.get("job_id") or ""), job)))
+    return rows
+
+
+def _save_onebss_job_result(
+    repository: AppRepository,
+    *,
+    job_id: str,
+    report: dict[str, Any],
+    result: dict[str, Any],
+    parameters: dict[str, Any],
+    started_at: str,
+    created_by: str,
+) -> dict[str, Any]:
+    finished_at = result.get("finished_at") or datetime.now().isoformat(timespec="seconds")
+    return repository.save_onebss_report_run({
+        "run_id": job_id,
+        "ma_bao_cao": report.get("ma_bao_cao"),
+        "ten_bao_cao": report.get("ten_bao_cao"),
+        "status": result.get("status") or ("success" if result.get("ok") else "failed"),
+        "message": result.get("message") or "",
+        "file_name": result.get("file_name") or "",
+        "file_path": result.get("file_path") or "",
+        "storage_link": result.get("storage_link") or "",
+        "storage_status": result.get("storage_status") or "",
+        "parameters": result.get("parameters") if isinstance(result.get("parameters"), dict) else parameters,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "duration_ms": int(result.get("duration_ms") or 0),
+        "created_by": created_by,
+    })
+
+
+def _run_onebss_report_job(
+    job_id: str,
+    *,
+    report: dict[str, Any],
+    parameters: dict[str, Any],
+    created_by: str,
+    otp: str = "",
+    session_id: str = "",
+    otp_request_id: str = "",
+    otp_source: str = "",
+) -> None:
+    settings = get_settings()
+    started_at = str((_get_onebss_report_job(job_id) or {}).get("started_at") or datetime.now().isoformat(timespec="seconds"))
+    _set_onebss_report_job(job_id, status="queued", message="Dang cho luot lay du lieu OneBSS.", session_id=session_id, otp_request_id=otp_request_id)
+    with ONEBSS_REPORT_SEMAPHORE:
+        _set_onebss_report_job(job_id, status="running", message="Dang dang nhap va lay du lieu OneBSS.", session_id=session_id, otp_request_id=otp_request_id)
+        try:
+            result = run_onebss_report_request(
+                settings,
+                report,
+                parameters,
+                otp=otp,
+                session_id=session_id,
+                created_by=created_by,
+            )
+        except Exception as error:
+            logger.exception("Unhandled OneBSS report background job error")
+            result = {
+                "ok": False,
+                "status": "failed",
+                "message": f"Loi khi khoi chay OneBSS: {error}",
+                "parameters": parameters,
+            }
+
+        status_value = str(result.get("status") or ("success" if result.get("ok") else "failed"))
+        if status_value in {"otp_required", "otp_invalid", "manual_otp_required"} and result.get("session_id"):
+            _set_onebss_report_job(
+                job_id,
+                status=status_value,
+                message=result.get("message") or "OneBSS yeu cau OTP.",
+                session_id=result.get("session_id") or session_id,
+                otp_request_id=result.get("otp_request_id") or otp_request_id,
+                parameters=result.get("parameters") if isinstance(result.get("parameters"), dict) else parameters,
+                result=result,
+            )
+            return
+
+        if result.get("ok") and otp_source == "manual" and otp_request_id:
+            cancel_onebss_mobile_gateway_otp(settings, otp_request_id, "manual_otp_used")
+
+        repository = build_app_repository()
+        try:
+            run = _save_onebss_job_result(
+                repository,
+                job_id=job_id,
+                report=report,
+                result=result,
+                parameters=parameters,
+                started_at=started_at,
+                created_by=created_by,
+            )
+        except Exception as error:
+            logger.exception("Cannot save OneBSS background run")
+            _set_onebss_report_job(
+                job_id,
+                status="failed",
+                message=f"Da chay OneBSS nhung khong luu duoc lich su: {error}",
+                result=result,
+                finished_at=datetime.now().isoformat(timespec="seconds"),
+            )
+            return
+
+        try:
+            repository.add_audit_log(created_by, "onebss_report_run", f"Chay bao cao OneBSS {report.get('ma_bao_cao')}: {result.get('ok')}")
+        except Exception:
+            logger.exception("Cannot write OneBSS report audit log")
+        _set_onebss_report_job(
+            job_id,
+            status=run.get("status") or status_value,
+            message=run.get("message") or result.get("message") or "",
+            result=result,
+            run=run,
+            run_id=run.get("run_id") or job_id,
+            file_name=run.get("file_name") or result.get("file_name") or "",
+            file_path=run.get("file_path") or result.get("file_path") or "",
+            storage_link=run.get("storage_link") or result.get("storage_link") or "",
+            storage_status=run.get("storage_status") or result.get("storage_status") or "",
+            finished_at=run.get("finished_at") or datetime.now().isoformat(timespec="seconds"),
+            session_id="",
+            otp_request_id="",
+        )
+
+
+def _start_onebss_report_job_thread(job_id: str, **kwargs: Any) -> None:
+    thread = threading.Thread(target=_run_onebss_report_job, args=(job_id,), kwargs=kwargs, daemon=True)
+    thread.start()
+
+
 @router.get("/api/onebss-reports/configs")
 def list_onebss_report_configs(request: Request) -> dict:
     admin_user(request)
@@ -2888,8 +3256,12 @@ def list_onebss_report_configs(request: Request) -> dict:
 @router.get("/api/onebss-reports/runs")
 def list_onebss_report_runs(request: Request, ma_bao_cao: str = "", limit: int = 50) -> dict:
     admin_user(request)
+    report_code = ma_bao_cao.strip().upper()
     try:
-        runs = build_app_repository().list_onebss_report_runs(ma_bao_cao=ma_bao_cao.strip().upper(), limit=limit)
+        runs = [
+            _decorate_onebss_report_run(run)
+            for run in build_app_repository().list_onebss_report_runs(ma_bao_cao=report_code, limit=limit)
+        ]
     except RuntimeError as error:
         raise_onebss_report_schema_error(error)
     return {"runs": runs}
@@ -2922,6 +3294,85 @@ def get_onebss_otp_request(request: Request, otp_request_id: str) -> dict:
     return result
 
 
+@router.get("/api/onebss-reports/jobs/{job_id}")
+def get_onebss_report_job(request: Request, job_id: str) -> dict:
+    admin_user(request)
+    run = build_app_repository().get_onebss_report_run(job_id.strip())
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay job OneBSS.")
+    return _onebss_report_job_response(job_id, {**run, "job_id": job_id})
+
+
+def ensure_onebss_task_otp_request(repository: AppRepository, run: dict[str, Any], report: dict[str, Any], worker_session_id: str = "") -> dict[str, Any]:
+    existing_request_id = str(run.get("otp_request_id") or "").strip()
+    if existing_request_id:
+        return {"otp_request_id": existing_request_id}
+    settings = get_settings()
+    session_label = worker_session_id or str(run.get("worker_session_id") or "") or str(run.get("run_id") or "")
+    result = start_onebss_otp_mobile_gateway_request(
+        settings,
+        session_label,
+        run.get("parameters") if isinstance(run.get("parameters"), dict) else {},
+        otp_service_code=str(report.get("otp_service_code") or "onebss"),
+        report_url=str(report.get("report_url") or ""),
+        fallback_message="May tram bao OneBSS yeu cau OTP. Hay nhap OTP neu Mobile Gateway chua tu lay duoc.",
+    )
+    request_id = str(result.get("otp_request_id") or "").strip()
+    updates = {
+        "status": result.get("status") or "otp_required",
+        "message": result.get("message") or "May tram dang doi OTP OneBSS.",
+        "worker_session_id": session_label,
+    }
+    if request_id:
+        updates["otp_request_id"] = request_id
+    updated = repository.update_onebss_report_run(str(run.get("run_id") or ""), updates) or run
+    return {"otp_request_id": request_id, "run": updated, "status": updated.get("status"), "message": updated.get("message")}
+
+
+@router.post("/api/onebss-reports/jobs/{job_id}/otp")
+def submit_onebss_report_job_otp(request: Request, job_id: str, payload: OneBssTaskOtpPayload) -> dict:
+    admin_user(request)
+    repository = build_app_repository()
+    run = repository.get_onebss_report_run(job_id.strip())
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay job OneBSS.")
+    otp_request_id = payload.otp_request_id.strip() or str(run.get("otp_request_id") or "")
+    source = payload.otp_source.strip().lower()
+    result: dict[str, Any]
+    if payload.otp.strip():
+        result = match_onebss_mobile_gateway_manual_otp(get_settings(), otp_request_id, payload.otp, source_id=job_id)
+    else:
+        result = inspect_onebss_mobile_gateway_otp(get_settings(), otp_request_id)
+    if result.get("ok") or result.get("status") == "matched":
+        run = repository.update_onebss_report_run(
+            job_id.strip(),
+            {
+                "status": "running",
+                "message": "Da nhan OTP cho task OneBSS, may tram se tiep tuc dang nhap.",
+                "otp_request_id": otp_request_id,
+            },
+        ) or run
+    return {"ok": bool(result.get("ok") or result.get("status") == "matched"), "otp": result, "run": _decorate_onebss_report_run(run)}
+
+
+@router.get("/api/onebss-reports/runs/{run_id}/download")
+def download_onebss_report_run(request: Request, run_id: str) -> Response:
+    admin_user(request)
+    run_id = run_id.strip()
+    try:
+        run = build_app_repository().get_onebss_report_run(run_id)
+    except RuntimeError as error:
+        raise_onebss_report_schema_error(error)
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay lan lay du lieu OneBSS.")
+    file_path = Path(str(run.get("file_path") or ""))
+    if not file_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File ket qua OneBSS khong con ton tai tren may chu.")
+    suffix = file_path.suffix.lower()
+    media_type = "application/zip" if suffix == ".zip" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return FileResponse(file_path, media_type=media_type, filename=str(run.get("file_name") or file_path.name))
+
+
 @router.post("/api/onebss-reports/run")
 def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict:
     actor = admin_user(request)
@@ -2935,75 +3386,158 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay cau hinh bao cao OneBSS.")
     started_at = datetime.now().isoformat(timespec="seconds")
     run_parameters = payload.parameters if isinstance(payload.parameters, dict) and payload.parameters else report.get("parameters") or {}
-    settings = get_settings()
-    otp_value = payload.otp.strip()
-    otp_request_id = payload.otp_request_id.strip()
-    otp_source = payload.otp_source.strip().lower()
-    if payload.session_id.strip() and otp_request_id and not otp_value and otp_source in {"auto", "mobile_gateway", "otp_request"}:
-        otp_result = consume_onebss_mobile_gateway_otp(settings, otp_request_id)
-        if otp_result.get("ok") and otp_result.get("otp"):
-            otp_value = str(otp_result.get("otp") or "").strip()
-        else:
-            return {
-                "ok": False,
-                "status": "otp_required" if otp_result.get("status") in {"waiting", "matched"} else "manual_otp_required",
-                "message": otp_result.get("message") or "Chua lay duoc OTP tu Mobile Gateway. Hay nhap OTP thu cong.",
-                "session_id": payload.session_id.strip(),
-                "parameters": run_parameters,
-                "otp_request_id": otp_request_id,
-            }
-    try:
-        result = run_onebss_report_request(
-            settings,
-            report,
-            run_parameters,
-            otp=otp_value,
-            session_id=payload.session_id.strip(),
-            created_by=actor["username"],
+    job_id = re.sub(r"[^A-Za-z0-9_-]+", "", payload.job_id.strip()) or uuid.uuid4().hex
+    if payload.job_id.strip() and (payload.otp.strip() or payload.otp_request_id.strip()):
+        return submit_onebss_report_job_otp(
+            request,
+            job_id,
+            OneBssTaskOtpPayload(otp=payload.otp, otp_request_id=payload.otp_request_id, otp_source=payload.otp_source or "manual"),
         )
-    except Exception as error:
-        logger.exception("Unhandled OneBSS report run error")
-        result = {
-            "ok": False,
-            "status": "failed",
-            "message": f"Loi khi khoi chay OneBSS: {error}",
-            "parameters": run_parameters,
-        }
-    if result.get("status") in {"otp_required", "otp_invalid", "manual_otp_required"} and result.get("session_id"):
-        return {
-            "ok": False,
-            "status": result.get("status"),
-            "message": result.get("message"),
-            "session_id": result.get("session_id"),
-            "parameters": result.get("parameters") or run_parameters,
-            "otp_request_id": result.get("otp_request_id") or otp_request_id,
-        }
-    if result.get("ok") and otp_source == "manual" and otp_request_id:
-        cancel_onebss_mobile_gateway_otp(settings, otp_request_id, "manual_otp_used")
-    finished_at = result.get("finished_at") or datetime.now().isoformat(timespec="seconds")
+    existing_run = repository.get_onebss_report_run(job_id)
+    if existing_run and str(existing_run.get("status") or "").lower() in ONEBSS_REPORT_ACTIVE_STATUSES:
+        return _onebss_report_job_response(job_id, {**existing_run, "job_id": job_id})
     try:
         run = repository.save_onebss_report_run({
-            "ma_bao_cao": report.get("ma_bao_cao"),
-            "ten_bao_cao": report.get("ten_bao_cao"),
-            "status": result.get("status") or ("success" if result.get("ok") else "failed"),
-            "message": result.get("message") or "",
-            "file_name": result.get("file_name") or "",
-            "file_path": result.get("file_path") or "",
-            "storage_link": result.get("storage_link") or "",
-            "storage_status": result.get("storage_status") or "",
-            "parameters": result.get("parameters") if isinstance(result.get("parameters"), dict) else run_parameters,
+            "run_id": job_id,
+            "ma_bao_cao": report.get("ma_bao_cao") or ma_bao_cao,
+            "ten_bao_cao": report.get("ten_bao_cao") or ma_bao_cao,
+            "status": "queued",
+            "message": "Da dua yeu cau lay du lieu OneBSS vao hang doi may tram.",
+            "parameters": run_parameters,
             "started_at": started_at,
-            "finished_at": finished_at,
-            "duration_ms": int(result.get("duration_ms") or 0),
+            "finished_at": "",
             "created_by": actor["username"],
         })
     except RuntimeError as error:
         raise_onebss_report_schema_error(error)
     try:
-        repository.add_audit_log(actor["username"], "onebss_report_run", f"Chay bao cao OneBSS {ma_bao_cao}: {result.get('ok')}")
+        repository.add_audit_log(actor["username"], "onebss_report_job_queued", f"Dua bao cao OneBSS {ma_bao_cao} vao hang doi: {job_id}")
     except Exception:
-        logger.exception("Cannot write OneBSS report audit log")
-    return {"ok": bool(result.get("ok")), "status": run.get("status"), "message": run.get("message"), "result": result, "run": run}
+        logger.exception("Cannot write OneBSS report queued audit log")
+    return _onebss_report_job_response(job_id, {**run, "job_id": job_id})
+
+
+@router.post("/api/onebss-worker/tasks/claim")
+def claim_onebss_worker_task(request: Request, payload: OneBssWorkerClaimPayload) -> dict:
+    onebss_worker_token(request)
+    repository = build_app_repository()
+    try:
+        run = repository.claim_next_onebss_report_run(payload.worker_id)
+    except RuntimeError as error:
+        raise_onebss_report_schema_error(error)
+    if not run:
+        return {"ok": True, "task": None, "message": "Khong co task OneBSS dang cho."}
+    report = repository.get_onebss_report_by_code(str(run.get("ma_bao_cao") or ""))
+    if not report:
+        repository.update_onebss_report_run(
+            str(run.get("run_id") or ""),
+            {
+                "status": "failed",
+                "message": "Khong tim thay cau hinh bao cao OneBSS cho task.",
+                "finished_at": datetime.now().isoformat(timespec="seconds"),
+            },
+        )
+        return {"ok": False, "task": None, "message": "Khong tim thay cau hinh bao cao OneBSS."}
+    folder_id = google_drive_folder_id(get_settings(), str(report.get("storage_link") or ""))
+    return {
+        "ok": True,
+        "task": {
+            "run_id": run.get("run_id"),
+            "job_id": run.get("run_id"),
+            "ma_bao_cao": run.get("ma_bao_cao"),
+            "ten_bao_cao": run.get("ten_bao_cao"),
+            "parameters": run.get("parameters") if isinstance(run.get("parameters"), dict) else {},
+            "report": report,
+            "report_url": report.get("report_url") or "",
+            "storage_link": report.get("storage_link") or "",
+            "drive_folder_id": folder_id,
+            "otp_service_code": report.get("otp_service_code") or "onebss",
+            "created_by": run.get("created_by") or "",
+            "started_at": run.get("started_at") or "",
+        },
+    }
+
+
+@router.post("/api/onebss-worker/tasks/{run_id}/status")
+def update_onebss_worker_task_status(request: Request, run_id: str, payload: OneBssWorkerStatusPayload) -> dict:
+    onebss_worker_token(request)
+    repository = build_app_repository()
+    run = repository.get_onebss_report_run(run_id.strip())
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task OneBSS.")
+    report = repository.get_onebss_report_by_code(str(run.get("ma_bao_cao") or "")) or {}
+    status_value = payload.status.strip().lower()
+    worker_session_id = payload.worker_session_id.strip()
+    if status_value in {"waiting_otp", "otp_required", "manual_otp_required"}:
+        otp_info = ensure_onebss_task_otp_request(repository, run, report, worker_session_id)
+        updated_run = otp_info.get("run") if isinstance(otp_info.get("run"), dict) else repository.get_onebss_report_run(run_id.strip())
+        return {"ok": True, "run": _decorate_onebss_report_run(updated_run or run), "otp_request_id": otp_info.get("otp_request_id") or ""}
+    updated = repository.update_onebss_report_run(
+        run_id.strip(),
+        {
+            "status": status_value or "running",
+            "message": payload.message or "May tram dang xu ly task OneBSS.",
+            "worker_id": payload.worker_id or run.get("worker_id") or "",
+            "worker_session_id": worker_session_id or run.get("worker_session_id") or "",
+        },
+    )
+    return {"ok": True, "run": _decorate_onebss_report_run(updated or run)}
+
+
+@router.get("/api/onebss-worker/tasks/{run_id}/otp")
+def get_onebss_worker_task_otp(request: Request, run_id: str) -> dict:
+    onebss_worker_token(request)
+    repository = build_app_repository()
+    run = repository.get_onebss_report_run(run_id.strip())
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task OneBSS.")
+    request_id = str(run.get("otp_request_id") or "").strip()
+    if not request_id:
+        return {"ok": False, "status": "waiting", "message": "Task chua co OTP request.", "otp": ""}
+    result = consume_onebss_mobile_gateway_otp(get_settings(), request_id)
+    if result.get("ok") and result.get("otp"):
+        updated = repository.update_onebss_report_run(
+            run_id.strip(),
+            {
+                "status": "running",
+                "message": "May tram da nhan OTP va dang tiep tuc dang nhap OneBSS.",
+            },
+        )
+        return {"ok": True, "status": "matched", "otp": result.get("otp"), "run": _decorate_onebss_report_run(updated or run)}
+    return {"ok": False, "status": result.get("status") or "waiting", "message": result.get("message") or "Chua co OTP.", "otp": ""}
+
+
+@router.post("/api/onebss-worker/tasks/{run_id}/result")
+def finish_onebss_worker_task(request: Request, run_id: str, payload: OneBssWorkerResultPayload) -> dict:
+    onebss_worker_token(request)
+    repository = build_app_repository()
+    run = repository.get_onebss_report_run(run_id.strip())
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task OneBSS.")
+    finished_at = datetime.now().isoformat(timespec="seconds")
+    status_value = payload.status.strip().lower() or ("success" if payload.ok else "failed")
+    updated = repository.update_onebss_report_run(
+        run_id.strip(),
+        {
+            "status": status_value,
+            "message": payload.message or ("Da lay bao cao OneBSS tren may tram." if payload.ok else "May tram khong lay duoc bao cao OneBSS."),
+            "file_name": payload.file_name,
+            "file_path": payload.file_path,
+            "storage_link": payload.storage_link,
+            "storage_status": payload.storage_status,
+            "duration_ms": payload.duration_ms,
+            "finished_at": finished_at,
+        },
+    )
+    try:
+        repository.add_audit_log(
+            run.get("created_by") or "onebss-worker",
+            "onebss_worker_task_finished",
+            f"May tram tra ket qua task OneBSS {run_id}: {status_value}",
+        )
+    except Exception:
+        logger.exception("Cannot write OneBSS worker result audit log")
+    return {"ok": payload.ok, "run": _decorate_onebss_report_run(updated or run)}
 
 
 @router.post("/api/admin/telegram/test-message")

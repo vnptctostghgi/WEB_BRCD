@@ -8,6 +8,7 @@ import re
 import threading
 import time
 import uuid
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from itertools import product
@@ -379,6 +380,32 @@ def cancel_onebss_mobile_gateway_otp(settings: Settings, request_id: str, reason
         logger.exception("Cannot cancel OneBSS OTP request %s", request_id)
 
 
+def match_onebss_mobile_gateway_manual_otp(settings: Settings, request_id: str, code: str, source_id: str = "") -> dict[str, Any]:
+    request_id = str(request_id or "").strip()
+    code = re.sub(r"\D+", "", str(code or ""))[:8]
+    if not request_id:
+        return {"ok": False, "status": "missing_request", "message": "Chua co OTP request cho task OneBSS."}
+    if not OTP_PATTERN.fullmatch(code):
+        return {"ok": False, "status": "invalid_otp", "message": "OTP phai tu 4 den 8 chu so."}
+    if not bool(getattr(settings, "mobile_gateway_enabled", True)):
+        return {"ok": False, "status": "mobile_gateway_disabled", "message": "Mobile Gateway chua bat."}
+    try:
+        repository = MobileGatewayRepository(build_repository(settings), settings)
+        matched = repository.match_otp_request(request_id, "manual", source_id or request_id, code)
+        if matched:
+            return {"ok": True, "status": "matched", "message": "Da ghi OTP thu cong cho task OneBSS."}
+        request = repository.get_otp_request(request_id)
+        status_value = str((request or {}).get("status") or "missing")
+        return {
+            "ok": status_value in {"matched", "consumed"},
+            "status": status_value,
+            "message": "OTP request da co ma khac hoac khong con cho OTP.",
+        }
+    except Exception as error:
+        logger.exception("Cannot match manual OneBSS OTP request %s", request_id)
+        return {"ok": False, "status": "failed", "message": str(error)[:300]}
+
+
 def start_onebss_api_session(
     settings: Settings,
     report: dict[str, Any],
@@ -711,36 +738,16 @@ def finish_onebss_report_download_api(
                 )
             )
 
-        first_export = downloaded_files[0].export_info if downloaded_files else {}
-        target_file = build_target_file_path(
+        return finalize_onebss_multiple_downloads(
             settings,
+            report,
+            parameters,
             schedule_like,
-            suggested_filename=merged_excel_suggested_filename(downloaded_files[0].suggested_filename if downloaded_files else ".xlsx"),
-            report_title=str(first_export.get("title") or report.get("ten_bao_cao") or ""),
+            downloaded_files,
+            merge_config,
+            each_keys,
+            started,
         )
-        merge_onebss_excel_files(downloaded_files, target_file, merge_config, each_keys)
-        storage_result = save_downloaded_file(settings, target_file, str(report.get("storage_link") or ""))
-        ok = bool(storage_result.get("ok", True))
-        status = "success" if ok else str(storage_result.get("status") or "storage_failed")
-        storage_message = storage_result.get("message") or "Da tai bao cao OneBSS."
-        merged_message = f"Da tai va gop {len(downloaded_files)} file OneBSS thanh 1 file."
-        message = f"{merged_message} {storage_message}" if ok else storage_message
-        return {
-            "ok": ok,
-            "status": status,
-            "message": message,
-            "file_name": target_file.name,
-            "file_path": str(target_file),
-            "storage_link": storage_result.get("storage_link") or str(report.get("storage_link") or ""),
-            "storage_status": storage_result.get("storage_status") or "",
-            "report_id": first_export.get("report_id") or "",
-            "report_title": first_export.get("title") or report.get("ten_bao_cao") or "",
-            "parameters": parameters,
-            "run_parameters": [downloaded.parameters for downloaded in downloaded_files],
-            "merged_file_count": len(downloaded_files),
-            "duration_ms": int((time.monotonic() - started) * 1000),
-            "finished_at": datetime.now(LOCAL_TIMEZONE).isoformat(timespec="seconds"),
-        }
     finally:
         for temporary_file in temporary_files:
             try:
@@ -750,6 +757,44 @@ def finish_onebss_report_download_api(
 
 
 def download_onebss_report_file_api(
+    settings: Settings,
+    token: OneBssApiToken,
+    report: dict[str, Any],
+    parameters: dict[str, Any],
+    *,
+    target_file: Path | None = None,
+    source_values: dict[str, Any] | None = None,
+) -> OneBssDownloadedFile:
+    download_source = str(
+        parameters.get("$download_source")
+        or parameters.get("$onebss_download_source")
+        or "excel"
+    ).strip().lower()
+    if download_source in {"grid", "run_v7", "json"}:
+        try:
+            return download_onebss_grid_file_api(
+                settings,
+                token,
+                report,
+                parameters,
+                target_file=target_file,
+                source_values=source_values,
+            )
+        except OneBssDownloadError as error:
+            if not should_fallback_to_onebss_excel_export(error):
+                raise
+            logger.info("OneBSS grid data API is not usable, fallback to direct Excel export: %s", error)
+    return download_onebss_export_file_api(
+        settings,
+        token,
+        report,
+        parameters,
+        target_file=target_file,
+        source_values=source_values,
+    )
+
+
+def download_onebss_report_file_api_grid_first(
     settings: Settings,
     token: OneBssApiToken,
     report: dict[str, Any],
@@ -973,37 +1018,17 @@ def finish_onebss_report_download(
                 )
             )
 
-        first_export = downloaded_files[0].export_info if downloaded_files else {}
-        target_file = build_target_file_path(
-            settings,
-            schedule_like,
-            suggested_filename=merged_excel_suggested_filename(downloaded_files[0].suggested_filename if downloaded_files else ".xlsx"),
-            report_title=str(first_export.get("title") or report.get("ten_bao_cao") or ""),
-        )
-        merge_onebss_excel_files(downloaded_files, target_file, merge_config, each_keys)
-        storage_result = save_downloaded_file(settings, target_file, str(report.get("storage_link") or ""))
         context.storage_state(path=str(ONEBSS_STATE_PATH))
-        ok = bool(storage_result.get("ok", True))
-        status = "success" if ok else str(storage_result.get("status") or "storage_failed")
-        storage_message = storage_result.get("message") or "Da tai bao cao OneBSS."
-        merged_message = f"Da tai va gop {len(downloaded_files)} file OneBSS thanh 1 file."
-        message = f"{merged_message} {storage_message}" if ok else storage_message
-        return {
-            "ok": ok,
-            "status": status,
-            "message": message,
-            "file_name": target_file.name,
-            "file_path": str(target_file),
-            "storage_link": storage_result.get("storage_link") or str(report.get("storage_link") or ""),
-            "storage_status": storage_result.get("storage_status") or "",
-            "report_id": first_export.get("report_id") or "",
-            "report_title": first_export.get("title") or report.get("ten_bao_cao") or "",
-            "parameters": parameters,
-            "run_parameters": [downloaded.parameters for downloaded in downloaded_files],
-            "merged_file_count": len(downloaded_files),
-            "duration_ms": int((time.monotonic() - started) * 1000),
-            "finished_at": datetime.now(LOCAL_TIMEZONE).isoformat(timespec="seconds"),
-        }
+        return finalize_onebss_multiple_downloads(
+            settings,
+            report,
+            parameters,
+            schedule_like,
+            downloaded_files,
+            merge_config,
+            each_keys,
+            started,
+        )
     finally:
         for temporary_file in temporary_files:
             try:
@@ -1437,6 +1462,114 @@ def merged_excel_suggested_filename(suggested_filename: str) -> str:
         return suggested_filename
     stem = Path(str(suggested_filename or "onebss_report")).stem or "onebss_report"
     return f"{stem}.xlsx"
+
+
+def split_archive_suggested_filename(suggested_filename: str) -> str:
+    stem = Path(str(suggested_filename or "onebss_report")).stem or "onebss_report"
+    return f"{stem}_parts.zip"
+
+
+def onebss_merge_mode(merge_config: dict[str, Any]) -> str:
+    return str(merge_config.get("mode") or merge_config.get("$mode") or "").strip().lower()
+
+
+def should_merge_onebss_excel_parts(merge_config: dict[str, Any]) -> bool:
+    return onebss_merge_mode(merge_config) in {"append", "merge", "merged", "single", "sheet", "sheets"}
+
+
+def archive_onebss_downloaded_files(
+    downloaded_files: list[OneBssDownloadedFile],
+    target_file: Path,
+    each_keys: list[str],
+) -> None:
+    if not downloaded_files:
+        raise OneBssDownloadError("Khong co file OneBSS nao de dong goi.")
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    used_names: set[str] = set()
+    with zipfile.ZipFile(target_file, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+        for index, downloaded in enumerate(downloaded_files, start=1):
+            arcname = onebss_archive_member_name(downloaded, each_keys, index)
+            while arcname.lower() in used_names:
+                arcname = f"{index:02d}_{arcname}"
+            used_names.add(arcname.lower())
+            archive.write(downloaded.file_path, arcname)
+
+
+def onebss_archive_member_name(downloaded: OneBssDownloadedFile, each_keys: list[str], index: int) -> str:
+    suffix = downloaded.file_path.suffix or Path(str(downloaded.suggested_filename or "")).suffix or ".xlsx"
+    source_parts: list[str] = []
+    for key in each_keys:
+        value = downloaded.source_values.get(key)
+        if value not in {None, ""}:
+            source_parts.append(f"{key}_{value}")
+    source_label = "_".join(source_parts) or str(index).zfill(2)
+    stem = Path(str(downloaded.suggested_filename or downloaded.file_path.name or f"onebss_{index}")).stem
+    return f"{safe_zip_name(stem)}_{safe_zip_name(source_label)}{suffix}"
+
+
+def safe_zip_name(value: Any) -> str:
+    text = str(value or "").strip() or "onebss"
+    text = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", text)
+    text = re.sub(r"\s+", "_", text).strip("._")
+    return text[:120] or "onebss"
+
+
+def finalize_onebss_multiple_downloads(
+    settings: Settings,
+    report: dict[str, Any],
+    parameters: dict[str, Any],
+    schedule_like: dict[str, Any],
+    downloaded_files: list[OneBssDownloadedFile],
+    merge_config: dict[str, Any],
+    each_keys: list[str],
+    started: float,
+) -> dict[str, Any]:
+    first_export = downloaded_files[0].export_info if downloaded_files else {}
+    if should_merge_onebss_excel_parts(merge_config):
+        target_file = build_target_file_path(
+            settings,
+            schedule_like,
+            suggested_filename=merged_excel_suggested_filename(downloaded_files[0].suggested_filename if downloaded_files else ".xlsx"),
+            report_title=str(first_export.get("title") or report.get("ten_bao_cao") or ""),
+        )
+        merge_onebss_excel_files(downloaded_files, target_file, merge_config, each_keys)
+        result_kind = "merged"
+        result_count_key = "merged_file_count"
+        result_message = f"Da tai va gop {len(downloaded_files)} file OneBSS thanh 1 file."
+    else:
+        target_file = build_target_file_path(
+            settings,
+            schedule_like,
+            suggested_filename=split_archive_suggested_filename(downloaded_files[0].suggested_filename if downloaded_files else ".xlsx"),
+            report_title=str(first_export.get("title") or report.get("ten_bao_cao") or ""),
+        )
+        archive_onebss_downloaded_files(downloaded_files, target_file, each_keys)
+        result_kind = "split_archive"
+        result_count_key = "split_file_count"
+        result_message = f"Da tai {len(downloaded_files)} file OneBSS rieng va dong goi thanh 1 file zip."
+
+    storage_result = save_downloaded_file(settings, target_file, str(report.get("storage_link") or ""))
+    ok = bool(storage_result.get("ok", True))
+    status = "success" if ok else str(storage_result.get("status") or "storage_failed")
+    storage_message = storage_result.get("message") or "Da tai bao cao OneBSS."
+    message = f"{result_message} {storage_message}" if ok else storage_message
+    return {
+        "ok": ok,
+        "status": status,
+        "message": message,
+        "file_name": target_file.name,
+        "file_path": str(target_file),
+        "storage_link": storage_result.get("storage_link") or str(report.get("storage_link") or ""),
+        "storage_status": storage_result.get("storage_status") or "",
+        "report_id": first_export.get("report_id") or "",
+        "report_title": first_export.get("title") or report.get("ten_bao_cao") or "",
+        "parameters": parameters,
+        "run_parameters": [downloaded.parameters for downloaded in downloaded_files],
+        result_count_key: len(downloaded_files),
+        "output_mode": result_kind,
+        "duration_ms": int((time.monotonic() - started) * 1000),
+        "finished_at": datetime.now(LOCAL_TIMEZONE).isoformat(timespec="seconds"),
+    }
 
 
 def build_onebss_parameter_runs(parameters: dict[str, Any]) -> tuple[list[OneBssParameterRun], dict[str, Any], list[str]]:

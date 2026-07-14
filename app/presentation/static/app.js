@@ -20,10 +20,13 @@ let oneBssReportDrafts = [];
 let oneBssReportRuns = [];
 let oneBssPendingSessionId = "";
 let oneBssPendingOtpRequestId = "";
+let oneBssPendingJobId = "";
 let oneBssOtpPollTimer = null;
 let oneBssOtpPollToken = 0;
 let oneBssOtpManualSubmitStarted = false;
 let oneBssManualOtpTimer = null;
+let oneBssJobPollTimer = null;
+let oneBssJobPollToken = 0;
 let oneBssRunInProgress = false;
 let oneBssRunParameterEditing = false;
 let mobileGatewayLoaded = false;
@@ -1185,6 +1188,8 @@ if (role === "admin") {
   $("#onebss-run-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     oneBssPendingSessionId = "";
+    oneBssPendingJobId = "";
+    stopOneBssJobPolling();
     resetOneBssOtpState();
     await runOneBssReport();
   });
@@ -1192,6 +1197,8 @@ if (role === "admin") {
   $("#clear-onebss-run-history")?.addEventListener("click", clearOneBssRunHistory);
   $("#onebss-run-report-select")?.addEventListener("change", () => {
     oneBssPendingSessionId = "";
+    oneBssPendingJobId = "";
+    stopOneBssJobPolling();
     resetOneBssOtpState();
     oneBssRunParameterEditing = false;
     renderOneBssRunParameters();
@@ -1208,7 +1215,7 @@ if (role === "admin") {
         oneBssOtpManualSubmitStarted = true;
         stopOneBssOtpPolling();
         setOneBssOtpStatus("Dang dung OTP nhap tay de dang nhap...", "info");
-        await runOneBssReport(value, { otpRequestId: oneBssPendingOtpRequestId, otpSource: "manual" });
+        await runOneBssReport(value, { otpRequestId: oneBssPendingOtpRequestId, otpSource: "manual", jobId: oneBssPendingJobId });
       }, delay);
     }
   });
@@ -5763,6 +5770,7 @@ async function loadOneBssMining({ force = false } = {}) {
     fillOneBssRunSelect();
     renderOneBssRunParameters();
     renderOneBssRunHistory();
+    resumeOneBssActiveJobPolling();
     return;
   }
   try {
@@ -5777,6 +5785,7 @@ async function loadOneBssMining({ force = false } = {}) {
     fillOneBssRunSelect();
     renderOneBssRunParameters();
     renderOneBssRunHistory();
+    resumeOneBssActiveJobPolling();
   } catch (error) {
     showMessage($("#onebss-run-message"), error.message, "error");
     const history = $("#onebss-run-history");
@@ -5839,6 +5848,12 @@ function stopOneBssOtpPolling() {
   oneBssOtpPollTimer = null;
 }
 
+function stopOneBssJobPolling() {
+  oneBssJobPollToken += 1;
+  if (oneBssJobPollTimer) clearTimeout(oneBssJobPollTimer);
+  oneBssJobPollTimer = null;
+}
+
 function clearOneBssManualOtpTimer() {
   if (oneBssManualOtpTimer) clearTimeout(oneBssManualOtpTimer);
   oneBssManualOtpTimer = null;
@@ -5895,7 +5910,7 @@ function startOneBssOtpPolling(otpRequestId) {
         }
         setOneBssOtpStatus("Da boc tach OTP tu tin nhan. Dang dang nhap...", "success");
         stopOneBssOtpPolling();
-        await runOneBssReport(response.otp || "", { otpRequestId: requestId, otpSource: "auto" });
+        await runOneBssReport(response.otp || "", { otpRequestId: requestId, otpSource: "auto", jobId: oneBssPendingJobId });
         return;
       }
       if (["waiting", "created"].includes(response.status || "")) {
@@ -5911,6 +5926,93 @@ function startOneBssOtpPolling(otpRequestId) {
   };
 
   oneBssOtpPollTimer = setTimeout(poll, 900);
+}
+
+function oneBssJobIsActive(status) {
+  return ["queued", "running", "otp_required", "otp_invalid", "manual_otp_required"].includes(String(status || "").toLowerCase());
+}
+
+function upsertOneBssRun(run) {
+  if (!run) return;
+  const normalized = repairDataEncoding(run);
+  const key = normalized.run_id || normalized.job_id || "";
+  const index = oneBssReportRuns.findIndex((item) => (item.run_id || item.job_id || "") === key && key);
+  if (index >= 0) {
+    oneBssReportRuns[index] = { ...oneBssReportRuns[index], ...normalized };
+  } else {
+    oneBssReportRuns.unshift(normalized);
+  }
+  oneBssReportRuns = oneBssReportRuns.slice(0, 30);
+}
+
+function handleOneBssJobResponse(response) {
+  const job = repairDataEncoding(response || {});
+  const status = String(job.status || "").toLowerCase();
+  const message = $("#onebss-run-message");
+  if (job.job_id) oneBssPendingJobId = job.job_id;
+  upsertOneBssRun(job.run || job);
+  renderOneBssRunHistory();
+
+  if (["otp_required", "otp_invalid", "manual_otp_required"].includes(status) && job.session_id) {
+    oneBssPendingSessionId = job.session_id || oneBssPendingSessionId;
+    oneBssPendingOtpRequestId = job.otp_request_id || oneBssPendingOtpRequestId;
+    if (status === "otp_invalid") oneBssOtpManualSubmitStarted = false;
+    showOneBssOtpPanel(oneBssPendingOtpRequestId ? "Dang doi OTP tu tin nhan. Anh co the nhap tay neu nhan duoc truoc." : "");
+    if (oneBssPendingOtpRequestId && !oneBssOtpManualSubmitStarted) startOneBssOtpPolling(oneBssPendingOtpRequestId);
+    showMessage(message, job.message || "OneBSS yeu cau OTP.", status === "otp_invalid" ? "error" : "info");
+    return;
+  }
+
+  if (status === "queued" || status === "running") {
+    showMessage(message, job.message || "Dang lay du lieu OneBSS trong nen.", "info");
+    return;
+  }
+
+  if (status) {
+    oneBssPendingSessionId = "";
+    oneBssPendingOtpRequestId = "";
+    oneBssPendingJobId = "";
+    resetOneBssOtpState();
+    stopOneBssJobPolling();
+    showMessage(message, job.message || (job.ok ? "Da lay bao cao OneBSS." : "Lay bao cao OneBSS loi."), job.ok ? "success" : "error");
+  }
+}
+
+function startOneBssJobPolling(jobId) {
+  const id = String(jobId || "").trim();
+  if (!id) return;
+  stopOneBssJobPolling();
+  oneBssPendingJobId = id;
+  const token = oneBssJobPollToken;
+  const poll = async () => {
+    if (token !== oneBssJobPollToken) return;
+    try {
+      const response = await api(`/api/onebss-reports/jobs/${encodeURIComponent(id)}`);
+      if (token !== oneBssJobPollToken) return;
+      handleOneBssJobResponse(response);
+      if (oneBssJobIsActive(response.status)) {
+        const status = String(response.status || "").toLowerCase();
+        oneBssJobPollTimer = setTimeout(poll, ["otp_required", "otp_invalid", "manual_otp_required"].includes(status) ? 4000 : 2500);
+      } else {
+        await refreshOneBssRunHistory($("#onebss-run-report-select")?.value || "");
+      }
+    } catch (error) {
+      if (token !== oneBssJobPollToken) return;
+      showMessage($("#onebss-run-message"), error.message || "Khong kiem tra duoc job OneBSS.", "warning");
+      oneBssJobPollTimer = setTimeout(poll, 5000);
+    }
+  };
+  oneBssJobPollTimer = setTimeout(poll, 1200);
+}
+
+function resumeOneBssActiveJobPolling() {
+  if (oneBssJobPollTimer) return;
+  const job = oneBssReportRuns.find((run) => (run.job_id || run.run_id) && oneBssJobIsActive(run.status));
+  if (!job) return;
+  if (["otp_required", "otp_invalid", "manual_otp_required"].includes(String(job.status || "").toLowerCase())) {
+    handleOneBssJobResponse(job);
+  }
+  startOneBssJobPolling(job.job_id || job.run_id);
 }
 
 async function runOneBssReport(otp = "", options = {}) {
@@ -5941,8 +6043,14 @@ async function runOneBssReport(otp = "", options = {}) {
         session_id: oneBssPendingSessionId,
         otp_request_id: options.otpRequestId || oneBssPendingOtpRequestId,
         otp_source: options.otpSource || "",
+        job_id: options.jobId || oneBssPendingJobId,
       }),
     });
+    if (response.job_id) {
+      handleOneBssJobResponse(response);
+      if (oneBssJobIsActive(response.status)) startOneBssJobPolling(response.job_id);
+      return;
+    }
     if (response.status === "otp_required" || response.status === "otp_invalid" || response.status === "manual_otp_required") {
       oneBssPendingSessionId = response.session_id || oneBssPendingSessionId;
       oneBssPendingOtpRequestId = response.otp_request_id || oneBssPendingOtpRequestId;
@@ -5969,6 +6077,7 @@ async function refreshOneBssRunHistory(maBaoCao = "") {
   const data = await api(`/api/onebss-reports/runs${query}`);
   oneBssReportRuns = (data.runs || []).map((run) => repairDataEncoding(run));
   renderOneBssRunHistory();
+  resumeOneBssActiveJobPolling();
 }
 
 function renderOneBssRunHistory() {
@@ -6087,9 +6196,12 @@ function renderOneBssRunRow(run) {
   const isDirectFileLink = run.storage_link
     && /^https?:\/\//.test(run.storage_link)
     && (isUploadedDriveFile || /\/file\/d\/|\/spreadsheets\/d\/|[?&]id=/.test(run.storage_link));
+  const localFileLink = run.download_url
+    ? `<a class="onebss-file-link" href="${escapeHtml(run.download_url)}" target="_blank" rel="noopener">T\u1ea3i file</a>`
+    : (run.file_path ? `<span class="onebss-file-name">${escapeHtml(run.file_name || run.file_path)}</span>` : "-");
   const fileLink = isDirectFileLink
     ? `<a class="onebss-file-link" href="${escapeHtml(run.storage_link)}" target="_blank" rel="noopener">M\u1edf file</a>`
-    : (run.file_path ? `<span class="onebss-file-name">${escapeHtml(run.file_name || run.file_path)}</span>` : "-");
+    : localFileLink;
   const message = truncateText(run.message || "", 180);
   return `
     <tr>

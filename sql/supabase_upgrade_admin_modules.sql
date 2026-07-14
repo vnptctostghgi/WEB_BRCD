@@ -306,8 +306,24 @@ create table if not exists public.onebss_report_runs (
   started_at timestamptz not null default now(),
   finished_at timestamptz,
   duration_ms integer not null default 0,
-  created_by text not null default ''
+  created_by text not null default '',
+  worker_id text not null default '',
+  worker_session_id text not null default '',
+  otp_request_id text not null default '',
+  claimed_at timestamptz,
+  updated_at timestamptz not null default now()
 );
+
+alter table public.onebss_report_runs
+add column if not exists worker_id text not null default '';
+alter table public.onebss_report_runs
+add column if not exists worker_session_id text not null default '';
+alter table public.onebss_report_runs
+add column if not exists otp_request_id text not null default '';
+alter table public.onebss_report_runs
+add column if not exists claimed_at timestamptz;
+alter table public.onebss_report_runs
+add column if not exists updated_at timestamptz not null default now();
 
 create index if not exists onebss_report_runs_report_idx
 on public.onebss_report_runs (ma_bao_cao, started_at desc);

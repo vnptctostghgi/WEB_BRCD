@@ -645,9 +645,65 @@ class SupabaseRepository:
             "finished_at": str(payload.get("finished_at") or self._now()),
             "duration_ms": int(payload.get("duration_ms") or 0),
             "created_by": str(payload.get("created_by") or ""),
+            "worker_id": str(payload.get("worker_id") or ""),
+            "worker_session_id": str(payload.get("worker_session_id") or ""),
+            "otp_request_id": str(payload.get("otp_request_id") or ""),
+            "claimed_at": str(payload.get("claimed_at") or ""),
+            "updated_at": str(payload.get("updated_at") or self._now()),
         }
         self._insert("onebss_report_runs", row)
         return self._decode_onebss_report_run(row)
+
+    def get_onebss_report_run(self, run_id: str) -> dict[str, Any] | None:
+        rows = self._get("onebss_report_runs", {"run_id": f"eq.{run_id}", "limit": "1"})
+        return self._decode_onebss_report_run(rows[0]) if rows else None
+
+    def claim_next_onebss_report_run(self, worker_id: str) -> dict[str, Any] | None:
+        rows = self._get("onebss_report_runs", {"status": "eq.queued", "order": "started_at.asc", "limit": "1"})
+        if not rows:
+            return None
+        run_id = str(rows[0].get("run_id") or "")
+        now = self._now()
+        self._patch(
+            "onebss_report_runs",
+            {"run_id": f"eq.{run_id}", "status": "eq.queued"},
+            {
+                "status": "running",
+                "message": "May tram da nhan task va dang xu ly OneBSS.",
+                "worker_id": str(worker_id or "")[:120],
+                "claimed_at": now,
+                "updated_at": now,
+            },
+        )
+        return self.get_onebss_report_run(run_id)
+
+    def update_onebss_report_run(self, run_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+        allowed = {
+            "status",
+            "message",
+            "file_name",
+            "file_path",
+            "storage_link",
+            "storage_status",
+            "parameters_json",
+            "finished_at",
+            "duration_ms",
+            "worker_id",
+            "worker_session_id",
+            "otp_request_id",
+            "claimed_at",
+            "updated_at",
+        }
+        payload: dict[str, Any] = {}
+        for key, value in updates.items():
+            if key == "parameters" and isinstance(value, dict):
+                payload["parameters_json"] = value
+            elif key in allowed:
+                payload[key] = value
+        payload["updated_at"] = str(payload.get("updated_at") or self._now())
+        if payload:
+            self._patch("onebss_report_runs", {"run_id": f"eq.{run_id}"}, payload)
+        return self.get_onebss_report_run(run_id)
 
     def list_onebss_report_runs(self, ma_bao_cao: str = "", limit: int = 50) -> list[dict[str, Any]]:
         params = {"order": "started_at.desc", "limit": str(min(max(int(limit or 50), 1), 200))}
@@ -1157,6 +1213,11 @@ class SupabaseRepository:
             "finished_at": row.get("finished_at") or "",
             "duration_ms": int(row.get("duration_ms") or 0),
             "created_by": row.get("created_by") or "",
+            "worker_id": row.get("worker_id") or "",
+            "worker_session_id": row.get("worker_session_id") or "",
+            "otp_request_id": row.get("otp_request_id") or "",
+            "claimed_at": row.get("claimed_at") or "",
+            "updated_at": row.get("updated_at") or "",
         }
 
     @staticmethod
