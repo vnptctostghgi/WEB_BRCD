@@ -774,9 +774,31 @@ def download_onebss_report_file_api(
     download_source = str(
         parameters.get("$download_source")
         or parameters.get("$onebss_download_source")
-        or "excel"
+        or "grid"
     ).strip().lower()
-    if download_source in {"grid", "run_v7", "json"}:
+    if download_source in {"excel", "export", "run_v5", "xlsx"}:
+        try:
+            return download_onebss_export_file_api(
+                settings,
+                token,
+                report,
+                parameters,
+                target_file=target_file,
+                source_values=source_values,
+            )
+        except OneBssDownloadError as error:
+            if "405" not in str(error) and "method not allowed" not in str(error).lower():
+                raise
+            logger.info("OneBSS direct Excel export is not usable, fallback to grid data API: %s", error)
+        return download_onebss_grid_file_api(
+            settings,
+            token,
+            report,
+            parameters,
+            target_file=target_file,
+            source_values=source_values,
+        )
+    if download_source in {"grid", "run_v7", "json", ""}:
         try:
             return download_onebss_grid_file_api(
                 settings,

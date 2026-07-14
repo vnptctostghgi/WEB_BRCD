@@ -2044,6 +2044,94 @@ def test_onebss_download_falls_back_when_grid_has_no_rows(monkeypatch, tmp_path)
     assert result.suggested_filename == "fallback.xlsx"
 
 
+def test_onebss_download_uses_grid_by_default(monkeypatch, tmp_path) -> None:
+    from app.application import onebss_report_service as service
+    from app.application.onebss_report_service import OneBssDownloadedFile, OneBssApiToken
+
+    events = []
+    token = OneBssApiToken(
+        access_token="token",
+        token_type="Bearer",
+        username="test@vnpt.vn",
+        mobile_id="mobile",
+        device_id="device",
+        expires_at=9999999999,
+    )
+
+    def fake_grid(settings, token, report, parameters, **kwargs):
+        events.append("grid")
+        target = kwargs.get("target_file") or tmp_path / "grid.xlsx"
+        target.write_bytes(b"PK\x03\x04")
+        return OneBssDownloadedFile(
+            file_path=target,
+            suggested_filename="grid.xlsx",
+            export_info={"params": parameters},
+            parameters=parameters,
+            source_values=kwargs.get("source_values") or {},
+        )
+
+    def fake_export(*args, **kwargs):
+        events.append("export")
+        raise AssertionError("Default OneBSS download should try grid before Excel export")
+
+    monkeypatch.setattr(service, "download_onebss_grid_file_api", fake_grid)
+    monkeypatch.setattr(service, "download_onebss_export_file_api", fake_export)
+
+    result = service.download_onebss_report_file_api(
+        get_settings(),
+        token,
+        {"report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST&name=Test"},
+        {"P_PHANVUNG_ID": "13"},
+    )
+
+    assert events == ["grid"]
+    assert result.suggested_filename == "grid.xlsx"
+
+
+def test_onebss_excel_export_405_falls_back_to_grid(monkeypatch, tmp_path) -> None:
+    from app.application import onebss_report_service as service
+    from app.application.onebss_report_service import OneBssDownloadError, OneBssDownloadedFile, OneBssApiToken
+
+    events = []
+    token = OneBssApiToken(
+        access_token="token",
+        token_type="Bearer",
+        username="test@vnpt.vn",
+        mobile_id="mobile",
+        device_id="device",
+        expires_at=9999999999,
+    )
+
+    def fake_export(*args, **kwargs):
+        events.append("export")
+        raise OneBssDownloadError("OneBSS khong tra file bao cao. HTTP 405.")
+
+    def fake_grid(settings, token, report, parameters, **kwargs):
+        events.append("grid")
+        target = kwargs.get("target_file") or tmp_path / "grid.xlsx"
+        target.write_bytes(b"PK\x03\x04")
+        return OneBssDownloadedFile(
+            file_path=target,
+            suggested_filename="grid.xlsx",
+            export_info={"params": parameters},
+            parameters=parameters,
+            source_values=kwargs.get("source_values") or {},
+        )
+
+    monkeypatch.setattr(service, "download_onebss_export_file_api", fake_export)
+    monkeypatch.setattr(service, "download_onebss_grid_file_api", fake_grid)
+
+    result = service.download_onebss_report_file_api(
+        get_settings(),
+        token,
+        {"report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST&name=Test"},
+        {"P_PHANVUNG_ID": "13", "$download_source": "excel"},
+    )
+
+    assert events == ["export", "grid"]
+    assert result.suggested_filename == "grid.xlsx"
+
+
 def test_onebss_grid_rows_are_written_to_excel(tmp_path) -> None:
     from openpyxl import load_workbook
 
