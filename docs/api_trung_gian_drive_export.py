@@ -13,7 +13,10 @@ import oracledb
 import openpyxl
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse
+from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from openpyxl.cell import WriteOnlyCell
@@ -25,6 +28,7 @@ app = FastAPI(title="API trung gian VNPT CTO")
 
 
 EXCEL_MAX_ROWS_PER_SHEET = 1_048_576
+GOOGLE_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 
 def require_token(authorization: str = "") -> None:
@@ -97,6 +101,71 @@ def validate_service_account_info(info: dict[str, Any]) -> None:
         raise RuntimeError("Service account JSON co private_key khong hop le.")
 
 
+def google_drive_auth_mode() -> str:
+    configured = os.getenv("GOOGLE_DRIVE_AUTH_MODE", "").strip().lower()
+    if configured in {"oauth", "user", "user_oauth"}:
+        return "oauth"
+    if configured in {"service_account", "service-account", "sa"}:
+        return "service_account"
+    token_file = google_drive_oauth_token_file()
+    if token_file.exists():
+        return "oauth"
+    return "service_account"
+
+
+def google_drive_oauth_client_file() -> Path:
+    return Path(os.getenv("GOOGLE_DRIVE_OAUTH_CLIENT_FILE", "drive-oauth-client.json")).expanduser()
+
+
+def google_drive_oauth_token_file() -> Path:
+    return Path(os.getenv("GOOGLE_DRIVE_OAUTH_TOKEN_FILE", "drive-oauth-token.json")).expanduser()
+
+
+def google_drive_oauth_redirect_uri() -> str:
+    return os.getenv("GOOGLE_DRIVE_OAUTH_REDIRECT_URI", "http://127.0.0.1:8000/drive-oauth/callback").strip()
+
+
+def load_oauth_credentials() -> Credentials:
+    token_file = google_drive_oauth_token_file()
+    if not token_file.exists():
+        raise RuntimeError("Chua ket noi Google Drive OAuth. Mo http://127.0.0.1:8000/drive-oauth/start tren may tram de cap quyen.")
+    credentials = Credentials.from_authorized_user_file(str(token_file), GOOGLE_DRIVE_SCOPES)
+    if credentials.expired and credentials.refresh_token:
+        credentials.refresh(GoogleAuthRequest())
+        token_file.write_text(credentials.to_json(), encoding="utf-8")
+    if not credentials.valid:
+        raise RuntimeError("Token Google Drive OAuth khong hop le. Mo lai http://127.0.0.1:8000/drive-oauth/start de cap quyen lai.")
+    return credentials
+
+
+def service_account_drive_client() -> tuple[Any, dict[str, Any]]:
+    info = load_service_account_info()
+    credentials = service_account.Credentials.from_service_account_info(
+        info,
+        scopes=GOOGLE_DRIVE_SCOPES,
+    )
+    return build("drive", "v3", credentials=credentials, cache_discovery=False), {
+        **info,
+        "auth_mode": "service_account",
+    }
+
+
+def oauth_drive_client() -> tuple[Any, dict[str, Any]]:
+    credentials = load_oauth_credentials()
+    drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
+    user_email = ""
+    try:
+        about = drive.about().get(fields="user").execute()
+        user = about.get("user") if isinstance(about.get("user"), dict) else {}
+        user_email = str(user.get("emailAddress") or "")
+    except Exception:
+        user_email = ""
+    return drive, {
+        "auth_mode": "oauth",
+        "user_email": user_email,
+    }
+
+
 def service_account_quota_message() -> str:
     return (
         "Google Drive dang dung Service Account nhung thu muc dich khong nam trong Shared Drive. "
@@ -130,14 +199,10 @@ def ensure_shared_drive_folder(folder: dict[str, Any]) -> None:
 
 
 def upload_to_drive(local_path: Path, file_name: str, folder_id: str) -> dict[str, Any]:
-    info = load_service_account_info()
-    credentials = service_account.Credentials.from_service_account_info(
-        info,
-        scopes=["https://www.googleapis.com/auth/drive"],
-    )
-    drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
+    drive, info = drive_client()
     folder = drive_folder(drive, folder_id)
-    ensure_shared_drive_folder(folder)
+    if info.get("auth_mode") == "service_account":
+        ensure_shared_drive_folder(folder)
     media = MediaFileUpload(
         str(local_path),
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -161,16 +226,14 @@ def upload_to_drive(local_path: Path, file_name: str, folder_id: str) -> dict[st
         "web_content_link": uploaded.get("webContentLink") or "",
         "drive_id": folder.get("driveId") or "",
         "folder_name": folder.get("name") or "",
+        "auth_mode": info.get("auth_mode") or "",
     }
 
 
 def drive_client():
-    info = load_service_account_info()
-    credentials = service_account.Credentials.from_service_account_info(
-        info,
-        scopes=["https://www.googleapis.com/auth/drive"],
-    )
-    return build("drive", "v3", credentials=credentials, cache_discovery=False), info
+    if google_drive_auth_mode() == "oauth":
+        return oauth_drive_client()
+    return service_account_drive_client()
 
 
 def count_rows(cursor, sql: str, binds: dict[str, Any]) -> int:
@@ -285,10 +348,11 @@ def test_drive():
         folder: dict[str, Any] = {}
         if folder_id:
             folder = drive_folder(drive, folder_id)
-            if not folder.get("driveId"):
+            if info.get("auth_mode") == "service_account" and not folder.get("driveId"):
                 return {
                     "status": "error",
                     "message": service_account_quota_message(),
+                    "auth_mode": info.get("auth_mode") or "",
                     "client_email": info.get("client_email") or "",
                     "folder_id": folder_id,
                     "folder_name": folder.get("name") or "",
@@ -296,17 +360,77 @@ def test_drive():
                 }
         return {
             "status": "ok",
+            "auth_mode": info.get("auth_mode") or "",
             "client_email": info.get("client_email") or "",
+            "user_email": info.get("user_email") or "",
             "folder_id": folder_id,
             "folder_name": folder.get("name") or "",
             "drive_id": folder.get("driveId") or "",
-            "drive_type": "shared_drive" if folder.get("driveId") else "",
+            "drive_type": "shared_drive" if folder.get("driveId") else ("my_drive" if folder_id else ""),
         }
     except Exception as error:
         return {
             "status": "error",
             "message": f"{type(error).__name__}: {error}",
         }
+
+
+@app.get("/drive-oauth/start")
+def drive_oauth_start():
+    try:
+        try:
+            from google_auth_oauthlib.flow import Flow
+        except ModuleNotFoundError as error:
+            raise RuntimeError("Chua cai google-auth-oauthlib. Hay chay: python -m pip install google-auth-oauthlib") from error
+
+        client_file = google_drive_oauth_client_file()
+        if not client_file.exists():
+            raise RuntimeError(f"Khong tim thay OAuth client JSON: {client_file}")
+
+        os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+        flow = Flow.from_client_secrets_file(
+            str(client_file),
+            scopes=GOOGLE_DRIVE_SCOPES,
+            redirect_uri=google_drive_oauth_redirect_uri(),
+        )
+        authorization_url, _ = flow.authorization_url(
+            access_type="offline",
+            prompt="consent",
+            include_granted_scopes="true",
+        )
+        return RedirectResponse(authorization_url)
+    except Exception as error:
+        return HTMLResponse(f"<h3>Khong mo duoc OAuth Google Drive</h3><pre>{type(error).__name__}: {error}</pre>", status_code=500)
+
+
+@app.get("/drive-oauth/callback")
+def drive_oauth_callback(code: str = "", error: str = ""):
+    try:
+        if error:
+            raise RuntimeError(f"Google tu choi cap quyen: {error}")
+        if not code:
+            raise RuntimeError("Google callback thieu code.")
+        try:
+            from google_auth_oauthlib.flow import Flow
+        except ModuleNotFoundError as module_error:
+            raise RuntimeError("Chua cai google-auth-oauthlib. Hay chay: python -m pip install google-auth-oauthlib") from module_error
+
+        os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+        flow = Flow.from_client_secrets_file(
+            str(google_drive_oauth_client_file()),
+            scopes=GOOGLE_DRIVE_SCOPES,
+            redirect_uri=google_drive_oauth_redirect_uri(),
+        )
+        flow.fetch_token(code=code)
+        token_file = google_drive_oauth_token_file()
+        token_file.parent.mkdir(parents=True, exist_ok=True)
+        token_file.write_text(flow.credentials.to_json(), encoding="utf-8")
+        return HTMLResponse(
+            "<h3>Da ket noi Google Drive OAuth thanh cong.</h3>"
+            "<p>Co the dong cua so nay, sau do chay lai /test-drive va xuat file tren web.</p>"
+        )
+    except Exception as callback_error:
+        return HTMLResponse(f"<h3>Ket noi OAuth Google Drive loi</h3><pre>{type(callback_error).__name__}: {callback_error}</pre>", status_code=500)
 
 
 @app.post("/api/du-lieu-web")

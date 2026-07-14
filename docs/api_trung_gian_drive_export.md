@@ -9,7 +9,7 @@ Web sẽ gọi action `export_sql_report_to_drive` trên máy trạm. Máy trạ
 
 ```powershell
 cd C:\VNPTCTO\api-trung-gian
-python -m pip install fastapi uvicorn oracledb python-dotenv openpyxl google-api-python-client google-auth
+python -m pip install fastapi uvicorn oracledb python-dotenv openpyxl google-api-python-client google-auth google-auth-oauthlib
 ```
 
 3. Tạo service account Google Cloud, tải file JSON và đặt tại:
@@ -63,6 +63,46 @@ Invoke-RestMethod https://api.vnptcto.com/test-drive
 ```
 
 Khi web xuất Excel, kết quả hoàn tất sẽ là link Google Drive thay vì file tải trực tiếp từ Render.
+
+## Nếu không có quyền Shared Drive
+
+Dùng OAuth bằng tài khoản Google thật của người dùng. File sẽ upload vào My Drive/folder thường và tính vào quota của tài khoản đó, không dùng quota Service Account.
+
+1. Vào Google Cloud Console > APIs & Services > Credentials.
+2. Tạo `OAuth client ID` loại `Desktop app`, tải file JSON và lưu tại:
+
+```text
+C:\VNPTCTO\api-trung-gian\drive-oauth-client.json
+```
+
+3. Cập nhật `.env` máy trạm:
+
+```dotenv
+GOOGLE_DRIVE_AUTH_MODE=oauth
+GOOGLE_DRIVE_OAUTH_CLIENT_FILE=C:\VNPTCTO\api-trung-gian\drive-oauth-client.json
+GOOGLE_DRIVE_OAUTH_TOKEN_FILE=C:\VNPTCTO\api-trung-gian\drive-oauth-token.json
+GOOGLE_DRIVE_FOLDER_ID=ID_THU_MUC_MY_DRIVE_HOAC_FOLDER_DUOC_SHARE
+```
+
+4. Restart API máy trạm, rồi mở trình duyệt trên máy trạm:
+
+```powershell
+Start-Process "http://127.0.0.1:8000/drive-oauth/start"
+```
+
+Đăng nhập tài khoản Google muốn dùng để chứa file, bấm Allow. Sau đó kiểm tra:
+
+```powershell
+Invoke-RestMethod https://api.vnptcto.com/test-drive
+```
+
+Kết quả đúng với OAuth sẽ có:
+
+```text
+status: ok
+auth_mode: oauth
+drive_type: my_drive
+```
 
 ## Auto run on workstation
 
