@@ -620,12 +620,39 @@ def raise_onebss_report_schema_error(error: RuntimeError) -> None:
         or "relation" in error_text and "does not exist" in error_text
         or "Supabase REST loi 404" in error_text
     )
+    is_missing_column_error = (
+        "PGRST204" in error_text
+        or "Could not find" in error_text and "column" in error_text
+        or "no such column" in error_text
+        or "has no column named" in error_text
+    )
     if ("onebss_reports" in error_text or "onebss_report_runs" in error_text) and is_missing_table_error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Supabase chua co bang onebss_reports/onebss_report_runs. Hay chay lai file sql/supabase_upgrade_admin_modules.sql.",
         ) from error
+    if ("onebss_report_runs" in error_text or "worker_id" in error_text or "otp_request_id" in error_text) and is_missing_column_error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Bang lich su OneBSS chua co cac cot hang doi may tram. Hay chay migration moi nhat hoac khoi dong lai ung dung de SQLite tu nang cap.",
+        ) from error
     raise error
+
+
+def raise_onebss_operation_error(error: Exception, action: str) -> None:
+    try:
+        raise_onebss_report_schema_error(error)  # type: ignore[arg-type]
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("%s", action)
+        detail = str(error).replace("\n", " ").strip()
+        if len(detail) > 300:
+            detail = f"{detail[:297]}..."
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{action}: {type(error).__name__}: {detail or 'khong co chi tiet loi'}",
+        ) from error
 
 
 def raise_dashboard_layout_schema_error(error: RuntimeError) -> None:
@@ -3297,7 +3324,10 @@ def get_onebss_otp_request(request: Request, otp_request_id: str) -> dict:
 @router.get("/api/onebss-reports/jobs/{job_id}")
 def get_onebss_report_job(request: Request, job_id: str) -> dict:
     admin_user(request)
-    run = build_app_repository().get_onebss_report_run(job_id.strip())
+    try:
+        run = build_app_repository().get_onebss_report_run(job_id.strip())
+    except (RuntimeError, sqlite3.Error, AttributeError) as error:
+        raise_onebss_operation_error(error, "Khong kiem tra duoc task OneBSS")
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay job OneBSS.")
     return _onebss_report_job_response(job_id, {**run, "job_id": job_id})
@@ -3380,8 +3410,8 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
     ma_bao_cao = payload.ma_bao_cao.strip().upper()
     try:
         report = repository.get_onebss_report_by_code(ma_bao_cao)
-    except RuntimeError as error:
-        raise_onebss_report_schema_error(error)
+    except (RuntimeError, sqlite3.Error, AttributeError) as error:
+        raise_onebss_operation_error(error, "Khong doc duoc cau hinh bao cao OneBSS")
     if not report:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay cau hinh bao cao OneBSS.")
     started_at = datetime.now().isoformat(timespec="seconds")
@@ -3393,7 +3423,10 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
             job_id,
             OneBssTaskOtpPayload(otp=payload.otp, otp_request_id=payload.otp_request_id, otp_source=payload.otp_source or "manual"),
         )
-    existing_run = repository.get_onebss_report_run(job_id)
+    try:
+        existing_run = repository.get_onebss_report_run(job_id)
+    except (RuntimeError, sqlite3.Error, AttributeError) as error:
+        raise_onebss_operation_error(error, "Khong kiem tra duoc task OneBSS dang ton tai")
     if existing_run and str(existing_run.get("status") or "").lower() in ONEBSS_REPORT_ACTIVE_STATUSES:
         return _onebss_report_job_response(job_id, {**existing_run, "job_id": job_id})
     try:
@@ -3408,8 +3441,8 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
             "finished_at": "",
             "created_by": actor["username"],
         })
-    except RuntimeError as error:
-        raise_onebss_report_schema_error(error)
+    except (RuntimeError, sqlite3.Error, AttributeError) as error:
+        raise_onebss_operation_error(error, "Khong tao duoc task lay bao cao OneBSS")
     try:
         repository.add_audit_log(actor["username"], "onebss_report_job_queued", f"Dua bao cao OneBSS {ma_bao_cao} vao hang doi: {job_id}")
     except Exception:

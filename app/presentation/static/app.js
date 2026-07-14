@@ -373,11 +373,18 @@ async function api(url, options = {}) {
 
 function showMessage(element, text, type = "success") {
   if (element) {
-    element.textContent = "";
-    element.classList?.add("hidden");
-    element.setAttribute?.("aria-hidden", "true");
+    const value = repairTextEncoding(text || "");
+    element.textContent = value;
+    element.classList?.remove("hidden", "success", "error");
+    if (value) {
+      element.classList?.add(type === "error" || type === "warning" ? "error" : "success");
+      element.setAttribute?.("aria-hidden", "false");
+    } else {
+      element.classList?.add("hidden");
+      element.setAttribute?.("aria-hidden", "true");
+    }
   }
-  showToast(text, type);
+  if (text) showToast(text, type);
 }
 
 let toastTimer;

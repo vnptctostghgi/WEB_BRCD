@@ -171,6 +171,20 @@ class AppRepository:
         connection.row_factory = sqlite3.Row
         return connection
 
+    @staticmethod
+    def _ensure_onebss_report_run_worker_columns(connection: sqlite3.Connection) -> None:
+        for column, definition in {
+            "worker_id": "TEXT NOT NULL DEFAULT ''",
+            "worker_session_id": "TEXT NOT NULL DEFAULT ''",
+            "otp_request_id": "TEXT NOT NULL DEFAULT ''",
+            "claimed_at": "TEXT NOT NULL DEFAULT ''",
+            "updated_at": "TEXT NOT NULL DEFAULT ''",
+        }.items():
+            try:
+                connection.execute(f"ALTER TABLE onebss_report_runs ADD COLUMN {column} {definition}")
+            except sqlite3.OperationalError:
+                pass
+
     def initialize(self, admin_username: str, admin_password: str) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
@@ -485,17 +499,7 @@ class AppRepository:
                 connection.execute("ALTER TABLE onebss_reports ADD COLUMN otp_service_code TEXT NOT NULL DEFAULT 'onebss'")
             except sqlite3.OperationalError:
                 pass
-            for column, definition in {
-                "worker_id": "TEXT NOT NULL DEFAULT ''",
-                "worker_session_id": "TEXT NOT NULL DEFAULT ''",
-                "otp_request_id": "TEXT NOT NULL DEFAULT ''",
-                "claimed_at": "TEXT NOT NULL DEFAULT ''",
-                "updated_at": "TEXT NOT NULL DEFAULT ''",
-            }.items():
-                try:
-                    connection.execute(f"ALTER TABLE onebss_report_runs ADD COLUMN {column} {definition}")
-                except sqlite3.OperationalError:
-                    pass
+            self._ensure_onebss_report_run_worker_columns(connection)
             legacy_menu = connection.execute(
                 "SELECT 1 FROM features WHERE code IN ('admin', 'admin.connections.test', 'admin.menu', 'new_reports') LIMIT 1"
             ).fetchone()
@@ -1186,6 +1190,7 @@ class AppRepository:
             "updated_at": str(payload.get("updated_at") or now),
         }
         with self.connect() as connection:
+            self._ensure_onebss_report_run_worker_columns(connection)
             connection.execute(
                 """
                 INSERT INTO onebss_report_runs
@@ -1209,6 +1214,7 @@ class AppRepository:
         now = self._now()
         worker = str(worker_id or "").strip()[:120]
         with self.connect() as connection:
+            self._ensure_onebss_report_run_worker_columns(connection)
             row = connection.execute(
                 """
                 SELECT * FROM onebss_report_runs
@@ -1261,6 +1267,7 @@ class AppRepository:
         assignments = ", ".join(f"{key}=:{key}" for key in values.keys())
         values["run_id"] = run_id
         with self.connect() as connection:
+            self._ensure_onebss_report_run_worker_columns(connection)
             connection.execute(f"UPDATE onebss_report_runs SET {assignments} WHERE run_id=:run_id", values)
             row = connection.execute("SELECT * FROM onebss_report_runs WHERE run_id=?", (run_id,)).fetchone()
             return self._decode_onebss_report_run(dict(row)) if row else None
@@ -1977,6 +1984,8 @@ class AppRepository:
 
     @staticmethod
     def _decode_onebss_report_run(row: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(row, dict):
+            row = dict(row)
         try:
             parameters = json.loads(row.get("parameters_json") or "{}")
         except json.JSONDecodeError:
