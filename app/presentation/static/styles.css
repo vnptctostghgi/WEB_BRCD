@@ -3243,6 +3243,35 @@ legend {
   font-size: .86rem;
 }
 
+.onebss-parameter-converter {
+  display: grid;
+  gap: .85rem;
+}
+
+@media (min-width: 920px) {
+  .onebss-parameter-converter {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.onebss-parameter-converter textarea {
+  min-height: 14rem;
+  resize: vertical;
+}
+
+[data-onebss-sample-status][data-tone="success"] {
+  color: #bae6fd;
+}
+
+[data-onebss-sample-status][data-tone="warning"] {
+  color: #fed7aa;
+}
+
+[data-onebss-sample-status][data-tone="error"] {
+  color: #fecaca;
+}
+
 .connection-editor {
   margin-top: 1rem;
 }

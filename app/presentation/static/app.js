@@ -5198,7 +5198,14 @@ function renderOneBssReports() {
   editor.innerHTML = renderOneBssReportEditor(selectedReport || draft, !selectedReport);
   ensureOneBssOtpServiceCodeField(editor, selectedReport || draft);
   document.querySelectorAll("[data-inline-onebss-field]").forEach((field) => {
-    field.addEventListener("input", () => markOneBssReportDirty(field.closest("[data-onebss-row]")));
+    field.addEventListener("input", () => {
+      const row = field.closest("[data-onebss-row]");
+      if (field.dataset.inlineOnebssField === "parameters") updateOneBssVariableListFromParameters(row);
+      markOneBssReportDirty(row);
+    });
+  });
+  document.querySelectorAll("[data-onebss-sample-json]").forEach((field) => {
+    field.addEventListener("input", () => applyOneBssSampleJson(field));
   });
   document.querySelectorAll("[data-save-onebss-report-inline]").forEach((button) => {
     button.addEventListener("click", () => saveInlineOneBssReport(button.dataset.saveOnebssReportInline, button));
@@ -5211,7 +5218,7 @@ function renderOneBssReports() {
 function ensureOneBssOtpServiceCodeField(editor, report) {
   const row = editor?.querySelector("[data-onebss-row]");
   if (!row || row.querySelector('[data-inline-onebss-field="otp_service_code"]')) return;
-  const before = row.querySelector('[data-inline-onebss-field="danh_sach_bien"]')?.closest("label");
+  const before = row.querySelector('[data-inline-onebss-field="report_url"]')?.closest("label");
   const label = document.createElement("label");
   label.innerHTML = `Ma OTP tu dong<input class="form-control inline-admin-input" data-inline-onebss-field="otp_service_code" value="${escapeHtml(report?.otp_service_code || "onebss")}" placeholder="onebss" /><small class="cell-note">Nhap dung Ma OTP trong Mobile Gateway. OneBSS chi goi ma nay; nguoi gui, so ky tu va vi tri cat lay theo cau hinh OTP Mobile Gateway.</small>`;
   row.insertBefore(label, before || null);
@@ -5261,6 +5268,179 @@ function createOneBssReportDraft() {
   return draft;
 }
 
+const oneBssDefaultRegionValues = ["13", "14", "15"];
+const oneBssSampleWrapperKeys = ["parameters", "params", "param", "filters", "filter", "payload", "body", "data", "request", "values"];
+
+function parseOneBssPastedJson(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return null;
+  const candidates = [raw];
+  const firstObject = raw.indexOf("{");
+  const lastObject = raw.lastIndexOf("}");
+  if (firstObject >= 0 && lastObject > firstObject) candidates.push(raw.slice(firstObject, lastObject + 1));
+  const firstArray = raw.indexOf("[");
+  const lastArray = raw.lastIndexOf("]");
+  if (firstArray >= 0 && lastArray > firstArray) candidates.push(raw.slice(firstArray, lastArray + 1));
+  for (const candidate of candidates) {
+    try {
+      let parsed = JSON.parse(candidate);
+      if (typeof parsed === "string" && /^[\s[{]/.test(parsed)) parsed = JSON.parse(parsed);
+      return parsed;
+    } catch {
+      // Try the next bounded JSON candidate.
+    }
+  }
+  throw new Error("JSON mẫu chưa đúng định dạng.");
+}
+
+function oneBssParameterKeyFromDescriptor(item) {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return "";
+  const keys = ["name", "key", "field", "parameter", "param", "id", "ma", "code", "ten_bien", "variable"];
+  for (const key of keys) {
+    const value = String(item[key] || "").trim();
+    if (value) return value;
+  }
+  return "";
+}
+
+function oneBssParameterValueFromDescriptor(item) {
+  const valueKeys = ["value", "defaultValue", "default_value", "selected", "currentValue", "gia_tri", "data"];
+  for (const key of valueKeys) {
+    if (Object.prototype.hasOwnProperty.call(item, key)) return item[key];
+  }
+  return "";
+}
+
+function oneBssLooksLikeParameterKey(key) {
+  const text = String(key || "").trim();
+  return /^P_[A-Za-z0-9_]+$/.test(text) || /^\$[A-Za-z0-9_]+$/.test(text);
+}
+
+function oneBssDescriptorArrayToParameters(items) {
+  if (!Array.isArray(items)) return {};
+  const output = {};
+  items.forEach((item) => {
+    const key = oneBssParameterKeyFromDescriptor(item);
+    if (key) output[key] = oneBssParameterValueFromDescriptor(item);
+  });
+  return output;
+}
+
+function oneBssFindParameterCandidate(value) {
+  const candidates = [];
+  const visit = (item, depth = 0) => {
+    if (depth > 5 || item === null || item === undefined) return;
+    if (typeof item === "string" && /^[\s[{]/.test(item)) {
+      try {
+        visit(JSON.parse(item), depth + 1);
+      } catch {
+        // Not an embedded JSON value.
+      }
+      return;
+    }
+    if (Array.isArray(item)) {
+      const fromDescriptors = oneBssDescriptorArrayToParameters(item);
+      const descriptorKeys = Object.keys(fromDescriptors);
+      if (descriptorKeys.length) {
+        candidates.push({ score: descriptorKeys.filter(oneBssLooksLikeParameterKey).length + descriptorKeys.length / 100, value: fromDescriptors });
+      }
+      item.forEach((child) => visit(child, depth + 1));
+      return;
+    }
+    if (typeof item !== "object") return;
+    const keys = Object.keys(item);
+    const parameterKeys = keys.filter(oneBssLooksLikeParameterKey);
+    if (parameterKeys.length) {
+      candidates.push({ score: parameterKeys.length + keys.length / 1000, value: item });
+    }
+    oneBssSampleWrapperKeys.forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(item, key)) visit(item[key], depth + 1);
+    });
+    Object.values(item).forEach((child) => visit(child, depth + 1));
+  };
+  visit(value);
+  candidates.sort((a, b) => b.score - a.score);
+  if (candidates.length) return candidates[0].value;
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function normalizeOneBssSampleValue(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    if (Object.prototype.hasOwnProperty.call(value, "$each")) return value;
+    for (const key of ["value", "defaultValue", "default_value", "selected", "currentValue", "gia_tri", "data"]) {
+      if (Object.prototype.hasOwnProperty.call(value, key)) return value[key];
+    }
+  }
+  return value;
+}
+
+function oneBssParameterVariables(parameters) {
+  return Object.keys(parameters || {}).filter((key) => {
+    const text = String(key || "").trim();
+    return text && !text.startsWith("$");
+  });
+}
+
+function buildOneBssDirectParametersFromSample(sample) {
+  const source = oneBssFindParameterCandidate(sample);
+  const output = {};
+  Object.entries(source || {}).forEach(([key, value]) => {
+    const paramKey = String(key || "").trim();
+    if (!paramKey || paramKey.startsWith("$")) return;
+    output[paramKey] = /PHANVUNG/i.test(paramKey)
+      ? { $each: [...oneBssDefaultRegionValues] }
+      : normalizeOneBssSampleValue(value);
+  });
+  const regionKey = Object.keys(output).find((key) => /PHANVUNG/i.test(key));
+  if (regionKey && !output.$merge_excel) {
+    output.$merge_excel = { sheet: "DATA", source_column: regionKey };
+  }
+  return output;
+}
+
+function updateOneBssVariableListFromParameters(row) {
+  const parametersInput = row?.querySelector('[data-inline-onebss-field="parameters"]');
+  const variablesInput = row?.querySelector('[data-inline-onebss-field="danh_sach_bien"]');
+  if (!parametersInput || !variablesInput) return;
+  try {
+    const parameters = parametersInput.value.trim() ? JSON.parse(parametersInput.value) : {};
+    variablesInput.value = oneBssParameterVariables(parameters).join(", ");
+  } catch {
+    // Keep the last valid variable list while the JSON is being edited.
+  }
+}
+
+function applyOneBssSampleJson(sampleInput) {
+  const row = sampleInput?.closest("[data-onebss-row]");
+  if (!row) return;
+  const status = row.querySelector("[data-onebss-sample-status]");
+  if (!String(sampleInput.value || "").trim()) {
+    if (status) {
+      status.textContent = "Dán JSON mẫu để tự tách biến và tạo tham số chạy.";
+      delete status.dataset.tone;
+    }
+    return;
+  }
+  try {
+    const parsed = parseOneBssPastedJson(sampleInput.value);
+    const parameters = buildOneBssDirectParametersFromSample(parsed);
+    const parametersInput = row.querySelector('[data-inline-onebss-field="parameters"]');
+    if (parametersInput) parametersInput.value = JSON.stringify(parameters, null, 2);
+    updateOneBssVariableListFromParameters(row);
+    if (status) {
+      const count = oneBssParameterVariables(parameters).length;
+      status.textContent = count ? `Đã tách ${count} biến và tự cấu hình chạy 3 phân vùng.` : "JSON mẫu chưa có biến báo cáo.";
+      status.dataset.tone = count ? "success" : "warning";
+    }
+    markOneBssReportDirty(row);
+  } catch (error) {
+    if (status) {
+      status.textContent = error.message || "Không chuyển được JSON mẫu.";
+      status.dataset.tone = "error";
+    }
+  }
+}
+
 function renderOneBssReportEditor(report, isDraft = false) {
   const rowKey = report._rowKey || `onebss-${report.id}`;
   const params = (report.danh_sach_bien || []).join(", ");
@@ -5273,8 +5453,11 @@ function renderOneBssReportEditor(report, isDraft = false) {
       </div>
       <label>Mã báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="Tự sinh nếu để trống" /></label>
       <label>Tên báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="Tên báo cáo OneBSS" /></label>
-      <label>Danh sách biến<input class="form-control inline-admin-input inline-admin-params" data-inline-onebss-field="danh_sach_bien" value="${escapeHtml(params)}" placeholder="P_PHANVUNG_ID, P_LOAI_NGAY, P_TUNGAY, P_DENNGAY, P_LOAI_BAOCAO, P_LOAI_BIENDONG" /><small class="cell-note">Mỗi biến cách nhau bằng dấu phẩy.</small></label>
-      <label>Tham số xuất trực tiếp JSON<textarea class="form-control inline-admin-input font-mono text-xs" data-inline-onebss-field="parameters" rows="9" placeholder='{"P_PHANVUNG_ID":{"$each":["13","14","15"]},"P_TUNGAY":"{{month_start}}","P_DENNGAY":"{{today}}"}'>${escapeHtml(parameterJson === "{}" ? "" : parameterJson)}</textarea><small class="cell-note">Lưu điều kiện xuất ở đây để khi chạy chỉ cần bấm Lấy báo cáo.</small></label>
+      <div class="onebss-parameter-converter">
+        <label>JSON mẫu từ trình duyệt<textarea class="form-control inline-admin-input font-mono text-xs onebss-sample-json" data-onebss-sample-json rows="10" placeholder='Dán JSON mẫu vừa copy từ trình duyệt OneBSS vào đây'></textarea><small class="cell-note" data-onebss-sample-status>Dán JSON mẫu để tự tách biến và tạo tham số chạy.</small></label>
+        <label>Tham số xuất trực tiếp JSON<textarea class="form-control inline-admin-input font-mono text-xs" data-inline-onebss-field="parameters" rows="10" placeholder='{"P_PHANVUNG_ID":{"$each":["13","14","15"]},"P_TUNGAY":"{{month_start}}","P_DENNGAY":"{{today}}"}'>${escapeHtml(parameterJson === "{}" ? "" : parameterJson)}</textarea><small class="cell-note">JSON này là tham số chạy thật. P_PHANVUNG_ID sẽ chạy lần lượt 13, 14, 15 khi được sinh từ mẫu.</small></label>
+      </div>
+      <label>Danh sách biến<input class="form-control inline-admin-input inline-admin-params" data-inline-onebss-field="danh_sach_bien" value="${escapeHtml(params)}" placeholder="P_PHANVUNG_ID, P_LOAI_NGAY, P_TUNGAY, P_DENNGAY, P_LOAI_BAOCAO, P_LOAI_BIENDONG" readonly /><small class="cell-note">Tự tách từ JSON mẫu hoặc từ JSON tham số xuất trực tiếp.</small></label>
       <label>Link lấy báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="report_url" value="${escapeHtml(report.report_url || "")}" placeholder="https://onebss.vnpt.vn/#/report/bi?..." /></label>
       <label>Link lưu báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="storage_link" value="${escapeHtml(report.storage_link || "")}" placeholder="Link thư mục Google Drive hoặc thư mục nội bộ" /></label>
     </div>`;
