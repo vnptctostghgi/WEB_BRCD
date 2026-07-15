@@ -23,15 +23,49 @@ class OneBssTaskCancelled(OneBssProgressCancelled):
     pass
 
 
+TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+
+
 def response_is_cancelled(data: dict[str, Any]) -> bool:
     return bool(data.get("cancelled")) or str(data.get("status") or "").lower() == "cancelled"
 
 
+def describe_request_error(error: Exception) -> str:
+    if isinstance(error, httpx.HTTPStatusError):
+        status_code = error.response.status_code if error.response is not None else "?"
+        return f"HTTP {status_code}"
+    return str(error)[:300] or error.__class__.__name__
+
+
+def is_transient_request_error(error: Exception) -> bool:
+    if isinstance(error, httpx.HTTPStatusError):
+        return bool(error.response is not None and error.response.status_code in TRANSIENT_HTTP_STATUS_CODES)
+    return isinstance(error, httpx.RequestError)
+
+
+def transient_retry_delay_seconds(attempt: int) -> float:
+    return min(60.0, max(5.0, float(attempt) * 5.0))
+
+
 def request_json(client: httpx.Client, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-    response = client.request(method, path, **kwargs)
-    response.raise_for_status()
-    data = response.json()
-    return data if isinstance(data, dict) else {"ok": True, "data": data}
+    attempt = 0
+    while True:
+        try:
+            response = client.request(method, path, **kwargs)
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, dict) else {"ok": True, "data": data}
+        except (httpx.HTTPStatusError, httpx.RequestError) as error:
+            if not is_transient_request_error(error):
+                raise
+            attempt += 1
+            delay_seconds = transient_retry_delay_seconds(attempt)
+            print(
+                f"Ket noi web loi tam thoi ({describe_request_error(error)}). "
+                f"May tram se thu lai sau {int(delay_seconds)} giay.",
+                file=sys.stderr,
+            )
+            time.sleep(delay_seconds)
 
 
 def wait_for_otp(client: httpx.Client, run_id: str, poll_seconds: float, progress_callback=None) -> str:

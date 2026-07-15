@@ -2523,6 +2523,40 @@ def test_onebss_workstation_worker_updates_existing_status_message(monkeypatch) 
     assert "Da di den bao cao OneBSS." in messages
 
 
+def test_onebss_workstation_worker_retries_transient_web_errors(monkeypatch) -> None:
+    import httpx
+    from scripts import onebss_workstation_worker as worker
+
+    attempts = {"count": 0}
+    monkeypatch.setattr(worker.time, "sleep", lambda seconds: None)
+
+    class FakeResponse:
+        def __init__(self, status_code: int, payload: dict | None = None) -> None:
+            self.status_code = status_code
+            self.payload = payload or {}
+            self.request = httpx.Request("POST", "https://vnptcto.com/api/onebss-worker/tasks/claim")
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                response = httpx.Response(self.status_code, request=self.request)
+                raise httpx.HTTPStatusError("temporary error", request=self.request, response=response)
+
+        def json(self) -> dict:
+            return self.payload
+
+    class FakeClient:
+        def request(self, method: str, path: str, **kwargs):
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                return FakeResponse(502)
+            return FakeResponse(200, {"ok": True, "task": None})
+
+    data = worker.request_json(FakeClient(), "POST", "/api/onebss-worker/tasks/claim", json={"worker_id": "ws"})
+
+    assert data == {"ok": True, "task": None}
+    assert attempts["count"] == 2
+
+
 def test_onebss_worker_uploads_result_file_for_download(monkeypatch, tmp_path) -> None:
     settings = get_settings().model_copy(update={"data_mining_download_dir": str(tmp_path)})
     monkeypatch.setattr(routes, "get_settings", lambda: settings)
