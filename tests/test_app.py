@@ -2479,6 +2479,50 @@ def test_onebss_report_run_can_be_cancelled_without_worker_overwrite() -> None:
         assert runs[0]["can_cancel"] is False
 
 
+def test_onebss_workstation_worker_updates_existing_status_message(monkeypatch) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self.payload = payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return self.payload
+
+    class FakeClient:
+        def request(self, method: str, path: str, **kwargs):
+            calls.append((method, path, kwargs.get("json") or {}))
+            return FakeResponse({"ok": True, "run": {"status": "running"}})
+
+    def fake_run_onebss_report_request(settings, report, parameters, **kwargs):
+        progress_callback = kwargs["progress_callback"]
+        progress_callback("Da dien tai khoan OneBSS.")
+        progress_callback("Da dien mat khau OneBSS.")
+        progress_callback("Da gui OTP ve dien thoai.")
+        progress_callback("Da di den bao cao OneBSS.")
+        return {
+            "ok": True,
+            "status": "success",
+            "message": "Da tai bao cao OneBSS.",
+            "storage_status": "uploaded_google_drive:test-file",
+        }
+
+    monkeypatch.setattr(worker, "run_onebss_report_request", fake_run_onebss_report_request)
+
+    worker.process_task(FakeClient(), {"run_id": "RUN-PROGRESS", "report": {}, "parameters": {}}, "ws-progress", 0)
+
+    messages = [payload.get("message") for _, path, payload in calls if path.endswith("/status")]
+    assert "Da dien tai khoan OneBSS." in messages
+    assert "Da dien mat khau OneBSS." in messages
+    assert "Da gui OTP ve dien thoai." in messages
+    assert "Da di den bao cao OneBSS." in messages
+
+
 def test_onebss_worker_uploads_result_file_for_download(monkeypatch, tmp_path) -> None:
     settings = get_settings().model_copy(update={"data_mining_download_dir": str(tmp_path)})
     monkeypatch.setattr(routes, "get_settings", lambda: settings)

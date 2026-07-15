@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from itertools import product
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
@@ -145,6 +145,34 @@ PENDING_ONEBSS_SESSIONS: dict[str, PendingOneBssSession] = {}
 PENDING_ONEBSS_API_SESSIONS: dict[str, PendingOneBssApiSession] = {}
 ONEBSS_API_TOKENS: dict[str, OneBssApiToken] = {}
 PENDING_ONEBSS_LOCK = threading.Lock()
+OneBssProgressCallback = Callable[[str], None]
+
+
+class OneBssProgressCancelled(Exception):
+    pass
+
+
+def emit_onebss_progress(progress_callback: OneBssProgressCallback | None, message: str) -> None:
+    if not progress_callback or not message:
+        return
+    try:
+        progress_callback(message)
+    except OneBssProgressCancelled:
+        raise
+    except Exception:
+        logger.exception("Cannot publish OneBSS progress")
+
+
+def onebss_parameter_progress_label(parameters: dict[str, Any], *, max_items: int = 5) -> str:
+    visible_items = [
+        f"{key}={value}"
+        for key, value in parameters.items()
+        if not str(key).startswith("$") and key not in ONEBSS_API_META_KEYS
+    ]
+    if not visible_items:
+        return "khong co tham so"
+    suffix = "" if len(visible_items) <= max_items else f", +{len(visible_items) - max_items} tham so"
+    return ", ".join(str(item) for item in visible_items[:max_items]) + suffix
 
 
 def run_onebss_report_request(
@@ -155,14 +183,16 @@ def run_onebss_report_request(
     otp: str = "",
     session_id: str = "",
     created_by: str = "",
+    progress_callback: OneBssProgressCallback | None = None,
 ) -> dict[str, Any]:
     cleanup_expired_onebss_sessions()
     resolved_parameters = with_resolved_schedule_parameters({"parameters": parameters if isinstance(parameters, dict) else {}})["parameters"]
+    emit_onebss_progress(progress_callback, "Da chuan bi tham so chay bao cao OneBSS.")
     if session_id.startswith("api-"):
-        return continue_onebss_api_session(settings, session_id, otp, resolved_parameters)
+        return continue_onebss_api_session(settings, session_id, otp, resolved_parameters, progress_callback=progress_callback)
     if session_id:
-        return continue_onebss_report_session(settings, session_id, otp, resolved_parameters)
-    return start_onebss_api_session(settings, report, resolved_parameters, created_by=created_by)
+        return continue_onebss_report_session(settings, session_id, otp, resolved_parameters, progress_callback=progress_callback)
+    return start_onebss_api_session(settings, report, resolved_parameters, created_by=created_by, progress_callback=progress_callback)
 
 
 def onebss_report_otp_service_code(report: dict[str, Any] | None) -> str:
@@ -418,11 +448,13 @@ def start_onebss_api_session(
     parameters: dict[str, Any],
     *,
     created_by: str = "",
+    progress_callback: OneBssProgressCallback | None = None,
 ) -> dict[str, Any]:
     try:
         report_url = normalize_onebss_report_url(report.get("report_url"))
     except OneBssDownloadError as error:
         return {"ok": False, "status": "invalid_report_url", "message": str(error), "parameters": parameters}
+    emit_onebss_progress(progress_callback, "Dang chuan bi dang nhap OneBSS.")
     credentials = onebss_api_credentials(settings)
     if not credentials:
         return {"ok": False, "status": "missing_credentials", "message": "Chua cau hinh ONEBSS_USERNAME/ONEBSS_PASSWORD.", "parameters": parameters}
@@ -431,13 +463,17 @@ def start_onebss_api_session(
     cached_token = get_valid_onebss_api_token(username)
     if cached_token:
         try:
-            return finish_onebss_report_download_api(settings, cached_token, report, parameters)
+            emit_onebss_progress(progress_callback, "Da co phien dang nhap OneBSS con han.")
+            return finish_onebss_report_download_api(settings, cached_token, report, parameters, progress_callback=progress_callback)
         except OneBssDownloadError as error:
             if onebss_error_looks_auth_related(error):
                 forget_onebss_api_token(username)
             return {"ok": False, "status": "failed", "message": str(error)[:1000], "parameters": parameters}
 
     try:
+        emit_onebss_progress(progress_callback, "Da dien tai khoan OneBSS.")
+        emit_onebss_progress(progress_callback, "Da dien mat khau OneBSS.")
+        emit_onebss_progress(progress_callback, "Dang gui thong tin dang nhap den OneBSS.")
         with httpx.Client(timeout=onebss_api_timeout(settings, minimum_seconds=30)) as client:
             response = client.post(
                 f"{ONEBSS_API_BASE_URL}/quantri/user/xacthuc_tapdoan_v2",
@@ -456,7 +492,10 @@ def start_onebss_api_session(
     data = parse_onebss_json_response(response)
     secret_code = str(((data.get("data") if isinstance(data, dict) else {}) or {}).get("secretCode") or "").strip()
     if response.status_code == 200 and secret_code:
+        emit_onebss_progress(progress_callback, "OneBSS da chap nhan tai khoan/mat khau.")
+        emit_onebss_progress(progress_callback, "Da gui OTP ve dien thoai.")
         pending = keep_onebss_api_session(secret_code, report, parameters, username, mobile_id, device_id, created_by)
+        emit_onebss_progress(progress_callback, "Dang cho he thong bat tin nhan OTP.")
         return start_onebss_otp_mobile_gateway_request(
             settings,
             pending.session_id,
@@ -479,6 +518,8 @@ def continue_onebss_api_session(
     session_id: str,
     otp: str,
     parameters: dict[str, Any],
+    *,
+    progress_callback: OneBssProgressCallback | None = None,
 ) -> dict[str, Any]:
     pending = get_onebss_api_session(session_id)
     if not pending:
@@ -488,6 +529,9 @@ def continue_onebss_api_session(
 
     effective_parameters = parameters if parameters else pending.parameters
     try:
+        emit_onebss_progress(progress_callback, "Da nhan duoc OTP.")
+        emit_onebss_progress(progress_callback, "Da dien OTP vao OneBSS.")
+        emit_onebss_progress(progress_callback, "Dang xac thuc OTP voi OneBSS.")
         with httpx.Client(timeout=onebss_api_timeout(settings, minimum_seconds=30)) as client:
             response = client.post(
                 f"{ONEBSS_API_BASE_URL}/quantri/oauth/token",
@@ -529,9 +573,10 @@ def continue_onebss_api_session(
         mobile_id=pending.mobile_id,
         device_id=pending.device_id,
     )
+    emit_onebss_progress(progress_callback, "Da dang nhap OneBSS thanh cong.")
     pop_onebss_api_session(session_id)
     try:
-        return finish_onebss_report_download_api(settings, token, pending.report, effective_parameters)
+        return finish_onebss_report_download_api(settings, token, pending.report, effective_parameters, progress_callback=progress_callback)
     except Exception as error:
         logger.exception("Cannot finish OneBSS API report request")
         return {"ok": False, "status": "failed", "message": str(error)[:1000], "parameters": effective_parameters}
@@ -543,6 +588,7 @@ def start_onebss_report_session(
     parameters: dict[str, Any],
     *,
     created_by: str = "",
+    progress_callback: OneBssProgressCallback | None = None,
 ) -> dict[str, Any]:
     report_url = normalize_onebss_report_url(report.get("report_url"))
     username = str(getattr(settings, "onebss_username", "") or "").strip()
@@ -580,6 +626,7 @@ def start_onebss_report_session(
         page.set_default_timeout(30000)
         page.set_default_navigation_timeout(30000)
         helper = OneBssReportDownloader(settings)
+        emit_onebss_progress(progress_callback, "Dang mo trang bao cao OneBSS.")
         goto_onebss_page(page, report_url, step="open_report")
         wait_for_onebss_network_quiet(page, timeout_ms=8000, pause_ms=1000)
         if helper._is_login_page(page):
@@ -593,6 +640,10 @@ def start_onebss_report_session(
                 }
             username_filled = helper._fill_first(page, ["input[name='username']", "input[placeholder*='Tài khoản']", "input[placeholder*='Tên']", "input[type='text']"], username)
             password_filled = helper._fill_first(page, ["input[name='password']", "input[placeholder*='Mật khẩu']", "input[type='password']"], password)
+            if username_filled:
+                emit_onebss_progress(progress_callback, "Da dien tai khoan OneBSS.")
+            if password_filled:
+                emit_onebss_progress(progress_callback, "Da dien mat khau OneBSS.")
             if not username_filled or not password_filled:
                 close_browser_stack(browser, context, playwright)
                 return {
@@ -602,8 +653,10 @@ def start_onebss_report_session(
                     "parameters": parameters,
                 }
             click_onebss_button(page, helper, ["Đăng nhập", "Dang nhap", "Login"])
+            emit_onebss_progress(progress_callback, "Da bam Dang nhap OneBSS, dang cho phan hoi.")
             wait_for_onebss_auth_transition(page, helper, timeout_ms=30000)
             if page_contains(page, OTP_TEXT_NEEDLES):
+                emit_onebss_progress(progress_callback, "Da gui OTP ve dien thoai.")
                 pending = keep_onebss_session(playwright, browser, context, page, report, parameters, created_by)
                 return start_onebss_otp_mobile_gateway_request(
                     settings,
@@ -622,7 +675,8 @@ def start_onebss_report_session(
             if helper._is_login_page(page):
                 close_browser_stack(browser, context, playwright)
                 return {"ok": False, "status": "login_failed", "message": onebss_login_failed_message(page), "parameters": parameters}
-        result = finish_onebss_report_download(settings, helper, context, page, report, parameters)
+        emit_onebss_progress(progress_callback, "Da dang nhap OneBSS thanh cong.")
+        result = finish_onebss_report_download(settings, helper, context, page, report, parameters, progress_callback=progress_callback)
         close_browser_stack(browser, context, playwright)
         return result
     except Exception as error:
@@ -636,6 +690,8 @@ def continue_onebss_report_session(
     session_id: str,
     otp: str,
     parameters: dict[str, Any],
+    *,
+    progress_callback: OneBssProgressCallback | None = None,
 ) -> dict[str, Any]:
     pending = get_onebss_session(session_id)
     if not pending:
@@ -648,8 +704,11 @@ def continue_onebss_report_session(
     helper = OneBssReportDownloader(settings)
     try:
         pending.parameters = parameters if parameters else pending.parameters
+        emit_onebss_progress(progress_callback, "Da nhan duoc OTP.")
         helper._fill_otp(page, str(otp).strip())
+        emit_onebss_progress(progress_callback, "Da dien OTP vao OneBSS.")
         click_onebss_button(page, helper, ["Xác nhận", "Xac nhan", "Gửi yêu cầu", "Gui yeu cau", "Đăng nhập", "Dang nhap"])
+        emit_onebss_progress(progress_callback, "Dang xac thuc OTP voi OneBSS.")
         wait_for_onebss_auth_transition(page, helper, timeout_ms=30000)
         if page_contains(page, OTP_INVALID_TEXT_NEEDLES):
             return {
@@ -672,9 +731,11 @@ def continue_onebss_report_session(
             return {"ok": False, "status": "login_failed", "message": onebss_login_failed_message(page), "parameters": pending.parameters}
         report_url = normalize_onebss_report_url(pending.report.get("report_url"))
         if page.url != report_url:
+            emit_onebss_progress(progress_callback, "Dang di den bao cao OneBSS.")
             goto_onebss_page(page, report_url, step="open_report_after_otp")
             wait_for_onebss_network_quiet(page, timeout_ms=8000, pause_ms=1000)
-        result = finish_onebss_report_download(settings, helper, context, page, pending.report, pending.parameters)
+        emit_onebss_progress(progress_callback, "Da dang nhap OneBSS thanh cong.")
+        result = finish_onebss_report_download(settings, helper, context, page, pending.report, pending.parameters, progress_callback=progress_callback)
         pop_onebss_session(session_id)
         close_browser_stack(pending.browser, pending.context, pending.playwright)
         return result
@@ -690,28 +751,39 @@ def finish_onebss_report_download_api(
     token: OneBssApiToken,
     report: dict[str, Any],
     parameters: dict[str, Any],
+    *,
+    progress_callback: OneBssProgressCallback | None = None,
 ) -> dict[str, Any]:
     started = time.monotonic()
     report_url = normalize_onebss_report_url(report.get("report_url"))
+    emit_onebss_progress(progress_callback, "Da di den bao cao OneBSS.")
     schedule_like = {
         "report_url": report_url,
         "storage_link": report.get("storage_link") or "",
         "file_name_template": report.get("ten_bao_cao") or report.get("ma_bao_cao") or "",
     }
     parameter_runs, merge_config, each_keys = build_onebss_parameter_runs(parameters)
+    if len(parameter_runs) > 1:
+        emit_onebss_progress(progress_callback, f"Da tach tham so thanh {len(parameter_runs)} luot chay.")
+    else:
+        emit_onebss_progress(progress_callback, f"Da truyen tham so: {onebss_parameter_progress_label(parameter_runs[0].parameters)}.")
     downloaded_files: list[OneBssDownloadedFile] = []
     temporary_files: list[Path] = []
     try:
         if len(parameter_runs) == 1:
+            emit_onebss_progress(progress_callback, "Dang lay du lieu bao cao OneBSS.")
             downloaded = download_onebss_report_file_api(
                 settings,
                 token,
                 report,
                 parameter_runs[0].parameters,
                 source_values=parameter_runs[0].source_values,
+                progress_callback=progress_callback,
             )
             downloaded_files.append(downloaded)
             target_file = downloaded.file_path
+            emit_onebss_progress(progress_callback, "Da tai file bao cao OneBSS.")
+            emit_onebss_progress(progress_callback, "Dang luu/upload file ket qua.")
             storage_result = save_downloaded_file(settings, target_file, str(report.get("storage_link") or ""))
             ok = bool(storage_result.get("ok", True))
             export_info = downloaded.export_info
@@ -733,6 +805,10 @@ def finish_onebss_report_download_api(
         for index, parameter_run in enumerate(parameter_runs, start=1):
             target_file = build_onebss_temp_file_path(settings, index)
             temporary_files.append(target_file)
+            emit_onebss_progress(
+                progress_callback,
+                f"Dang truyen tham so luot {index}/{len(parameter_runs)}: {onebss_parameter_progress_label(parameter_run.parameters)}.",
+            )
             downloaded_files.append(
                 download_onebss_report_file_api(
                     settings,
@@ -741,8 +817,10 @@ def finish_onebss_report_download_api(
                     parameter_run.parameters,
                     target_file=target_file,
                     source_values=parameter_run.source_values,
+                    progress_callback=progress_callback,
                 )
             )
+            emit_onebss_progress(progress_callback, f"Da tai file luot {index}/{len(parameter_runs)}.")
 
         return finalize_onebss_multiple_downloads(
             settings,
@@ -753,6 +831,7 @@ def finish_onebss_report_download_api(
             merge_config,
             each_keys,
             started,
+            progress_callback=progress_callback,
         )
     finally:
         for temporary_file in temporary_files:
@@ -770,6 +849,7 @@ def download_onebss_report_file_api(
     *,
     target_file: Path | None = None,
     source_values: dict[str, Any] | None = None,
+    progress_callback: OneBssProgressCallback | None = None,
 ) -> OneBssDownloadedFile:
     download_source = str(
         parameters.get("$download_source")
@@ -778,6 +858,7 @@ def download_onebss_report_file_api(
     ).strip().lower()
     if download_source in {"excel", "export", "run_v5", "xlsx"}:
         try:
+            emit_onebss_progress(progress_callback, "Dang yeu cau OneBSS xuat file Excel.")
             return download_onebss_export_file_api(
                 settings,
                 token,
@@ -785,6 +866,7 @@ def download_onebss_report_file_api(
                 parameters,
                 target_file=target_file,
                 source_values=source_values,
+                progress_callback=progress_callback,
             )
         except OneBssDownloadError as error:
             if "405" not in str(error) and "method not allowed" not in str(error).lower():
@@ -797,9 +879,11 @@ def download_onebss_report_file_api(
             parameters,
             target_file=target_file,
             source_values=source_values,
+            progress_callback=progress_callback,
         )
     if download_source in {"grid", "run_v7", "json", ""}:
         try:
+            emit_onebss_progress(progress_callback, "Dang yeu cau OneBSS tra du lieu luoi.")
             return download_onebss_grid_file_api(
                 settings,
                 token,
@@ -807,6 +891,7 @@ def download_onebss_report_file_api(
                 parameters,
                 target_file=target_file,
                 source_values=source_values,
+                progress_callback=progress_callback,
             )
         except OneBssDownloadError as error:
             if not should_fallback_to_onebss_excel_export(error):
@@ -819,6 +904,7 @@ def download_onebss_report_file_api(
         parameters,
         target_file=target_file,
         source_values=source_values,
+        progress_callback=progress_callback,
     )
 
 
@@ -862,6 +948,7 @@ def download_onebss_grid_file_api(
     *,
     target_file: Path | None = None,
     source_values: dict[str, Any] | None = None,
+    progress_callback: OneBssProgressCallback | None = None,
 ) -> OneBssDownloadedFile:
     report_url = normalize_onebss_report_url(report.get("report_url"))
     report_id = onebss_report_id(report, parameters, token)
@@ -871,6 +958,8 @@ def download_onebss_grid_file_api(
     payload = {"baocao_id": report_id, "params": export_params}
     timeout = onebss_api_timeout(settings, minimum_seconds=ONEBSS_EXPORT_TIMEOUT_SECONDS)
     try:
+        emit_onebss_progress(progress_callback, f"Da truyen tham so len OneBSS: {onebss_parameter_progress_label(export_params)}.")
+        emit_onebss_progress(progress_callback, "Dang cho OneBSS tra du lieu bao cao.")
         with httpx.Client(timeout=timeout) as client:
             response = client.post(
                 f"{ONEBSS_API_BASE_URL}/web-report/report/bi/run_v7",
@@ -890,6 +979,7 @@ def download_onebss_grid_file_api(
     rows = onebss_grid_rows(data, response)
     if not rows:
         raise OneBssDownloadError("OneBSS run_v7 grid khong co du lieu; fallback sang export Excel truc tiep.")
+    emit_onebss_progress(progress_callback, f"Da nhan {len(rows)} dong du lieu tu OneBSS.")
     suggested_filename = f"onebss_grid_{report_id}.xlsx"
     if target_file is None:
         schedule_like = {
@@ -903,7 +993,9 @@ def download_onebss_grid_file_api(
             suggested_filename=suggested_filename,
             report_title=str(report.get("ten_bao_cao") or ""),
         )
+    emit_onebss_progress(progress_callback, "Dang ghi du lieu ra file Excel.")
     write_onebss_grid_excel(rows, target_file, sheet_name="DATA")
+    emit_onebss_progress(progress_callback, "Da ghi xong file Excel.")
     return OneBssDownloadedFile(
         file_path=target_file,
         suggested_filename=suggested_filename,
@@ -928,6 +1020,7 @@ def download_onebss_export_file_api(
     *,
     target_file: Path | None = None,
     source_values: dict[str, Any] | None = None,
+    progress_callback: OneBssProgressCallback | None = None,
 ) -> OneBssDownloadedFile:
     report_url = normalize_onebss_report_url(report.get("report_url"))
     report_id = onebss_report_id(report, parameters, token)
@@ -936,6 +1029,8 @@ def download_onebss_export_file_api(
     headers = {**onebss_api_auth_headers(token), "apiKey": "x"}
     timeout = onebss_api_timeout(settings, minimum_seconds=ONEBSS_EXPORT_TIMEOUT_SECONDS)
     try:
+        emit_onebss_progress(progress_callback, f"Da truyen tham so len OneBSS: {onebss_parameter_progress_label(export_params)}.")
+        emit_onebss_progress(progress_callback, "Dang cho OneBSS tao file Excel.")
         with httpx.Client(timeout=timeout) as client:
             response = client.post(
                 f"{ONEBSS_API_BASE_URL}/web-report/report/bi/run_v5",
@@ -953,6 +1048,7 @@ def download_onebss_export_file_api(
         raise OneBssDownloadError(f"Khong goi duoc API xuat OneBSS: {error}") from error
 
     ensure_onebss_file_response(response)
+    emit_onebss_progress(progress_callback, "Da nhan file Excel tu OneBSS.")
     suggested_filename = onebss_response_filename(response, fallback=f"onebss_{report_id}.xlsx")
     if target_file is None:
         schedule_like = {
@@ -968,6 +1064,7 @@ def download_onebss_export_file_api(
         )
     target_file.parent.mkdir(parents=True, exist_ok=True)
     target_file.write_bytes(response.content)
+    emit_onebss_progress(progress_callback, "Da luu file Excel ve may tram.")
     return OneBssDownloadedFile(
         file_path=target_file,
         suggested_filename=suggested_filename,
@@ -989,19 +1086,27 @@ def finish_onebss_report_download(
     page: Any,
     report: dict[str, Any],
     parameters: dict[str, Any],
+    *,
+    progress_callback: OneBssProgressCallback | None = None,
 ) -> dict[str, Any]:
     started = time.monotonic()
     report_url = normalize_onebss_report_url(report.get("report_url"))
+    emit_onebss_progress(progress_callback, "Da di den bao cao OneBSS.")
     schedule_like = {
         "report_url": report_url,
         "storage_link": report.get("storage_link") or "",
         "file_name_template": report.get("ten_bao_cao") or report.get("ma_bao_cao") or "",
     }
     parameter_runs, merge_config, each_keys = build_onebss_parameter_runs(parameters)
+    if len(parameter_runs) > 1:
+        emit_onebss_progress(progress_callback, f"Da tach tham so thanh {len(parameter_runs)} luot chay.")
+    else:
+        emit_onebss_progress(progress_callback, f"Da truyen tham so: {onebss_parameter_progress_label(parameter_runs[0].parameters)}.")
     downloaded_files: list[OneBssDownloadedFile] = []
     temporary_files: list[Path] = []
     try:
         if len(parameter_runs) == 1:
+            emit_onebss_progress(progress_callback, "Dang truyen tham so va tai file OneBSS.")
             downloaded = download_onebss_report_file(
                 settings,
                 helper,
@@ -1009,9 +1114,12 @@ def finish_onebss_report_download(
                 report,
                 parameter_runs[0].parameters,
                 source_values=parameter_runs[0].source_values,
+                progress_callback=progress_callback,
             )
             downloaded_files.append(downloaded)
             target_file = downloaded.file_path
+            emit_onebss_progress(progress_callback, "Da tai file bao cao OneBSS.")
+            emit_onebss_progress(progress_callback, "Dang luu/upload file ket qua.")
             storage_result = save_downloaded_file(settings, target_file, str(report.get("storage_link") or ""))
             context.storage_state(path=str(ONEBSS_STATE_PATH))
             ok = bool(storage_result.get("ok", True))
@@ -1034,6 +1142,10 @@ def finish_onebss_report_download(
         for index, parameter_run in enumerate(parameter_runs, start=1):
             target_file = build_onebss_temp_file_path(settings, index)
             temporary_files.append(target_file)
+            emit_onebss_progress(
+                progress_callback,
+                f"Dang truyen tham so luot {index}/{len(parameter_runs)}: {onebss_parameter_progress_label(parameter_run.parameters)}.",
+            )
             downloaded_files.append(
                 download_onebss_report_file(
                     settings,
@@ -1043,8 +1155,10 @@ def finish_onebss_report_download(
                     parameter_run.parameters,
                     target_file=target_file,
                     source_values=parameter_run.source_values,
+                    progress_callback=progress_callback,
                 )
             )
+            emit_onebss_progress(progress_callback, f"Da tai file luot {index}/{len(parameter_runs)}.")
 
         context.storage_state(path=str(ONEBSS_STATE_PATH))
         return finalize_onebss_multiple_downloads(
@@ -1056,6 +1170,7 @@ def finish_onebss_report_download(
             merge_config,
             each_keys,
             started,
+            progress_callback=progress_callback,
         )
     finally:
         for temporary_file in temporary_files:
@@ -1074,10 +1189,14 @@ def download_onebss_report_file(
     *,
     target_file: Path | None = None,
     source_values: dict[str, Any] | None = None,
+    progress_callback: OneBssProgressCallback | None = None,
 ) -> OneBssDownloadedFile:
     report_url = normalize_onebss_report_url(report.get("report_url"))
+    emit_onebss_progress(progress_callback, "Dang doi thanh phan bao cao OneBSS san sang.")
     page.wait_for_function(REPORT_COMPONENT_READY_SCRIPT, timeout=90000)
     export_info: dict[str, Any] = {}
+    emit_onebss_progress(progress_callback, f"Da truyen tham so len OneBSS: {onebss_parameter_progress_label(parameters)}.")
+    emit_onebss_progress(progress_callback, "Dang bam xuat file tren OneBSS.")
     with page.expect_download(timeout=helper.timeout_ms) as download_info:
         export_info = page.evaluate(EXPORT_DIRECT_SCRIPT, parameters)
     download = download_info.value
@@ -1096,7 +1215,9 @@ def download_onebss_report_file(
             report_title=str(export_info.get("title") or report.get("ten_bao_cao") or ""),
         )
     target_file.parent.mkdir(parents=True, exist_ok=True)
+    emit_onebss_progress(progress_callback, "Dang luu file OneBSS ve may tram.")
     download.save_as(str(target_file))
+    emit_onebss_progress(progress_callback, "Da luu file OneBSS ve may tram.")
     return OneBssDownloadedFile(
         file_path=target_file,
         suggested_filename=str(download.suggested_filename or target_file.name),
@@ -1558,9 +1679,12 @@ def finalize_onebss_multiple_downloads(
     merge_config: dict[str, Any],
     each_keys: list[str],
     started: float,
+    *,
+    progress_callback: OneBssProgressCallback | None = None,
 ) -> dict[str, Any]:
     first_export = downloaded_files[0].export_info if downloaded_files else {}
     if should_merge_onebss_excel_parts(merge_config):
+        emit_onebss_progress(progress_callback, f"Dang gop {len(downloaded_files)} file OneBSS thanh 1 file.")
         target_file = build_target_file_path(
             settings,
             schedule_like,
@@ -1568,10 +1692,12 @@ def finalize_onebss_multiple_downloads(
             report_title=str(first_export.get("title") or report.get("ten_bao_cao") or ""),
         )
         merge_onebss_excel_files(downloaded_files, target_file, merge_config, each_keys)
+        emit_onebss_progress(progress_callback, "Da gop xong file OneBSS.")
         result_kind = "merged"
         result_count_key = "merged_file_count"
         result_message = f"Da tai va gop {len(downloaded_files)} file OneBSS thanh 1 file."
     else:
+        emit_onebss_progress(progress_callback, f"Dang dong goi {len(downloaded_files)} file OneBSS.")
         target_file = build_target_file_path(
             settings,
             schedule_like,
@@ -1579,10 +1705,12 @@ def finalize_onebss_multiple_downloads(
             report_title=str(first_export.get("title") or report.get("ten_bao_cao") or ""),
         )
         archive_onebss_downloaded_files(downloaded_files, target_file, each_keys)
+        emit_onebss_progress(progress_callback, "Da dong goi xong file OneBSS.")
         result_kind = "split_archive"
         result_count_key = "split_file_count"
         result_message = f"Da tai {len(downloaded_files)} file OneBSS rieng va dong goi thanh 1 file zip."
 
+    emit_onebss_progress(progress_callback, "Dang luu/upload file ket qua.")
     storage_result = save_downloaded_file(settings, target_file, str(report.get("storage_link") or ""))
     ok = bool(storage_result.get("ok", True))
     status = "success" if ok else str(storage_result.get("status") or "storage_failed")

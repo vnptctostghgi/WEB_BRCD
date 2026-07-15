@@ -15,11 +15,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.application.onebss_report_service import run_onebss_report_request
+from app.application.onebss_report_service import OneBssProgressCancelled, run_onebss_report_request
 from app.settings import get_settings
 
 
-class OneBssTaskCancelled(Exception):
+class OneBssTaskCancelled(OneBssProgressCancelled):
     pass
 
 
@@ -34,13 +34,21 @@ def request_json(client: httpx.Client, method: str, path: str, **kwargs: Any) ->
     return data if isinstance(data, dict) else {"ok": True, "data": data}
 
 
-def wait_for_otp(client: httpx.Client, run_id: str, poll_seconds: float) -> str:
+def wait_for_otp(client: httpx.Client, run_id: str, poll_seconds: float, progress_callback=None) -> str:
+    if progress_callback:
+        progress_callback("Dang doi OTP tu tin nhan/Mobile Gateway.")
+    last_notice = time.monotonic()
     while True:
         data = request_json(client, "GET", f"/api/onebss-worker/tasks/{run_id}/otp")
         if response_is_cancelled(data):
             raise OneBssTaskCancelled(str(data.get("message") or "Task OneBSS da bi huy."))
         if data.get("ok") and data.get("otp"):
+            if progress_callback:
+                progress_callback("Da nhan duoc OTP tu Mobile Gateway.")
             return str(data["otp"])
+        if progress_callback and time.monotonic() - last_notice >= 30:
+            progress_callback(str(data.get("message") or "Dang doi OTP tu tin nhan/Mobile Gateway."))
+            last_notice = time.monotonic()
         time.sleep(poll_seconds)
 
 
@@ -110,16 +118,22 @@ def upload_result_file(client: httpx.Client, run_id: str, file_path: str) -> dic
     return uploaded if isinstance(uploaded, dict) else {}
 
 
-def attach_worker_file_if_needed(client: httpx.Client, run_id: str, result: dict[str, Any], drive_folder_id: str = "") -> dict[str, Any]:
+def attach_worker_file_if_needed(client: httpx.Client, run_id: str, result: dict[str, Any], drive_folder_id: str = "", progress_callback=None) -> dict[str, Any]:
     storage_status = str(result.get("storage_status") or "").lower()
     if storage_status.startswith("uploaded_google_drive:"):
         return result
     try:
+        if drive_folder_id and progress_callback:
+            progress_callback("Dang upload file len Google Drive qua API trung gian.")
         drive_uploaded = upload_result_file_to_internal_drive(str(result.get("file_path") or ""), drive_folder_id)
     except Exception as error:
         print(f"Cannot upload OneBSS result to Drive through internal API: {error}", file=sys.stderr)
+        if progress_callback:
+            progress_callback("Upload Google Drive qua API trung gian loi, dang gui file ve web.")
         drive_uploaded = {}
     if drive_uploaded:
+        if progress_callback:
+            progress_callback("Da upload file len Google Drive.")
         merged = {**result}
         for key in ("file_name", "storage_link", "storage_status"):
             if drive_uploaded.get(key):
@@ -128,9 +142,13 @@ def attach_worker_file_if_needed(client: httpx.Client, run_id: str, result: dict
         merged["status"] = "success"
         merged["message"] = drive_uploaded.get("message") or "Da upload file OneBSS len Google Drive qua API trung gian."
         return merged
+    if progress_callback:
+        progress_callback("Dang gui file ket qua ve web de co link tai xuong.")
     uploaded = upload_result_file(client, run_id, str(result.get("file_path") or ""))
     if not uploaded:
         return result
+    if progress_callback:
+        progress_callback("Da gui file ket qua ve web.")
     merged = {**result}
     for key in ("file_name", "file_path", "storage_link", "storage_status"):
         if uploaded.get(key):
@@ -157,8 +175,33 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
     session_id = ""
     otp = ""
     started = time.monotonic()
+    last_progress = {"message": "", "at": 0.0}
+
+    def send_progress(message: str, status: str = "running") -> None:
+        text = str(message or "").strip()
+        if not text:
+            return
+        now = time.monotonic()
+        if text == last_progress["message"] and now - float(last_progress["at"] or 0) < 3:
+            return
+        last_progress["message"] = text
+        last_progress["at"] = now
+        data = request_json(
+            client,
+            "POST",
+            f"/api/onebss-worker/tasks/{run_id}/status",
+            json={
+                "status": status,
+                "message": text,
+                "worker_id": worker_id,
+                "worker_session_id": session_id,
+            },
+        )
+        if response_is_cancelled(data):
+            raise OneBssTaskCancelled(str(data.get("message") or "Task OneBSS da bi huy."))
 
     try:
+        send_progress("May tram da nhan task OneBSS. Dang khoi tao phien chay.")
         while True:
             result = run_onebss_report_request(
                 settings,
@@ -167,6 +210,7 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
                 otp=otp,
                 session_id=session_id,
                 created_by=worker_id,
+                progress_callback=send_progress,
             )
             status = str(result.get("status") or ("success" if result.get("ok") else "failed")).lower()
             if status in {"otp_required", "otp_invalid", "manual_otp_required"} and result.get("session_id"):
@@ -184,11 +228,12 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
                 )
                 if response_is_cancelled(status_response):
                     return
-                otp = wait_for_otp(client, run_id, poll_seconds)
+                otp = wait_for_otp(client, run_id, poll_seconds, lambda message: send_progress(message, status))
                 continue
 
             duration_ms = int((time.monotonic() - started) * 1000)
-            result = attach_worker_file_if_needed(client, run_id, result, drive_folder_id)
+            send_progress("Da hoan thanh buoc lay du lieu OneBSS. Dang xu ly file ket qua.")
+            result = attach_worker_file_if_needed(client, run_id, result, drive_folder_id, send_progress)
             status = str(result.get("status") or ("success" if result.get("ok") else "failed")).lower()
             finish_response = request_json(
                 client,
