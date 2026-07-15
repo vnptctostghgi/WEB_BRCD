@@ -2018,8 +2018,11 @@ def save_admin_onebss_report(request: Request, payload: OneBssReportPayload) -> 
     except sqlite3.IntegrityError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ma bao cao OneBSS da ton tai.") from error
     except RuntimeError as error:
-        raise_onebss_report_schema_error(error)
-    repository.add_audit_log(actor["username"], "onebss_report_saved", f"Luu cau hinh OneBSS {ma_bao_cao}")
+        raise_onebss_operation_error(error, "Khong luu duoc cau hinh OneBSS")
+    try:
+        repository.add_audit_log(actor["username"], "onebss_report_saved", f"Luu cau hinh OneBSS {ma_bao_cao}")
+    except Exception:
+        logger.exception("Cannot write OneBSS report saved audit log")
     return {"ok": True, "id": report_id, "ma_bao_cao": ma_bao_cao}
 
 

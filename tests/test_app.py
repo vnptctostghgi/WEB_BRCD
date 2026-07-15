@@ -1643,6 +1643,52 @@ def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
         assert post_clear.json()["deleted"] == 0
 
 
+def test_save_onebss_report_ignores_audit_log_failure(monkeypatch) -> None:
+    class FakeRepository:
+        def get_user_by_id(self, user_id):
+            return {"id": user_id, "username": "admin", "full_name": "Admin", "role": "admin", "is_active": True}
+
+        def get_user_permissions(self, user_id):
+            return []
+
+        def generate_onebss_report_code(self):
+            return "ONEBSS9999"
+
+        def save_onebss_report(self, *args, **kwargs):
+            self.saved_args = args
+            return 123
+
+        def add_audit_log(self, *args, **kwargs):
+            raise RuntimeError("audit_logs unavailable")
+
+    repository = FakeRepository()
+
+    with TestClient(app) as client:
+        login(client)
+        monkeypatch.setattr(routes, "build_app_repository", lambda: repository)
+        response = client.post(
+            "/api/admin/onebss-reports",
+            json={
+                "ma_bao_cao": "MYTV_KTT",
+                "ten_bao_cao": "DS MyTV không tương tác",
+                "danh_sach_bien": ["p_phanvung_id", "p_nhanvienkd_id"],
+                "parameters": {
+                    "p_phanvung_id": {"$each": ["13", "47", "66"]},
+                    "p_nhanvienkd_id": "0",
+                    "$merge_excel": {"sheet": "DATA", "source_column": "p_phanvung_id"},
+                },
+                "otp_service_code": "onebss",
+                "report_url": "https://onebss.vnpt.vn/#/report/bi?path=KHAC%2FBRCD%2FRP_BSS_107195&name=Test",
+                "storage_link": "https://drive.google.com/drive/folders/test-folder",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == 123
+    assert repository.saved_args[1] == "MYTV_KTT"
+    assert repository.saved_args[4]["p_phanvung_id"]["$each"] == ["13", "47", "66"]
+
+
 def test_onebss_login_deviceid_screen_requests_otp() -> None:
     from app.application.onebss_report_service import (
         handle_onebss_otp_request,
