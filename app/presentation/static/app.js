@@ -532,6 +532,7 @@ async function activateNavItem(item, options = {}) {
   item.classList.add("active");
   openNavParents(item);
   const activeView = setActiveAppView(nextView);
+  document.body.classList.remove("app-booting");
   const moduleTitle = $("#module-title");
   if (moduleTitle) moduleTitle.textContent = item.dataset.title || item.textContent.trim();
   $("#sidebar").classList.remove("menu-open");
@@ -1958,6 +1959,8 @@ async function syncNavigationFromFeatures() {
     }
     filterNavigation($("#menu-search")?.value || "");
   } catch {
+    await activateNavForCurrentPath();
+    document.body.classList.remove("app-booting");
     // Nếu API layout chưa sẵn sàng, sidebar vẫn dùng cấu trúc tĩnh đã render từ server.
   }
 }
