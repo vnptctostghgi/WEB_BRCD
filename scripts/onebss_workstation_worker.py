@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import mimetypes
 import os
 import sys
@@ -33,6 +34,54 @@ def wait_for_otp(client: httpx.Client, run_id: str, poll_seconds: float) -> str:
         time.sleep(poll_seconds)
 
 
+def internal_drive_upload_api_url() -> str:
+    return (
+        os.getenv("ONEBSS_DRIVE_UPLOAD_API_URL", "").strip()
+        or os.getenv("INTERNAL_API_URL", "").strip()
+        or "https://api.vnptcto.com/api/du-lieu-web"
+    )
+
+
+def upload_result_file_to_internal_drive(file_path: str, drive_folder_id: str) -> dict[str, Any]:
+    folder_id = str(drive_folder_id or "").strip()
+    if not folder_id:
+        return {}
+    source = Path(str(file_path or ""))
+    if not source.exists() or not source.is_file() or source.stat().st_size <= 0:
+        return {}
+    api_url = internal_drive_upload_api_url()
+    token = os.getenv("INTERNAL_API_TOKEN", "").strip()
+    if not api_url or not token:
+        return {}
+    mime_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+    payload = {
+        "action": "upload_file_to_drive",
+        "source": "onebss-worker",
+        "file_name": source.name,
+        "file_base64": base64.b64encode(source.read_bytes()).decode("ascii"),
+        "content_type": mime_type,
+        "drive_folder_id": folder_id,
+    }
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    timeout_seconds = float(os.getenv("ONEBSS_DRIVE_UPLOAD_TIMEOUT_SECONDS", "300") or "300")
+    with httpx.Client(timeout=httpx.Timeout(timeout_seconds, connect=20.0)) as internal_client:
+        response = internal_client.post(api_url, json=payload, headers=headers)
+    response.raise_for_status()
+    data = response.json()
+    if not isinstance(data, dict) or not data.get("ok"):
+        return {}
+    drive_url = str(data.get("drive_url") or data.get("storage_link") or data.get("web_view_link") or data.get("web_content_link") or "").strip()
+    if not drive_url:
+        return {}
+    file_id = str(data.get("file_id") or "").strip()
+    return {
+        "file_name": str(data.get("file_name") or source.name),
+        "storage_link": drive_url,
+        "storage_status": f"uploaded_google_drive:{file_id}" if file_id else "uploaded_google_drive",
+        "message": str(data.get("message") or "Da upload file OneBSS len Google Drive qua API trung gian."),
+    }
+
+
 def upload_result_file(client: httpx.Client, run_id: str, file_path: str) -> dict[str, Any]:
     source = Path(str(file_path or ""))
     if not source.exists() or not source.is_file() or source.stat().st_size <= 0:
@@ -49,10 +98,24 @@ def upload_result_file(client: httpx.Client, run_id: str, file_path: str) -> dic
     return uploaded if isinstance(uploaded, dict) else {}
 
 
-def attach_worker_file_if_needed(client: httpx.Client, run_id: str, result: dict[str, Any]) -> dict[str, Any]:
+def attach_worker_file_if_needed(client: httpx.Client, run_id: str, result: dict[str, Any], drive_folder_id: str = "") -> dict[str, Any]:
     storage_status = str(result.get("storage_status") or "").lower()
     if storage_status.startswith("uploaded_google_drive:"):
         return result
+    try:
+        drive_uploaded = upload_result_file_to_internal_drive(str(result.get("file_path") or ""), drive_folder_id)
+    except Exception as error:
+        print(f"Cannot upload OneBSS result to Drive through internal API: {error}", file=sys.stderr)
+        drive_uploaded = {}
+    if drive_uploaded:
+        merged = {**result}
+        for key in ("file_name", "storage_link", "storage_status"):
+            if drive_uploaded.get(key):
+                merged[key] = drive_uploaded.get(key)
+        merged["ok"] = True
+        merged["status"] = "success"
+        merged["message"] = drive_uploaded.get("message") or "Da upload file OneBSS len Google Drive qua API trung gian."
+        return merged
     uploaded = upload_result_file(client, run_id, str(result.get("file_path") or ""))
     if not uploaded:
         return result
@@ -76,7 +139,9 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
     run_id = str(task.get("run_id") or "")
     report = task.get("report") if isinstance(task.get("report"), dict) else {}
     parameters = task.get("parameters") if isinstance(task.get("parameters"), dict) else {}
-    settings = get_settings().model_copy(update={"mobile_gateway_enabled": False})
+    drive_folder_id = str(task.get("drive_folder_id") or "").strip()
+    report_for_worker = {**report, "storage_link": ""}
+    settings = get_settings().model_copy(update={"mobile_gateway_enabled": False, "google_drive_folder_id": ""})
     session_id = ""
     otp = ""
     started = time.monotonic()
@@ -84,7 +149,7 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
     while True:
         result = run_onebss_report_request(
             settings,
-            report,
+            report_for_worker,
             parameters,
             otp=otp,
             session_id=session_id,
@@ -108,7 +173,7 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
             continue
 
         duration_ms = int((time.monotonic() - started) * 1000)
-        result = attach_worker_file_if_needed(client, run_id, result)
+        result = attach_worker_file_if_needed(client, run_id, result, drive_folder_id)
         status = str(result.get("status") or ("success" if result.get("ok") else "failed")).lower()
         request_json(
             client,

@@ -581,6 +581,55 @@ def test_admin_can_manage_zalo_auto_messages_and_captures(monkeypatch) -> None:
         get_settings.cache_clear()
 
 
+def test_active_zalo_auto_message_requires_one_target() -> None:
+    with TestClient(app) as client:
+        login(client)
+        no_target = client.post(
+            "/api/admin/zalo/auto-messages",
+            json={
+                "name": "Bao cao chua chon dich",
+                "page_url": "/dashboard",
+                "schedule_type": "Daily",
+                "run_time": "07:00",
+                "target_type": "group",
+                "chat_id": "",
+                "is_active": True,
+            },
+        )
+        assert no_target.status_code == 400
+        assert "Chua chon" in no_target.json()["detail"]
+
+        many_targets = client.post(
+            "/api/admin/zalo/auto-messages",
+            json={
+                "name": "Bao cao nhieu dich",
+                "page_url": "/dashboard",
+                "schedule_type": "Daily",
+                "run_time": "07:00",
+                "target_type": "person",
+                "chat_id": "chat-a,chat-b",
+                "is_active": True,
+            },
+        )
+        assert many_targets.status_code == 400
+        assert "1 chat_id" in many_targets.json()["detail"]
+
+        disabled_draft = client.post(
+            "/api/admin/zalo/auto-messages",
+            json={
+                "name": "Ban nhap Zalo",
+                "page_url": "/dashboard",
+                "schedule_type": "Daily",
+                "run_time": "07:00",
+                "target_type": "group",
+                "chat_id": "",
+                "is_active": False,
+            },
+        )
+        assert disabled_draft.status_code == 200
+        assert disabled_draft.json()["schedule"]["is_active"] is False
+
+
 def test_zalo_auto_capture_session_cookie_opens_authenticated_page() -> None:
     from app.application.zalo_auto_message_service import signed_capture_session_cookie
 
@@ -711,6 +760,32 @@ def test_zalo_auto_message_scheduler_sends_due_photo(monkeypatch) -> None:
             assert scheduler.check_due_messages(now) == 0
     finally:
         get_settings.cache_clear()
+
+
+def test_zalo_auto_message_requires_explicit_chat_id(monkeypatch) -> None:
+    from app.application import zalo_auto_message_service as service
+
+    refresh_calls = []
+
+    class FakeRepository:
+        def list_audit_logs(self, limit=500):
+            return [{"action": "zalo_message_received", "details": '{"chat_id":"latest-chat"}'}]
+
+    def fake_refresh_schedule_data(repository, settings, schedule):
+        refresh_calls.append(schedule)
+        return {"ok": True}
+
+    monkeypatch.setattr(service, "refresh_schedule_data", fake_refresh_schedule_data)
+    result = service.send_zalo_auto_message(
+        FakeRepository(),
+        get_settings(),
+        {"schedule_id": "ZALOEMPTY", "name": "Bao cao", "chat_id": "", "page_url": "/dashboard"},
+    )
+
+    assert result["ok"] is False
+    assert result["chat_id"] == ""
+    assert "chat_id" in result["message"]
+    assert refresh_calls == []
 
 
 def test_admin_can_manage_data_mining_schedules_and_run_now(monkeypatch) -> None:

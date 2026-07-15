@@ -861,12 +861,25 @@ def validate_zalo_photo_url(value: str) -> str:
     return photo_url
 
 
+def validate_zalo_schedule_target(chat_id: str, is_active: bool) -> str:
+    chat_id = str(chat_id or "").strip()
+    if re.search(r"[\s,;]+", chat_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Moi lich Zalo chi duoc cau hinh 1 chat_id.")
+    if is_active and not chat_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Chua chon ca nhan/nhom Zalo nhan bao cao. Neu chua can gui, hay tat lich truoc khi luu.",
+        )
+    return chat_id
+
+
 def normalize_zalo_auto_message_payload(payload: ZaloAutoMessagePayload, schedule_id: str) -> dict[str, Any]:
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ten lich gui Zalo khong duoc de trong.")
     time_slots = normalize_zalo_time_slots(payload.time_slots)
     run_time = normalize_clock_time(payload.run_time, "Gio gui")
+    chat_id = validate_zalo_schedule_target(payload.chat_id, payload.is_active)
     if payload.schedule_type == "TimeWindow" and not time_slots:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Lich theo khung gio can nhap it nhat mot khung gio.")
     if payload.schedule_type == "Weekly" and not payload.weekday.strip():
@@ -882,7 +895,7 @@ def normalize_zalo_auto_message_payload(payload: ZaloAutoMessagePayload, schedul
         "weekday": payload.weekday.strip(),
         "month_day": min(max(int(payload.month_day or 1), 1), 31),
         "target_type": payload.target_type,
-        "chat_id": payload.chat_id.strip(),
+        "chat_id": chat_id,
         "chat_name": payload.chat_name.strip(),
         "caption": payload.caption.strip(),
         "photo_url": validate_zalo_photo_url(payload.photo_url),

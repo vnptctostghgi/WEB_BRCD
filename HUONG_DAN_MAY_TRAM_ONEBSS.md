@@ -25,7 +25,22 @@ Buoc nay da duoc Codex chay thu thanh cong tren may nay.
 4. De nguyen cua so dang mo.
 5. Tren web vnptcto.com, bam `Lay bao cao`.
 6. Web se dua bao cao vao hang doi, may tram se tu lay task va xuat file.
-7. Khi xong, quay lai lich su tren web va bam link ket qua de mo file.
+7. May tram se uu tien goi API trung gian de upload file len Google Drive giong luong Truy van.
+8. Khi xong, quay lai lich su tren web va bam link ket qua de mo file Drive.
+
+## Luu file len Google Drive
+
+- Khong can bo nho dung chung/Shared Drive neu API trung gian da ket noi Google Drive bang OAuth.
+- API trung gian can co action `upload_file_to_drive`.
+- Neu may tram chua cai action nay, worker van gui file ve web de anh tai xuong tam thoi.
+- Nen dat bien User Environment tren may tram:
+
+```text
+INTERNAL_API_URL=https://api.vnptcto.com/api/du-lieu-web
+ONEBSS_DRIVE_UPLOAD_TIMEOUT_SECONDS=300
+```
+
+`INTERNAL_API_TOKEN` dung chung voi API trung gian hien co.
 
 ## Chay nen de co the dong cua so
 

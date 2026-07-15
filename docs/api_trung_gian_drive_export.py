@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import mimetypes
 import os
 import re
 import tempfile
@@ -235,14 +236,14 @@ def ensure_shared_drive_folder(folder: dict[str, Any]) -> None:
         raise RuntimeError(service_account_quota_message())
 
 
-def upload_to_drive(local_path: Path, file_name: str, folder_id: str) -> dict[str, Any]:
+def upload_to_drive(local_path: Path, file_name: str, folder_id: str, mime_type: str = "") -> dict[str, Any]:
     drive, info = drive_client()
     folder = drive_folder(drive, folder_id)
     if info.get("auth_mode") == "service_account":
         ensure_shared_drive_folder(folder)
     media = MediaFileUpload(
         str(local_path),
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        mimetype=mime_type or mimetypes.guess_type(file_name)[0] or "application/octet-stream",
         resumable=True,
     )
     try:
@@ -271,6 +272,23 @@ def drive_client():
     if google_drive_auth_mode() == "oauth":
         return oauth_drive_client()
     return service_account_drive_client()
+
+
+def payload_file_bytes(payload: dict[str, Any]) -> bytes:
+    encoded = str(
+        payload.get("file_base64")
+        or payload.get("content_base64")
+        or payload.get("data_base64")
+        or ""
+    ).strip()
+    if "," in encoded and encoded.lower().startswith("data:"):
+        encoded = encoded.split(",", 1)[1]
+    if not encoded:
+        raise HTTPException(status_code=400, detail="Thieu file_base64.")
+    try:
+        return base64.b64decode(encoded, validate=True)
+    except Exception as error:
+        raise HTTPException(status_code=400, detail="file_base64 khong hop le.") from error
 
 
 def count_rows(cursor, sql: str, binds: dict[str, Any]) -> int:
@@ -484,6 +502,32 @@ def du_lieu_web(payload: dict[str, Any], authorization: str = Header(default="")
         action = str(payload.get("action") or "").strip()
         if action == "health_check":
             return {"ok": True, "status": "ok"}
+
+        if action in {"upload_file_to_drive", "upload_onebss_file_to_drive"}:
+            folder_id = str(os.getenv("GOOGLE_DRIVE_FOLDER_ID") or payload.get("drive_folder_id") or "").strip()
+            if not folder_id:
+                raise HTTPException(status_code=400, detail="Thieu drive_folder_id.")
+            content = payload_file_bytes(payload)
+            if not content:
+                raise HTTPException(status_code=400, detail="File upload rong.")
+            file_name = safe_file_name(payload.get("file_name") or f"onebss_{datetime.now():%Y%m%d_%H%M%S}.xlsx")
+            content_type = str(payload.get("content_type") or "").strip()
+            export_dir = Path(os.getenv("EXPORT_DIR", str(Path(tempfile.gettempdir()) / "vnptcto_exports")))
+            export_dir.mkdir(parents=True, exist_ok=True)
+            target_path = export_dir / file_name
+            target_path.write_bytes(content)
+            uploaded = upload_to_drive(target_path, file_name, folder_id, content_type)
+            return {
+                "ok": True,
+                "status": "uploaded_google_drive",
+                "message": "Da upload file len Google Drive qua API trung gian.",
+                "file_id": uploaded.get("file_id") or "",
+                "file_name": uploaded.get("file_name") or file_name,
+                "drive_url": uploaded.get("web_view_link") or uploaded.get("web_content_link") or "",
+                "storage_link": uploaded.get("web_view_link") or uploaded.get("web_content_link") or "",
+                "auth_mode": uploaded.get("auth_mode") or "",
+                "folder_name": uploaded.get("folder_name") or "",
+            }
 
         sql = clean_sql(payload.get("cau_lenh_sql") or "")
         binds = payload.get("tham_so") if isinstance(payload.get("tham_so"), dict) else {}

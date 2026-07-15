@@ -2,6 +2,8 @@
 
 Web sẽ gọi action `export_sql_report_to_drive` trên máy trạm. Máy trạm chạy Oracle, tạo file Excel tại chỗ, upload vào thư mục Google Drive, rồi trả link file về web.
 
+OneBSS dùng cùng đường Drive này nhưng không cần Oracle: worker OneBSS tải file báo cáo xong sẽ gọi action `upload_file_to_drive` để API trung gian upload file đó lên Google Drive và trả link về web.
+
 ## Cài trên máy trạm
 
 1. Copy `docs/api_trung_gian_drive_export.py` thành `C:\VNPTCTO\api-trung-gian\main.py`.
@@ -103,6 +105,28 @@ status: ok
 auth_mode: oauth
 drive_type: my_drive
 ```
+
+Khi không có bộ nhớ dùng chung, đây là cấu hình nên dùng cho cả Truy vấn và OneBSS:
+
+```dotenv
+GOOGLE_DRIVE_AUTH_MODE=oauth
+GOOGLE_DRIVE_OAUTH_CLIENT_FILE=C:\VNPTCTO\api-trung-gian\drive-oauth-client.json
+GOOGLE_DRIVE_OAUTH_TOKEN_FILE=C:\VNPTCTO\api-trung-gian\drive-oauth-token.json
+GOOGLE_DRIVE_FOLDER_ID=ID_THU_MUC_MY_DRIVE_HOAC_FOLDER_DUOC_SHARE
+```
+
+OneBSS worker sẽ gọi:
+
+```json
+{
+  "action": "upload_file_to_drive",
+  "file_name": "bao_cao_onebss.xlsx",
+  "file_base64": "...",
+  "drive_folder_id": "ID_THU_MUC_MY_DRIVE_HOAC_FOLDER_DUOC_SHARE"
+}
+```
+
+Action cũ `export_sql_report_to_drive` của Truy vấn vẫn giữ nguyên.
 
 ## Auto run on workstation
 

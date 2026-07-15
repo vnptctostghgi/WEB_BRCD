@@ -348,9 +348,9 @@ def capture_page_screenshot_bytes(repository: Any, settings: Settings, page_url:
 
 
 def send_zalo_auto_message(repository: Any, settings: Settings, schedule: dict[str, Any]) -> dict[str, Any]:
-    chat_id = str(schedule.get("chat_id") or "").strip() or latest_zalo_chat_id_from_logs(repository)
+    chat_id = str(schedule.get("chat_id") or "").strip()
     if not chat_id:
-        return {"ok": False, "message": "Chua co chat_id Zalo de gui lich tu dong.", "chat_id": "", "photo_url": ""}
+        return {"ok": False, "message": "Chua cau hinh chat_id Zalo cho lich gui nay.", "chat_id": "", "photo_url": ""}
     try:
         refresh_result = refresh_schedule_data(repository, settings, schedule)
     except Exception as error:

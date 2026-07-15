@@ -13,6 +13,7 @@ let connections = [];
 let systemRoles = [];
 let workTasks = [];
 let zaloAutoMessages = [];
+let zaloMessageLogs = [];
 let dataMiningSchedules = [];
 let dataMiningRuns = [];
 let oneBssReports = [];
@@ -1169,12 +1170,14 @@ if (role === "admin") {
   });
   $("#mobile-policy-device")?.addEventListener("change", loadMobilePolicy);
   $("#mobile-save-policy")?.addEventListener("click", saveMobilePolicy);
-  $("#refresh-zalo-message-logs")?.addEventListener("click", loadZaloMessageLogs);
+  $("#refresh-zalo-message-logs")?.addEventListener("click", () => loadZaloMessageLogs({ force: true }));
   $("#zalo-send-test-message")?.addEventListener("click", (event) => sendZaloTestMessage(event.currentTarget));
   $("#refresh-zalo-auto-messages")?.addEventListener("click", () => loadZaloAutoMessages({ force: true }));
   $("#add-zalo-auto-message")?.addEventListener("click", () => openZaloAutoMessage(""));
   $("#zalo-auto-message-form")?.addEventListener("submit", saveZaloAutoMessage);
   $("#save-zalo-auto-message-button")?.addEventListener("click", () => $("#zalo-auto-message-form")?.requestSubmit());
+  $("#zalo-auto-message-form [name='chat_id']")?.addEventListener("input", (event) => applyZaloChatTargetSelection(event.currentTarget.value, { updateName: false }));
+  $("#zalo-auto-message-form [name='chat_id']")?.addEventListener("change", (event) => applyZaloChatTargetSelection(event.currentTarget.value));
   $("#refresh-data-mining")?.addEventListener("click", () => loadDataMining({ force: true }));
   $("#add-data-mining-schedule")?.addEventListener("click", () => openDataMiningSchedule(""));
   $("#data-mining-form")?.addEventListener("submit", saveDataMiningSchedule);
@@ -4694,6 +4697,65 @@ function fillZaloAutoMessagePickers() {
   if (current && zaloAutoMessages.some((schedule) => schedule.schedule_id === current)) picker.value = current;
 }
 
+function normalizeZaloTargetType(value) {
+  return String(value || "").toLowerCase().includes("group") ? "group" : "person";
+}
+
+function zaloChatTargetName(log) {
+  return String(log.sender_name || log.sender_id || log.chat_id || "").trim();
+}
+
+function uniqueZaloChatTargets() {
+  const seen = new Set();
+  return zaloMessageLogs.reduce((targets, log) => {
+    const chatId = String(log.chat_id || "").trim();
+    if (!chatId || seen.has(chatId)) return targets;
+    seen.add(chatId);
+    targets.push({
+      chat_id: chatId,
+      target_type: normalizeZaloTargetType(log.chat_type),
+      chat_name: zaloChatTargetName(log),
+      chat_type: String(log.chat_type || "").trim(),
+    });
+    return targets;
+  }, []);
+}
+
+function ensureZaloChatTargetDatalist() {
+  const input = $("#zalo-auto-message-form [name='chat_id']");
+  if (!input) return null;
+  let datalist = $("#zalo-chat-target-options");
+  if (!datalist) {
+    datalist = document.createElement("datalist");
+    datalist.id = "zalo-chat-target-options";
+    input.insertAdjacentElement("afterend", datalist);
+  }
+  input.setAttribute("list", datalist.id);
+  input.setAttribute("placeholder", "Chon 1 ca nhan hoac 1 nhom tu nhat ky Zalo");
+  return datalist;
+}
+
+function fillZaloChatTargetOptions() {
+  const datalist = ensureZaloChatTargetDatalist();
+  if (!datalist) return;
+  datalist.innerHTML = uniqueZaloChatTargets().map((target) => {
+    const typeLabel = target.target_type === "group" ? "Nhom" : "Ca nhan";
+    const label = [typeLabel, target.chat_name, target.chat_type].filter(Boolean).join(" - ");
+    return `<option value="${escapeHtml(target.chat_id)}" label="${escapeHtml(label)}"></option>`;
+  }).join("");
+}
+
+function applyZaloChatTargetSelection(chatId, { updateName = true } = {}) {
+  const form = $("#zalo-auto-message-form");
+  if (!form) return;
+  const target = uniqueZaloChatTargets().find((item) => item.chat_id === String(chatId || "").trim());
+  if (!target) return;
+  form.elements.namedItem("target_type").value = target.target_type;
+  if (updateName || !String(form.elements.namedItem("chat_name").value || "").trim()) {
+    form.elements.namedItem("chat_name").value = target.chat_name;
+  }
+}
+
 function zaloScheduleText(schedule) {
   if (schedule.schedule_type === "TimeWindow") return `Khung giờ: ${(schedule.time_slots || []).join(", ") || "-"}`;
   if (schedule.schedule_type === "Weekly") return `Hàng tuần ${schedule.weekday || "-"} lúc ${schedule.run_time || "-"}`;
@@ -4713,7 +4775,8 @@ function renderZaloAutoMessages() {
 }
 
 function renderZaloAutoMessageRow(schedule) {
-  const targetText = [schedule.target_type === "person" ? "Cá nhân" : "Nhóm", schedule.chat_name, schedule.chat_id].filter(Boolean).join(" · ") || "Dùng chat mới nhất";
+  const targetParts = schedule.chat_id ? [schedule.target_type === "person" ? "Cá nhân" : "Nhóm", schedule.chat_name, schedule.chat_id].filter(Boolean) : [];
+  const targetText = targetParts.length ? targetParts.join(" · ") : "Chưa cấu hình đích nhận";
   const imageText = schedule.latest_capture_url ? "Lần chụp gần nhất" : "Tự chụp mới khi gửi";
   const lastSent = schedule.last_sent_at ? new Date(schedule.last_sent_at).toLocaleString("vi-VN") : "";
   return `
@@ -4730,6 +4793,8 @@ function renderZaloAutoMessageRow(schedule) {
 function openZaloAutoMessage(scheduleId = "") {
   const schedule = zaloAutoMessages.find((item) => item.schedule_id === scheduleId);
   const form = $("#zalo-auto-message-form");
+  fillZaloChatTargetOptions();
+  if (!zaloMessageLogs.length) loadZaloMessageLogs();
   form.elements.namedItem("schedule_id").value = schedule?.schedule_id || "";
   form.elements.namedItem("name").value = schedule?.name || "";
   form.elements.namedItem("page_url").value = schedule?.page_url || window.location.pathname || "/";
@@ -4759,6 +4824,16 @@ async function saveZaloAutoMessage(event) {
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
   const file = form.elements.namedItem("capture_file")?.files?.[0];
+  const chatId = String(data.chat_id || "").trim();
+  const isActive = Boolean(form.elements.namedItem("is_active")?.checked);
+  if (isActive && !chatId) {
+    showMessage(form.querySelector(".result"), "Chon 1 ca nhan hoac 1 nhom Zalo truoc khi bat lich.", "error");
+    return;
+  }
+  if (/[\s,;]+/.test(chatId)) {
+    showMessage(form.querySelector(".result"), "Moi lich Zalo chi duoc nhap 1 chat_id.", "error");
+    return;
+  }
   try {
     const response = await api("/api/admin/zalo/auto-messages", { method: "POST", body: JSON.stringify({
       schedule_id: data.schedule_id || "",
@@ -4771,11 +4846,11 @@ async function saveZaloAutoMessage(event) {
       weekday: data.weekday || "",
       month_day: Number(data.month_day || 1),
       target_type: data.target_type || "group",
-      chat_id: data.chat_id || "",
+      chat_id: chatId,
       chat_name: data.chat_name || "",
       caption: data.caption || "",
       photo_url: data.photo_url || "",
-      is_active: Boolean(form.elements.namedItem("is_active")?.checked),
+      is_active: isActive,
     })});
     if (file) await uploadZaloAutoMessageCapture(response.schedule.schedule_id, file, data.page_url || "/");
     $("#zalo-auto-message-dialog").close();
@@ -4805,7 +4880,7 @@ async function sendZaloAutoMessageNow(scheduleId, button) {
   try {
     const result = await api(`/api/admin/zalo/auto-messages/${encodeURIComponent(scheduleId)}/send-now`, { method: "POST" });
     showMessage($("#zalo-auto-message-result"), `${result.message} Chat ID: ${result.chat_id}`);
-    await Promise.all([loadZaloAutoMessages({ force: true }), loadZaloMessageLogs()]);
+    await Promise.all([loadZaloAutoMessages({ force: true }), loadZaloMessageLogs({ force: true })]);
   } catch (error) {
     showMessage($("#zalo-auto-message-result"), error.message, "error");
   } finally {
@@ -4824,16 +4899,25 @@ async function deleteZaloAutoMessage(scheduleId) {
   }
 }
 
-async function loadZaloMessageLogs() {
+async function loadZaloMessageLogs({ force = false } = {}) {
   const table = $("#zalo-message-logs-table");
   if (!table) return;
+  if (!force && isDataFresh("zaloMessageLogs")) {
+    table.innerHTML = zaloMessageLogs.length
+      ? zaloMessageLogs.map((log) => renderZaloMessageLog(log)).join("")
+      : emptyRow(5, "Chưa có tin nhắn Zalo", "Khi người dùng mention hoặc trả lời bot trong nhóm, log sẽ xuất hiện ở đây.");
+    fillZaloChatTargetOptions();
+    return;
+  }
   setTableLoading("#zalo-message-logs-table", 5, "Đang tải nhật ký Zalo Bot...");
   try {
     const data = await api("/api/admin/zalo/message-logs?limit=100");
-    const logs = data.logs || [];
-    table.innerHTML = logs.length
-      ? logs.map((log) => renderZaloMessageLog(log)).join("")
+    zaloMessageLogs = data.logs || [];
+    markDataFresh("zaloMessageLogs");
+    table.innerHTML = zaloMessageLogs.length
+      ? zaloMessageLogs.map((log) => renderZaloMessageLog(log)).join("")
       : emptyRow(5, "Chưa có tin nhắn Zalo", "Khi người dùng mention hoặc trả lời bot trong nhóm, log sẽ xuất hiện ở đây.");
+    fillZaloChatTargetOptions();
   } catch (error) {
     table.innerHTML = emptyRow(5, "Không tải được nhật ký Zalo", error.message);
   }
@@ -4866,7 +4950,7 @@ async function sendZaloTestMessage(button) {
       body: JSON.stringify({ text: "Tin nhan test tu Bot VNPT Can Tho." }),
     });
     showMessage(resultBox, `${response.message} Chat ID: ${response.chat_id}`);
-    await loadZaloMessageLogs();
+    await loadZaloMessageLogs({ force: true });
   } catch (error) {
     showMessage(resultBox, error.message, "error");
   } finally {
