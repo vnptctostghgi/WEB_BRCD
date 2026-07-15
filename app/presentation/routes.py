@@ -3105,15 +3105,43 @@ def _onebss_report_download_url(run: dict[str, Any]) -> str:
         or "&id=" in storage_link
     ):
         return ""
+    if _onebss_drive_link_from_storage_status(storage_status):
+        return ""
     if not Path(file_path).exists():
         return ""
     return f"/api/onebss-reports/runs/{quote(run_id)}/download"
+
+
+def _onebss_drive_link_from_storage_status(storage_status: str) -> str:
+    status_text = str(storage_status or "").strip()
+    prefix = "uploaded_google_drive:"
+    if not status_text.lower().startswith(prefix):
+        return ""
+    file_id = status_text.split(":", 1)[1].strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{10,}", file_id):
+        return ""
+    return f"https://drive.google.com/file/d/{quote(file_id, safe='')}/view"
+
+
+def _onebss_report_file_url(run: dict[str, Any]) -> str:
+    storage_link = str(run.get("storage_link") or "").strip()
+    if storage_link.startswith(("http://", "https://")):
+        return storage_link
+    drive_link = _onebss_drive_link_from_storage_status(str(run.get("storage_status") or ""))
+    if drive_link:
+        return drive_link
+    return _onebss_report_download_url(run)
 
 
 def _decorate_onebss_report_run(run: dict[str, Any]) -> dict[str, Any]:
     decorated = dict(run)
     status_value = str(decorated.get("status") or "").lower()
     decorated["can_cancel"] = status_value in ONEBSS_REPORT_ACTIVE_STATUSES
+    file_url = _onebss_report_file_url(decorated)
+    if file_url:
+        decorated["file_url"] = file_url
+    if file_url.startswith(("http://", "https://")) and not str(decorated.get("storage_link") or "").strip():
+        decorated["storage_link"] = file_url
     download_url = _onebss_report_download_url(decorated)
     if download_url:
         decorated["download_url"] = download_url

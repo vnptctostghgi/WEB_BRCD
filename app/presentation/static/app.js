@@ -6314,14 +6314,16 @@ function renderOneBssRunRow(run) {
   const startedAt = run.started_at ? new Date(run.started_at).toLocaleString("vi-VN") : "-";
   const statusValue = String(run.status || "").toLowerCase();
   const storageStatus = run.storage_status || "";
-  const storageLink = String(run.storage_link || "").trim();
-  const hasExternalStorageLink = /^https?:\/\//.test(storageLink);
-  const localFileLink = run.download_url
-    ? `<a class="onebss-file-link" href="${escapeHtml(run.download_url)}">T\u1ea3i file</a>`
+  const fileUrl = String(run.file_url || run.storage_link || run.download_url || "").trim();
+  const hasExternalFileUrl = /^https?:\/\//.test(fileUrl);
+  const fileLabel = hasExternalFileUrl && /drive\.google\.com/i.test(fileUrl) ? "M\u1edf file tr\u00ean Drive" : (hasExternalFileUrl ? "M\u1edf file" : "T\u1ea3i file");
+  const fileNote = run.file_name || (hasExternalFileUrl ? "Link Google Drive" : "");
+  const fileLink = fileUrl
+    ? `<a class="onebss-file-link onebss-file-link-primary" href="${escapeHtml(fileUrl)}" ${hasExternalFileUrl ? 'target="_blank" rel="noopener"' : ""}>${fileLabel}</a>${fileNote ? `<small class="cell-note">${escapeHtml(fileNote)}</small>` : ""}`
     : (run.file_path ? `<span class="onebss-file-name">${escapeHtml(run.file_name || run.file_path)}</span>` : "-");
-  const fileLink = hasExternalStorageLink
-    ? `<a class="onebss-file-link" href="${escapeHtml(storageLink)}" target="_blank" rel="noopener">M\u1edf file</a>`
-    : localFileLink;
+  const storageNote = storageStatus && !/^uploaded_google_drive/i.test(storageStatus)
+    ? `<small class="cell-note">${escapeHtml(truncateText(storageStatus, 60))}</small>`
+    : "";
   const message = truncateText(run.message || "", 180);
   const runId = oneBssRunKey(run);
   const actions = oneBssRunCanCancel(run) && runId
@@ -6332,7 +6334,7 @@ function renderOneBssRunRow(run) {
       <td class="onebss-time-cell">${escapeHtml(startedAt)}</td>
       <td><strong>${escapeHtml(run.ten_bao_cao || run.ma_bao_cao)}</strong><small class="cell-note">${escapeHtml(run.ma_bao_cao || "")}</small></td>
       <td><span class="status ${oneBssRunStatusClass(statusValue)}">${escapeHtml(oneBssRunStatusLabel(statusValue))}</span></td>
-      <td>${fileLink}${storageStatus ? `<small class="cell-note">${escapeHtml(truncateText(storageStatus, 60))}</small>` : ""}</td>
+      <td>${fileLink}${storageNote}</td>
       <td><span title="${escapeHtml(run.message || "")}">${escapeHtml(message)}</span></td>
       <td class="table-action-cell"><div class="action-group onebss-row-actions">${actions}</div></td>
     </tr>`;

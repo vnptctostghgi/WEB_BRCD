@@ -3795,6 +3795,17 @@ legend {
   white-space: nowrap;
 }
 
+.onebss-file-link-primary {
+  color: #dff6ff;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.onebss-file-link-primary:hover {
+  color: #8bdcff;
+}
+
 .onebss-time-cell {
   white-space: normal;
 }
