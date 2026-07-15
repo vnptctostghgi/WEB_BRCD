@@ -2626,6 +2626,48 @@ def test_onebss_worker_result_preserves_uploaded_web_file(monkeypatch, tmp_path)
         assert download.content == b"xlsx-bytes"
 
 
+def test_onebss_worker_drive_link_does_not_expose_missing_local_download() -> None:
+    with TestClient(app) as client:
+        login(client)
+        created = client.post(
+            "/api/admin/onebss-reports",
+            json={
+                "ten_bao_cao": "OneBSS Drive link",
+                "danh_sach_bien": ["P_TUNGAY"],
+                "report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST_DRIVE_LINK&name=Test",
+                "storage_link": "",
+            },
+        )
+        assert created.status_code == 200
+        code = created.json()["ma_bao_cao"]
+
+        response = client.post("/api/onebss-reports/run", json={"ma_bao_cao": code, "parameters": {"P_TUNGAY": "01/07/2026"}})
+        assert response.status_code == 200
+        job_id = response.json()["job_id"]
+        finished = client.post(
+            f"/api/onebss-worker/tasks/{job_id}/result",
+            json={
+                "ok": True,
+                "status": "success",
+                "message": "Da upload file len Google Drive.",
+                "file_name": "result.xlsx",
+                "file_path": "C:/VNPTCTO/onebss/result.xlsx",
+                "storage_link": "https://drive.google.com/open?id=drive-file-002",
+                "storage_status": "uploaded_google_drive",
+            },
+            headers={"Authorization": "Bearer test-worker-token"},
+        )
+        assert finished.status_code == 200
+        run = finished.json()["run"]
+        assert run["storage_link"] == "https://drive.google.com/open?id=drive-file-002"
+        assert "download_url" not in run
+
+        runs = client.get(f"/api/onebss-reports/runs?ma_bao_cao={code}").json()["runs"]
+        assert len(runs) == 1
+        assert runs[0]["storage_link"] == "https://drive.google.com/open?id=drive-file-002"
+        assert "download_url" not in runs[0]
+
+
 def test_supabase_onebss_run_uses_parameters_json_column(monkeypatch) -> None:
     captured = {}
     repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")

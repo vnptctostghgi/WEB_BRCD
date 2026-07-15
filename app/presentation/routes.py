@@ -3098,12 +3098,14 @@ def _onebss_report_download_url(run: dict[str, Any]) -> str:
     storage_link = str(run.get("storage_link") or "")
     storage_status = str(run.get("storage_status") or "")
     if storage_link.startswith(("http://", "https://")) and (
-        storage_status.lower().startswith("uploaded_google_drive:")
+        storage_status.lower().startswith("uploaded_google_drive")
         or "/file/d/" in storage_link
         or "/spreadsheets/d/" in storage_link
         or "?id=" in storage_link
         or "&id=" in storage_link
     ):
+        return ""
+    if not Path(file_path).exists():
         return ""
     return f"/api/onebss-reports/runs/{quote(run_id)}/download"
 

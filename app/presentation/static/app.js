@@ -6314,15 +6314,13 @@ function renderOneBssRunRow(run) {
   const startedAt = run.started_at ? new Date(run.started_at).toLocaleString("vi-VN") : "-";
   const statusValue = String(run.status || "").toLowerCase();
   const storageStatus = run.storage_status || "";
-  const isUploadedDriveFile = /^uploaded_google_drive:/i.test(storageStatus);
-  const isDirectFileLink = run.storage_link
-    && /^https?:\/\//.test(run.storage_link)
-    && (isUploadedDriveFile || /\/file\/d\/|\/spreadsheets\/d\/|[?&]id=/.test(run.storage_link));
+  const storageLink = String(run.storage_link || "").trim();
+  const hasExternalStorageLink = /^https?:\/\//.test(storageLink);
   const localFileLink = run.download_url
-    ? `<a class="onebss-file-link" href="${escapeHtml(run.download_url)}" download>T\u1ea3i file</a>`
+    ? `<a class="onebss-file-link" href="${escapeHtml(run.download_url)}">T\u1ea3i file</a>`
     : (run.file_path ? `<span class="onebss-file-name">${escapeHtml(run.file_name || run.file_path)}</span>` : "-");
-  const fileLink = isDirectFileLink
-    ? `<a class="onebss-file-link" href="${escapeHtml(run.storage_link)}" target="_blank" rel="noopener">M\u1edf file</a>`
+  const fileLink = hasExternalStorageLink
+    ? `<a class="onebss-file-link" href="${escapeHtml(storageLink)}" target="_blank" rel="noopener">M\u1edf file</a>`
     : localFileLink;
   const message = truncateText(run.message || "", 180);
   const runId = oneBssRunKey(run);
