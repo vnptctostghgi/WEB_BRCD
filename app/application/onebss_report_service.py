@@ -1502,7 +1502,14 @@ def onebss_merge_mode(merge_config: dict[str, Any]) -> str:
 
 
 def should_merge_onebss_excel_parts(merge_config: dict[str, Any]) -> bool:
-    return onebss_merge_mode(merge_config) in {"append", "merge", "merged", "single", "sheet", "sheets"}
+    if not merge_config:
+        return False
+    mode = onebss_merge_mode(merge_config)
+    if not mode or mode == "auto":
+        return True
+    if mode in {"none", "off", "false", "no", "zip", "archive", "split", "split_archive", "parts"}:
+        return False
+    return mode in {"append", "merge", "merged", "single", "sheet", "sheets"}
 
 
 def archive_onebss_downloaded_files(

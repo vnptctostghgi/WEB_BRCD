@@ -2203,7 +2203,7 @@ def test_onebss_finish_api_splits_regions_and_merges_excel(monkeypatch, tmp_path
             "P_LOAI_NGAY": "1",
             "P_TUNGAY": "01/07/2026",
             "P_DENNGAY": "14/07/2026",
-            "$merge_excel": {"mode": "append", "sheet": "DATA", "source_column": "P_PHANVUNG_ID"},
+            "$merge_excel": {"sheet": "DATA", "source_column": "P_PHANVUNG_ID"},
         },
     )
 
