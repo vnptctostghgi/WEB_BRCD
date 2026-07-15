@@ -2532,6 +2532,56 @@ def test_onebss_worker_uploads_result_file_for_download(monkeypatch, tmp_path) -
         assert download.content == b"zip-bytes"
 
 
+def test_onebss_worker_result_preserves_uploaded_web_file(monkeypatch, tmp_path) -> None:
+    settings = get_settings().model_copy(update={"data_mining_download_dir": str(tmp_path)})
+    monkeypatch.setattr(routes, "get_settings", lambda: settings)
+    with TestClient(app) as client:
+        login(client)
+        created = client.post(
+            "/api/admin/onebss-reports",
+            json={
+                "ten_bao_cao": "OneBSS preserve web file",
+                "danh_sach_bien": ["P_TUNGAY"],
+                "report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST_PRESERVE&name=Test",
+                "storage_link": "",
+            },
+        )
+        assert created.status_code == 200
+        code = created.json()["ma_bao_cao"]
+
+        response = client.post("/api/onebss-reports/run", json={"ma_bao_cao": code, "parameters": {"P_TUNGAY": "01/07/2026"}})
+        assert response.status_code == 200
+        job_id = response.json()["job_id"]
+        headers = {"Authorization": "Bearer test-worker-token"}
+        upload = client.post(
+            f"/api/onebss-worker/tasks/{job_id}/file",
+            files={"file": ("result.xlsx", b"xlsx-bytes", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            headers=headers,
+        )
+        assert upload.status_code == 200
+
+        finished = client.post(
+            f"/api/onebss-worker/tasks/{job_id}/result",
+            json={
+                "ok": True,
+                "status": "success",
+                "message": "Worker finished after web upload.",
+                "file_name": "",
+                "file_path": "",
+                "storage_status": "",
+            },
+            headers=headers,
+        )
+        assert finished.status_code == 200
+        run = finished.json()["run"]
+        assert run["file_name"] == "result.xlsx"
+        assert run["storage_status"] == "uploaded_worker_file"
+        assert run["download_url"]
+        download = client.get(run["download_url"])
+        assert download.status_code == 200
+        assert download.content == b"xlsx-bytes"
+
+
 def test_supabase_onebss_run_uses_parameters_json_column(monkeypatch) -> None:
     captured = {}
     repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")

@@ -6319,7 +6319,7 @@ function renderOneBssRunRow(run) {
     && /^https?:\/\//.test(run.storage_link)
     && (isUploadedDriveFile || /\/file\/d\/|\/spreadsheets\/d\/|[?&]id=/.test(run.storage_link));
   const localFileLink = run.download_url
-    ? `<a class="onebss-file-link" href="${escapeHtml(run.download_url)}" target="_blank" rel="noopener">T\u1ea3i file</a>`
+    ? `<a class="onebss-file-link" href="${escapeHtml(run.download_url)}" download>T\u1ea3i file</a>`
     : (run.file_path ? `<span class="onebss-file-name">${escapeHtml(run.file_name || run.file_path)}</span>` : "-");
   const fileLink = isDirectFileLink
     ? `<a class="onebss-file-link" href="${escapeHtml(run.storage_link)}" target="_blank" rel="noopener">M\u1edf file</a>`

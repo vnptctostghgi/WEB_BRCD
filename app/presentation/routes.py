@@ -3132,6 +3132,22 @@ def _onebss_worker_cancelled_response(run: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _onebss_worker_result_file_updates(run: dict[str, Any], payload: OneBssWorkerResultPayload) -> dict[str, Any]:
+    payload_file_path = str(payload.file_path or "").strip()
+    current_file_path = str(run.get("file_path") or "").strip()
+    payload_storage_status = str(payload.storage_status or "").strip()
+    payload_is_drive = payload_storage_status.lower().startswith("uploaded_google_drive:")
+    payload_is_server_file = bool(payload_file_path and Path(payload_file_path).exists())
+    current_is_server_file = bool(current_file_path and Path(current_file_path).exists())
+    keep_current_file = current_is_server_file and not payload_is_drive and not payload_is_server_file
+    return {
+        "file_name": (run.get("file_name") if keep_current_file else payload.file_name) or run.get("file_name") or "",
+        "file_path": (run.get("file_path") if keep_current_file else payload.file_path) or run.get("file_path") or "",
+        "storage_link": (run.get("storage_link") if keep_current_file else payload.storage_link) or run.get("storage_link") or "",
+        "storage_status": (run.get("storage_status") if keep_current_file else payload.storage_status) or run.get("storage_status") or "",
+    }
+
+
 def _onebss_report_job_response(job_id: str, job: dict[str, Any]) -> dict[str, Any]:
     status_value = str(job.get("status") or "queued").lower()
     response = {
@@ -3700,15 +3716,13 @@ def finish_onebss_worker_task(request: Request, run_id: str, payload: OneBssWork
         return _onebss_worker_cancelled_response(run)
     finished_at = datetime.now().isoformat(timespec="seconds")
     status_value = payload.status.strip().lower() or ("success" if payload.ok else "failed")
+    file_updates = _onebss_worker_result_file_updates(run, payload)
     updated = repository.update_onebss_report_run(
         run_id.strip(),
         {
             "status": status_value,
             "message": payload.message or ("Da lay bao cao OneBSS tren may tram." if payload.ok else "May tram khong lay duoc bao cao OneBSS."),
-            "file_name": payload.file_name,
-            "file_path": payload.file_path,
-            "storage_link": payload.storage_link,
-            "storage_status": payload.storage_status,
+            **file_updates,
             "duration_ms": payload.duration_ms,
             "finished_at": finished_at,
         },
