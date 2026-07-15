@@ -1205,6 +1205,7 @@ if (role === "admin") {
   });
   $("#toggle-onebss-param-edit")?.addEventListener("click", toggleOneBssRunParameterEditing);
   $("#clear-onebss-run-history")?.addEventListener("click", clearOneBssRunHistory);
+  $("#onebss-run-history")?.addEventListener("click", handleOneBssRunHistoryAction);
   $("#onebss-run-report-select")?.addEventListener("change", () => {
     oneBssPendingSessionId = "";
     oneBssPendingJobId = "";
@@ -6023,11 +6024,43 @@ function oneBssJobIsActive(status) {
   return ["queued", "running", "otp_required", "otp_invalid", "manual_otp_required"].includes(String(status || "").toLowerCase());
 }
 
+function oneBssRunStatusLabel(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "queued") return "Đang chờ";
+  if (normalized === "running") return "Đang chạy";
+  if (normalized === "otp_required" || normalized === "manual_otp_required") return "Chờ OTP";
+  if (normalized === "otp_invalid") return "OTP lỗi";
+  if (normalized === "success") return "Hoàn tất";
+  if (normalized === "cancelled") return "Đã hủy";
+  if (normalized === "failed") return "Lỗi";
+  if (normalized === "google_drive_upload_failed") return "Lỗi Drive";
+  if (normalized === "google_drive_not_configured") return "Thiếu Drive";
+  if (normalized === "storage_failed") return "Lỗi lưu";
+  return status || "-";
+}
+
+function oneBssRunStatusClass(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "success") return "viewer";
+  if (normalized === "queued" || normalized === "otp_required" || normalized === "manual_otp_required") return "pending";
+  if (normalized === "running" || normalized === "otp_invalid") return "admin";
+  return "inactive";
+}
+
+function oneBssRunKey(run) {
+  return run?.run_id || run?.job_id || "";
+}
+
+function oneBssRunCanCancel(run) {
+  if (run?.can_cancel === true) return true;
+  return oneBssJobIsActive(run?.status);
+}
+
 function upsertOneBssRun(run) {
   if (!run) return;
   const normalized = repairDataEncoding(run);
-  const key = normalized.run_id || normalized.job_id || "";
-  const index = oneBssReportRuns.findIndex((item) => (item.run_id || item.job_id || "") === key && key);
+  const key = oneBssRunKey(normalized);
+  const index = oneBssReportRuns.findIndex((item) => oneBssRunKey(item) === key && key);
   if (index >= 0) {
     oneBssReportRuns[index] = { ...oneBssReportRuns[index], ...normalized };
   } else {
@@ -6218,7 +6251,7 @@ function normalizeOneBssRunShellText() {
   }
   const tableHeader = $(".onebss-run-table thead tr");
   if (tableHeader && !tableHeader.dataset.normalized) {
-    tableHeader.innerHTML = "<th>Th\u1eddi gian</th><th>B\u00e1o c\u00e1o</th><th>K\u1ebft qu\u1ea3</th><th>File</th><th>Th\u00f4ng b\u00e1o</th>";
+    tableHeader.innerHTML = "<th>Th\u1eddi gian</th><th>B\u00e1o c\u00e1o</th><th>K\u1ebft qu\u1ea3</th><th>File</th><th>Th\u00f4ng b\u00e1o</th><th>Thao t\u00e1c</th>";
     tableHeader.dataset.normalized = "1";
   }
 }
@@ -6273,13 +6306,13 @@ function renderOneBssRunHistory() {
   const visibleRuns = oneBssReportRuns.slice(0, 12);
   table.innerHTML = visibleRuns.length
     ? visibleRuns.map((run) => renderOneBssRunRow(run)).join("")
-    : emptyRow(5, "Ch\u01b0a c\u00f3 l\u01b0\u1ee3t l\u1ea5y b\u00e1o c\u00e1o", "K\u1ebft qu\u1ea3 l\u1ea5y OneBSS s\u1ebd xu\u1ea5t hi\u1ec7n \u1edf \u0111\u00e2y sau khi b\u1ea5m L\u1ea5y b\u00e1o c\u00e1o.");
+    : emptyRow(6, "Ch\u01b0a c\u00f3 l\u01b0\u1ee3t l\u1ea5y b\u00e1o c\u00e1o", "K\u1ebft qu\u1ea3 l\u1ea5y OneBSS s\u1ebd xu\u1ea5t hi\u1ec7n \u1edf \u0111\u00e2y sau khi b\u1ea5m L\u1ea5y b\u00e1o c\u00e1o.");
 }
 
 function renderOneBssRunRow(run) {
   run = repairDataEncoding(run);
   const startedAt = run.started_at ? new Date(run.started_at).toLocaleString("vi-VN") : "-";
-  const ok = run.status === "success";
+  const statusValue = String(run.status || "").toLowerCase();
   const storageStatus = run.storage_status || "";
   const isUploadedDriveFile = /^uploaded_google_drive:/i.test(storageStatus);
   const isDirectFileLink = run.storage_link
@@ -6292,19 +6325,59 @@ function renderOneBssRunRow(run) {
     ? `<a class="onebss-file-link" href="${escapeHtml(run.storage_link)}" target="_blank" rel="noopener">M\u1edf file</a>`
     : localFileLink;
   const message = truncateText(run.message || "", 180);
+  const runId = oneBssRunKey(run);
+  const actions = oneBssRunCanCancel(run) && runId
+    ? `<button class="table-action danger" data-onebss-run-action="cancel" data-run-id="${escapeHtml(runId)}" type="button">H\u1ee7y</button>`
+    : `<span class="cell-note">-</span>`;
   return `
     <tr>
       <td class="onebss-time-cell">${escapeHtml(startedAt)}</td>
       <td><strong>${escapeHtml(run.ten_bao_cao || run.ma_bao_cao)}</strong><small class="cell-note">${escapeHtml(run.ma_bao_cao || "")}</small></td>
-      <td><span class="status ${ok ? "viewer" : "inactive"}">${escapeHtml(run.status || "-")}</span></td>
+      <td><span class="status ${oneBssRunStatusClass(statusValue)}">${escapeHtml(oneBssRunStatusLabel(statusValue))}</span></td>
       <td>${fileLink}${storageStatus ? `<small class="cell-note">${escapeHtml(truncateText(storageStatus, 60))}</small>` : ""}</td>
       <td><span title="${escapeHtml(run.message || "")}">${escapeHtml(message)}</span></td>
+      <td class="table-action-cell"><div class="action-group onebss-row-actions">${actions}</div></td>
     </tr>`;
 }
 
 function truncateText(value, maxLength = 120) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
+async function cancelOneBssRun(runId, button = null) {
+  const id = String(runId || "").trim();
+  const message = $("#onebss-run-message");
+  if (!id) return;
+  if (!confirm("Hủy task lấy báo cáo OneBSS này?")) return;
+  try {
+    if (button) button.disabled = true;
+    const response = repairDataEncoding(await api(`/api/onebss-reports/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" }));
+    upsertOneBssRun(response.run || response);
+    if (oneBssPendingJobId === id) {
+      oneBssPendingSessionId = "";
+      oneBssPendingOtpRequestId = "";
+      oneBssPendingJobId = "";
+      stopOneBssJobPolling();
+      resetOneBssOtpState();
+    }
+    renderOneBssRunHistory();
+    showMessage(message, response.message || "Đã hủy task OneBSS.");
+    await refreshOneBssRunHistory($("#onebss-run-report-select")?.value || "");
+  } catch (error) {
+    showMessage(message, error.message, "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function handleOneBssRunHistoryAction(event) {
+  const button = event.target.closest("[data-onebss-run-action]");
+  if (!button) return;
+  const action = button.dataset.onebssRunAction || "";
+  if (action === "cancel") {
+    cancelOneBssRun(button.dataset.runId || "", button);
+  }
 }
 
 async function clearOneBssRunHistory() {

@@ -19,6 +19,14 @@ from app.application.onebss_report_service import run_onebss_report_request
 from app.settings import get_settings
 
 
+class OneBssTaskCancelled(Exception):
+    pass
+
+
+def response_is_cancelled(data: dict[str, Any]) -> bool:
+    return bool(data.get("cancelled")) or str(data.get("status") or "").lower() == "cancelled"
+
+
 def request_json(client: httpx.Client, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
     response = client.request(method, path, **kwargs)
     response.raise_for_status()
@@ -29,6 +37,8 @@ def request_json(client: httpx.Client, method: str, path: str, **kwargs: Any) ->
 def wait_for_otp(client: httpx.Client, run_id: str, poll_seconds: float) -> str:
     while True:
         data = request_json(client, "GET", f"/api/onebss-worker/tasks/{run_id}/otp")
+        if response_is_cancelled(data):
+            raise OneBssTaskCancelled(str(data.get("message") or "Task OneBSS da bi huy."))
         if data.get("ok") and data.get("otp"):
             return str(data["otp"])
         time.sleep(poll_seconds)
@@ -94,6 +104,8 @@ def upload_result_file(client: httpx.Client, run_id: str, file_path: str) -> dic
         )
     response.raise_for_status()
     data = response.json()
+    if isinstance(data, dict) and response_is_cancelled(data):
+        raise OneBssTaskCancelled(str(data.get("message") or "Task OneBSS da bi huy."))
     uploaded = data.get("file") if isinstance(data.get("file"), dict) else {}
     return uploaded if isinstance(uploaded, dict) else {}
 
@@ -146,51 +158,59 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
     otp = ""
     started = time.monotonic()
 
-    while True:
-        result = run_onebss_report_request(
-            settings,
-            report_for_worker,
-            parameters,
-            otp=otp,
-            session_id=session_id,
-            created_by=worker_id,
-        )
-        status = str(result.get("status") or ("success" if result.get("ok") else "failed")).lower()
-        if status in {"otp_required", "otp_invalid", "manual_otp_required"} and result.get("session_id"):
-            session_id = str(result.get("session_id") or "")
-            request_json(
+    try:
+        while True:
+            result = run_onebss_report_request(
+                settings,
+                report_for_worker,
+                parameters,
+                otp=otp,
+                session_id=session_id,
+                created_by=worker_id,
+            )
+            status = str(result.get("status") or ("success" if result.get("ok") else "failed")).lower()
+            if status in {"otp_required", "otp_invalid", "manual_otp_required"} and result.get("session_id"):
+                session_id = str(result.get("session_id") or "")
+                status_response = request_json(
+                    client,
+                    "POST",
+                    f"/api/onebss-worker/tasks/{run_id}/status",
+                    json={
+                        "status": status,
+                        "message": result.get("message") or "May tram dang doi OTP OneBSS.",
+                        "worker_id": worker_id,
+                        "worker_session_id": session_id,
+                    },
+                )
+                if response_is_cancelled(status_response):
+                    return
+                otp = wait_for_otp(client, run_id, poll_seconds)
+                continue
+
+            duration_ms = int((time.monotonic() - started) * 1000)
+            result = attach_worker_file_if_needed(client, run_id, result, drive_folder_id)
+            status = str(result.get("status") or ("success" if result.get("ok") else "failed")).lower()
+            finish_response = request_json(
                 client,
                 "POST",
-                f"/api/onebss-worker/tasks/{run_id}/status",
+                f"/api/onebss-worker/tasks/{run_id}/result",
                 json={
+                    "ok": bool(result.get("ok")),
                     "status": status,
-                    "message": result.get("message") or "May tram dang doi OTP OneBSS.",
-                    "worker_id": worker_id,
-                    "worker_session_id": session_id,
+                    "message": result.get("message") or "",
+                    "file_name": result.get("file_name") or "",
+                    "file_path": result.get("file_path") or "",
+                    "storage_link": result.get("storage_link") or "",
+                    "storage_status": result.get("storage_status") or "",
+                    "duration_ms": int(result.get("duration_ms") or duration_ms),
+                    "details": result,
                 },
             )
-            otp = wait_for_otp(client, run_id, poll_seconds)
-            continue
-
-        duration_ms = int((time.monotonic() - started) * 1000)
-        result = attach_worker_file_if_needed(client, run_id, result, drive_folder_id)
-        status = str(result.get("status") or ("success" if result.get("ok") else "failed")).lower()
-        request_json(
-            client,
-            "POST",
-            f"/api/onebss-worker/tasks/{run_id}/result",
-            json={
-                "ok": bool(result.get("ok")),
-                "status": status,
-                "message": result.get("message") or "",
-                "file_name": result.get("file_name") or "",
-                "file_path": result.get("file_path") or "",
-                "storage_link": result.get("storage_link") or "",
-                "storage_status": result.get("storage_status") or "",
-                "duration_ms": int(result.get("duration_ms") or duration_ms),
-                "details": result,
-            },
-        )
+            if response_is_cancelled(finish_response):
+                return
+            return
+    except OneBssTaskCancelled as error:
+        print(str(error), file=sys.stderr)
         return
 
 

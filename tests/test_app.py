@@ -2428,6 +2428,57 @@ def test_onebss_report_run_records_worker_errors() -> None:
         assert "browser launch failed" in runs[0]["message"]
 
 
+def test_onebss_report_run_can_be_cancelled_without_worker_overwrite() -> None:
+    with TestClient(app) as client:
+        login(client)
+        client.delete("/api/onebss-reports/runs")
+        created = client.post(
+            "/api/admin/onebss-reports",
+            json={
+                "ten_bao_cao": "OneBSS cancellable run",
+                "danh_sach_bien": ["P_TUNGAY"],
+                "report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST_CANCEL&name=Test",
+                "storage_link": "",
+            },
+        )
+        assert created.status_code == 200
+        code = created.json()["ma_bao_cao"]
+
+        response = client.post("/api/onebss-reports/run", json={"ma_bao_cao": code, "parameters": {"P_TUNGAY": "01/07/2026"}})
+        assert response.status_code == 200
+        job_id = response.json()["job_id"]
+        headers = {"Authorization": "Bearer test-worker-token"}
+        claim = client.post("/api/onebss-worker/tasks/claim", json={"worker_id": "ws-cancel"}, headers=headers)
+        assert claim.status_code == 200
+        assert claim.json()["task"]["run_id"] == job_id
+
+        cancelled = client.post(f"/api/onebss-reports/runs/{job_id}/cancel")
+        assert cancelled.status_code == 200
+        assert cancelled.json()["status"] == "cancelled"
+        assert cancelled.json()["can_cancel"] is False
+
+        status_update = client.post(
+            f"/api/onebss-worker/tasks/{job_id}/status",
+            json={"status": "running", "message": "Still running", "worker_id": "ws-cancel"},
+            headers=headers,
+        )
+        assert status_update.status_code == 200
+        assert status_update.json()["cancelled"] is True
+
+        finished = client.post(
+            f"/api/onebss-worker/tasks/{job_id}/result",
+            json={"ok": True, "status": "success", "message": "Should not overwrite cancel"},
+            headers=headers,
+        )
+        assert finished.status_code == 200
+        assert finished.json()["run"]["status"] == "cancelled"
+
+        runs = client.get(f"/api/onebss-reports/runs?ma_bao_cao={code}").json()["runs"]
+        assert len(runs) == 1
+        assert runs[0]["status"] == "cancelled"
+        assert runs[0]["can_cancel"] is False
+
+
 def test_onebss_worker_uploads_result_file_for_download(monkeypatch, tmp_path) -> None:
     settings = get_settings().model_copy(update={"data_mining_download_dir": str(tmp_path)})
     monkeypatch.setattr(routes, "get_settings", lambda: settings)

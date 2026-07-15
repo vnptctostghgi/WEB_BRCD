@@ -3110,14 +3110,30 @@ def _onebss_report_download_url(run: dict[str, Any]) -> str:
 
 def _decorate_onebss_report_run(run: dict[str, Any]) -> dict[str, Any]:
     decorated = dict(run)
+    status_value = str(decorated.get("status") or "").lower()
+    decorated["can_cancel"] = status_value in ONEBSS_REPORT_ACTIVE_STATUSES
     download_url = _onebss_report_download_url(decorated)
     if download_url:
         decorated["download_url"] = download_url
     return decorated
 
 
+def _onebss_report_run_cancelled(run: dict[str, Any]) -> bool:
+    return str(run.get("status") or "").lower() == "cancelled"
+
+
+def _onebss_worker_cancelled_response(run: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "cancelled": True,
+        "status": "cancelled",
+        "message": run.get("message") or "Task OneBSS da bi huy.",
+        "run": _decorate_onebss_report_run(run),
+    }
+
+
 def _onebss_report_job_response(job_id: str, job: dict[str, Any]) -> dict[str, Any]:
-    status_value = str(job.get("status") or "queued")
+    status_value = str(job.get("status") or "queued").lower()
     response = {
         "ok": status_value not in {"failed", "cancelled", "storage_failed", "google_drive_not_configured", "google_drive_upload_failed"},
         "job_id": job_id,
@@ -3134,6 +3150,7 @@ def _onebss_report_job_response(job_id: str, job: dict[str, Any]) -> dict[str, A
         "worker_session_id": job.get("worker_session_id") or "",
         "otp_request_id": job.get("otp_request_id") or "",
         "can_resume_otp": status_value in {"otp_required", "otp_invalid", "manual_otp_required"},
+        "can_cancel": status_value in ONEBSS_REPORT_ACTIVE_STATUSES,
         "can_poll": status_value in ONEBSS_REPORT_ACTIVE_STATUSES,
     }
     result = job.get("result") if isinstance(job.get("result"), dict) else {}
@@ -3335,6 +3352,48 @@ def clear_onebss_report_runs(request: Request, ma_bao_cao: str = "") -> dict:
     return {"ok": True, "deleted": deleted}
 
 
+@router.post("/api/onebss-reports/runs/{run_id}/cancel")
+@router.delete("/api/onebss-reports/runs/{run_id}/cancel")
+def cancel_onebss_report_run(request: Request, run_id: str) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    run_id = run_id.strip()
+    try:
+        run = repository.get_onebss_report_run(run_id)
+    except RuntimeError as error:
+        raise_onebss_report_schema_error(error)
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task OneBSS.")
+    status_value = str(run.get("status") or "").lower()
+    if status_value not in ONEBSS_REPORT_ACTIVE_STATUSES:
+        response = _onebss_report_job_response(run_id, {**run, "job_id": run_id})
+        response["run"] = _decorate_onebss_report_run(run)
+        return response
+    finished_at = datetime.now().isoformat(timespec="seconds")
+    message = "Da huy task lay bao cao OneBSS."
+    updated = repository.update_onebss_report_run(
+        run_id,
+        {
+            "status": "cancelled",
+            "message": message,
+            "finished_at": finished_at,
+        },
+    ) or run
+    otp_request_id = str(run.get("otp_request_id") or updated.get("otp_request_id") or "").strip()
+    if otp_request_id:
+        try:
+            cancel_onebss_mobile_gateway_otp(get_settings(), otp_request_id, "onebss_task_cancelled")
+        except Exception:
+            logger.exception("Cannot cancel OneBSS OTP request after task cancellation")
+    try:
+        repository.add_audit_log(actor["username"], "onebss_report_run_cancelled", f"Huy task OneBSS {run_id}")
+    except Exception:
+        logger.exception("Cannot write OneBSS cancel audit log")
+    response = _onebss_report_job_response(run_id, {**updated, "job_id": run_id})
+    response["run"] = _decorate_onebss_report_run(updated)
+    return response
+
+
 @router.get("/api/onebss-reports/otp-requests/{otp_request_id}")
 def get_onebss_otp_request(request: Request, otp_request_id: str) -> dict:
     admin_user(request)
@@ -3389,6 +3448,8 @@ def submit_onebss_report_job_otp(request: Request, job_id: str, payload: OneBssT
     run = repository.get_onebss_report_run(job_id.strip())
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay job OneBSS.")
+    if _onebss_report_run_cancelled(run):
+        return _onebss_report_job_response(job_id, {**run, "job_id": job_id})
     otp_request_id = payload.otp_request_id.strip() or str(run.get("otp_request_id") or "")
     source = payload.otp_source.strip().lower()
     result: dict[str, Any]
@@ -3521,6 +3582,8 @@ def update_onebss_worker_task_status(request: Request, run_id: str, payload: One
     run = repository.get_onebss_report_run(run_id.strip())
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task OneBSS.")
+    if _onebss_report_run_cancelled(run):
+        return _onebss_worker_cancelled_response(run)
     report = repository.get_onebss_report_by_code(str(run.get("ma_bao_cao") or "")) or {}
     status_value = payload.status.strip().lower()
     worker_session_id = payload.worker_session_id.strip()
@@ -3547,6 +3610,8 @@ def get_onebss_worker_task_otp(request: Request, run_id: str) -> dict:
     run = repository.get_onebss_report_run(run_id.strip())
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task OneBSS.")
+    if _onebss_report_run_cancelled(run):
+        return _onebss_worker_cancelled_response(run)
     request_id = str(run.get("otp_request_id") or "").strip()
     if not request_id:
         return {"ok": False, "status": "waiting", "message": "Task chua co OTP request.", "otp": ""}
@@ -3570,6 +3635,8 @@ async def upload_onebss_worker_task_file(request: Request, run_id: str, file: Up
     run = repository.get_onebss_report_run(run_id.strip())
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task OneBSS.")
+    if _onebss_report_run_cancelled(run):
+        return _onebss_worker_cancelled_response(run)
 
     original_name = Path(str(file.filename or "onebss_result.xlsx")).name
     safe_name = safe_filename_part(original_name, "onebss_result.xlsx")
@@ -3629,6 +3696,8 @@ def finish_onebss_worker_task(request: Request, run_id: str, payload: OneBssWork
     run = repository.get_onebss_report_run(run_id.strip())
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task OneBSS.")
+    if _onebss_report_run_cancelled(run):
+        return _onebss_worker_cancelled_response(run)
     finished_at = datetime.now().isoformat(timespec="seconds")
     status_value = payload.status.strip().lower() or ("success" if payload.ok else "failed")
     updated = repository.update_onebss_report_run(
