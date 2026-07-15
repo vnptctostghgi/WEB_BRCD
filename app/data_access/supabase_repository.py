@@ -628,11 +628,23 @@ class SupabaseRepository:
             "storage_link": storage_link,
             "updated_at": self._now(),
         }
+        legacy_payload = {key: value for key, value in payload.items() if key != "otp_service_code"}
         if report_id:
-            self._patch("onebss_reports", {"id": f"eq.{report_id}"}, payload)
+            try:
+                self._patch("onebss_reports", {"id": f"eq.{report_id}"}, payload)
+            except RuntimeError as error:
+                if not self._is_missing_onebss_otp_service_column_error(error):
+                    raise
+                self._patch("onebss_reports", {"id": f"eq.{report_id}"}, legacy_payload)
             return int(report_id)
         payload["created_at"] = self._now()
-        return int(self._insert("onebss_reports", payload)["id"])
+        legacy_payload["created_at"] = payload["created_at"]
+        try:
+            return int(self._insert("onebss_reports", payload)["id"])
+        except RuntimeError as error:
+            if not self._is_missing_onebss_otp_service_column_error(error):
+                raise
+            return int(self._insert("onebss_reports", legacy_payload)["id"])
 
     def delete_onebss_report(self, report_id: int) -> None:
         self._delete("onebss_reports", {"id": f"eq.{report_id}"})
@@ -1359,6 +1371,11 @@ class SupabaseRepository:
         if extra:
             headers.update(extra)
         return headers
+
+    @staticmethod
+    def _is_missing_onebss_otp_service_column_error(error: Exception) -> bool:
+        text = str(error)
+        return "PGRST204" in text and "otp_service_code" in text and "onebss_reports" in text
 
     def _request(self, method: str, table: str, *, params: dict[str, str] | None = None, json: Any = None, headers: dict[str, str] | None = None) -> Any:
         url = f"{self.rest_url}/{table}"

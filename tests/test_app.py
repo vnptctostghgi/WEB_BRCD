@@ -2814,6 +2814,37 @@ def test_supabase_onebss_run_uses_parameters_json_column(monkeypatch) -> None:
     assert run["parameters"] == {"P_TUNGAY": "01/07/2026"}
 
 
+def test_supabase_onebss_report_save_falls_back_without_otp_service_code(monkeypatch) -> None:
+    repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
+    payloads = []
+
+    def fake_insert(table, payload):
+        payloads.append(payload)
+        if "otp_service_code" in payload:
+            raise RuntimeError(
+                'Supabase REST loi 400: {"code":"PGRST204","message":"Could not find the '
+                "'otp_service_code' column of 'onebss_reports' in the schema cache\"}"
+            )
+        return {"id": 77, **payload}
+
+    monkeypatch.setattr(repository, "_insert", fake_insert)
+    report_id = repository.save_onebss_report(
+        None,
+        "MYTV_KTT",
+        "DS MyTV",
+        ["p_phanvung_id"],
+        {"p_phanvung_id": {"$each": ["13", "47", "66"]}},
+        "https://onebss.vnpt.vn/#/report/bi?path=TEST&name=Test",
+        "https://drive.google.com/drive/folders/test",
+        "onebss",
+    )
+
+    assert report_id == 77
+    assert "otp_service_code" in payloads[0]
+    assert "otp_service_code" not in payloads[1]
+    assert payloads[1]["parameters"]["p_phanvung_id"]["$each"] == ["13", "47", "66"]
+
+
 def test_supabase_clear_onebss_report_runs_uses_run_id(monkeypatch) -> None:
     repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
     calls = []
