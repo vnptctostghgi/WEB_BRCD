@@ -5271,6 +5271,14 @@ function createOneBssReportDraft() {
 const oneBssDefaultRegionValues = ["13", "47", "66"];
 const oneBssSampleWrapperKeys = ["parameters", "params", "param", "filters", "filter", "payload", "body", "data", "request", "values"];
 
+function normalizeOneBssLooseJsonText(text) {
+  return String(text || "")
+    .trim()
+    .replace(/;+\s*$/, "")
+    .replace(/([{,]\s*)([A-Za-z_$][A-Za-z0-9_$]*)(\s*:)/g, '$1"$2"$3')
+    .replace(/,\s*([}\]])/g, "$1");
+}
+
 function parseOneBssPastedJson(text) {
   const raw = String(text || "").trim();
   if (!raw) return null;
@@ -5282,15 +5290,20 @@ function parseOneBssPastedJson(text) {
   const lastArray = raw.lastIndexOf("]");
   if (firstArray >= 0 && lastArray > firstArray) candidates.push(raw.slice(firstArray, lastArray + 1));
   for (const candidate of candidates) {
-    try {
-      let parsed = JSON.parse(candidate);
-      if (typeof parsed === "string" && /^[\s[{]/.test(parsed)) parsed = JSON.parse(parsed);
-      return parsed;
-    } catch {
-      // Try the next bounded JSON candidate.
+    const variants = [candidate];
+    const looseJson = normalizeOneBssLooseJsonText(candidate);
+    if (looseJson && looseJson !== candidate) variants.push(looseJson);
+    for (const variant of variants) {
+      try {
+        let parsed = JSON.parse(variant);
+        if (typeof parsed === "string" && /^[\s[{]/.test(parsed)) parsed = parseOneBssPastedJson(parsed);
+        return parsed;
+      } catch {
+        // Try the next bounded JSON/object-literal candidate.
+      }
     }
   }
-  throw new Error("JSON mẫu chưa đúng định dạng.");
+  throw new Error("JSON mẫu chưa đúng định dạng. Có thể dán JSON chuẩn hoặc mẫu object copy từ trình duyệt.");
 }
 
 function oneBssParameterKeyFromDescriptor(item) {
@@ -5313,7 +5326,7 @@ function oneBssParameterValueFromDescriptor(item) {
 
 function oneBssLooksLikeParameterKey(key) {
   const text = String(key || "").trim();
-  return /^P_[A-Za-z0-9_]+$/.test(text) || /^\$[A-Za-z0-9_]+$/.test(text);
+  return /^P_[A-Za-z0-9_]+$/i.test(text) || /^\$[A-Za-z0-9_]+$/.test(text);
 }
 
 function oneBssDescriptorArrayToParameters(items) {
@@ -5454,7 +5467,7 @@ function renderOneBssReportEditor(report, isDraft = false) {
       <label>Mã báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="Tự sinh nếu để trống" /></label>
       <label>Tên báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="Tên báo cáo OneBSS" /></label>
       <div class="onebss-parameter-converter">
-        <label>JSON mẫu từ trình duyệt<textarea class="form-control inline-admin-input font-mono text-xs onebss-sample-json" data-onebss-sample-json rows="10" placeholder='Dán JSON mẫu vừa copy từ trình duyệt OneBSS vào đây'></textarea><small class="cell-note" data-onebss-sample-status>Dán JSON mẫu để tự tách biến và tạo tham số chạy.</small></label>
+        <label>JSON mẫu từ trình duyệt<textarea class="form-control inline-admin-input font-mono text-xs onebss-sample-json" data-onebss-sample-json rows="10" placeholder='{p_phanvung_id: "66", p_nhanvienkd_id: "0", p_nhanvienkt_id: "0"}'></textarea><small class="cell-note" data-onebss-sample-status>Dán JSON chuẩn hoặc mẫu object copy từ trình duyệt để tự tách biến và tạo tham số chạy.</small></label>
         <label>Tham số xuất trực tiếp JSON<textarea class="form-control inline-admin-input font-mono text-xs" data-inline-onebss-field="parameters" rows="10" placeholder='{"P_PHANVUNG_ID":{"$each":["13","47","66"]},"P_TUNGAY":"{{month_start}}","P_DENNGAY":"{{today}}"}'>${escapeHtml(parameterJson === "{}" ? "" : parameterJson)}</textarea><small class="cell-note">JSON này là tham số chạy thật. P_PHANVUNG_ID sẽ chạy lần lượt 13, 47, 66 khi được sinh từ mẫu.</small></label>
       </div>
       <label>Danh sách biến<input class="form-control inline-admin-input inline-admin-params" data-inline-onebss-field="danh_sach_bien" value="${escapeHtml(params)}" placeholder="P_PHANVUNG_ID, P_LOAI_NGAY, P_TUNGAY, P_DENNGAY, P_LOAI_BAOCAO, P_LOAI_BIENDONG" readonly /><small class="cell-note">Tự tách từ JSON mẫu hoặc từ JSON tham số xuất trực tiếp.</small></label>
