@@ -3037,6 +3037,37 @@ tbody tr:hover {
   color: #94a3b8;
 }
 
+.billing-fieldset {
+  border-color: rgba(56, 189, 248, .35);
+  background: rgba(14, 165, 233, .08);
+}
+
+.billing-grid {
+  display: grid;
+  gap: .85rem;
+}
+
+.billing-dialog-note {
+  border: 1px solid rgba(14, 165, 233, .25);
+  border-radius: 12px;
+  padding: .7rem .85rem;
+  background: rgba(2, 132, 199, .1);
+  color: #0f172a;
+  font-size: .82rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.dark .billing-dialog-note {
+  color: #dbeafe;
+}
+
+@media (min-width: 720px) {
+  .billing-grid {
+    grid-template-columns: minmax(0, 1.4fr) minmax(160px, .6fr);
+  }
+}
+
 .empty-state {
   display: grid;
   place-items: center;

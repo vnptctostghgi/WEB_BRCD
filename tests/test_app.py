@@ -216,6 +216,56 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
         assert client.get("/api/dashboard-layouts/DASHBOARD_KINH_DOANH").status_code == 403
 
 
+def test_admin_can_toggle_and_demo_renew_user_billing() -> None:
+    with TestClient(app) as client:
+        login(client)
+        plans_response = client.get("/api/admin/billing/plans")
+        assert plans_response.status_code == 200
+        plan_codes = {plan["code"] for plan in plans_response.json()["plans"]}
+        assert {"monthly", "quarterly", "six_months", "yearly"} <= plan_codes
+
+        created = client.post(
+            "/api/admin/users",
+            json={
+                "username": "viewer_billing",
+                "full_name": "Viewer Billing",
+                "password": "Viewer@Billing123",
+                "role": "viewer",
+            },
+        )
+        assert created.status_code == 200
+        viewer_id = created.json()["user"]["id"]
+
+        expired = client.put(
+            f"/api/admin/users/{viewer_id}/billing",
+            json={"billing_enabled": True, "plan_code": "monthly", "expires_at": "2020-01-01"},
+        )
+        assert expired.status_code == 200
+        assert expired.json()["billing"]["billing_status"] == "expired"
+
+        client.post("/api/auth/logout")
+        login(client, "viewer_billing", "Viewer@Billing123")
+        assert client.get("/").status_code == 200
+        blocked = client.get("/api/navigation")
+        assert blocked.status_code == 402
+
+        client.post("/api/auth/logout")
+        login(client)
+        renewed = client.post(
+            f"/api/admin/users/{viewer_id}/billing/renew",
+            json={"plan_code": "six_months"},
+        )
+        assert renewed.status_code == 200
+        payload = renewed.json()
+        assert payload["invoice"]["status"] == "paid"
+        assert payload["subscription"]["billing_status"] == "active"
+        assert payload["subscription"]["billing_total_months"] == 7
+
+        client.post("/api/auth/logout")
+        login(client, "viewer_billing", "Viewer@Billing123")
+        assert client.get("/api/navigation").status_code == 200
+
+
 def test_five_failed_logins_send_telegram_alert(monkeypatch) -> None:
     sent_messages = []
     routes.FAILED_LOGIN_COUNTS.clear()

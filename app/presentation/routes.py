@@ -64,6 +64,7 @@ from app.application.zalo_bot import ZaloBotClient
 from app.data_access.app_repository import (
     AppRepository,
     DEFAULT_DASHBOARD_PAGE_ID,
+    billing_datetime_text,
     dashboard_feature_code_for_page,
     normalize_feature_code,
 )
@@ -270,6 +271,16 @@ class UpdateUserPayload(BaseModel):
     full_name: str
     role: Literal["admin", "viewer"]
     is_active: bool
+
+
+class UserBillingPayload(BaseModel):
+    billing_enabled: bool = False
+    plan_code: str = "monthly"
+    expires_at: str = ""
+
+
+class BillingRenewPayload(BaseModel):
+    plan_code: str = "monthly"
 
 
 class PasswordPayload(BaseModel):
@@ -1739,6 +1750,31 @@ def parse_employee_workbook(content: bytes) -> list[dict]:
     return employees
 
 
+BILLING_ALLOWED_API_PATHS = {
+    "/api/auth/me",
+    "/api/auth/logout",
+    "/api/auth/change-password",
+    "/api/billing/self",
+}
+
+
+def billing_access_blocked(user: dict[str, Any]) -> bool:
+    return user.get("role") != "admin" and bool(user.get("billing_access_blocked"))
+
+
+def enforce_billing_access(request: Request, user: dict[str, Any]) -> None:
+    path = request.url.path
+    if not path.startswith("/api/") or path in BILLING_ALLOWED_API_PATHS:
+        return
+    if billing_access_blocked(user):
+        expires_at = str(user.get("billing_expires_at") or "")
+        suffix = f" Han dung: {expires_at[:10]}." if expires_at else ""
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=f"Tai khoan da het han su dung. Vui long thanh toan/gia han de tiep tuc.{suffix}",
+        )
+
+
 
 def current_user(request: Request) -> dict:
     session_user = request.session.get("user")
@@ -1750,6 +1786,7 @@ def current_user(request: Request) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Phiên đăng nhập không còn hợp lệ.")
     public = AuthService.public_user(user)
     public["permissions"] = build_app_repository().get_user_permissions(public["id"])
+    enforce_billing_access(request, public)
     return public
 
 
@@ -1922,6 +1959,31 @@ def me(request: Request) -> dict:
     return {"user": current_user(request)}
 
 
+@router.get("/api/billing/self")
+def own_billing(request: Request) -> dict:
+    user = current_user(request)
+    return {
+        "billing": {
+            key: user.get(key)
+            for key in (
+                "billing_enabled",
+                "billing_plan_code",
+                "billing_plan_name",
+                "billing_paid_months",
+                "billing_bonus_months",
+                "billing_total_months",
+                "billing_price_vnd",
+                "billing_started_at",
+                "billing_expires_at",
+                "billing_status",
+                "billing_days_remaining",
+                "billing_last_invoice_id",
+                "billing_access_blocked",
+            )
+        }
+    }
+
+
 @router.post("/api/auth/change-password")
 def change_password(request: Request, payload: ChangePasswordPayload) -> dict:
     user = current_user(request)
@@ -1980,6 +2042,12 @@ def list_users(request: Request) -> dict:
     return {"users": build_app_repository().list_users()}
 
 
+@router.get("/api/admin/billing/plans")
+def list_billing_plans(request: Request) -> dict:
+    admin_user(request)
+    return {"plans": build_app_repository().list_billing_plans(active_only=True)}
+
+
 @router.post("/api/admin/users")
 def create_user(request: Request, payload: CreateUserPayload) -> dict:
     actor = admin_user(request)
@@ -1990,6 +2058,59 @@ def create_user(request: Request, payload: CreateUserPayload) -> dict:
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     return {"ok": True, "user": user}
+
+
+@router.put("/api/admin/users/{user_id}/billing")
+def update_user_billing(request: Request, user_id: int, payload: UserBillingPayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    if not repository.get_user_by_id(user_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay nguoi dung.")
+    try:
+        billing = repository.set_user_billing(
+            user_id,
+            payload.billing_enabled,
+            payload.plan_code,
+            billing_datetime_text(payload.expires_at),
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    except RuntimeError as error:
+        if "billing_" in str(error) or "user_billing" in str(error):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Supabase chua co bang billing. Hay chay file sql/supabase_billing_demo.sql trong SQL Editor truoc.",
+            ) from error
+        raise
+    repository.add_audit_log(actor["username"], "user_billing_updated", f"Cap nhat tinh phi user #{user_id}: {billing['billing_status']}")
+    return {"ok": True, "billing": billing}
+
+
+@router.post("/api/admin/users/{user_id}/billing/renew")
+def renew_user_billing(request: Request, user_id: int, payload: BillingRenewPayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    user = repository.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay nguoi dung.")
+    try:
+        result = repository.renew_user_billing_demo(user_id, payload.plan_code, actor["username"])
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    except RuntimeError as error:
+        if "billing_" in str(error) or "user_billing" in str(error):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Supabase chua co bang billing. Hay chay file sql/supabase_billing_demo.sql trong SQL Editor truoc.",
+            ) from error
+        raise
+    invoice = result["invoice"]
+    repository.add_audit_log(
+        actor["username"],
+        "user_billing_demo_renewed",
+        f"Gia han demo user {user['username']} bang hoa don {invoice['invoice_id']} so tien {invoice['amount_vnd']}",
+    )
+    return {"ok": True, **result}
 
 
 @router.get("/api/admin/users/import-template")
@@ -4499,7 +4620,6 @@ def list_data_mining_runs(request: Request, schedule_id: str = "", limit: int = 
         return {"runs": repository.list_data_mining_runs(schedule_id=schedule_id.strip(), limit=limit)}
     except RuntimeError as error:
         raise_data_mining_schema_error(error)
-
 
 
 def _run_data_mining_schedule_background(

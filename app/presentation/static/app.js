@@ -4,6 +4,7 @@ let mustChangePassword = ["1", "True", "true"].includes(document.body.dataset.mu
 const canManageVault = document.body.dataset.canManageVault === "True";
 const canRevealVault = document.body.dataset.canRevealVault === "True";
 let users = [];
+let billingPlans = [];
 let websites = [];
 let credentialWebsites = [];
 let credentials = [];
@@ -373,6 +374,11 @@ async function api(url, options = {}) {
   }
   if (response.status === 403) {
     const message = body.detail || "Bạn không có quyền truy cập chức năng này";
+    showToast(message, "error");
+    throw new Error(message);
+  }
+  if (response.status === 402) {
+    const message = body.detail || "Tài khoản đã hết hạn sử dụng.";
     showToast(message, "error");
     throw new Error(message);
   }
@@ -1035,6 +1041,81 @@ $("#password-form")?.addEventListener("submit", async (event) => {
   }
 });
 
+function formatVnd(value) {
+  return `${Number(value || 0).toLocaleString("vi-VN")}đ`;
+}
+
+function dateInputValue(value) {
+  return String(value || "").slice(0, 10);
+}
+
+function billingStatusLabel(status) {
+  return {
+    disabled: "Tắt",
+    active: "Còn hạn",
+    expired: "Hết hạn",
+    pending: "Chưa có hạn",
+  }[status] || status || "Tắt";
+}
+
+function billingStatusClass(status) {
+  if (status === "active") return "active";
+  if (status === "expired") return "inactive";
+  if (status === "pending") return "pending";
+  return "viewer";
+}
+
+function billingPlanLabel(plan) {
+  if (!plan) return "Chọn gói";
+  const bonus = Number(plan.bonus_months || 0);
+  const months = Number(plan.paid_months || 0);
+  const total = Number(plan.total_months || months + bonus);
+  const gift = bonus ? `, dùng ${total} tháng` : "";
+  return `${plan.name || plan.code} - ${formatVnd(plan.price_vnd)}${gift}`;
+}
+
+async function ensureBillingPlans() {
+  if (!billingPlans.length) {
+    billingPlans = (await api("/api/admin/billing/plans")).plans || [];
+  }
+  return billingPlans;
+}
+
+function renderBillingPlanOptions(selectedCode = "monthly") {
+  const options = billingPlans.map((plan) => `<option value="${escapeHtml(plan.code)}" ${plan.code === selectedCode ? "selected" : ""}>${escapeHtml(billingPlanLabel(plan))}</option>`);
+  return options.join("");
+}
+
+function renderUserBillingCell(user) {
+  const status = user.billing_status || "disabled";
+  if (!user.billing_enabled) {
+    return `<span class="status viewer">Tắt</span><small class="cell-note">Không kiểm soát tính phí</small>`;
+  }
+  const notes = [];
+  notes.push(user.billing_plan_name || user.billing_plan_code || "");
+  if (user.billing_expires_at) notes.push(`Hạn: ${dateInputValue(user.billing_expires_at)}`);
+  if (status === "active") notes.push(`Còn ${Number(user.billing_days_remaining || 0)} ngày`);
+  if (user.billing_bonus_months) notes.push(`Tặng ${Number(user.billing_bonus_months || 0)} tháng`);
+  return `<span class="status ${billingStatusClass(status)}">${escapeHtml(billingStatusLabel(status))}</span>${notes.filter(Boolean).map((note) => `<small class="cell-note">${escapeHtml(note)}</small>`).join("")}`;
+}
+
+function updateEditBillingSummary() {
+  const form = $("#edit-user-form");
+  if (!form) return;
+  const enabled = form.elements.namedItem("billing_enabled")?.checked;
+  const planCode = form.elements.namedItem("billing_plan_code")?.value || "monthly";
+  const plan = billingPlans.find((item) => item.code === planCode);
+  const expires = form.elements.namedItem("billing_expires_at")?.value || "";
+  const summary = $("#edit-user-billing-summary");
+  if (!summary) return;
+  if (!enabled) {
+    summary.textContent = "Tài khoản này không bị kiểm soát tính phí.";
+    return;
+  }
+  const planText = billingPlanLabel(plan);
+  summary.textContent = expires ? `${planText}. Hạn dùng đến ${expires}.` : `${planText}. Chưa đặt hạn dùng.`;
+}
+
 async function loadUsers({ force = false } = {}) {
   if (!force && isDataFresh("users")) {
     renderUsersTable();
@@ -1043,7 +1124,7 @@ async function loadUsers({ force = false } = {}) {
   if (users.length && !force) {
     renderUsersTable();
   }
-  if (!users.length || force) setTableLoading("#users-table", 5, "Đang tải danh sách người dùng...");
+  if (!users.length || force) setTableLoading("#users-table", 6, "Đang tải danh sách người dùng...");
   users = (await api("/api/admin/users")).users;
   markDataFresh("users");
   renderUsersTable();
@@ -1064,13 +1145,15 @@ function renderUsersTable() {
   if (count) count.textContent = `${filteredUsers.length}/${users.length} người dùng`;
   $("#users-table").innerHTML = filteredUsers.length ? filteredUsers.map((user) => `
     <tr>
-      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-user="${user.id}">Chỉnh sửa</button> <button class="table-action danger" data-delete-user="${user.id}">Xóa</button></div></td>
+      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-user="${user.id}">Chỉnh sửa</button> <button class="table-action" data-renew-billing="${user.id}">Gia hạn</button> <button class="table-action danger" data-delete-user="${user.id}">Xóa</button></div></td>
       <td><strong>${escapeHtml(user.username)}</strong><small class='cell-note'>${escapeHtml(user.email || user.employee_code || "")}</small>${user.must_change_password ? "<small class='cell-note'>Cần đổi mật khẩu</small>" : ""}</td>
       <td>${escapeHtml(user.full_name)}<small class='cell-note'>${escapeHtml(user.department || "")}</small></td>
       <td><span class="status ${user.role === "admin" ? "admin" : "viewer"}">${user.role === "admin" ? "Quản trị viên" : "Người xem"}</span></td>
       <td><span class="status ${user.is_active ? "active" : "inactive"}">${user.is_active ? "Hoạt động" : "Đã khóa"}</span></td>
-    </tr>`).join("") : emptyRow(5, keyword ? "Không tìm thấy người dùng" : "Chưa có người dùng", keyword ? "Hãy thử nhập từ khóa khác." : "Hãy tạo hoặc import người dùng từ Excel.");
+      <td>${renderUserBillingCell(user)}</td>
+    </tr>`).join("") : emptyRow(6, keyword ? "Không tìm thấy người dùng" : "Chưa có người dùng", keyword ? "Hãy thử nhập từ khóa khác." : "Hãy tạo hoặc import người dùng từ Excel.");
   document.querySelectorAll("[data-edit-user]").forEach((button) => button.addEventListener("click", () => openEditUser(Number(button.dataset.editUser))));
+  document.querySelectorAll("[data-renew-billing]").forEach((button) => button.addEventListener("click", () => renewUserBillingDemo(Number(button.dataset.renewBilling))));
   document.querySelectorAll("[data-delete-user]").forEach((button) => button.addEventListener("click", () => deleteUser(Number(button.dataset.deleteUser))));
 }
 
@@ -1080,15 +1163,40 @@ async function deleteUser(id) {
   await loadUsers({ force: true });
 }
 
+async function renewUserBillingDemo(id, selectedPlanCode = "") {
+  await ensureBillingPlans();
+  const user = users.find((item) => item.id === id);
+  const planCode = selectedPlanCode || user?.billing_plan_code || billingPlans[0]?.code || "monthly";
+  const plan = billingPlans.find((item) => item.code === planCode);
+  if (!confirm(`Gia hạn demo cho ${user?.username || "người dùng"} theo gói ${billingPlanLabel(plan)}?`)) return;
+  try {
+    const result = await api(`/api/admin/users/${id}/billing/renew`, {
+      method: "POST",
+      body: JSON.stringify({ plan_code: planCode }),
+    });
+    showMessage($("#users-message"), `Đã ghi nhận thanh toán demo ${result.invoice.payment_code}, hạn mới ${dateInputValue(result.subscription.billing_expires_at)}.`);
+    await loadUsers({ force: true });
+  } catch (error) {
+    showMessage($("#users-message"), error.message, "error");
+  }
+}
+
 async function openEditUser(id) {
   const user = users.find((item) => item.id === id);
   const form = $("#edit-user-form");
+  await ensureBillingPlans();
   form.elements.namedItem("id").value = user.id;
   form.elements.namedItem("full_name").value = user.full_name;
   form.elements.namedItem("role").value = user.role;
   form.elements.namedItem("is_active").checked = Boolean(user.is_active);
+  form.elements.namedItem("billing_enabled").checked = Boolean(user.billing_enabled);
+  const billingPlan = form.elements.namedItem("billing_plan_code");
+  billingPlan.innerHTML = renderBillingPlanOptions(user.billing_plan_code || "monthly");
+  billingPlan.value = user.billing_plan_code || "monthly";
+  form.elements.namedItem("billing_expires_at").value = dateInputValue(user.billing_expires_at);
   form.elements.namedItem("password").value = "";
   form.querySelector(".result").className = "result hidden";
+  updateEditBillingSummary();
   if (!features.length) features = (await api("/api/admin/features")).features;
   const granted = new Set((await api(`/api/admin/users/${id}/permissions`)).feature_codes);
   const orderedFeatures = flattenFeatureTree(buildFeatureTree(features)).map((row) => row.feature);
@@ -1122,6 +1230,7 @@ if (role === "admin") {
     const data = Object.fromEntries(new FormData(form));
     try {
       await api(`/api/admin/users/${data.id}`, { method: "PUT", body: JSON.stringify({ full_name: data.full_name, role: data.role, is_active: form.is_active.checked }) });
+      await api(`/api/admin/users/${data.id}/billing`, { method: "PUT", body: JSON.stringify({ billing_enabled: form.billing_enabled.checked, plan_code: data.billing_plan_code || "monthly", expires_at: data.billing_expires_at || "" }) });
       if (data.password) await api(`/api/admin/users/${data.id}/reset-password`, { method: "POST", body: JSON.stringify({ password: data.password }) });
       const feature_codes = [...$("#permission-tree").querySelectorAll("input:checked")].map((input) => input.value);
       await api(`/api/admin/users/${data.id}/permissions`, { method: "PUT", body: JSON.stringify({ feature_codes }) });
@@ -1130,6 +1239,19 @@ if (role === "admin") {
     } catch (error) {
       showMessage(form.querySelector(".result"), error.message, "error");
     }
+  });
+
+  ["billing_enabled", "billing_plan_code", "billing_expires_at"].forEach((name) => {
+    $("#edit-user-form")?.elements.namedItem(name)?.addEventListener("change", updateEditBillingSummary);
+    $("#edit-user-form")?.elements.namedItem(name)?.addEventListener("input", updateEditBillingSummary);
+  });
+
+  $("#renew-user-billing-demo")?.addEventListener("click", async () => {
+    const form = $("#edit-user-form");
+    const id = Number(form.elements.namedItem("id").value);
+    const planCode = form.elements.namedItem("billing_plan_code").value || "monthly";
+    $("#edit-user-dialog").close();
+    await renewUserBillingDemo(id, planCode);
   });
 
   $("#refresh-audit")?.addEventListener("click", () => loadAudit({ force: true }));
@@ -4930,7 +5052,7 @@ async function runDataMiningScheduleNow(scheduleId, button) {
       method: "POST",
       body: JSON.stringify({ otp, allow_device_registration: true, parameters }),
     });
-    const message = response.message || response.result?.message || (response.ok ? "Da dua lich dao du lieu vao hang doi." : "Chua chay xong lich dao du lieu.");
+    const message = response.message || response.result?.message || (response.ok ? "Đã đưa lịch đào dữ liệu vào hàng đợi." : "Chưa chạy xong lịch đào dữ liệu.");
     showMessage($("#data-mining-result"), message, response.ok ? "success" : "error");
     await loadDataMining({ force: true });
   } catch (error) {

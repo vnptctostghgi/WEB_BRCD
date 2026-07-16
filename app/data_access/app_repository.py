@@ -1,3 +1,4 @@
+import calendar
 import hashlib
 import hmac
 import os
@@ -7,7 +8,7 @@ import re
 import secrets
 import unicodedata
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +79,94 @@ OBSOLETE_FEATURE_CODES = (
     *LEGACY_REMOVED_FEATURE_CODES,
     *FEATURE_CODE_ALIASES.keys(),
 )
+
+BILLING_PLAN_ROWS = [
+    {"code": "monthly", "name": "1 thang", "paid_months": 1, "bonus_months": 0, "price_vnd": 99000, "is_active": True, "sort_order": 10},
+    {"code": "quarterly", "name": "3 thang", "paid_months": 3, "bonus_months": 0, "price_vnd": 279000, "is_active": True, "sort_order": 20},
+    {"code": "six_months", "name": "6 thang tang 1", "paid_months": 6, "bonus_months": 1, "price_vnd": 539000, "is_active": True, "sort_order": 30},
+    {"code": "yearly", "name": "12 thang tang 2", "paid_months": 12, "bonus_months": 2, "price_vnd": 999000, "is_active": True, "sort_order": 40},
+]
+BILLING_PLAN_BY_CODE = {plan["code"]: plan for plan in BILLING_PLAN_ROWS}
+
+
+def billing_bool(value: Any) -> bool:
+    return value is True or value == 1 or str(value).lower() in {"1", "true", "yes", "on"}
+
+
+def billing_parse_datetime(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        text = f"{text}T23:59:59+00:00"
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def billing_datetime_text(value: Any) -> str:
+    parsed = billing_parse_datetime(value)
+    return parsed.isoformat(timespec="seconds") if parsed else ""
+
+
+def billing_add_months(value: datetime, months: int) -> datetime:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
+
+
+def billing_effective_status(enabled: Any, expires_at: Any) -> str:
+    if not billing_bool(enabled):
+        return "disabled"
+    expires = billing_parse_datetime(expires_at)
+    if not expires:
+        return "pending"
+    return "active" if expires >= datetime.now(UTC) else "expired"
+
+
+def billing_days_remaining(expires_at: Any) -> int:
+    expires = billing_parse_datetime(expires_at)
+    if not expires:
+        return 0
+    seconds = (expires - datetime.now(UTC)).total_seconds()
+    if seconds <= 0:
+        return 0
+    return int((seconds + 86399) // 86400)
+
+
+def billing_plan_total_months(plan: dict[str, Any]) -> int:
+    return int(plan.get("paid_months") or 0) + int(plan.get("bonus_months") or 0)
+
+
+def billing_normalize_summary(user_id: int, billing: dict[str, Any] | None = None, plan: dict[str, Any] | None = None) -> dict[str, Any]:
+    billing = billing or {}
+    plan_code = str(billing.get("plan_code") or (plan or {}).get("code") or "monthly")
+    plan = plan or BILLING_PLAN_BY_CODE.get(plan_code) or BILLING_PLAN_BY_CODE["monthly"]
+    enabled = billing_bool(billing.get("billing_enabled"))
+    expires_at = billing_datetime_text(billing.get("expires_at"))
+    status = billing_effective_status(enabled, expires_at)
+    return {
+        "billing_enabled": enabled,
+        "billing_plan_code": plan["code"],
+        "billing_plan_name": plan.get("name") or plan["code"],
+        "billing_paid_months": int(plan.get("paid_months") or 0),
+        "billing_bonus_months": int(plan.get("bonus_months") or 0),
+        "billing_total_months": billing_plan_total_months(plan),
+        "billing_price_vnd": int(plan.get("price_vnd") or 0),
+        "billing_started_at": billing_datetime_text(billing.get("started_at")),
+        "billing_expires_at": expires_at,
+        "billing_status": status,
+        "billing_days_remaining": billing_days_remaining(expires_at),
+        "billing_last_invoice_id": str(billing.get("last_invoice_id") or ""),
+        "billing_access_blocked": enabled and status == "expired",
+        "billing_user_id": int(user_id),
+    }
 
 DEFAULT_DASHBOARD_PAGE_ID = "DASHBOARD_KINH_DOANH"
 DEFAULT_DASHBOARD_PAGE_NAME = "Dashboard Kinh doanh"
@@ -497,6 +586,68 @@ class AppRepository:
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS billing_plans (
+                    code TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    paid_months INTEGER NOT NULL,
+                    bonus_months INTEGER NOT NULL DEFAULT 0,
+                    price_vnd INTEGER NOT NULL DEFAULT 0,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS user_billing (
+                    user_id INTEGER PRIMARY KEY,
+                    billing_enabled INTEGER NOT NULL DEFAULT 0,
+                    plan_code TEXT NOT NULL DEFAULT 'monthly',
+                    started_at TEXT NOT NULL DEFAULT '',
+                    expires_at TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'disabled',
+                    last_invoice_id TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY(plan_code) REFERENCES billing_plans(code)
+                );
+
+                CREATE TABLE IF NOT EXISTS billing_invoices (
+                    invoice_id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    plan_code TEXT NOT NULL,
+                    amount_vnd INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    payment_code TEXT NOT NULL UNIQUE,
+                    qr_payload TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    due_at TEXT NOT NULL,
+                    paid_at TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY(plan_code) REFERENCES billing_plans(code)
+                );
+
+                CREATE TABLE IF NOT EXISTS billing_payments (
+                    payment_id TEXT PRIMARY KEY,
+                    invoice_id TEXT NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    provider TEXT NOT NULL DEFAULT 'demo_vietqr',
+                    transaction_ref TEXT NOT NULL DEFAULT '',
+                    amount_vnd INTEGER NOT NULL DEFAULT 0,
+                    raw_payload_json TEXT NOT NULL DEFAULT '{}',
+                    paid_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(invoice_id) REFERENCES billing_invoices(invoice_id) ON DELETE CASCADE,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS user_billing_status_idx
+                ON user_billing (billing_enabled, status, expires_at);
+
+                CREATE INDEX IF NOT EXISTS billing_invoices_user_idx
+                ON billing_invoices (user_id, created_at DESC);
+
                 """
             )
             for column, definition in {
@@ -569,6 +720,27 @@ class AppRepository:
                 VALUES (?, ?, 1, ?, ?, ?)
                 """,
                 [("ALL", "Tat ca", 0, now, now), ("13", "Can Tho", 10, now, now), ("66", "Hau Giang", 20, now, now), ("47", "Soc Trang", 30, now, now)],
+            )
+            connection.executemany(
+                """
+                INSERT OR IGNORE INTO billing_plans
+                (code, name, paid_months, bonus_months, price_vnd, is_active, sort_order, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        plan["code"],
+                        plan["name"],
+                        int(plan["paid_months"]),
+                        int(plan["bonus_months"]),
+                        int(plan["price_vnd"]),
+                        int(plan["is_active"]),
+                        int(plan["sort_order"]),
+                        now,
+                        now,
+                    )
+                    for plan in BILLING_PLAN_ROWS
+                ],
             )
             exists = connection.execute(
                 "SELECT id FROM users WHERE username = ?", (admin_username,)
@@ -651,12 +823,12 @@ class AppRepository:
             row = connection.execute(
                 "SELECT * FROM users WHERE username = ?", (username,)
             ).fetchone()
-            return dict(row) if row else None
+            return self._with_billing_summary(connection, dict(row)) if row else None
 
     def get_user_by_id(self, user_id: int) -> dict[str, Any] | None:
         with self.connect() as connection:
             row = connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-            return dict(row) if row else None
+            return self._with_billing_summary(connection, dict(row)) if row else None
 
     def list_users(self) -> list[dict[str, Any]]:
         with self.connect() as connection:
@@ -667,7 +839,7 @@ class AppRepository:
                 FROM users ORDER BY id
                 """
             ).fetchall()
-            return [dict(row) for row in rows]
+            return [self._with_billing_summary(connection, dict(row)) for row in rows]
 
     def create_user(self, username: str, full_name: str, password: str, role: str, employee: dict[str, Any] | None = None) -> int:
         now = self._now()
@@ -726,6 +898,168 @@ class AppRepository:
                 "SELECT COUNT(*) AS total FROM users WHERE role = 'admin' AND is_active = 1"
             ).fetchone()
             return int(row["total"])
+
+    def list_billing_plans(self, active_only: bool = False) -> list[dict[str, Any]]:
+        query = "SELECT * FROM billing_plans"
+        if active_only:
+            query += " WHERE is_active = 1"
+        query += " ORDER BY sort_order, paid_months"
+        with self.connect() as connection:
+            return [self._decode_billing_plan(dict(row)) for row in connection.execute(query).fetchall()]
+
+    def get_billing_plan(self, code: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM billing_plans WHERE code=?", (code,)).fetchone()
+            return self._decode_billing_plan(dict(row)) if row else None
+
+    def get_user_billing(self, user_id: int) -> dict[str, Any]:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM user_billing WHERE user_id=?", (user_id,)).fetchone()
+            billing = dict(row) if row else {}
+            plan = self.get_billing_plan(str(billing.get("plan_code") or "monthly"))
+            return billing_normalize_summary(user_id, billing, plan)
+
+    def set_user_billing(self, user_id: int, enabled: bool, plan_code: str, expires_at: str = "") -> dict[str, Any]:
+        plan = self.get_billing_plan(plan_code)
+        if not plan:
+            raise ValueError("Goi tinh phi khong hop le.")
+        now = self._now()
+        normalized_expires = billing_datetime_text(expires_at)
+        status_value = billing_effective_status(enabled, normalized_expires)
+        with self.connect() as connection:
+            existing = connection.execute("SELECT * FROM user_billing WHERE user_id=?", (user_id,)).fetchone()
+            started_at = str(existing["started_at"] or "") if existing else ""
+            if enabled and not started_at:
+                started_at = now
+            if not enabled:
+                status_value = "disabled"
+            connection.execute(
+                """
+                INSERT INTO user_billing
+                (user_id, billing_enabled, plan_code, started_at, expires_at, status, last_invoice_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                  billing_enabled=excluded.billing_enabled,
+                  plan_code=excluded.plan_code,
+                  started_at=excluded.started_at,
+                  expires_at=excluded.expires_at,
+                  status=excluded.status,
+                  updated_at=excluded.updated_at
+                """,
+                (
+                    user_id,
+                    int(enabled),
+                    plan_code,
+                    started_at,
+                    normalized_expires,
+                    status_value,
+                    str(existing["last_invoice_id"] or "") if existing else "",
+                    now,
+                    now,
+                ),
+            )
+        return self.get_user_billing(user_id)
+
+    def renew_user_billing_demo(self, user_id: int, plan_code: str, actor: str = "") -> dict[str, Any]:
+        plan = self.get_billing_plan(plan_code)
+        if not plan:
+            raise ValueError("Goi tinh phi khong hop le.")
+        now_dt = datetime.now(UTC)
+        now = now_dt.isoformat(timespec="seconds")
+        current = self.get_user_billing(user_id)
+        current_expires = billing_parse_datetime(current.get("billing_expires_at"))
+        base_dt = current_expires if current.get("billing_enabled") and current_expires and current_expires > now_dt else now_dt
+        total_months = billing_plan_total_months(plan)
+        new_expires = billing_add_months(base_dt, total_months).isoformat(timespec="seconds")
+        invoice_id = f"INV{now_dt.strftime('%Y%m%d')}{uuid.uuid4().hex[:8].upper()}"
+        payment_id = f"PAY{uuid.uuid4().hex[:16].upper()}"
+        payment_code = f"VNPTCTO{user_id}{uuid.uuid4().hex[:8].upper()}"[:25]
+        due_at = (now_dt + timedelta(hours=24)).isoformat(timespec="seconds")
+        amount_vnd = int(plan.get("price_vnd") or 0)
+        qr_payload = f"DEMO_VIETQR|{payment_code}|{amount_vnd}"
+        raw_payload = {
+            "mode": "demo",
+            "actor": actor,
+            "payment_code": payment_code,
+            "plan_code": plan_code,
+        }
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO billing_invoices
+                (invoice_id, user_id, plan_code, amount_vnd, status, payment_code, qr_payload, created_at, due_at, paid_at, updated_at)
+                VALUES (?, ?, ?, ?, 'paid', ?, ?, ?, ?, ?, ?)
+                """,
+                (invoice_id, user_id, plan_code, amount_vnd, payment_code, qr_payload, now, due_at, now, now),
+            )
+            connection.execute(
+                """
+                INSERT INTO billing_payments
+                (payment_id, invoice_id, user_id, provider, transaction_ref, amount_vnd, raw_payload_json, paid_at, created_at)
+                VALUES (?, ?, ?, 'demo_vietqr', ?, ?, ?, ?, ?)
+                """,
+                (payment_id, invoice_id, user_id, f"DEMO-{invoice_id}", amount_vnd, json.dumps(raw_payload, ensure_ascii=False), now, now),
+            )
+            existing = connection.execute("SELECT * FROM user_billing WHERE user_id=?", (user_id,)).fetchone()
+            started_at = str(existing["started_at"] or "") if existing else ""
+            if not started_at:
+                started_at = now
+            connection.execute(
+                """
+                INSERT INTO user_billing
+                (user_id, billing_enabled, plan_code, started_at, expires_at, status, last_invoice_id, created_at, updated_at)
+                VALUES (?, 1, ?, ?, ?, 'active', ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                  billing_enabled=1,
+                  plan_code=excluded.plan_code,
+                  started_at=excluded.started_at,
+                  expires_at=excluded.expires_at,
+                  status='active',
+                  last_invoice_id=excluded.last_invoice_id,
+                  updated_at=excluded.updated_at
+                """,
+                (user_id, plan_code, started_at, new_expires, invoice_id, now, now),
+            )
+        return {
+            "subscription": self.get_user_billing(user_id),
+            "invoice": {
+                "invoice_id": invoice_id,
+                "user_id": user_id,
+                "plan_code": plan_code,
+                "amount_vnd": amount_vnd,
+                "status": "paid",
+                "payment_code": payment_code,
+                "qr_payload": qr_payload,
+                "created_at": now,
+                "due_at": due_at,
+                "paid_at": now,
+            },
+            "payment": {"payment_id": payment_id, "provider": "demo_vietqr", "paid_at": now},
+        }
+
+    def _with_billing_summary(self, connection: sqlite3.Connection, user: dict[str, Any]) -> dict[str, Any]:
+        row = connection.execute("SELECT * FROM user_billing WHERE user_id=?", (user["id"],)).fetchone()
+        billing = dict(row) if row else {}
+        plan_code = str(billing.get("plan_code") or "monthly")
+        plan_row = connection.execute("SELECT * FROM billing_plans WHERE code=?", (plan_code,)).fetchone()
+        plan = self._decode_billing_plan(dict(plan_row)) if plan_row else BILLING_PLAN_BY_CODE.get(plan_code)
+        user.update(billing_normalize_summary(int(user["id"]), billing, plan))
+        return user
+
+    @staticmethod
+    def _decode_billing_plan(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "code": str(row.get("code") or ""),
+            "name": str(row.get("name") or ""),
+            "paid_months": int(row.get("paid_months") or 0),
+            "bonus_months": int(row.get("bonus_months") or 0),
+            "price_vnd": int(row.get("price_vnd") or 0),
+            "is_active": billing_bool(row.get("is_active")),
+            "sort_order": int(row.get("sort_order") or 0),
+            "created_at": row.get("created_at") or "",
+            "updated_at": row.get("updated_at") or "",
+            "total_months": int(row.get("paid_months") or 0) + int(row.get("bonus_months") or 0),
+        }
 
     def add_audit_log(self, actor: str, action: str, details: str) -> None:
         with self.connect() as connection:

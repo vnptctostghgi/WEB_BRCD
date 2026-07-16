@@ -3,17 +3,26 @@ import json
 import re
 import secrets
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
 
 from app.data_access.app_repository import (
+    BILLING_PLAN_BY_CODE,
+    BILLING_PLAN_ROWS,
     DEFAULT_DASHBOARD_LAYOUT,
     DEFAULT_DASHBOARD_PAGE_ID,
     DEFAULT_DASHBOARD_PAGE_NAME,
     FEATURE_CODE_ALIASES,
     LEGACY_REMOVED_FEATURE_CODES,
+    billing_add_months,
+    billing_bool,
+    billing_datetime_text,
+    billing_effective_status,
+    billing_normalize_summary,
+    billing_parse_datetime,
+    billing_plan_total_months,
     dashboard_feature_code_for_page,
     hash_password,
     normalize_feature_code,
@@ -106,6 +115,12 @@ class SupabaseRepository:
                 self._upsert("system_roles", {**role, "created_at": now, "updated_at": now}, "code")
             except RuntimeError:
                 pass
+        for plan in BILLING_PLAN_ROWS:
+            now = self._now()
+            try:
+                self._upsert("billing_plans", {**plan, "created_at": now, "updated_at": now}, "code")
+            except RuntimeError:
+                pass
         self._migrate_legacy_feature_layout()
         self._delete_obsolete_features()
         admin = self.get_user_by_username(admin_username)
@@ -122,7 +137,7 @@ class SupabaseRepository:
 
     def get_user_by_username(self, username: str) -> dict[str, Any] | None:
         rows = self._get("users", {"username": f"eq.{username}"})
-        return rows[0] if rows else None
+        return self._with_billing_summary(rows[0]) if rows else None
 
     def _migrate_feature_codes(self) -> None:
         try:
@@ -226,18 +241,19 @@ class SupabaseRepository:
 
     def get_user_by_id(self, user_id: int) -> dict[str, Any] | None:
         rows = self._get("users", {"id": f"eq.{user_id}"})
-        return rows[0] if rows else None
+        return self._with_billing_summary(rows[0]) if rows else None
 
     def list_users(self) -> list[dict[str, Any]]:
         try:
-            return self._get("users", {
+            rows = self._get("users", {
                 "select": "id,username,full_name,employee_code,email,phone,birth_date,gender,department,job_title,role,is_active,must_change_password,created_at,updated_at",
                 "order": "id.asc",
             })
         except RuntimeError as error:
             if "employee_code" not in str(error):
                 raise
-            return self._get("users", {"select": "id,username,full_name,role,is_active,must_change_password,created_at,updated_at", "order": "id.asc"})
+            rows = self._get("users", {"select": "id,username,full_name,role,is_active,must_change_password,created_at,updated_at", "order": "id.asc"})
+        return [self._with_billing_summary(row) for row in rows]
 
     def create_user(self, username: str, full_name: str, password: str, role: str, employee: dict[str, Any] | None = None) -> int:
         now = self._now()
@@ -305,6 +321,159 @@ class SupabaseRepository:
 
     def count_active_admins(self) -> int:
         return len(self._get("users", {"role": "eq.admin", "is_active": "eq.true", "select": "id"}))
+
+    def list_billing_plans(self, active_only: bool = False) -> list[dict[str, Any]]:
+        params = {"order": "sort_order.asc,paid_months.asc"}
+        if active_only:
+            params["is_active"] = "eq.true"
+        try:
+            return [self._decode_billing_plan(row) for row in self._get("billing_plans", params)]
+        except RuntimeError:
+            return [self._decode_billing_plan(plan) for plan in BILLING_PLAN_ROWS if not active_only or plan.get("is_active")]
+
+    def get_billing_plan(self, code: str) -> dict[str, Any] | None:
+        try:
+            rows = self._get("billing_plans", {"code": f"eq.{code}", "limit": "1"})
+            return self._decode_billing_plan(rows[0]) if rows else None
+        except RuntimeError:
+            plan = BILLING_PLAN_BY_CODE.get(code)
+            return self._decode_billing_plan(plan) if plan else None
+
+    def get_user_billing(self, user_id: int) -> dict[str, Any]:
+        try:
+            rows = self._get("user_billing", {"user_id": f"eq.{user_id}", "limit": "1"})
+        except RuntimeError:
+            return billing_normalize_summary(user_id)
+        billing = rows[0] if rows else {}
+        plan = self.get_billing_plan(str(billing.get("plan_code") or "monthly"))
+        return billing_normalize_summary(user_id, billing, plan)
+
+    def set_user_billing(self, user_id: int, enabled: bool, plan_code: str, expires_at: str = "") -> dict[str, Any]:
+        plan = self.get_billing_plan(plan_code)
+        if not plan:
+            raise ValueError("Goi tinh phi khong hop le.")
+        now = self._now()
+        normalized_expires = billing_datetime_text(expires_at)
+        status_value = billing_effective_status(enabled, normalized_expires)
+        existing_rows = self._get("user_billing", {"user_id": f"eq.{user_id}", "limit": "1"})
+        existing = existing_rows[0] if existing_rows else {}
+        started_at = str(existing.get("started_at") or "")
+        if enabled and not started_at:
+            started_at = now
+        if not enabled:
+            status_value = "disabled"
+        self._upsert("user_billing", {
+            "user_id": user_id,
+            "billing_enabled": enabled,
+            "plan_code": plan_code,
+            "started_at": started_at or None,
+            "expires_at": normalized_expires or None,
+            "status": status_value,
+            "last_invoice_id": existing.get("last_invoice_id") or "",
+            "created_at": existing.get("created_at") or now,
+            "updated_at": now,
+        }, "user_id")
+        return self.get_user_billing(user_id)
+
+    def renew_user_billing_demo(self, user_id: int, plan_code: str, actor: str = "") -> dict[str, Any]:
+        plan = self.get_billing_plan(plan_code)
+        if not plan:
+            raise ValueError("Goi tinh phi khong hop le.")
+        now_dt = datetime.now(UTC)
+        now = now_dt.isoformat(timespec="seconds")
+        current = self.get_user_billing(user_id)
+        current_expires = billing_parse_datetime(current.get("billing_expires_at"))
+        base_dt = current_expires if current.get("billing_enabled") and current_expires and current_expires > now_dt else now_dt
+        new_expires = billing_add_months(base_dt, billing_plan_total_months(plan)).isoformat(timespec="seconds")
+        invoice_id = f"INV{now_dt.strftime('%Y%m%d')}{uuid.uuid4().hex[:8].upper()}"
+        payment_id = f"PAY{uuid.uuid4().hex[:16].upper()}"
+        payment_code = f"VNPTCTO{user_id}{uuid.uuid4().hex[:8].upper()}"[:25]
+        due_at = (now_dt + timedelta(hours=24)).isoformat(timespec="seconds")
+        amount_vnd = int(plan.get("price_vnd") or 0)
+        qr_payload = f"DEMO_VIETQR|{payment_code}|{amount_vnd}"
+        self._insert("billing_invoices", {
+            "invoice_id": invoice_id,
+            "user_id": user_id,
+            "plan_code": plan_code,
+            "amount_vnd": amount_vnd,
+            "status": "paid",
+            "payment_code": payment_code,
+            "qr_payload": qr_payload,
+            "created_at": now,
+            "due_at": due_at,
+            "paid_at": now,
+            "updated_at": now,
+        })
+        self._insert("billing_payments", {
+            "payment_id": payment_id,
+            "invoice_id": invoice_id,
+            "user_id": user_id,
+            "provider": "demo_vietqr",
+            "transaction_ref": f"DEMO-{invoice_id}",
+            "amount_vnd": amount_vnd,
+            "raw_payload_json": {
+                "mode": "demo",
+                "actor": actor,
+                "payment_code": payment_code,
+                "plan_code": plan_code,
+            },
+            "paid_at": now,
+            "created_at": now,
+        })
+        existing_rows = self._get("user_billing", {"user_id": f"eq.{user_id}", "limit": "1"})
+        existing = existing_rows[0] if existing_rows else {}
+        started_at = str(existing.get("started_at") or "") or now
+        self._upsert("user_billing", {
+            "user_id": user_id,
+            "billing_enabled": True,
+            "plan_code": plan_code,
+            "started_at": started_at,
+            "expires_at": new_expires,
+            "status": "active",
+            "last_invoice_id": invoice_id,
+            "created_at": existing.get("created_at") or now,
+            "updated_at": now,
+        }, "user_id")
+        return {
+            "subscription": self.get_user_billing(user_id),
+            "invoice": {
+                "invoice_id": invoice_id,
+                "user_id": user_id,
+                "plan_code": plan_code,
+                "amount_vnd": amount_vnd,
+                "status": "paid",
+                "payment_code": payment_code,
+                "qr_payload": qr_payload,
+                "created_at": now,
+                "due_at": due_at,
+                "paid_at": now,
+            },
+            "payment": {"payment_id": payment_id, "provider": "demo_vietqr", "paid_at": now},
+        }
+
+    def _with_billing_summary(self, user: dict[str, Any]) -> dict[str, Any]:
+        try:
+            summary = self.get_user_billing(int(user["id"]))
+        except RuntimeError:
+            summary = billing_normalize_summary(int(user["id"]))
+        user.update(summary)
+        return user
+
+    @staticmethod
+    def _decode_billing_plan(row: dict[str, Any] | None) -> dict[str, Any]:
+        row = row or {}
+        return {
+            "code": str(row.get("code") or ""),
+            "name": str(row.get("name") or ""),
+            "paid_months": int(row.get("paid_months") or 0),
+            "bonus_months": int(row.get("bonus_months") or 0),
+            "price_vnd": int(row.get("price_vnd") or 0),
+            "is_active": billing_bool(row.get("is_active")),
+            "sort_order": int(row.get("sort_order") or 0),
+            "created_at": row.get("created_at") or "",
+            "updated_at": row.get("updated_at") or "",
+            "total_months": int(row.get("paid_months") or 0) + int(row.get("bonus_months") or 0),
+        }
 
     def add_audit_log(self, actor: str, action: str, details: str) -> None:
         self._insert("audit_logs", {"actor": actor, "action": action, "details": details, "created_at": self._now()})

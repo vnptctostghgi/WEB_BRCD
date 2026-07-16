@@ -65,6 +65,10 @@ class AuthService:
         keys = (
             "id", "username", "full_name", "employee_code", "email", "phone", "birth_date", "gender",
             "department", "job_title", "role", "is_active", "must_change_password",
+            "billing_enabled", "billing_plan_code", "billing_plan_name", "billing_paid_months",
+            "billing_bonus_months", "billing_total_months", "billing_price_vnd",
+            "billing_started_at", "billing_expires_at", "billing_status",
+            "billing_days_remaining", "billing_last_invoice_id", "billing_access_blocked",
         )
         return {key: user.get(key) for key in keys if key in user}
 
