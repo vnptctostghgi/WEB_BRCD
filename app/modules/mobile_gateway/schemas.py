@@ -111,6 +111,7 @@ class AdminCommandPayload(BaseModel):
         "refresh_policy",
         "upload_diagnostics",
         "clear_synced_local_queue",
+        "send_sms",
         "capture_photo",
         "record_video",
     ]

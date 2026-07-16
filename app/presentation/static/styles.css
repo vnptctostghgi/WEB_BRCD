@@ -3926,6 +3926,80 @@ legend {
   line-height: 1;
 }
 
+.mobile-overview-device-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.mobile-overview-device-card {
+  display: grid;
+  gap: .85rem;
+  border: 1px solid rgba(125, 211, 252, .22);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, .3);
+  padding: 1rem;
+}
+
+.mobile-overview-device-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .75rem;
+}
+
+.mobile-overview-device-head strong {
+  color: #fff;
+  font-size: 1rem;
+}
+
+.mobile-overview-device-metrics {
+  display: grid;
+  gap: .55rem;
+  margin: 0;
+}
+
+.mobile-overview-device-metrics div {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: .75rem;
+}
+
+.mobile-overview-device-metrics dt {
+  color: #7dd3fc;
+  font-size: .72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.mobile-overview-device-metrics dd {
+  margin: 0;
+  color: #e0f2fe;
+  font-size: .85rem;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.mobile-error-text {
+  color: #fecaca !important;
+}
+
+.mobile-send-form {
+  display: grid;
+  grid-template-columns: minmax(180px, .8fr) minmax(180px, 1fr);
+  gap: .85rem;
+}
+
+.mobile-send-body-label,
+.mobile-send-actions {
+  grid-column: 1 / -1;
+}
+
+.mobile-send-actions {
+  display: flex;
+  align-items: center;
+  gap: .85rem;
+  flex-wrap: wrap;
+}
+
 .mobile-form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));

@@ -4,7 +4,7 @@ function normalizeMobileGatewayUi() {
   const root = $("#view-mobile-gateway");
   if (!root) return;
   const activeTab = root.querySelector("[data-mobile-tab].active")?.dataset.mobileTab || "overview";
-  const safeTab = ["overview", "devices-config", "sms", "otp"].includes(activeTab) ? activeTab : "overview";
+  const safeTab = ["overview", "devices-config", "sms", "send", "otp"].includes(activeTab) ? activeTab : "overview";
   const actionGroup = root.querySelector(".page-header .action-group");
   if (actionGroup) actionGroup.innerHTML = "";
   const tabs = root.querySelector(".mobile-gateway-tabs");
@@ -13,6 +13,7 @@ function normalizeMobileGatewayUi() {
       <button class="mobile-gateway-tab ${safeTab === "overview" ? "active" : ""}" data-mobile-tab="overview" type="button">Tổng quan</button>
       <button class="mobile-gateway-tab ${safeTab === "devices-config" ? "active" : ""}" data-mobile-tab="devices-config" type="button">Thiết bị</button>
       <button class="mobile-gateway-tab ${safeTab === "sms" ? "active" : ""}" data-mobile-tab="sms" type="button">SMS</button>
+      <button class="mobile-gateway-tab ${safeTab === "send" ? "active" : ""}" data-mobile-tab="send" type="button">Gửi</button>
       <button class="mobile-gateway-tab ${safeTab === "otp" ? "active" : ""}" data-mobile-tab="otp" type="button">OTP</button>
       <button class="btn-secondary mobile-refresh-tab" id="mobile-refresh" type="button">Làm mới</button>`;
   }
@@ -50,6 +51,30 @@ function normalizeMobileGatewayUi() {
         </div>
         <div class="table-scroll"><table><thead><tr><th>Người gửi</th><th>Thời gian nhận</th><th>Nội dung tin nhắn</th><th>Thiết bị</th><th>SIM</th></tr></thead><tbody id="mobile-sms-table"></tbody></table></div>
         <div class="mt-4 flex items-center justify-between gap-3"><span id="mobile-sms-page-info">Trang 1</span><div class="action-group"><button class="btn-secondary" id="mobile-sms-prev" type="button">Trang trước</button><button class="btn-secondary" id="mobile-sms-next" type="button">Trang sau</button></div></div>
+      </section>`;
+  }
+  let sendPanel = root.querySelector('[data-mobile-panel="send"]');
+  if (!sendPanel) {
+    sendPanel = document.createElement("section");
+    sendPanel.className = "mobile-gateway-panel";
+    sendPanel.dataset.mobilePanel = "send";
+    root.querySelector('[data-mobile-panel="sms"]')?.after(sendPanel);
+  }
+  if (sendPanel) {
+    sendPanel.classList.toggle("active", safeTab === "send");
+    sendPanel.innerHTML = `
+      <section class="data-card mobile-send-card">
+        <div class="section-heading compact"><div><p class="eyebrow">SMS outgoing</p><h2>G&#7917;i tin nh&#7855;n t&#7915; &#273;i&#7879;n tho&#7841;i</h2></div></div>
+        <form id="mobile-send-sms-form" class="mobile-send-form">
+          <label>Thi&#7871;t b&#7883;<select class="form-control" id="mobile-send-device" required></select></label>
+          <label>Ng&#432;&#7901;i nh&#7853;n<input class="form-control" id="mobile-send-recipient" inputmode="tel" autocomplete="off" placeholder="Nh&#7853;p s&#7889; li&#234;n h&#7879;" required /></label>
+          <label class="mobile-send-body-label">N&#7897;i dung tin nh&#7855;n<textarea class="form-control" id="mobile-send-body" rows="5" required></textarea></label>
+          <div class="mobile-send-actions"><button class="btn-primary" id="mobile-send-submit" type="submit">G&#7917;i SMS</button><div id="mobile-send-result" class="result hidden"></div></div>
+        </form>
+      </section>
+      <section class="data-card mt-4">
+        <div class="section-heading compact"><div><p class="eyebrow">Theo d&#245;i</p><h2>L&#7879;nh g&#7917;i SMS</h2></div><button class="btn-secondary" id="mobile-refresh-send" type="button">L&#224;m m&#7899;i</button></div>
+        <div class="table-scroll"><table><thead><tr><th>Th&#7901;i gian</th><th>Thi&#7871;t b&#7883;</th><th>Ng&#432;&#7901;i nh&#7853;n</th><th>Tr&#7841;ng th&#225;i</th><th>G&#7917;i xong</th><th>L&#7895;i</th></tr></thead><tbody id="mobile-send-history-table"></tbody></table></div>
       </section>`;
   }
   const otpPanel = root.querySelector('[data-mobile-panel="otp"]');
@@ -126,6 +151,11 @@ function bindMobileGatewayFocusedEvents() {
   });
   bind("#mobile-save-otp-filter", "click", saveMobileOtpFilter);
   bind("#mobile-refresh-otp", "click", loadMobileOtpData);
+  bind("#mobile-send-sms-form", "submit", (event) => {
+    event.preventDefault();
+    sendMobileSms();
+  });
+  bind("#mobile-refresh-send", "click", () => loadMobileSendCommands({ force: true }));
   bind("#mobile-otp-latest-table", "click", (event) => {
     const button = event.target.closest("[data-mobile-copy-otp]");
     if (button) copyMobileOtpFromButton(button);
@@ -146,11 +176,14 @@ async function loadMobileGateway({ force = false } = {}) {
       loadMobilePairingCodes(),
       loadMobileGatewaySms({ force: true }),
       loadMobileOtpData(),
+      loadMobileSendCommands(),
     ]);
     mobileGatewayLoaded = true;
+    renderMobileGatewayOverview();
     startMobileOtpTicker();
     startMobileGatewayEvents();
     startMobileSmsAutoRefresh();
+    startMobileSendStatusRefresh();
     if (message) message.className = "result hidden mb-4";
   } catch (error) {
     showMessage(message, error.message, "error");
@@ -158,20 +191,48 @@ async function loadMobileGateway({ force = false } = {}) {
 }
 
 function renderMobileGatewayOverview() {
-  const cards = [
-    ["Online", mobileGatewayOverview.devices_online || 0],
-    ["Offline", mobileGatewayOverview.devices_offline || 0],
-    ["SMS hôm nay", mobileGatewayOverview.sms_today || 0],
-    ["OTP hôm nay", mobileGatewayOverview.otp_today || 0],
-    ["OTP thành công", mobileGatewayOverview.otp_success || 0],
-    ["OTP timeout", mobileGatewayOverview.otp_timeout || 0],
-    ["Cảnh báo", mobileGatewayOverview.device_alerts || 0],
-  ];
-  const target = $("#mobile-overview-cards");
-  if (target) {
-    target.innerHTML = cards.map(([label, value]) => `<article class="status-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></article>`).join("");
+  const overviewTarget = $("#mobile-overview-cards");
+  if (overviewTarget) {
+    overviewTarget.classList.add("mobile-overview-device-grid");
+    overviewTarget.innerHTML = mobileGatewayDevices.length ? mobileGatewayDevices.map((device) => {
+      const heartbeat = device.heartbeat || {};
+      const active = Boolean(device.is_active);
+      const online = Boolean(device.online);
+      const statusClass = !active ? "inactive" : (online ? "viewer" : "pending");
+      const statusText = !active ? "Đã hủy ghép nối" : (online ? "Đã ghép nối - online" : "Đã ghép nối - offline");
+      const signal = mobileHeartbeatSignals(heartbeat);
+      const error = mobileLatestDeviceError(device.device_id);
+      return `<article class="mobile-overview-device-card">
+        <div class="mobile-overview-device-head">
+          <strong>${escapeHtml(device.name || device.device_id || "-")}</strong>
+          <span class="status ${statusClass}">${escapeHtml(statusText)}</span>
+        </div>
+        <dl class="mobile-overview-device-metrics">
+          <div><dt>Lỗi</dt><dd class="${error ? "mobile-error-text" : ""}">${escapeHtml(error || "Không có")}</dd></div>
+          <div><dt>PIN</dt><dd>${heartbeat.battery_percent == null ? "-" : `${escapeHtml(String(heartbeat.battery_percent))}%`}</dd></div>
+          <div><dt>Sóng mạng</dt><dd>${escapeHtml(signal.network)}</dd></div>
+          <div><dt>Sóng SIM</dt><dd>${escapeHtml(signal.sim)}</dd></div>
+          <div><dt>Heartbeat</dt><dd>${escapeHtml(mobileFormatTime(device.last_seen_at || heartbeat.created_at))}</dd></div>
+        </dl>
+      </article>`;
+    }).join("") : `<article class="mobile-overview-device-card"><strong>Chưa có thiết bị</strong><p>Hãy tạo mã ghép nối và kết nối điện thoại chứa SIM.</p></article>`;
   }
   renderMobileRecentSms(mobileGatewayOverview.recent_sms || []);
+}
+
+function mobileHeartbeatSignals(heartbeat = {}) {
+  const raw = String(heartbeat.network_type || "").trim();
+  if (!raw) return { network: "-", sim: "-" };
+  const parts = raw.split("|").map((part) => part.trim()).filter(Boolean);
+  const sim = parts.find((part) => /^sim\b/i.test(part)) || "";
+  const network = parts.find((part) => !/^sim\b/i.test(part)) || raw;
+  return { network: network || "-", sim: sim || "-" };
+}
+
+function mobileLatestDeviceError(deviceId) {
+  const commands = window.mobileGatewaySendCommands || [];
+  const command = commands.find((item) => item.device_id === deviceId && item.status === "failed" && item.sanitized_error);
+  return command?.sanitized_error || "";
 }
 
 function renderMobileRecentSms(items) {
@@ -196,6 +257,8 @@ function renderMobileRecentSms(items) {
 function renderMobileGatewayDeviceOptions() {
   const options = mobileGatewayDevices.map((device) => `<option value="${escapeHtml(device.device_id)}">${escapeHtml(device.name || device.device_id)}</option>`).join("");
   const select = $("#mobile-sms-device-filter");
+  const sendSelect = $("#mobile-send-device");
+  if (sendSelect) sendSelect.innerHTML = options || `<option value="">Chưa có thiết bị</option>`;
   if (select) select.innerHTML = `<option value="">Tất cả</option>${options}`;
 }
 
@@ -222,6 +285,8 @@ function renderMobileGatewayDevices() {
   }).join("") : emptyRow(6, "Chưa có thiết bị");
   document.querySelectorAll("[data-mobile-revoke]").forEach((button) => button.addEventListener("click", () => toggleMobileDeviceActive(button.dataset.mobileRevoke)));
   document.querySelectorAll("[data-mobile-delete]").forEach((button) => button.addEventListener("click", () => deleteMobileDevice(button.dataset.mobileDelete)));
+  renderMobileGatewayDeviceOptions();
+  renderMobileGatewayOverview();
 }
 
 function renderMobilePairingCountdown(statusText = "") {
@@ -372,6 +437,97 @@ function startMobileGatewayEvents() {
       if ($("#view-mobile-gateway")?.classList.contains("active")) startMobileGatewayEvents();
     }, 5000);
   };
+}
+
+async function loadMobileSendCommands({ force = false } = {}) {
+  const table = $("#mobile-send-history-table");
+  if (force && table) setTableLoading("#mobile-send-history-table", 6, "Đang tải lệnh gửi SMS...");
+  const data = await api("/api/admin/mobile-gateway/commands?limit=100");
+  window.mobileGatewaySendCommands = (data.commands || []).filter((command) => command.command_type === "send_sms");
+  renderMobileSendHistory();
+  renderMobileGatewayOverview();
+}
+
+function renderMobileSendHistory() {
+  const table = $("#mobile-send-history-table");
+  if (!table) return;
+  const commands = window.mobileGatewaySendCommands || [];
+  table.innerHTML = commands.length ? commands.map((command) => {
+    const payload = mobileCommandPayload(command);
+    const status = command.status || "";
+    return `<tr>
+      <td>${escapeHtml(mobileFormatTime(command.created_at))}</td>
+      <td>${escapeHtml(mobileDeviceLabel(command.device_id))}</td>
+      <td>${escapeHtml(mobileSendRecipientLabel(payload.recipient || payload.phone_number || ""))}</td>
+      <td><span class="status ${mobileCommandStatusClass(status)}">${escapeHtml(status || "-")}</span></td>
+      <td>${escapeHtml(mobileFormatTime(command.completed_at || command.acknowledged_at || command.delivered_at))}</td>
+      <td>${escapeHtml(command.sanitized_error || "")}</td>
+    </tr>`;
+  }).join("") : emptyRow(6, "Chưa có lệnh gửi SMS");
+}
+
+function mobileCommandPayload(command) {
+  const payload = command?.payload || {};
+  if (typeof payload === "string") {
+    try {
+      return JSON.parse(payload);
+    } catch (error) {
+      return {};
+    }
+  }
+  return payload && typeof payload === "object" ? payload : {};
+}
+
+function mobileCommandStatusClass(status) {
+  if (status === "completed") return "viewer";
+  if (status === "failed") return "inactive";
+  return "pending";
+}
+
+function mobileSendRecipientLabel(value) {
+  const text = String(value || "").trim();
+  if (text.length <= 4) return text || "-";
+  return `${"*".repeat(Math.max(0, text.length - 4))}${text.slice(-4)}`;
+}
+
+async function sendMobileSms() {
+  const result = $("#mobile-send-result");
+  const submit = $("#mobile-send-submit");
+  const deviceId = $("#mobile-send-device")?.value || "";
+  const recipient = ($("#mobile-send-recipient")?.value || "").trim();
+  const body = ($("#mobile-send-body")?.value || "").trim();
+  if (!deviceId) return showMessage(result, "Hãy chọn thiết bị.", "error");
+  if (!recipient) return showMessage(result, "Hãy nhập số liên hệ.", "error");
+  if (!body) return showMessage(result, "Hãy nhập nội dung tin nhắn.", "error");
+  if (submit) submit.disabled = true;
+  try {
+    await api("/api/admin/mobile-gateway/commands", {
+      method: "POST",
+      body: JSON.stringify({
+        device_id: deviceId,
+        command_type: "send_sms",
+        ttl_seconds: 300,
+        payload: { recipient, body },
+      }),
+    });
+    showMessage(result, "Đã tạo lệnh gửi SMS. Điện thoại sẽ gửi ngay khi nhận lệnh.", "success");
+    const bodyInput = $("#mobile-send-body");
+    if (bodyInput) bodyInput.value = "";
+    await loadMobileSendCommands({ force: true });
+  } catch (error) {
+    showMessage(result, error.message || "Không gửi được lệnh SMS.", "error");
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+}
+
+function startMobileSendStatusRefresh() {
+  if (window.mobileGatewaySendStatusRefresh) return;
+  window.mobileGatewaySendStatusRefresh = setInterval(() => {
+    const root = $("#view-mobile-gateway");
+    if (!root?.classList.contains("active")) return;
+    loadMobileSendCommands().catch((error) => console.warn("Mobile send status refresh failed", error));
+  }, 5000);
 }
 
 function renderMobileOtpFilterForm() {
