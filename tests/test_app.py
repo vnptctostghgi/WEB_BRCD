@@ -43,12 +43,24 @@ def test_unauthenticated_user_is_redirected_to_login() -> None:
         assert response.headers["location"] == "/login"
 
 
+def test_login_uses_optimized_static_assets() -> None:
+    with TestClient(app) as client:
+        response = client.get("/login")
+        assert response.status_code == 200
+        assert "/static/tailwind-built.css?v=1" in response.text
+        assert "cdn.tailwindcss.com" not in response.text
+        assert "/static/login-hero-900.webp" in response.text
+        assert "/static/images/system-logo-96.webp" in response.text
+
+
 def test_admin_can_login_and_open_dashboard() -> None:
     with TestClient(app) as client:
         login(client)
         response = client.get("/")
         assert response.status_code == 200
         assert 'rel="icon" type="image/png" href="/static/images/system-logo.png"' in response.text
+        assert "/static/tailwind-built.css?v=1" in response.text
+        assert "cdn.tailwindcss.com" not in response.text
         assert "dashboard-tab-fiber" not in response.text
         assert "Truy vấn SQL" in response.text
         assert "Báo cáo mới" in response.text

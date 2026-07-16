@@ -7,25 +7,10 @@
     <title>Hệ thống quản trị đặc biệt</title>
     <link rel="icon" type="image/png" href="/static/images/system-logo.png" />
     <link rel="apple-touch-icon" href="/static/images/system-logo.png" />
-    <link rel="preconnect" href="https://cdn.tailwindcss.com" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
-    <script>
-      tailwind = {
-        config: {
-          darkMode: "class",
-          theme: {
-            extend: {
-              fontFamily: { sans: ["Inter", "Roboto", "ui-sans-serif", "system-ui"] },
-              colors: { vnpt: { 50: "#edf9ff", 100: "#d6f1ff", 500: "#087ccf", 600: "#075fb0", 700: "#07559c", 950: "#082a58" } },
-              boxShadow: { soft: "0 18px 70px rgba(8, 42, 88, .12)" },
-            },
-          },
-        },
-      };
-    </script>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/tailwind-built.css?v=1" />
     <link rel="stylesheet" href="/static/styles.css?v=95" />
   </head>
   <body class="app-dark app-booting min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'themvasuataikhoan' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'xemmatkhaudaluu' in user.permissions }}">
