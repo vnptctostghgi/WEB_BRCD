@@ -1108,13 +1108,20 @@ class SupabaseRepository:
         self._delete("data_mining_runs", {"schedule_id": f"eq.{schedule_id}"})
         self._delete("data_mining_schedules", {"schedule_id": f"eq.{schedule_id}"})
 
-    def create_data_mining_run(self, schedule_id: str, parameters: dict[str, Any] | None = None, created_by: str = "") -> dict[str, Any]:
+    def create_data_mining_run(
+        self,
+        schedule_id: str,
+        parameters: dict[str, Any] | None = None,
+        created_by: str = "",
+        status: str = "running",
+        message: str = "",
+    ) -> dict[str, Any]:
         now = self._now()
         row = {
             "run_id": f"RUN{uuid.uuid4().hex[:16].upper()}",
             "schedule_id": schedule_id,
-            "status": "running",
-            "message": "",
+            "status": str(status or "running")[:50],
+            "message": str(message or "")[:1000],
             "file_name": "",
             "file_path": "",
             "storage_link": "",

@@ -47,9 +47,10 @@ def run_data_mining_schedule(
     allow_device_registration: bool = False,
     interactive: bool = False,
     parameter_overrides: dict[str, Any] | None = None,
+    existing_run: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     schedule_for_run = with_resolved_schedule_parameters(schedule, parameter_overrides)
-    run = repository.create_data_mining_run(
+    run = existing_run or repository.create_data_mining_run(
         str(schedule_for_run.get("schedule_id") or ""),
         schedule_for_run.get("parameters") if isinstance(schedule_for_run.get("parameters"), dict) else {},
         created_by=created_by,

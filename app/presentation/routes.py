@@ -49,6 +49,7 @@ from app.application.onebss_data_mining_service import (
     run_data_mining_schedule,
     safe_filename_part,
     save_downloaded_file,
+    with_resolved_schedule_parameters,
 )
 from app.application.onebss_report_service import (
     cancel_onebss_mobile_gateway_otp,
@@ -96,6 +97,7 @@ ONEBSS_REPORT_JOB_TTL_SECONDS = 24 * 60 * 60
 ONEBSS_REPORT_JOB_DIR = Path(tempfile.gettempdir()) / "vnptcto_onebss_report_jobs"
 ONEBSS_REPORT_ACTIVE_STATUSES = {"queued", "running", "otp_required", "otp_invalid", "manual_otp_required"}
 ONEBSS_REPORT_FINAL_STATUSES = {"success", "failed", "cancelled", "storage_failed", "google_drive_not_configured", "google_drive_upload_failed"}
+DATA_MINING_RUN_SEMAPHORE = threading.Semaphore(1)
 EXCEL_MAX_ROWS_PER_SHEET = 1_048_576
 ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
 DASHBOARD_LAYOUT_TYPES = {
@@ -4499,6 +4501,55 @@ def list_data_mining_runs(request: Request, schedule_id: str = "", limit: int = 
         raise_data_mining_schema_error(error)
 
 
+
+def _run_data_mining_schedule_background(
+    schedule_id: str,
+    queued_run: dict[str, Any],
+    payload_data: dict[str, Any],
+    created_by: str,
+) -> None:
+    repository = build_app_repository()
+    result: dict[str, Any] = {
+        "ok": False,
+        "status": "failed",
+        "message": "Khong chay duoc lich dao du lieu OneBSS.",
+    }
+    try:
+        schedule = repository.get_data_mining_schedule(schedule_id)
+        if not schedule:
+            result["message"] = "Khong tim thay lich dao du lieu."
+            repository.finish_data_mining_run(str(queued_run.get("run_id") or ""), result)
+            return
+        with DATA_MINING_RUN_SEMAPHORE:
+            result = run_data_mining_schedule(
+                repository,
+                get_settings(),
+                schedule,
+                otp=str(payload_data.get("otp") or "").strip(),
+                created_by=created_by,
+                allow_device_registration=bool(payload_data.get("allow_device_registration")),
+                interactive=True,
+                parameter_overrides=payload_data.get("parameters") if isinstance(payload_data.get("parameters"), dict) else {},
+                existing_run=queued_run,
+            )
+        run_key = f"manual:{result.get('run_id') or datetime.now().isoformat(timespec='seconds')}"
+        repository.mark_data_mining_schedule_run(schedule_id, run_key, bool(result.get("ok")), result)
+        repository.add_audit_log(created_by, "data_mining_manual_run", f"Chay thu lich dao du lieu {schedule_id}: {result.get('ok')}")
+    except Exception as error:
+        logger.exception("Background data mining run failed for %s", schedule_id)
+        result["message"] = str(error)[:1000] or result["message"]
+        try:
+            repository.finish_data_mining_run(str(queued_run.get("run_id") or ""), result)
+            repository.mark_data_mining_schedule_run(
+                schedule_id,
+                f"manual:{queued_run.get('run_id') or datetime.now().isoformat(timespec='seconds')}",
+                False,
+                result,
+            )
+        except Exception:
+            logger.exception("Cannot persist failed background data mining run")
+
+
 @router.post("/api/admin/data-mining/schedules/{schedule_id}/run-now")
 def run_data_mining_schedule_now(request: Request, schedule_id: str, payload: DataMiningRunPayload) -> dict:
     actor = admin_user(request)
@@ -4507,23 +4558,39 @@ def run_data_mining_schedule_now(request: Request, schedule_id: str, payload: Da
         schedule = repository.get_data_mining_schedule(schedule_id)
         if not schedule:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay lich dao du lieu.")
-        result = run_data_mining_schedule(
-            repository,
-            get_settings(),
-            schedule,
-            otp=payload.otp.strip(),
+        parameter_overrides = payload.parameters if isinstance(payload.parameters, dict) else {}
+        queued_schedule = with_resolved_schedule_parameters(schedule, parameter_overrides)
+        queued_run = repository.create_data_mining_run(
+            schedule_id,
+            queued_schedule.get("parameters") if isinstance(queued_schedule.get("parameters"), dict) else {},
             created_by=actor["username"],
-            allow_device_registration=payload.allow_device_registration,
-            interactive=True,
-            parameter_overrides=payload.parameters if isinstance(payload.parameters, dict) else {},
+            status="queued",
+            message="Da dua yeu cau dao du lieu OneBSS vao hang doi.",
         )
-        run_key = f"manual:{result.get('run_id') or datetime.now().isoformat(timespec='seconds')}"
-        repository.mark_data_mining_schedule_run(schedule_id, run_key, bool(result.get("ok")), result)
         refreshed_schedule = repository.get_data_mining_schedule(schedule_id)
     except RuntimeError as error:
         raise_data_mining_schema_error(error)
-    repository.add_audit_log(actor["username"], "data_mining_manual_run", f"Chay thu lich dao du lieu {schedule_id}: {result.get('ok')}")
-    return {"ok": bool(result.get("ok")), "result": result, "schedule": refreshed_schedule}
+    payload_data = {
+        "otp": payload.otp,
+        "allow_device_registration": payload.allow_device_registration,
+        "parameters": parameter_overrides,
+    }
+    thread = threading.Thread(
+        target=_run_data_mining_schedule_background,
+        args=(schedule_id, queued_run, payload_data, actor["username"]),
+        name=f"data-mining-run-{queued_run.get('run_id') or schedule_id}",
+        daemon=True,
+    )
+    thread.start()
+    repository.add_audit_log(actor["username"], "data_mining_manual_run_queued", f"Dua lich dao du lieu {schedule_id} vao hang doi: {queued_run.get('run_id')}")
+    return {
+        "ok": True,
+        "status": "queued",
+        "run": queued_run,
+        "result": queued_run,
+        "schedule": refreshed_schedule,
+        "message": "Da dua yeu cau dao du lieu OneBSS vao hang doi.",
+    }
 
 
 @router.get("/api/admin/work-tasks")

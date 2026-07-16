@@ -913,7 +913,11 @@ def test_admin_can_manage_data_mining_schedules_and_run_now(monkeypatch) -> None
             "created_by": kwargs.get("created_by"),
             "parameter_overrides": kwargs.get("parameter_overrides"),
         })
-        run = repository.create_data_mining_run(schedule["schedule_id"], schedule.get("parameters"), created_by=kwargs.get("created_by") or "")
+        run = kwargs.get("existing_run") or repository.create_data_mining_run(
+            schedule["schedule_id"],
+            schedule.get("parameters"),
+            created_by=kwargs.get("created_by") or "",
+        )
         result = {
             "ok": True,
             "status": "success",
@@ -957,10 +961,20 @@ def test_admin_can_manage_data_mining_schedules_and_run_now(monkeypatch) -> None
         )
         assert run_now.status_code == 200
         assert run_now.json()["ok"] is True
+        assert run_now.json()["status"] == "queued"
+        for _ in range(20):
+            if calls:
+                break
+            time.sleep(0.05)
         assert calls[-1]["otp"] == "123456"
         assert calls[-1]["parameter_overrides"] == {"P_DENNGAY": "09/07/2026"}
 
-        runs = client.get(f"/api/admin/data-mining/runs?schedule_id={schedule['schedule_id']}").json()["runs"]
+        runs = []
+        for _ in range(20):
+            runs = client.get(f"/api/admin/data-mining/runs?schedule_id={schedule['schedule_id']}").json()["runs"]
+            if runs and runs[0]["status"] == "success":
+                break
+            time.sleep(0.05)
         assert len(runs) == 1
         assert runs[0]["file_name"] == "bien_dong_0700_08072026.xlsx"
 

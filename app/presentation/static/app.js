@@ -4784,7 +4784,7 @@ async function loadDataMining({ force = false } = {}) {
   try {
     const [scheduleData, runData] = await Promise.all([
       api("/api/admin/data-mining/schedules"),
-      api("/api/admin/data-mining/runs?limit=30"),
+      api("/api/admin/data-mining/runs?limit=20"),
     ]);
     dataMiningSchedules = scheduleData.schedules || [];
     dataMiningRuns = runData.runs || [];
@@ -4930,7 +4930,7 @@ async function runDataMiningScheduleNow(scheduleId, button) {
       method: "POST",
       body: JSON.stringify({ otp, allow_device_registration: true, parameters }),
     });
-    const message = response.result?.message || (response.ok ? "Đã chạy lịch đào dữ liệu." : "Chưa chạy xong lịch đào dữ liệu.");
+    const message = response.message || response.result?.message || (response.ok ? "Da dua lich dao du lieu vao hang doi." : "Chua chay xong lich dao du lieu.");
     showMessage($("#data-mining-result"), message, response.ok ? "success" : "error");
     await loadDataMining({ force: true });
   } catch (error) {
