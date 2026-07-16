@@ -2866,6 +2866,42 @@ td {
   min-width: 9rem;
 }
 
+.mobile-otp-layout {
+  display: grid;
+  grid-template-columns: minmax(18rem, .82fr) minmax(26rem, 1.18fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.mobile-otp-card {
+  border-radius: 8px;
+}
+
+.mobile-otp-card .section-heading.compact {
+  margin-bottom: .75rem;
+}
+
+.mobile-otp-card .section-heading.compact h2 {
+  font-size: 1rem;
+}
+
+.mobile-otp-form-inline {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr .7fr .7fr auto;
+  gap: .65rem;
+  align-items: end;
+}
+
+.mobile-otp-form-inline label {
+  min-width: 0;
+}
+
+.mobile-otp-auto {
+  min-height: 2.65rem;
+  padding-inline: .6rem;
+  white-space: nowrap;
+}
+
 .mobile-otp-code {
   display: inline-flex;
   min-width: 4.5rem;
@@ -2888,6 +2924,17 @@ td {
 
 .mobile-otp-copy-button {
   white-space: nowrap;
+}
+
+@media (max-width: 1100px) {
+  .mobile-otp-layout,
+  .mobile-otp-form-inline {
+    grid-template-columns: 1fr;
+  }
+
+  .mobile-otp-auto {
+    justify-content: flex-start;
+  }
 }
 
 .dark th,

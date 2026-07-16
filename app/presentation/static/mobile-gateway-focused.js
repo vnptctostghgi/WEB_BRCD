@@ -56,21 +56,21 @@ function normalizeMobileGatewayUi() {
   if (otpPanel) {
     otpPanel.classList.toggle("active", safeTab === "otp");
     otpPanel.innerHTML = `
-      <section class="grid gap-4 xl:grid-cols-[.85fr_1.15fr]">
-        <div class="data-card">
-          <div class="section-heading"><div><p class="eyebrow">Quy tắc</p><h2>Lọc OTP theo SMS</h2></div><button class="btn-primary" id="mobile-save-otp-filter" type="button">Lưu quy tắc</button></div>
-          <form id="mobile-otp-filter-form" class="mobile-form-grid">
+      <section class="mobile-otp-layout">
+        <div class="data-card mobile-otp-card mobile-otp-rule-card">
+          <div class="section-heading compact"><div><p class="eyebrow">Quy tắc</p><h2>Lọc OTP theo SMS</h2></div><button class="btn-primary" id="mobile-save-otp-filter" type="button">Lưu</button></div>
+          <form id="mobile-otp-filter-form" class="mobile-otp-form-inline">
             <input type="hidden" name="id" />
             <label>Mã OTP<input class="form-control" name="filter_id" value="onebss" required /></label>
             <label>Người gửi<input class="form-control" name="sender_pattern" value="293" required /></label>
-            <label>Số lượng ký tự OTP<input class="form-control" name="otp_length" type="number" value="6" min="1" max="12" /></label>
-            <label>Cắt từ vị trí<input class="form-control" name="start_prefix" type="number" min="0" value="0" /></label>
-            <label class="checkbox-label"><input type="checkbox" name="enabled" checked /> Cho phép sử dụng tự động</label>
+            <label>Số ký tự<input class="form-control" name="otp_length" type="number" value="6" min="1" max="12" /></label>
+            <label>Cắt từ<input class="form-control" name="start_prefix" type="number" min="0" value="0" /></label>
+            <label class="checkbox-label mobile-otp-auto"><input type="checkbox" name="enabled" checked /> Tự động</label>
           </form>
           <div class="table-scroll mt-4"><table><thead><tr><th>Mã OTP</th><th>Người gửi</th><th>Số ký tự</th><th>Cắt từ vị trí</th><th>Tự động</th></tr></thead><tbody id="mobile-otp-filters-table"></tbody></table></div>
         </div>
-        <div class="data-card">
-          <div class="section-heading"><div><p class="eyebrow">OTP</p><h2>OTP mới nhất theo mã</h2></div><button class="btn-secondary" id="mobile-refresh-otp" type="button">Làm mới</button></div>
+        <div class="data-card mobile-otp-card">
+          <div class="section-heading compact"><div><p class="eyebrow">OTP</p><h2>OTP mới nhất</h2></div><button class="btn-secondary" id="mobile-refresh-otp" type="button">Làm mới</button></div>
           <div class="table-scroll"><table><thead><tr><th>Mã OTP</th><th>Người gửi</th><th>OTP</th><th>Thời gian nhận SMS</th><th>Trạng thái 60s</th></tr></thead><tbody id="mobile-otp-latest-table"></tbody></table></div>
         </div>
       </section>`;
@@ -150,6 +150,7 @@ async function loadMobileGateway({ force = false } = {}) {
     mobileGatewayLoaded = true;
     startMobileOtpTicker();
     startMobileGatewayEvents();
+    startMobileSmsAutoRefresh();
     if (message) message.className = "result hidden mb-4";
   } catch (error) {
     showMessage(message, error.message, "error");
@@ -319,10 +320,26 @@ function renderMobileSmsTable(items, markNew = false) {
 }
 
 function startMobileSmsAutoRefresh() {
-  if (window.mobileGatewaySmsAutoRefresh) {
-    clearInterval(window.mobileGatewaySmsAutoRefresh);
-    window.mobileGatewaySmsAutoRefresh = null;
-  }
+  if (window.mobileGatewaySmsAutoRefresh) return;
+  window.mobileGatewayLastSmsEventAt = window.mobileGatewayLastSmsEventAt || 0;
+  window.mobileGatewaySmsAutoRefresh = setInterval(async () => {
+    const root = $("#view-mobile-gateway");
+    if (!root?.classList.contains("active")) return;
+    const eventStreamStale = !window.mobileGatewayEventSource
+      || !window.mobileGatewayLastSmsEventAt
+      || Date.now() - window.mobileGatewayLastSmsEventAt > 35000;
+    if (!eventStreamStale || window.mobileGatewaySmsFallbackLoading) return;
+    window.mobileGatewaySmsFallbackLoading = true;
+    try {
+      mobileGatewaySmsPage = 1;
+      await loadMobileGatewaySms({ silent: true, markNew: true });
+      await loadMobileOtpData();
+    } catch (error) {
+      console.warn("Mobile Gateway fallback refresh failed", error);
+    } finally {
+      window.mobileGatewaySmsFallbackLoading = false;
+    }
+  }, 7000);
 }
 
 function startMobileGatewayEvents() {
@@ -330,6 +347,7 @@ function startMobileGatewayEvents() {
   const source = new EventSource("/api/admin/mobile-gateway/events");
   window.mobileGatewayEventSource = source;
   const reloadFromEvent = () => {
+    window.mobileGatewayLastSmsEventAt = Date.now();
     clearTimeout(window.mobileGatewayEventReloadTimer);
     window.mobileGatewayEventReloadTimer = setTimeout(() => {
       if (!$("#view-mobile-gateway")?.classList.contains("active")) return;
@@ -339,6 +357,12 @@ function startMobileGatewayEvents() {
       loadMobileOtpData();
     }, 250);
   };
+  source.onopen = () => {
+    window.mobileGatewayLastSmsEventAt = Date.now();
+  };
+  source.addEventListener("ready", () => {
+    window.mobileGatewayLastSmsEventAt = Date.now();
+  });
   source.addEventListener("sms_batch", reloadFromEvent);
   source.onerror = () => {
     source.close();

@@ -24,11 +24,12 @@ class SmsService:
                 latest = self.otp_service.record_latest_from_sms(sms)
                 if latest:
                     matches.append(latest)
-        if inserted:
+        if messages:
             mobile_gateway_events.publish(
                 "sms_batch",
                 {
                     "device_id": device_id,
+                    "received": len(messages),
                     "inserted": len(inserted),
                     "skipped": skipped,
                     "otp_matches": len(matches),
