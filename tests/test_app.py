@@ -92,6 +92,20 @@ def test_static_assets_are_cacheable() -> None:
         assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
 
 
+def test_mobile_gateway_admin_lists_are_clamped_to_twenty_rows() -> None:
+    with TestClient(app) as client:
+        login(client)
+        sms = client.get("/api/admin/mobile-gateway/sms?page=1&page_size=100")
+        notifications = client.get("/api/admin/mobile-gateway/notifications?page=1&page_size=100")
+        commands = client.get("/api/admin/mobile-gateway/commands?limit=100")
+        assert sms.status_code == 200
+        assert notifications.status_code == 200
+        assert commands.status_code == 200
+        assert sms.json()["page_size"] == 20
+        assert notifications.json()["page_size"] == 20
+        assert len(commands.json()["commands"]) <= 20
+
+
 def test_production_startup_validation_rejects_unsafe_defaults() -> None:
     settings = Settings(
         app_env="production",

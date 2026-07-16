@@ -45,11 +45,20 @@ from app.settings import get_settings
 router = APIRouter(prefix="/api/mobile-gateway", tags=["mobile-gateway"])
 admin_router = APIRouter(prefix="/api/admin/mobile-gateway", tags=["admin-mobile-gateway"])
 MOBILE_MEDIA_DRIVE_FOLDER_ID = "1BHXfVDbIPqvgFSX7K1Fz25OJLlUpOris"
+ADMIN_TABLE_PAGE_SIZE = 20
 MEDIA_LIMITS = {
     "image/jpeg": ("image", 20 * 1024 * 1024),
     "image/png": ("image", 20 * 1024 * 1024),
     "video/mp4": ("video", 250 * 1024 * 1024),
 }
+
+
+def admin_table_limit(value: int | str | None = None, default: int = ADMIN_TABLE_PAGE_SIZE) -> int:
+    try:
+        raw_value = int(value if value is not None else default)
+    except (TypeError, ValueError):
+        raw_value = default
+    return min(max(raw_value, 1), ADMIN_TABLE_PAGE_SIZE)
 
 
 def mobile_repository() -> MobileGatewayRepository:
@@ -439,7 +448,7 @@ def admin_save_policy(request: Request, device_id: str, payload: DevicePolicyPay
 def admin_sms(
     request: Request,
     page: int = 1,
-    page_size: int = 50,
+    page_size: int = ADMIN_TABLE_PAGE_SIZE,
     device_id: str = "",
     sender: str = "",
     query: str = "",
@@ -451,7 +460,7 @@ def admin_sms(
     user = require_mobile_permission(request, "mobile_gateway.sms.view")
     data = mobile_repository().list_sms(
         page=page,
-        page_size=page_size,
+        page_size=admin_table_limit(page_size),
         device_id=device_id,
         sender=sender,
         query=query,
@@ -475,9 +484,9 @@ def admin_sms(
 
 
 @admin_router.get("/notifications")
-def admin_notifications(request: Request, page: int = 1, page_size: int = 50, device_id: str = "", package_name: str = "", query: str = "") -> dict[str, Any]:
+def admin_notifications(request: Request, page: int = 1, page_size: int = ADMIN_TABLE_PAGE_SIZE, device_id: str = "", package_name: str = "", query: str = "") -> dict[str, Any]:
     user = require_mobile_permission(request, "mobile_gateway.notifications.view")
-    data = mobile_repository().list_notifications(page=page, page_size=page_size, device_id=device_id, package_name=package_name, query=query)
+    data = mobile_repository().list_notifications(page=page, page_size=admin_table_limit(page_size), device_id=device_id, package_name=package_name, query=query)
     items = data["items"]
     if not has_mobile_permission(user, "mobile_gateway.notifications.view_content"):
         for item in items:
@@ -493,9 +502,9 @@ def admin_notifications(request: Request, page: int = 1, page_size: int = 50, de
 
 
 @admin_router.get("/commands")
-def admin_commands(request: Request, device_id: str = "", limit: int = 100) -> dict[str, Any]:
+def admin_commands(request: Request, device_id: str = "", limit: int = ADMIN_TABLE_PAGE_SIZE) -> dict[str, Any]:
     require_mobile_permission(request, "mobile_gateway.commands.view")
-    return {"ok": True, "commands": mobile_repository().list_commands(device_id=device_id, limit=limit)}
+    return {"ok": True, "commands": mobile_repository().list_commands(device_id=device_id, limit=admin_table_limit(limit))}
 
 
 @admin_router.post("/commands")
@@ -508,16 +517,16 @@ def admin_create_command(request: Request, payload: AdminCommandPayload) -> dict
 
 
 @admin_router.get("/media")
-def admin_media(request: Request, page: int = 1, page_size: int = 50, device_id: str = "", media_type: str = "") -> dict[str, Any]:
+def admin_media(request: Request, page: int = 1, page_size: int = ADMIN_TABLE_PAGE_SIZE, device_id: str = "", media_type: str = "") -> dict[str, Any]:
     require_mobile_permission(request, "mobile_gateway.media.view")
-    data = mobile_repository().list_media(page=page, page_size=page_size, device_id=device_id, media_type=media_type)
+    data = mobile_repository().list_media(page=page, page_size=admin_table_limit(page_size), device_id=device_id, media_type=media_type)
     return {"ok": True, **data}
 
 
 @admin_router.get("/diagnostics")
-def admin_diagnostics(request: Request, limit: int = 100) -> dict[str, Any]:
+def admin_diagnostics(request: Request, limit: int = ADMIN_TABLE_PAGE_SIZE) -> dict[str, Any]:
     require_mobile_permission(request, "mobile_gateway.audit.view")
-    return {"ok": True, "items": mobile_repository().list_diagnostics(limit)}
+    return {"ok": True, "items": mobile_repository().list_diagnostics(admin_table_limit(limit))}
 
 
 @admin_router.get("/otp/configurations")
@@ -547,11 +556,12 @@ def admin_save_otp_filter(request: Request, payload: OtpFilterPayload) -> dict[s
 
 
 @admin_router.get("/otp/latest")
-def admin_otp_latest(request: Request, limit: int = 100) -> dict[str, Any]:
+def admin_otp_latest(request: Request, limit: int = ADMIN_TABLE_PAGE_SIZE) -> dict[str, Any]:
     require_mobile_permission(request, "mobile_gateway.otp.view")
     repository = mobile_repository()
     repository.ensure_defaults()
-    items = repository.list_otp_latest_values(limit)
+    safe_limit = admin_table_limit(limit)
+    items = repository.list_otp_latest_values(safe_limit)
     seen_filter_ids = {str(item.get("filter_id") or item.get("service_code") or "") for item in items}
     for otp_filter in repository.list_otp_filters():
         filter_id = str(otp_filter.get("filter_id") or otp_filter.get("service_code") or "")
@@ -572,7 +582,7 @@ def admin_otp_latest(request: Request, limit: int = 100) -> dict[str, Any]:
                     "otp_request_id": "",
                 }
             )
-    return {"ok": True, "items": items[:limit]}
+    return {"ok": True, "items": items[:safe_limit]}
 
 
 @admin_router.post("/otp/configurations")
@@ -594,9 +604,9 @@ def admin_test_otp_regex(request: Request, payload: OtpRegexTestPayload) -> dict
 
 
 @admin_router.get("/otp/requests")
-def admin_otp_requests(request: Request, limit: int = 100) -> dict[str, Any]:
+def admin_otp_requests(request: Request, limit: int = ADMIN_TABLE_PAGE_SIZE) -> dict[str, Any]:
     require_mobile_permission(request, "mobile_gateway.otp.view")
-    return {"ok": True, "requests": mobile_repository().list_otp_requests(limit)}
+    return {"ok": True, "requests": mobile_repository().list_otp_requests(admin_table_limit(limit))}
 
 
 @admin_router.post("/otp/requests")
@@ -616,6 +626,6 @@ def admin_cancel_otp_request(request: Request, request_id: str) -> dict[str, Any
 
 
 @admin_router.get("/otp/events")
-def admin_otp_events(request: Request, limit: int = 100) -> dict[str, Any]:
+def admin_otp_events(request: Request, limit: int = ADMIN_TABLE_PAGE_SIZE) -> dict[str, Any]:
     require_mobile_permission(request, "mobile_gateway.audit.view")
-    return {"ok": True, "events": mobile_repository().list_otp_events(limit)}
+    return {"ok": True, "events": mobile_repository().list_otp_events(admin_table_limit(limit))}

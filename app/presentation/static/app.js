@@ -58,6 +58,7 @@ let dynamicReportSearchActive = false;
 let dynamicReportExportJobs = [];
 const dynamicReportHistoryPollingJobs = new Set();
 let menuLayoutState = [];
+let menuLayoutPage = 1;
 let auditLogs = [];
 let dashboardFiberLoaded = false;
 let dashboardViewerLayouts = [];
@@ -164,6 +165,10 @@ const dataCacheTimestamps = new Map();
 const dashboardViewerLayoutCache = new Map();
 const dashboardBuilderLayoutCache = new Map();
 const DATA_CACHE_TTL_MS = 2 * 60 * 1000;
+const TABLE_PAGE_SIZE = 20;
+const TABLE_SHORT_PAGE_SIZE = 10;
+const TABLE_HISTORY_LIMIT = 20;
+window.TABLE_PAGE_SIZE = TABLE_PAGE_SIZE;
 
 function markDataFresh(key) {
   dataCacheTimestamps.set(key, Date.now());
@@ -588,6 +593,15 @@ $("#menu-layout-table")?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-menu-move]");
   if (!button || !$("#menu-layout-table")?.contains(button)) return;
   moveMenuItem(button.dataset.menuCode, button.dataset.menuMove);
+});
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-menu-page]");
+  if (!button) return;
+  event.preventDefault();
+  collectMenuLayoutStateFromDom();
+  menuLayoutPage = Math.max(1, Number(button.dataset.menuPage || 1));
+  renderMenuLayout();
 });
 
 document.addEventListener("click", async (event) => {
@@ -1988,17 +2002,39 @@ function collectMenuLayoutStateFromDom() {
   const rows = [...document.querySelectorAll("#menu-layout-table tr[data-feature-row]")];
   if (!rows.length) return;
   const currentByCode = new Map(menuLayoutState.map((feature) => [feature.code, feature]));
-  menuLayoutState = rows.map((row) => {
+  rows.forEach((row) => {
     const code = row.dataset.featureRow;
     const existing = currentByCode.get(code) || {};
-    return {
+    currentByCode.set(code, {
       ...existing,
       code,
       name: row.querySelector("[name='name']")?.value.trim() || code,
       parent_code: row.querySelector("[name='parent_code']")?.value || null,
       sort_order: Number(existing.sort_order || 0),
-    };
+    });
   });
+  menuLayoutState = menuLayoutState.map((feature) => currentByCode.get(feature.code) || feature);
+}
+
+function renderMenuLayoutPager(totalRows) {
+  const scroll = $("#menu-layout-table")?.closest(".table-scroll");
+  if (!scroll) return;
+  let pager = $("#menu-layout-pagination");
+  if (!pager) {
+    pager = document.createElement("div");
+    pager.id = "menu-layout-pagination";
+    pager.className = "table-pagination";
+    scroll.insertAdjacentElement("afterend", pager);
+  }
+  const totalPages = Math.max(1, Math.ceil(totalRows / TABLE_PAGE_SIZE));
+  menuLayoutPage = Math.min(Math.max(1, menuLayoutPage), totalPages);
+  pager.innerHTML = `
+    <span>Trang ${menuLayoutPage}/${totalPages} · ${Math.min(totalRows, TABLE_PAGE_SIZE)} dòng/trang</span>
+    <div class="action-group">
+      <button class="btn-secondary" data-menu-page="${menuLayoutPage - 1}" type="button" ${menuLayoutPage <= 1 ? "disabled" : ""}>Trang trước</button>
+      <button class="btn-secondary" data-menu-page="${menuLayoutPage + 1}" type="button" ${menuLayoutPage >= totalPages ? "disabled" : ""}>Trang sau</button>
+    </div>
+  `;
 }
 
 function normalizeMenuSiblingOrders(parentCode = null) {
@@ -2047,7 +2083,10 @@ function renderMenuLayout() {
   const table = $("#menu-layout-table");
   if (!table) return;
   const rows = flattenFeatureTree(buildFeatureTree(menuLayoutState));
-  table.innerHTML = rows.length ? rows.map(({ feature, level }) => {
+  renderMenuLayoutPager(rows.length);
+  const start = (menuLayoutPage - 1) * TABLE_PAGE_SIZE;
+  const visibleRows = rows.slice(start, start + TABLE_PAGE_SIZE);
+  table.innerHTML = visibleRows.length ? visibleRows.map(({ feature, level }) => {
     const siblings = sortFeaturesForTree(menuLayoutState.filter((item) => (item.parent_code || null) === (feature.parent_code || null)));
     const siblingIndex = siblings.findIndex((item) => item.code === feature.code);
     return `
@@ -2125,6 +2164,7 @@ async function loadMenuLayout() {
   features = (await api("/api/admin/features")).features;
   markDataFresh("features");
   menuLayoutState = features.map((feature) => ({ ...feature }));
+  menuLayoutPage = 1;
   renderMenuLayout();
 }
 
@@ -5158,7 +5198,7 @@ async function loadZaloMessageLogs({ force = false } = {}) {
   }
   setTableLoading("#zalo-message-logs-table", 5, "Đang tải nhật ký Zalo Bot...");
   try {
-    const data = await api("/api/admin/zalo/message-logs?limit=100");
+    const data = await api(`/api/admin/zalo/message-logs?limit=${TABLE_PAGE_SIZE}`);
     zaloMessageLogs = data.logs || [];
     markDataFresh("zaloMessageLogs");
     table.innerHTML = zaloMessageLogs.length
@@ -6042,7 +6082,7 @@ function upsertDynamicReportExportJob(job) {
   dynamicReportExportJobs = [
     merged,
     ...dynamicReportExportJobs.filter((item) => dynamicReportHistoryItemKey(item) !== jobId),
-  ].slice(0, 30);
+  ].slice(0, TABLE_HISTORY_LIMIT);
   renderDynamicReportExportJobs();
   return merged;
 }
@@ -6138,7 +6178,7 @@ function mergeDynamicReportExportJobs(items) {
       if (leftActive !== rightActive) return rightActive - leftActive;
       return dynamicReportExportJobTime(right) - dynamicReportExportJobTime(left);
     })
-    .slice(0, 30);
+    .slice(0, TABLE_HISTORY_LIMIT);
   renderDynamicReportExportJobs();
   dynamicReportExportJobs.forEach((job) => {
     if (dynamicReportExportIsActive(job) && job.job_id) monitorDynamicReportExportJob(job.job_id);
@@ -6148,8 +6188,8 @@ function mergeDynamicReportExportJobs(items) {
 async function loadDynamicReportHistory({ silent = false } = {}) {
   try {
     const [historyData, queueData] = await Promise.all([
-      api("/api/reports/history?limit=30"),
-      api("/api/reports/export-jobs?limit=100"),
+      api(`/api/reports/history?limit=${TABLE_HISTORY_LIMIT}`),
+      api(`/api/reports/export-jobs?limit=${TABLE_HISTORY_LIMIT}`),
     ]);
     mergeDynamicReportExportJobs([...(queueData.jobs || []), ...(historyData.items || [])]);
   } catch (error) {
@@ -6508,7 +6548,7 @@ function upsertOneBssRun(run) {
   } else {
     oneBssReportRuns.unshift(normalized);
   }
-  oneBssReportRuns = oneBssReportRuns.slice(0, 30);
+  oneBssReportRuns = oneBssReportRuns.slice(0, TABLE_HISTORY_LIMIT);
 }
 
 function handleOneBssJobResponse(response, { interactive = true } = {}) {
@@ -6745,7 +6785,7 @@ function renderOneBssRunHistory() {
     summary.textContent = oneBssReportRuns.length ? `${oneBssReportRuns.length} l\u01b0\u1ee3t g\u1ea7n nh\u1ea5t, ${successCount} th\u00e0nh c\u00f4ng` : "Ch\u01b0a c\u00f3 d\u1eef li\u1ec7u";
   }
   if (!table) return;
-  const visibleRuns = oneBssReportRuns.slice(0, 12);
+  const visibleRuns = oneBssReportRuns.slice(0, TABLE_SHORT_PAGE_SIZE);
   table.innerHTML = visibleRuns.length
     ? visibleRuns.map((run) => renderOneBssRunRow(run)).join("")
     : emptyRow(6, "Ch\u01b0a c\u00f3 l\u01b0\u1ee3t l\u1ea5y b\u00e1o c\u00e1o", "K\u1ebft qu\u1ea3 l\u1ea5y OneBSS s\u1ebd xu\u1ea5t hi\u1ec7n \u1edf \u0111\u00e2y sau khi b\u1ea5m L\u1ea5y b\u00e1o c\u00e1o.");
@@ -7132,7 +7172,7 @@ async function loadMobileGatewaySms({ force = false } = {}) {
   const query = $("#mobile-sms-query-filter")?.value || "";
   const otpOnly = $("#mobile-sms-otp-filter")?.checked ? "true" : "false";
   if (force) setTableLoading("#mobile-sms-table", 7, "Đang tải SMS...");
-  const data = await api(`/api/admin/mobile-gateway/sms?page=${mobileGatewaySmsPage}&page_size=50&device_id=${encodeURIComponent(deviceId)}&sender=${encodeURIComponent(sender)}&query=${encodeURIComponent(query)}&otp_only=${otpOnly}`);
+  const data = await api(`/api/admin/mobile-gateway/sms?page=${mobileGatewaySmsPage}&page_size=${TABLE_PAGE_SIZE}&device_id=${encodeURIComponent(deviceId)}&sender=${encodeURIComponent(sender)}&query=${encodeURIComponent(query)}&otp_only=${otpOnly}`);
   mobileGatewaySmsHasMore = Boolean(data.has_more);
   renderMobileSmsTable(data.items || []);
   const pageInfo = $("#mobile-sms-page-info");
@@ -7170,7 +7210,7 @@ function renderMobileSmsTable(items) {
 async function loadMobileOtpData() {
   const [configs, requests] = await Promise.all([
     api("/api/admin/mobile-gateway/otp/configurations"),
-    api("/api/admin/mobile-gateway/otp/requests?limit=100"),
+    api(`/api/admin/mobile-gateway/otp/requests?limit=${TABLE_PAGE_SIZE}`),
   ]);
   mobileGatewayOtpConfigurations = configs.configurations || [];
   mobileGatewayOtpRequests = requests.requests || [];
@@ -7248,14 +7288,14 @@ function renderMobileOtpRequests() {
 }
 
 async function loadMobileNotifications() {
-  const data = await api("/api/admin/mobile-gateway/notifications?limit=100");
+  const data = await api(`/api/admin/mobile-gateway/notifications?page=1&page_size=${TABLE_PAGE_SIZE}`);
   const table = $("#mobile-notifications-table");
   if (!table) return;
   table.innerHTML = (data.items || []).length ? data.items.map((item) => `<tr><td>${escapeHtml(mobileFormatTime(item.posted_at))}</td><td>${escapeHtml(mobileDeviceLabel(item.device_id))}</td><td>${escapeHtml(item.package_name || "")}</td><td>${escapeHtml(item.title || "")}</td><td>${escapeHtml(item.text || item.text_masked || "")}</td><td>${escapeHtml(item.used_for_otp ? "Đã dùng" : "-")}</td></tr>`).join("") : emptyRow(6, "Chưa có thông báo");
 }
 
 async function loadMobileCommands() {
-  const data = await api("/api/admin/mobile-gateway/commands?limit=100");
+  const data = await api(`/api/admin/mobile-gateway/commands?limit=${TABLE_PAGE_SIZE}`);
   const table = $("#mobile-commands-table");
   if (!table) return;
   table.innerHTML = (data.commands || []).length ? data.commands.map((command) => `<tr><td>${escapeHtml(mobileFormatTime(command.created_at))}</td><td>${escapeHtml(mobileDeviceLabel(command.device_id))}</td><td>${escapeHtml(command.command_type || "")}</td><td><span class="status ${command.status === "completed" ? "viewer" : command.status === "failed" ? "inactive" : "pending"}">${escapeHtml(command.status || "")}</span></td><td>${escapeHtml(mobileFormatTime(command.expires_at))}</td><td>${escapeHtml(command.sanitized_error || "")}</td></tr>`).join("") : emptyRow(6, "Chưa có lệnh");
@@ -7272,8 +7312,8 @@ async function sendMobileCommand() {
 
 async function loadMobileLogs() {
   const [diagnostics, events] = await Promise.all([
-    api("/api/admin/mobile-gateway/diagnostics?limit=100"),
-    api("/api/admin/mobile-gateway/otp/events?limit=100"),
+    api(`/api/admin/mobile-gateway/diagnostics?limit=${TABLE_PAGE_SIZE}`),
+    api(`/api/admin/mobile-gateway/otp/events?limit=${TABLE_PAGE_SIZE}`),
   ]);
   const diagTable = $("#mobile-diagnostics-table");
   if (diagTable) {
@@ -7469,7 +7509,7 @@ async function loadMobileGatewaySms({ force = false } = {}) {
   const dateTo = mobileGatewayDateEnd($("#mobile-sms-date-to")?.value || "");
   const simSlot = $("#mobile-sms-sim-filter")?.value || "";
   if (force) setTableLoading("#mobile-sms-table", 5, "Đang tải SMS...");
-  const data = await api(`/api/admin/mobile-gateway/sms?page=${mobileGatewaySmsPage}&page_size=50&device_id=${encodeURIComponent(deviceId)}&sender=${encodeURIComponent(sender)}&query=${encodeURIComponent(query)}&date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}&sim_slot=${encodeURIComponent(simSlot)}`);
+  const data = await api(`/api/admin/mobile-gateway/sms?page=${mobileGatewaySmsPage}&page_size=${TABLE_PAGE_SIZE}&device_id=${encodeURIComponent(deviceId)}&sender=${encodeURIComponent(sender)}&query=${encodeURIComponent(query)}&date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}&sim_slot=${encodeURIComponent(simSlot)}`);
   mobileGatewaySmsHasMore = Boolean(data.has_more);
   renderMobileSmsTable(data.items || []);
   const pageInfo = $("#mobile-sms-page-info");
@@ -7498,7 +7538,7 @@ function renderMobileSmsTable(items) {
 async function loadMobileOtpData() {
   const [filters, latest] = await Promise.all([
     api("/api/admin/mobile-gateway/otp/filters"),
-    api("/api/admin/mobile-gateway/otp/latest?limit=100"),
+    api(`/api/admin/mobile-gateway/otp/latest?limit=${TABLE_PAGE_SIZE}`),
   ]);
   mobileGatewayOtpFilters = filters.filters || [];
   mobileGatewayOtpLatest = latest.items || [];
@@ -7590,7 +7630,7 @@ async function loadMobileNotifications({ force = false } = {}) {
   const packageName = $("#mobile-notification-app-filter")?.value || "";
   const query = $("#mobile-notification-query-filter")?.value || "";
   if (force) setTableLoading("#mobile-notifications-table", 5, "Đang tải thông báo...");
-  const data = await api(`/api/admin/mobile-gateway/notifications?page=${mobileGatewayNotificationPage}&page_size=50&device_id=${encodeURIComponent(deviceId)}&package_name=${encodeURIComponent(packageName)}&query=${encodeURIComponent(query)}`);
+  const data = await api(`/api/admin/mobile-gateway/notifications?page=${mobileGatewayNotificationPage}&page_size=${TABLE_PAGE_SIZE}&device_id=${encodeURIComponent(deviceId)}&package_name=${encodeURIComponent(packageName)}&query=${encodeURIComponent(query)}`);
   mobileGatewayNotificationHasMore = Boolean(data.has_more);
   const table = $("#mobile-notifications-table");
   if (table) {
@@ -7609,7 +7649,7 @@ async function loadMobileNotifications({ force = false } = {}) {
 async function loadMobileMedia() {
   const deviceId = $("#mobile-media-device-filter")?.value || "";
   const mediaType = $("#mobile-media-type-filter")?.value || "";
-  const data = await api(`/api/admin/mobile-gateway/media?page=1&page_size=50&device_id=${encodeURIComponent(deviceId)}&media_type=${encodeURIComponent(mediaType)}`);
+  const data = await api(`/api/admin/mobile-gateway/media?page=1&page_size=${TABLE_PAGE_SIZE}&device_id=${encodeURIComponent(deviceId)}&media_type=${encodeURIComponent(mediaType)}`);
   mobileGatewayMediaItems = data.items || [];
   renderMobileMediaDevices();
   renderMobileMediaTable();

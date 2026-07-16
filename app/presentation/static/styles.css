@@ -1243,6 +1243,7 @@ body.view-loading .app-view.active {
 
 .panel,
 .data-card {
+  min-width: 0;
   border-radius: 28px;
   padding: 1rem;
 }
@@ -3257,6 +3258,22 @@ legend {
 
 #menu-layout-table .form-control {
   min-width: 220px;
+}
+
+.table-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  margin-top: .85rem;
+  color: #bae6fd;
+  font-size: .82rem;
+  font-weight: 800;
+}
+
+.table-pagination .action-group {
+  width: auto;
 }
 
 .menu-feature-cell {

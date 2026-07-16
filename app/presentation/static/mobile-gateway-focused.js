@@ -1,4 +1,5 @@
 // Focused Mobile Gateway UI for SMS + OTP. Loaded after app.js on purpose.
+const MOBILE_GATEWAY_TABLE_PAGE_SIZE = window.TABLE_PAGE_SIZE || 20;
 
 function normalizeMobileGatewayUi() {
   const root = $("#view-mobile-gateway");
@@ -350,7 +351,7 @@ async function loadMobileGatewaySms({ force = false, markNew = false, silent = f
   const dateTo = mobileGatewayDateEnd($("#mobile-sms-date-to")?.value || "");
   const simSlot = $("#mobile-sms-sim-filter")?.value || "";
   if (force && !silent) setTableLoading("#mobile-sms-table", 5, "Đang tải SMS...");
-  const data = await api(`/api/admin/mobile-gateway/sms?page=${mobileGatewaySmsPage}&page_size=50&device_id=${encodeURIComponent(deviceId)}&sender=${encodeURIComponent(sender)}&query=${encodeURIComponent(query)}&date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}&sim_slot=${encodeURIComponent(simSlot)}`);
+  const data = await api(`/api/admin/mobile-gateway/sms?page=${mobileGatewaySmsPage}&page_size=${MOBILE_GATEWAY_TABLE_PAGE_SIZE}&device_id=${encodeURIComponent(deviceId)}&sender=${encodeURIComponent(sender)}&query=${encodeURIComponent(query)}&date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}&sim_slot=${encodeURIComponent(simSlot)}`);
   mobileGatewaySmsHasMore = Boolean(data.has_more);
   renderMobileSmsTable(data.items || [], markNew);
   const pageInfo = $("#mobile-sms-page-info");
@@ -442,7 +443,7 @@ function startMobileGatewayEvents() {
 async function loadMobileSendCommands({ force = false } = {}) {
   const table = $("#mobile-send-history-table");
   if (force && table) setTableLoading("#mobile-send-history-table", 6, "Đang tải lệnh gửi SMS...");
-  const data = await api("/api/admin/mobile-gateway/commands?limit=100");
+  const data = await api(`/api/admin/mobile-gateway/commands?limit=${MOBILE_GATEWAY_TABLE_PAGE_SIZE}`);
   window.mobileGatewaySendCommands = (data.commands || []).filter((command) => command.command_type === "send_sms");
   renderMobileSendHistory();
   renderMobileGatewayOverview();
