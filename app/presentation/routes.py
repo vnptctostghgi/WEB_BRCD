@@ -64,6 +64,7 @@ from app.application.zalo_bot import ZaloBotClient
 from app.data_access.app_repository import (
     AppRepository,
     DEFAULT_DASHBOARD_PAGE_ID,
+    MAX_ACTIVE_USER_LOGIN_SESSIONS,
     billing_datetime_text,
     dashboard_feature_code_for_page,
     normalize_feature_code,
@@ -1775,17 +1776,78 @@ def enforce_billing_access(request: Request, user: dict[str, Any]) -> None:
         )
 
 
+def login_session_client_host(request: Request) -> str:
+    forwarded_for = (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
+    if forwarded_for:
+        return forwarded_for[:120]
+    return (request.client.host if request.client else "")[:120]
+
+
+def attach_login_session(request: Request, user: dict[str, Any], repository: Any | None = None) -> dict[str, Any]:
+    repository = repository or build_app_repository()
+    session = repository.create_user_login_session(
+        int(user["id"]),
+        str(user.get("username") or ""),
+        login_session_client_host(request),
+        request.headers.get("user-agent", ""),
+    )
+    session_user = dict(user)
+    session_id = str(session.get("session_id") or "")
+    if session_id:
+        session_user["session_id"] = session_id
+    session_user["active_session_limit"] = MAX_ACTIVE_USER_LOGIN_SESSIONS
+    return session_user
+
+
+def public_session_user(session_user: dict[str, Any]) -> dict[str, Any]:
+    public = dict(session_user)
+    public.pop("session_id", None)
+    return public
+
+
+def ensure_login_session_active(
+    request: Request,
+    repository: Any,
+    session_user: dict[str, Any],
+    user: dict[str, Any],
+) -> None:
+    required_methods = (
+        "create_user_login_session",
+        "is_user_login_session_active",
+        "touch_user_login_session",
+    )
+    if not all(hasattr(repository, method_name) for method_name in required_methods):
+        return
+    session_id = str(session_user.get("session_id") or "")
+    user_id = int(user["id"])
+    if not session_id:
+        refreshed_session_user = attach_login_session(request, AuthService.public_user(user), repository)
+        if refreshed_session_user.get("session_id"):
+            request.session["user"] = refreshed_session_user
+        return
+    if not repository.is_user_login_session_active(session_id, user_id):
+        request.session.clear()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Phien dang nhap da het hieu luc do tai khoan da dang nhap o thiet bi khac.",
+        )
+    repository.touch_user_login_session(session_id)
+
+
 
 def current_user(request: Request) -> dict:
     session_user = request.session.get("user")
     if not session_user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bạn chưa đăng nhập.")
-    user = build_app_repository().get_user_by_id(int(session_user["id"]))
+    repository = build_app_repository()
+    user = repository.get_user_by_id(int(session_user["id"]))
     if not user or not user["is_active"]:
         request.session.clear()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Phiên đăng nhập không còn hợp lệ.")
+    ensure_login_session_active(request, repository, session_user, user)
     public = AuthService.public_user(user)
-    public["permissions"] = build_app_repository().get_user_permissions(public["id"])
+    public["active_session_limit"] = MAX_ACTIVE_USER_LOGIN_SESSIONS
+    public["permissions"] = repository.get_user_permissions(public["id"])
     enforce_billing_access(request, public)
     return public
 
@@ -1941,15 +2003,18 @@ def login(request: Request, payload: LoginPayload) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Tên đăng nhập hoặc mật khẩu không đúng.")
     reset_failed_login_counter(payload.username)
     request.session.clear()
-    request.session["user"] = user
-    return {"ok": True, "user": user}
+    session_user = attach_login_session(request, user)
+    request.session["user"] = session_user
+    return {"ok": True, "user": public_session_user(session_user)}
 
 
 @router.post("/api/auth/logout")
 def logout(request: Request) -> dict:
     user = request.session.get("user")
     if user:
-        build_app_repository().add_audit_log(user["username"], "logout", "Đăng xuất")
+        repository = build_app_repository()
+        repository.revoke_user_login_session(str(user.get("session_id") or ""), "logout")
+        repository.add_audit_log(user["username"], "logout", "Đăng xuất")
     request.session.clear()
     return {"ok": True}
 

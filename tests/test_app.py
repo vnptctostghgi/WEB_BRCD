@@ -2,6 +2,7 @@ import os
 import json
 import threading
 import time
+import uuid
 from io import BytesIO
 from datetime import datetime
 from pathlib import Path
@@ -264,6 +265,34 @@ def test_admin_can_toggle_and_demo_renew_user_billing() -> None:
         client.post("/api/auth/logout")
         login(client, "viewer_billing", "Viewer@Billing123")
         assert client.get("/api/navigation").status_code == 200
+
+
+def test_user_login_is_limited_to_two_active_devices() -> None:
+    username = f"viewer_device_{uuid.uuid4().hex[:8]}"
+    password = "Viewer@Device123"
+    with TestClient(app) as admin_client:
+        login(admin_client)
+        created = admin_client.post(
+            "/api/admin/users",
+            json={
+                "username": username,
+                "full_name": "Viewer Device Limit",
+                "password": password,
+                "role": "viewer",
+            },
+        )
+        assert created.status_code == 200
+
+    with TestClient(app) as first_client, TestClient(app) as second_client, TestClient(app) as third_client:
+        login(first_client, username, password)
+        login(second_client, username, password)
+        assert first_client.get("/api/auth/me").status_code == 200
+        assert second_client.get("/api/auth/me").status_code == 200
+
+        login(third_client, username, password)
+        assert third_client.get("/api/auth/me").status_code == 200
+        assert first_client.get("/api/auth/me").status_code == 401
+        assert second_client.get("/api/auth/me").status_code == 200
 
 
 def test_five_failed_logins_send_telegram_alert(monkeypatch) -> None:

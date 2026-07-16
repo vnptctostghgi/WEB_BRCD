@@ -87,6 +87,7 @@ BILLING_PLAN_ROWS = [
     {"code": "yearly", "name": "12 thang tang 2", "paid_months": 12, "bonus_months": 2, "price_vnd": 999000, "is_active": True, "sort_order": 40},
 ]
 BILLING_PLAN_BY_CODE = {plan["code"]: plan for plan in BILLING_PLAN_ROWS}
+MAX_ACTIVE_USER_LOGIN_SESSIONS = 2
 
 
 def billing_bool(value: Any) -> bool:
@@ -585,6 +586,23 @@ class AppRepository:
                     last_failed_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS user_login_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    username TEXT NOT NULL DEFAULT '',
+                    ip_address TEXT NOT NULL DEFAULT '',
+                    user_agent TEXT NOT NULL DEFAULT '',
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    revoked_at TEXT NOT NULL DEFAULT '',
+                    revoked_reason TEXT NOT NULL DEFAULT '',
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS user_login_sessions_active_idx
+                ON user_login_sessions (user_id, is_active, created_at DESC);
 
                 CREATE TABLE IF NOT EXISTS billing_plans (
                     code TEXT PRIMARY KEY,
@@ -1095,6 +1113,89 @@ class AppRepository:
         normalized = (username or "unknown").strip().lower() or "unknown"
         with self.connect() as connection:
             connection.execute("DELETE FROM login_attempts WHERE username=?", (normalized,))
+
+    def create_user_login_session(self, user_id: int, username: str, ip_address: str = "", user_agent: str = "") -> dict[str, Any]:
+        session_id = secrets.token_urlsafe(32)
+        now = datetime.now(UTC).isoformat(timespec="microseconds")
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO user_login_sessions
+                (session_id, user_id, username, ip_address, user_agent, is_active, created_at, last_seen_at)
+                VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (session_id, user_id, username, ip_address[:120], user_agent[:500], now, now),
+            )
+            self._enforce_user_login_session_limit(connection, user_id)
+            row = connection.execute(
+                "SELECT * FROM user_login_sessions WHERE session_id=?",
+                (session_id,),
+            ).fetchone()
+            return dict(row) if row else {"session_id": session_id, "user_id": user_id, "is_active": 1}
+
+    def _enforce_user_login_session_limit(self, connection: sqlite3.Connection, user_id: int) -> None:
+        rows = connection.execute(
+            """
+            SELECT session_id FROM user_login_sessions
+            WHERE user_id=? AND is_active=1
+            ORDER BY created_at DESC, last_seen_at DESC
+            """,
+            (user_id,),
+        ).fetchall()
+        stale_session_ids = [str(row["session_id"]) for row in rows[MAX_ACTIVE_USER_LOGIN_SESSIONS:]]
+        if not stale_session_ids:
+            return
+        now = datetime.now(UTC).isoformat(timespec="microseconds")
+        connection.executemany(
+            """
+            UPDATE user_login_sessions
+            SET is_active=0, revoked_at=?, revoked_reason='device_limit'
+            WHERE session_id=?
+            """,
+            [(now, session_id) for session_id in stale_session_ids],
+        )
+
+    def is_user_login_session_active(self, session_id: str, user_id: int) -> bool:
+        if not session_id:
+            return False
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT 1 FROM user_login_sessions
+                WHERE session_id=? AND user_id=? AND is_active=1
+                LIMIT 1
+                """,
+                (session_id, user_id),
+            ).fetchone()
+            return bool(row)
+
+    def touch_user_login_session(self, session_id: str) -> None:
+        if not session_id:
+            return
+        now = datetime.now(UTC).isoformat(timespec="microseconds")
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE user_login_sessions
+                SET last_seen_at=?
+                WHERE session_id=? AND is_active=1
+                """,
+                (now, session_id),
+            )
+
+    def revoke_user_login_session(self, session_id: str, reason: str = "logout") -> None:
+        if not session_id:
+            return
+        now = datetime.now(UTC).isoformat(timespec="microseconds")
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE user_login_sessions
+                SET is_active=0, revoked_at=?, revoked_reason=?
+                WHERE session_id=? AND is_active=1
+                """,
+                (now, reason[:80], session_id),
+            )
 
     def list_audit_logs(self, limit: int = 100) -> list[dict[str, Any]]:
         with self.connect() as connection:

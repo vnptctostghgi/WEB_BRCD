@@ -16,6 +16,7 @@ from app.data_access.app_repository import (
     DEFAULT_DASHBOARD_PAGE_NAME,
     FEATURE_CODE_ALIASES,
     LEGACY_REMOVED_FEATURE_CODES,
+    MAX_ACTIVE_USER_LOGIN_SESSIONS,
     billing_add_months,
     billing_bool,
     billing_datetime_text,
@@ -495,6 +496,91 @@ class SupabaseRepository:
     def reset_login_failures(self, username: str) -> None:
         normalized = (username or "unknown").strip().lower() or "unknown"
         self._delete("login_attempts", {"username": f"eq.{normalized}"})
+
+    def create_user_login_session(self, user_id: int, username: str, ip_address: str = "", user_agent: str = "") -> dict[str, Any]:
+        session_id = secrets.token_urlsafe(32)
+        now = datetime.now(UTC).isoformat(timespec="microseconds")
+        payload = {
+            "session_id": session_id,
+            "user_id": user_id,
+            "username": username,
+            "ip_address": ip_address[:120],
+            "user_agent": user_agent[:500],
+            "is_active": True,
+            "created_at": now,
+            "last_seen_at": now,
+        }
+        try:
+            row = self._insert("user_login_sessions", payload)
+            self._enforce_user_login_session_limit(user_id)
+            return row or payload
+        except RuntimeError as error:
+            if self._is_missing_user_login_sessions_error(error):
+                return {"session_id": "", "user_id": user_id, "is_active": True}
+            raise
+
+    def _enforce_user_login_session_limit(self, user_id: int) -> None:
+        try:
+            rows = self._get("user_login_sessions", {
+                "user_id": f"eq.{user_id}",
+                "is_active": "eq.true",
+                "select": "session_id",
+                "order": "created_at.desc,last_seen_at.desc",
+            })
+        except RuntimeError as error:
+            if self._is_missing_user_login_sessions_error(error):
+                return
+            raise
+        stale_session_ids = [str(row.get("session_id") or "") for row in rows[MAX_ACTIVE_USER_LOGIN_SESSIONS:]]
+        now = datetime.now(UTC).isoformat(timespec="microseconds")
+        for session_id in stale_session_ids:
+            if session_id:
+                self._patch("user_login_sessions", {"session_id": f"eq.{session_id}"}, {
+                    "is_active": False,
+                    "revoked_at": now,
+                    "revoked_reason": "device_limit",
+                })
+
+    def is_user_login_session_active(self, session_id: str, user_id: int) -> bool:
+        if not session_id:
+            return False
+        try:
+            rows = self._get("user_login_sessions", {
+                "session_id": f"eq.{session_id}",
+                "user_id": f"eq.{user_id}",
+                "is_active": "eq.true",
+                "select": "session_id",
+                "limit": "1",
+            })
+        except RuntimeError as error:
+            if self._is_missing_user_login_sessions_error(error):
+                return True
+            raise
+        return bool(rows)
+
+    def touch_user_login_session(self, session_id: str) -> None:
+        if not session_id:
+            return
+        try:
+            self._patch("user_login_sessions", {"session_id": f"eq.{session_id}", "is_active": "eq.true"}, {
+                "last_seen_at": datetime.now(UTC).isoformat(timespec="microseconds"),
+            })
+        except RuntimeError as error:
+            if not self._is_missing_user_login_sessions_error(error):
+                raise
+
+    def revoke_user_login_session(self, session_id: str, reason: str = "logout") -> None:
+        if not session_id:
+            return
+        try:
+            self._patch("user_login_sessions", {"session_id": f"eq.{session_id}", "is_active": "eq.true"}, {
+                "is_active": False,
+                "revoked_at": datetime.now(UTC).isoformat(timespec="microseconds"),
+                "revoked_reason": reason[:80],
+            })
+        except RuntimeError as error:
+            if not self._is_missing_user_login_sessions_error(error):
+                raise
 
     def list_audit_logs(self, limit: int = 100) -> list[dict[str, Any]]:
         return self._get("audit_logs", {"order": "id.desc", "limit": str(limit)})
@@ -1616,6 +1702,14 @@ class SupabaseRepository:
     def _is_missing_onebss_otp_service_column_error(error: Exception) -> bool:
         text = str(error)
         return "PGRST204" in text and "otp_service_code" in text and "onebss_reports" in text
+
+    @staticmethod
+    def _is_missing_user_login_sessions_error(error: Exception) -> bool:
+        text = str(error).lower()
+        return "user_login_sessions" in text and any(
+            marker in text
+            for marker in ("pgrst", "does not exist", "could not find", "schema cache", "relation")
+        )
 
     def _request(self, method: str, table: str, *, params: dict[str, str] | None = None, json: Any = None, headers: dict[str, str] | None = None) -> Any:
         url = f"{self.rest_url}/{table}"
