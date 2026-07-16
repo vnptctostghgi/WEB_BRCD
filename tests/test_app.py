@@ -74,7 +74,7 @@ def test_static_assets_are_cacheable() -> None:
     with TestClient(app) as client:
         response = client.get("/static/app.js?v=53")
         assert response.status_code == 200
-        assert response.headers["cache-control"] == "public, max-age=604800"
+        assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
         assert response.headers["x-content-type-options"] == "nosniff"
         assert response.headers["x-frame-options"] == "SAMEORIGIN"
         assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"

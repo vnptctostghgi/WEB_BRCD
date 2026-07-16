@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 import logging
+import mimetypes
 import uuid
 
 from fastapi import FastAPI, Request
@@ -19,6 +20,7 @@ from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+mimetypes.add_type("image/webp", ".webp")
 try:
     settings.validate_for_startup()
 except RuntimeError as error:
@@ -86,7 +88,7 @@ app.include_router(presentation_router)
 async def add_response_headers(request: Request, call_next):
     response = await call_next(request)
     if request.url.path.startswith("/static/") and response.status_code < 400:
-        response.headers.setdefault("Cache-Control", "public, max-age=604800")
+        response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
     for header, value in SECURITY_HEADERS.items():
         response.headers.setdefault(header, value)
     if settings.is_production:

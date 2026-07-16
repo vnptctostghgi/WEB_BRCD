@@ -7,6 +7,8 @@
     <title>Đăng nhập · Hệ thống quản trị đặc biệt</title>
     <link rel="icon" type="image/png" href="/static/images/system-logo.png" />
     <link rel="apple-touch-icon" href="/static/images/system-logo.png" />
+    <link rel="preload" as="image" href="/static/login-hero-900.webp" imagesrcset="/static/login-hero-640.webp 640w, /static/login-hero-900.webp 900w" imagesizes="(max-width: 1024px) 100vw, 52vw" />
+    <link rel="preconnect" href="https://cdn.tailwindcss.com" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
@@ -23,20 +25,23 @@
       };
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=88" />
+    <link rel="stylesheet" href="/static/styles.css?v=95" />
   </head>
   <body class="login-upgraded min-h-screen text-white antialiased">
     <main class="min-h-screen p-3 sm:p-5">
       <section class="login-stage mx-auto grid min-h-[calc(100vh-1.5rem)] max-w-7xl overflow-hidden shadow-2xl sm:min-h-[calc(100vh-2.5rem)] lg:grid-cols-[minmax(0,1.04fr)_minmax(360px,.96fr)]">
         <div class="login-visual relative flex min-h-[360px] items-center justify-center p-4 sm:min-h-[520px] sm:p-7 lg:min-h-full">
-          <img class="login-hero-image h-full max-h-[calc(100vh-3rem)] w-full object-contain" src="/static/login-hero.png" alt="Ảnh minh họa hệ thống quản trị nội bộ" />
+          <picture class="contents">
+            <source type="image/webp" srcset="/static/login-hero-640.webp 640w, /static/login-hero-900.webp 900w" sizes="(max-width: 1024px) 100vw, 52vw" />
+            <img class="login-hero-image h-full max-h-[calc(100vh-3rem)] w-full object-contain" src="/static/login-hero.png" width="900" height="1200" fetchpriority="high" decoding="async" alt="Ảnh minh họa hệ thống quản trị nội bộ" />
+          </picture>
         </div>
 
         <div class="login-panel-wrap flex min-w-0 items-center justify-center px-4 py-8 sm:px-8 lg:px-10">
           <div class="w-full max-w-[34rem] min-w-0">
             <div class="login-card-upgraded p-5 sm:p-8 lg:p-9">
               <div class="login-brand-lockup">
-                <img class="login-logo" src="/static/images/system-logo.png" alt="Logo hệ thống" />
+                <img class="login-logo" src="/static/images/system-logo-96.webp" width="96" height="96" decoding="async" alt="Logo hệ thống" />
                 <div>
                   <h1 class="text-2xl font-extrabold leading-tight text-white sm:text-3xl">Hệ thống quản trị đặc biệt</h1>
                 </div>
@@ -67,6 +72,6 @@
       </section>
     </main>
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script src="/static/login.js?v=9"></script>
+    <script defer src="/static/login.js?v=9"></script>
   </body>
 </html>

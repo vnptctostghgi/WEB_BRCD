@@ -1462,6 +1462,10 @@ body.view-loading .app-view.active {
   filter: drop-shadow(0 28px 48px rgba(0, 0, 0, .35));
 }
 
+.login-visual picture {
+  display: contents;
+}
+
 .login-panel-wrap {
   background: rgba(2, 6, 23, .5);
 }
