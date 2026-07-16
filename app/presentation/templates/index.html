@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/static/tailwind-built.css?v=1" />
-    <link rel="stylesheet" href="/static/styles.css?v=95" />
+    <link rel="stylesheet" href="/static/styles.css?v=96" />
   </head>
   <body class="app-dark app-booting min-h-screen bg-[#04182f] text-slate-100 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-can-manage-vault="{{ user.role == 'admin' or 'themvasuataikhoan' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'xemmatkhaudaluu' in user.permissions }}">
     <svg class="icon-sprite" aria-hidden="true">
@@ -165,6 +165,24 @@
             </section>
           </section>
 
+        </section>
+
+        <section class="app-view" id="view-report-links">
+          <div class="page-header">
+            <div><p class="eyebrow">Link chia sẻ</p><h1>Link báo cáo</h1><p class="subtitle">Danh sách Google Sheet, Google Doc, Google Slides, PDF và các link báo cáo đã được chia sẻ.</p></div>
+            <button class="btn-secondary" id="refresh-report-links" type="button">Làm mới</button>
+          </div>
+          <section class="data-card">
+            <div class="admin-inline-toolbar report-link-toolbar">
+              <label>Tìm báo cáo hoặc link<input class="form-control" id="report-link-search" placeholder="Nhập tên báo cáo hoặc link..." /></label>
+            </div>
+            <div class="table-scroll">
+              <table class="compact-admin-table inline-admin-table report-links-table">
+                <thead><tr><th class="table-action-column">Chức năng</th><th>Mã báo cáo</th><th>Tên báo cáo</th><th>Link</th><th>Trạng thái</th></tr></thead>
+                <tbody id="report-links-table"></tbody>
+              </table>
+            </div>
+          </section>
         </section>
 
         {% if user.role == "admin" or "xemdanhsachtaikhoan" in user.permissions %}
@@ -383,6 +401,18 @@
         <section class="app-view" id="view-system">
           <div class="page-header"><div><p class="eyebrow">Quản trị hệ thống</p><h1>Cấu hình và trạng thái</h1><p class="subtitle">Theo dõi DB cơ quan, DB web, FTP, Drive và Telegram.</p></div></div>
           <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" id="system-cards"></section>
+          <section class="data-card mt-4">
+            <div class="section-heading">
+              <div><p class="eyebrow">Quản trị link</p><h2>Danh sách link Drive được share</h2><p>Lưu link báo cáo dùng chung; link bật sẽ hiển thị cho tất cả người dùng, link tắt chỉ quản trị viên thấy.</p></div>
+              <button class="btn-primary" id="add-inline-report-link" type="button">Thêm link</button>
+            </div>
+            <div class="admin-inline-toolbar">
+              <label>Tìm link<input class="form-control" id="report-link-admin-search" placeholder="Nhập tên báo cáo hoặc link..." /></label>
+              <label>Chọn link<select class="form-control" id="report-link-picker"><option value="">Thêm link mới / chưa chọn link</option></select></label>
+            </div>
+            <div id="report-link-admin-message" class="result hidden mb-4"></div>
+            <div id="report-link-admin-editor" class="sql-report-editor"></div>
+          </section>
           <section class="data-card mt-4">
             <div class="section-heading">
               <div><p class="eyebrow">Quản trị SQL</p><h2>Danh sách lệnh SQL</h2><p>Tìm, chọn và chỉnh trực tiếp trong bảng. Nút lưu chỉ hiện khi dòng có thay đổi.</p></div>
@@ -636,7 +666,7 @@
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script defer src="/static/app.js?v=137"></script>
+    <script defer src="/static/app.js?v=138"></script>
     <script defer src="/static/mobile-gateway-focused.js?v=6"></script>
   </body>
 </html>

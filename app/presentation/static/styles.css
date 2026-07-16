@@ -3556,6 +3556,68 @@ legend {
   width: 112px;
 }
 
+.report-links-table {
+  min-width: 1040px;
+}
+
+.report-link-toolbar {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.report-links-table th:nth-child(1),
+.report-links-table td:nth-child(1) {
+  width: 15%;
+}
+
+.report-links-table th:nth-child(2),
+.report-links-table td:nth-child(2) {
+  width: 14%;
+}
+
+.report-links-table th:nth-child(3),
+.report-links-table td:nth-child(3) {
+  width: 24%;
+}
+
+.report-links-table th:nth-child(4),
+.report-links-table td:nth-child(4) {
+  width: 34%;
+}
+
+.report-links-table th:nth-child(5),
+.report-links-table td:nth-child(5) {
+  width: 13%;
+}
+
+.report-link-url {
+  display: block;
+  max-width: 100%;
+  color: #07559c;
+  font-weight: 700;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.dark .report-link-url {
+  color: #7dd3fc;
+}
+
+.report-link-actions {
+  align-items: flex-start;
+}
+
+.report-link-actions .table-action {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+}
+
+.report-link-actions .button-svg {
+  width: 15px;
+  height: 15px;
+}
+
 .zalo-auto-table th:nth-child(1),
 .zalo-auto-table td:nth-child(1) {
   width: 22%;

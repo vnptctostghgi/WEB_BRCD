@@ -36,6 +36,7 @@ FEATURE_ROWS = [
     {"code": "baocaomoi", "name": "Báo cáo mới", "parent_code": None, "sort_order": 35},
     {"code": "thietkelayoutbaocao", "name": "Thiết kế Layout báo cáo", "parent_code": "baocaomoi", "sort_order": 36},
     {"code": "daodulieuonebss", "name": "Đào dữ liệu OneBSS", "parent_code": "baocaomoi", "sort_order": 37},
+    {"code": "linkbaocao", "name": "Link báo cáo", "parent_code": "baocaomoi", "sort_order": 38},
     {"code": "taikhoanweb", "name": "Tài khoản web", "parent_code": "quantriweb", "sort_order": 40},
     {"code": "xemdanhsachtaikhoan", "name": "Xem danh sách tài khoản", "parent_code": "taikhoanweb", "sort_order": 41},
     {"code": "themvasuataikhoan", "name": "Thêm và sửa tài khoản", "parent_code": "taikhoanweb", "sort_order": 42},
@@ -549,6 +550,56 @@ class SupabaseRepository:
             return int(existing["id"])
         payload["created_at"] = self._now()
         return int(self._insert("system_connections", payload)["id"])
+
+    def list_report_links(self, include_inactive: bool = True) -> list[dict[str, Any]]:
+        params = {"order": "ten_bao_cao.asc"}
+        if not include_inactive:
+            params["is_active"] = "eq.true"
+        rows = self._get("report_links", params)
+        return [self._decode_report_link(row) for row in rows]
+
+    def get_report_link_by_id(self, report_id: int) -> dict[str, Any] | None:
+        rows = self._get("report_links", {"id": f"eq.{report_id}", "limit": "1"})
+        return self._decode_report_link(rows[0]) if rows else None
+
+    def get_report_link_by_code(self, ma_bao_cao: str) -> dict[str, Any] | None:
+        rows = self._get("report_links", {"ma_bao_cao": f"eq.{ma_bao_cao}", "limit": "1"})
+        return self._decode_report_link(rows[0]) if rows else None
+
+    def generate_report_link_code(self) -> str:
+        rows = self._get("report_links", {"select": "ma_bao_cao", "ma_bao_cao": "like.LINK%", "order": "ma_bao_cao.desc"})
+        numbers = []
+        for row in rows:
+            match = re.search(r"(\d+)$", str(row.get("ma_bao_cao") or ""))
+            if match:
+                numbers.append(int(match.group(1)))
+        return f"LINK{(max(numbers) if numbers else 0) + 1:04d}"
+
+    def save_report_link(
+        self,
+        report_id: int | None,
+        ma_bao_cao: str,
+        ten_bao_cao: str,
+        link: str,
+        link_type: str,
+        is_active: bool,
+    ) -> int:
+        payload = {
+            "ma_bao_cao": ma_bao_cao,
+            "ten_bao_cao": ten_bao_cao,
+            "link": link,
+            "link_type": link_type,
+            "is_active": is_active,
+            "updated_at": self._now(),
+        }
+        if report_id:
+            self._patch("report_links", {"id": f"eq.{report_id}"}, payload)
+            return int(report_id)
+        payload["created_at"] = self._now()
+        return int(self._insert("report_links", payload)["id"])
+
+    def delete_report_link(self, report_id: int) -> None:
+        self._delete("report_links", {"id": f"eq.{report_id}"})
 
     def list_sql_reports(self) -> list[dict[str, Any]]:
         rows = self._get("sql_reports", {"order": "ten_bao_cao.asc"})
@@ -1123,6 +1174,19 @@ class SupabaseRepository:
     def _decode_connection(row: dict[str, Any]) -> dict[str, Any]:
         row["config"] = row.get("config") or {}
         return row
+
+    @staticmethod
+    def _decode_report_link(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": row.get("id"),
+            "ma_bao_cao": row.get("ma_bao_cao") or "",
+            "ten_bao_cao": row.get("ten_bao_cao") or "",
+            "link": row.get("link") or "",
+            "link_type": row.get("link_type") or "other",
+            "is_active": bool(row.get("is_active")),
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        }
 
     @staticmethod
     def _decode_sql_report(row: dict[str, Any]) -> dict[str, Any]:

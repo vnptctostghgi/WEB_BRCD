@@ -16,7 +16,7 @@ import re
 import sqlite3
 from io import BytesIO
 from typing import Any, Literal
-from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse, urlunparse
 
 import httpx
 import openpyxl
@@ -35,6 +35,7 @@ from app.application.google_drive_service import (
     GoogleDriveConfigurationError,
     clear_google_drive_oauth_tokens,
     google_drive_folder_id,
+    google_drive_oauth_credentials,
     google_drive_oauth_client_configured,
     google_drive_oauth_status,
     save_google_drive_oauth_tokens,
@@ -117,6 +118,30 @@ DASHBOARD_LAYOUT_TYPES = {
 }
 DASHBOARD_WIDGET_TYPES = {"bar_chart", "pie_chart", "line_chart", "combo_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "multi_line_chart", "data_table", "metric", "data_card", "google_sheet_embed", "text_title"}
 DASHBOARD_NON_SQL_WIDGET_TYPES = {"google_sheet_embed", "text_title"}
+PUBLIC_FEATURE_CODES = {"linkbaocao"}
+REPORT_LINK_TYPES = {
+    "google_sheet": "Google Sheet",
+    "google_doc": "Google Doc",
+    "google_slide": "Google Slides",
+    "google_form": "Google Form",
+    "pdf": "PDF",
+    "other": "Link khác",
+}
+REPORT_LINK_DOWNLOAD_TYPES = {"google_sheet", "google_doc", "google_slide", "pdf"}
+REPORT_LINK_EXPORTS = {
+    "google_doc": {
+        "extension": ".docx",
+        "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "export_format": "docx",
+        "export_url": "https://docs.google.com/document/d/{file_id}/export?format=docx",
+    },
+    "google_slide": {
+        "extension": ".pptx",
+        "mime_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "export_format": "pptx",
+        "export_url": "https://docs.google.com/presentation/d/{file_id}/export/pptx",
+    },
+}
 DASHBOARD_LAYOUT_EXCLUDED_FEATURE_CODES = {
     "dashboard",
     "truyvansql",
@@ -125,6 +150,7 @@ DASHBOARD_LAYOUT_EXCLUDED_FEATURE_CODES = {
     "reports",
     "new_reports",
     "admin.dashboard_builder",
+    "linkbaocao",
 }
 DASHBOARD_LAYOUT_PARENT_EXCLUDED_FEATURE_CODES = {
     "dashboard",
@@ -315,6 +341,15 @@ class OneBssReportPayload(BaseModel):
     otp_service_code: str = "onebss"
     report_url: str
     storage_link: str = ""
+
+
+class ReportLinkPayload(BaseModel):
+    id: int | None = None
+    ma_bao_cao: str = ""
+    ten_bao_cao: str
+    link: str
+    link_type: str = "other"
+    is_active: bool = True
 
 
 class RunReportPayload(BaseModel):
@@ -663,6 +698,314 @@ def raise_onebss_operation_error(error: Exception, action: str) -> None:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"{action}: {type(error).__name__}: {detail or 'khong co chi tiet loi'}",
         ) from error
+
+
+def raise_report_link_schema_error(error: RuntimeError) -> None:
+    if "report_links" in str(error):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Supabase chua co bang report_links. Hay chay lai file sql/supabase_upgrade_admin_modules.sql.",
+        ) from error
+    raise error
+
+
+def normalize_report_link_url(raw_url: str) -> str:
+    link = str(raw_url or "").strip()
+    parsed = urlparse(link)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Link bao cao phai la URL http/https hop le.")
+    return link
+
+
+def report_link_name_key(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+
+
+def report_link_url_key(value: str) -> str:
+    raw_value = str(value or "").strip()
+    parsed = urlparse(raw_value)
+    if not parsed.scheme or not parsed.netloc:
+        return raw_value.casefold()
+    query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)))
+    normalized = urlunparse((
+        parsed.scheme.lower(),
+        parsed.netloc.lower(),
+        parsed.path.rstrip("/"),
+        parsed.params,
+        query,
+        parsed.fragment,
+    ))
+    return normalized.casefold()
+
+
+def detect_report_link_type(raw_url: str) -> str:
+    parsed = urlparse(str(raw_url or "").strip())
+    host = parsed.netloc.lower()
+    path = parsed.path.lower()
+    if host == "docs.google.com":
+        if path.startswith("/spreadsheets/"):
+            return "google_sheet"
+        if path.startswith("/document/"):
+            return "google_doc"
+        if path.startswith("/presentation/"):
+            return "google_slide"
+        if path.startswith("/forms/"):
+            return "google_form"
+    if path.endswith(".pdf") or parsed.query.lower().endswith("format=pdf"):
+        return "pdf"
+    return "other"
+
+
+def normalize_report_link_type(link_type: str, raw_url: str = "") -> str:
+    normalized = str(link_type or "").strip().lower()
+    if normalized in {"auto", ""}:
+        normalized = detect_report_link_type(raw_url)
+    return normalized if normalized in REPORT_LINK_TYPES else "other"
+
+
+def report_link_download_url(report: dict[str, Any]) -> str:
+    link_type = normalize_report_link_type(str(report.get("link_type") or ""), str(report.get("link") or ""))
+    if link_type not in REPORT_LINK_DOWNLOAD_TYPES:
+        return ""
+    return f"/api/report-links/{quote(str(report.get('id') or ''))}/download"
+
+
+def report_link_response(report: dict[str, Any]) -> dict[str, Any]:
+    link_type = normalize_report_link_type(str(report.get("link_type") or ""), str(report.get("link") or ""))
+    return {
+        "id": report.get("id"),
+        "ma_bao_cao": report.get("ma_bao_cao") or "",
+        "ten_bao_cao": report.get("ten_bao_cao") or "",
+        "link": report.get("link") or "",
+        "link_type": link_type,
+        "link_type_label": REPORT_LINK_TYPES.get(link_type, REPORT_LINK_TYPES["other"]),
+        "is_active": bool(report.get("is_active")),
+        "can_download": link_type in REPORT_LINK_DOWNLOAD_TYPES,
+        "download_url": report_link_download_url({**report, "link_type": link_type}),
+        "created_at": report.get("created_at"),
+        "updated_at": report.get("updated_at"),
+    }
+
+
+def validate_unique_report_link(repository: AppRepository, report_id: int | None, ma_bao_cao: str, ten_bao_cao: str, link: str) -> None:
+    name_key = report_link_name_key(ten_bao_cao)
+    link_key = report_link_url_key(link)
+    code_key = str(ma_bao_cao or "").strip().upper()
+    for item in repository.list_report_links(include_inactive=True):
+        if report_id and int(item.get("id") or 0) == int(report_id):
+            continue
+        if code_key and str(item.get("ma_bao_cao") or "").strip().upper() == code_key:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ma bao cao da ton tai.")
+        if report_link_name_key(str(item.get("ten_bao_cao") or "")) == name_key:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ten bao cao da duoc luu truoc do.")
+        if report_link_url_key(str(item.get("link") or "")) == link_key:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Link nay da duoc luu truoc do.")
+
+
+def extract_google_file_id(raw_url: str) -> str:
+    parsed = urlparse(str(raw_url or "").strip())
+    parts = [unquote(part) for part in parsed.path.split("/") if part]
+    if "d" in parts:
+        index = parts.index("d")
+        if len(parts) > index + 1:
+            return parts[index + 1].strip()
+    query_id = dict(parse_qsl(parsed.query, keep_blank_values=True)).get("id", "").strip()
+    return query_id
+
+
+def report_link_download_filename(report: dict[str, Any], extension: str) -> str:
+    base = safe_filename_part(report.get("ten_bao_cao") or report.get("ma_bao_cao") or "bao_cao", "bao_cao")
+    if base.lower().endswith(extension.lower()):
+        return base
+    return f"{base}{extension}"
+
+
+def attachment_response(content: bytes, filename: str, media_type: str) -> Response:
+    safe_name = filename or "download"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(safe_name)}"},
+    )
+
+
+def sheet_range_name(sheet_name: str) -> str:
+    return f"'{str(sheet_name or 'Sheet1').replace(chr(39), chr(39) + chr(39))}'"
+
+
+def safe_sheet_title(title: str, used_titles: set[str]) -> str:
+    base = re.sub(r"[:\\/?*\[\]]+", "_", str(title or "Sheet")).strip() or "Sheet"
+    base = base[:31]
+    candidate = base
+    suffix = 1
+    while candidate.casefold() in used_titles:
+        suffix += 1
+        marker = f"_{suffix}"
+        candidate = f"{base[:31 - len(marker)]}{marker}"
+    used_titles.add(candidate.casefold())
+    return candidate
+
+
+def workbook_values_bytes_from_openpyxl(source_workbook: openpyxl.Workbook) -> bytes:
+    target = openpyxl.Workbook()
+    target.remove(target.active)
+    used_titles: set[str] = set()
+    for source_sheet in source_workbook.worksheets:
+        target_sheet = target.create_sheet(safe_sheet_title(source_sheet.title, used_titles))
+        for row in source_sheet.iter_rows(values_only=True):
+            target_sheet.append(list(row))
+    if not target.worksheets:
+        target.create_sheet("Data")
+    output = BytesIO()
+    target.save(output)
+    return output.getvalue()
+
+
+def public_download_bytes(url: str, label: str, timeout: int = 90) -> bytes:
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            response = client.get(url)
+            response.raise_for_status()
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Khong tai duoc {label}: {error}") from error
+    content = response.content or b""
+    preview = content[:160].lstrip().lower()
+    if preview.startswith(b"<!doctype html") or preview.startswith(b"<html"):
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Link {label} tra ve trang HTML, khong phai file tai xuong.")
+    return content
+
+
+def google_credentials_for_download(repository: AppRepository) -> Any:
+    credentials_pair = google_drive_oauth_credentials(get_settings(), repository)
+    if not credentials_pair:
+        raise GoogleDriveConfigurationError("Chua ket noi Google Drive OAuth.")
+    credentials, _ = credentials_pair
+    try:
+        from google.auth.transport.requests import Request as GoogleAuthRequest
+    except ImportError as error:
+        raise GoogleDriveConfigurationError("May chu chua cai thu vien Google OAuth.") from error
+    credentials.refresh(GoogleAuthRequest())
+    return credentials
+
+
+def google_drive_media_bytes(file_id: str, repository: AppRepository, *, mime_type: str = "", export: bool = False) -> bytes:
+    try:
+        from googleapiclient.discovery import build
+        from googleapiclient.http import MediaIoBaseDownload
+    except ImportError as error:
+        raise GoogleDriveConfigurationError("May chu chua cai thu vien Google Drive API.") from error
+    credentials = google_credentials_for_download(repository)
+    drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
+    request = (
+        drive.files().export_media(fileId=file_id, mimeType=mime_type)
+        if export
+        else drive.files().get_media(fileId=file_id)
+    )
+    output = BytesIO()
+    downloader = MediaIoBaseDownload(output, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    return output.getvalue()
+
+
+def google_sheet_values_bytes(file_id: str, repository: AppRepository) -> bytes:
+    try:
+        from googleapiclient.discovery import build
+    except ImportError as error:
+        raise GoogleDriveConfigurationError("May chu chua cai thu vien Google Sheets API.") from error
+    credentials = google_credentials_for_download(repository)
+    sheets = build("sheets", "v4", credentials=credentials, cache_discovery=False)
+    metadata = sheets.spreadsheets().get(
+        spreadsheetId=file_id,
+        fields="properties.title,sheets.properties(title,sheetType)",
+    ).execute()
+    workbook = openpyxl.Workbook()
+    workbook.remove(workbook.active)
+    used_titles: set[str] = set()
+    grid_sheets = [
+        sheet.get("properties") or {}
+        for sheet in metadata.get("sheets", [])
+        if (sheet.get("properties") or {}).get("sheetType", "GRID") == "GRID"
+    ]
+    for sheet in grid_sheets:
+        title = str(sheet.get("title") or "Sheet")
+        worksheet = workbook.create_sheet(safe_sheet_title(title, used_titles))
+        values_result = sheets.spreadsheets().values().get(
+            spreadsheetId=file_id,
+            range=sheet_range_name(title),
+            valueRenderOption="UNFORMATTED_VALUE",
+            dateTimeRenderOption="FORMATTED_STRING",
+        ).execute()
+        values = values_result.get("values") or []
+        for row in values:
+            worksheet.append(list(row))
+    if not workbook.worksheets:
+        workbook.create_sheet("Data")
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+def public_google_sheet_values_bytes(file_id: str) -> bytes:
+    export_url = f"https://docs.google.com/spreadsheets/d/{quote(file_id)}/export?format=xlsx"
+    content = public_download_bytes(export_url, "Google Sheet")
+    source = None
+    try:
+        source = openpyxl.load_workbook(BytesIO(content), data_only=True, read_only=True)
+        return workbook_values_bytes_from_openpyxl(source)
+    except Exception as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Khong tao duoc Excel value-only tu Google Sheet: {error}") from error
+    finally:
+        try:
+            if source is not None:
+                source.close()
+        except Exception:
+            pass
+
+
+def download_google_sheet_report_link(report: dict[str, Any], repository: AppRepository) -> Response:
+    file_id = extract_google_file_id(str(report.get("link") or ""))
+    if not file_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Khong doc duoc file ID cua Google Sheet.")
+    try:
+        content = google_sheet_values_bytes(file_id, repository)
+    except Exception as api_error:
+        logger.info("Cannot export Google Sheet via API, fallback to public export: %s", api_error)
+        content = public_google_sheet_values_bytes(file_id)
+    filename = report_link_download_filename(report, ".xlsx")
+    return attachment_response(content, filename, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+def download_google_workspace_report_link(report: dict[str, Any], repository: AppRepository, link_type: str) -> Response:
+    export_info = REPORT_LINK_EXPORTS[link_type]
+    file_id = extract_google_file_id(str(report.get("link") or ""))
+    if not file_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Khong doc duoc file ID cua Google Workspace.")
+    try:
+        content = google_drive_media_bytes(file_id, repository, mime_type=export_info["mime_type"], export=True)
+    except Exception as api_error:
+        logger.info("Cannot export Google Workspace file via API, fallback to public export: %s", api_error)
+        export_url = export_info["export_url"].format(file_id=quote(file_id))
+        content = public_download_bytes(export_url, export_info["export_format"])
+    filename = report_link_download_filename(report, export_info["extension"])
+    return attachment_response(content, filename, export_info["mime_type"])
+
+
+def download_pdf_report_link(report: dict[str, Any], repository: AppRepository) -> Response:
+    link = str(report.get("link") or "").strip()
+    file_id = extract_google_file_id(link)
+    content: bytes
+    if file_id and "drive.google.com" in urlparse(link).netloc.lower():
+        try:
+            content = google_drive_media_bytes(file_id, repository)
+        except Exception as api_error:
+            logger.info("Cannot download Google Drive PDF via API, fallback to public download: %s", api_error)
+            content = public_download_bytes(f"https://drive.google.com/uc?export=download&id={quote(file_id)}", "PDF")
+    else:
+        content = public_download_bytes(link, "PDF")
+    filename = report_link_download_filename(report, ".pdf")
+    return attachment_response(content, filename, "application/pdf")
 
 
 def raise_dashboard_layout_schema_error(error: RuntimeError) -> None:
@@ -1143,7 +1486,7 @@ def feature_parent_code_for_page(features: list[dict], page_id: str) -> tuple[st
 def visible_features_for_user(features: list[dict], user: dict) -> list[dict]:
     if user.get("role") == "admin":
         return features
-    allowed_codes = {str(code) for code in user.get("permissions", []) if str(code)}
+    allowed_codes = {str(code) for code in user.get("permissions", []) if str(code)} | PUBLIC_FEATURE_CODES
     by_code = {str(feature.get("code") or ""): feature for feature in features if feature.get("code")}
     visible_codes: set[str] = set()
     for code in allowed_codes:
@@ -1925,6 +2268,83 @@ def save_system_connection(request: Request, code: str, payload: SystemConnectio
         payload.is_active,
     )
     repository.add_audit_log(actor["username"], "system_connection_saved", f"Luu ket noi {code}")
+    return {"ok": True}
+
+
+@router.get("/api/report-links")
+def list_visible_report_links(request: Request) -> dict:
+    user = current_user(request)
+    repository = build_app_repository()
+    try:
+        links = repository.list_report_links(include_inactive=user.get("role") == "admin")
+    except RuntimeError as error:
+        raise_report_link_schema_error(error)
+    return {"links": [report_link_response(link) for link in links]}
+
+
+@router.get("/api/report-links/{report_id}/download")
+def download_report_link(request: Request, report_id: int) -> Response:
+    user = current_user(request)
+    repository = build_app_repository()
+    try:
+        report = repository.get_report_link_by_id(report_id)
+    except RuntimeError as error:
+        raise_report_link_schema_error(error)
+    if not report or (not report.get("is_active") and user.get("role") != "admin"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay link bao cao.")
+    link_type = normalize_report_link_type(str(report.get("link_type") or ""), str(report.get("link") or ""))
+    if link_type == "google_sheet":
+        return download_google_sheet_report_link(report, repository)
+    if link_type in {"google_doc", "google_slide"}:
+        return download_google_workspace_report_link(report, repository, link_type)
+    if link_type == "pdf":
+        return download_pdf_report_link(report, repository)
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Loai link nay khong ho tro tai xuong.")
+
+
+@router.get("/api/admin/report-links")
+def list_admin_report_links(request: Request) -> dict:
+    admin_user(request)
+    try:
+        links = build_app_repository().list_report_links(include_inactive=True)
+    except RuntimeError as error:
+        raise_report_link_schema_error(error)
+    return {"links": [report_link_response(link) for link in links]}
+
+
+@router.post("/api/admin/report-links")
+def save_admin_report_link(request: Request, payload: ReportLinkPayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    report_id = payload.id
+    ten_bao_cao = payload.ten_bao_cao.strip()
+    link = normalize_report_link_url(payload.link)
+    link_type = normalize_report_link_type(payload.link_type, link)
+    if not ten_bao_cao:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ten bao cao la bat buoc.")
+    try:
+        if report_id and not repository.get_report_link_by_id(report_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay link bao cao.")
+        ma_bao_cao = payload.ma_bao_cao.strip().upper() or repository.generate_report_link_code()
+        validate_unique_report_link(repository, report_id, ma_bao_cao, ten_bao_cao, link)
+        saved_id = repository.save_report_link(report_id, ma_bao_cao, ten_bao_cao, link, link_type, payload.is_active)
+    except sqlite3.IntegrityError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ma, ten bao cao hoac link da ton tai.") from error
+    except RuntimeError as error:
+        raise_report_link_schema_error(error)
+    repository.add_audit_log(actor["username"], "report_link_saved", f"Luu link bao cao {ma_bao_cao}")
+    return {"ok": True, "id": saved_id, "ma_bao_cao": ma_bao_cao, "link_type": link_type}
+
+
+@router.delete("/api/admin/report-links/{report_id}")
+def delete_admin_report_link(request: Request, report_id: int) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    try:
+        repository.delete_report_link(report_id)
+    except RuntimeError as error:
+        raise_report_link_schema_error(error)
+    repository.add_audit_log(actor["username"], "report_link_deleted", f"Xoa link bao cao {report_id}")
     return {"ok": True}
 
 

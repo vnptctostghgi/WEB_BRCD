@@ -482,6 +482,95 @@ def test_system_connections_include_zalo_bot() -> None:
         assert "zalo_bot" in codes
 
 
+def test_admin_can_manage_report_links_and_active_links_are_public() -> None:
+    with TestClient(app) as client:
+        login(client)
+        active_payload = {
+            "ten_bao_cao": "Bao cao link active",
+            "link": "https://docs.google.com/spreadsheets/d/sheet-link-active/edit#gid=0",
+            "link_type": "google_sheet",
+            "is_active": True,
+        }
+        created = client.post("/api/admin/report-links", json=active_payload)
+        assert created.status_code == 200
+        active_code = created.json()["ma_bao_cao"]
+        assert active_code.startswith("LINK")
+
+        inactive = client.post(
+            "/api/admin/report-links",
+            json={
+                "ten_bao_cao": "Bao cao link inactive",
+                "link": "https://drive.google.com/file/d/pdf-link-inactive/view",
+                "link_type": "pdf",
+                "is_active": False,
+            },
+        )
+        assert inactive.status_code == 200
+
+        form = client.post(
+            "/api/admin/report-links",
+            json={
+                "ten_bao_cao": "Bieu mau Google",
+                "link": "https://docs.google.com/forms/d/e/form-link/viewform",
+                "link_type": "google_form",
+                "is_active": True,
+            },
+        )
+        assert form.status_code == 200
+
+        duplicate_name = client.post(
+            "/api/admin/report-links",
+            json={**active_payload, "link": "https://docs.google.com/spreadsheets/d/another-sheet/edit"},
+        )
+        assert duplicate_name.status_code == 400
+        assert "Ten bao cao" in duplicate_name.json()["detail"]
+
+        duplicate_link = client.post(
+            "/api/admin/report-links",
+            json={**active_payload, "ten_bao_cao": "Bao cao link khac ten"},
+        )
+        assert duplicate_link.status_code == 400
+        assert "Link nay" in duplicate_link.json()["detail"]
+
+        admin_links = client.get("/api/report-links")
+        assert admin_links.status_code == 200
+        admin_payload = admin_links.json()["links"]
+        active = next(item for item in admin_payload if item["ma_bao_cao"] == active_code)
+        inactive_item = next(item for item in admin_payload if item["ten_bao_cao"] == "Bao cao link inactive")
+        form_item = next(item for item in admin_payload if item["ten_bao_cao"] == "Bieu mau Google")
+        assert active["download_url"].endswith(f"/api/report-links/{created.json()['id']}/download")
+        assert inactive_item["is_active"] is False
+        assert inactive_item["can_download"] is True
+        assert form_item["can_download"] is False
+        assert form_item["download_url"] == ""
+
+        created_user = client.post(
+            "/api/admin/users",
+            json={
+                "username": "viewer_report_links",
+                "full_name": "Viewer Report Links",
+                "role": "viewer",
+                "password": "Viewer@Links2026!",
+            },
+        )
+        assert created_user.status_code == 200
+        client.post("/api/auth/logout")
+        login(client, "viewer_report_links", "Viewer@Links2026!")
+
+        navigation = client.get("/api/navigation")
+        assert navigation.status_code == 200
+        feature_codes = {feature["code"] for feature in navigation.json()["features"]}
+        assert "baocaomoi" in feature_codes
+        assert "linkbaocao" in feature_codes
+
+        viewer_links = client.get("/api/report-links")
+        assert viewer_links.status_code == 200
+        viewer_names = {item["ten_bao_cao"] for item in viewer_links.json()["links"]}
+        assert "Bao cao link active" in viewer_names
+        assert "Bieu mau Google" in viewer_names
+        assert "Bao cao link inactive" not in viewer_names
+
+
 def test_internal_api_client_uses_active_connection_config() -> None:
     class FakeRepository:
         def get_system_connection_by_code(self, code: str) -> dict:

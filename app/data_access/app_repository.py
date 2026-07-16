@@ -29,6 +29,7 @@ FEATURE_ROWS = [
     ("baocaomoi", "Báo cáo mới", None, 35),
     ("thietkelayoutbaocao", "Thiết kế Layout báo cáo", "baocaomoi", 36),
     ("daodulieuonebss", "Đào dữ liệu OneBSS", "baocaomoi", 37),
+    ("linkbaocao", "Link báo cáo", "baocaomoi", 38),
     ("taikhoanweb", "Tài khoản web", "quantriweb", 40),
     ("xemdanhsachtaikhoan", "Xem danh sách tài khoản", "taikhoanweb", 41),
     ("themvasuataikhoan", "Thêm và sửa tài khoản", "taikhoanweb", 42),
@@ -59,6 +60,8 @@ FEATURE_CODE_ALIASES = {
     "admin.audit": "nhatkyhoatdong",
     "admin.sql_reports": "quantrisql",
     "admin.onebss_reports": "quantridulieuonebss",
+    "report_links": "linkbaocao",
+    "shared_report_links": "linkbaocao",
     "web_links": "lienketweb",
     "web_links.elearning": "elearning",
 }
@@ -295,6 +298,23 @@ class AppRepository:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS report_links (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ma_bao_cao TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    ten_bao_cao TEXT NOT NULL COLLATE NOCASE,
+                    link TEXT NOT NULL,
+                    link_type TEXT NOT NULL DEFAULT 'other',
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE UNIQUE INDEX IF NOT EXISTS report_links_ten_bao_cao_lower_idx
+                ON report_links (lower(ten_bao_cao));
+
+                CREATE UNIQUE INDEX IF NOT EXISTS report_links_link_lower_idx
+                ON report_links (lower(link));
 
                 CREATE TABLE IF NOT EXISTS onebss_report_runs (
                     run_id TEXT PRIMARY KEY,
@@ -1049,6 +1069,70 @@ class AppRepository:
                 (code, name, connection_type, description, payload, int(is_active), now, now),
             )
             return int(cursor.lastrowid)
+
+    def list_report_links(self, include_inactive: bool = True) -> list[dict[str, Any]]:
+        query = "SELECT * FROM report_links"
+        if not include_inactive:
+            query += " WHERE is_active = 1"
+        query += " ORDER BY ten_bao_cao"
+        with self.connect() as connection:
+            rows = connection.execute(query).fetchall()
+            return [self._decode_report_link(dict(row)) for row in rows]
+
+    def get_report_link_by_id(self, report_id: int) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM report_links WHERE id=?", (report_id,)).fetchone()
+            return self._decode_report_link(dict(row)) if row else None
+
+    def get_report_link_by_code(self, ma_bao_cao: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM report_links WHERE ma_bao_cao=?", (ma_bao_cao,)).fetchone()
+            return self._decode_report_link(dict(row)) if row else None
+
+    def generate_report_link_code(self) -> str:
+        with self.connect() as connection:
+            rows = connection.execute("SELECT ma_bao_cao FROM report_links WHERE ma_bao_cao LIKE 'LINK%'").fetchall()
+        numbers = []
+        for row in rows:
+            match = re.search(r"(\d+)$", str(row["ma_bao_cao"] or ""))
+            if match:
+                numbers.append(int(match.group(1)))
+        return f"LINK{(max(numbers) if numbers else 0) + 1:04d}"
+
+    def save_report_link(
+        self,
+        report_id: int | None,
+        ma_bao_cao: str,
+        ten_bao_cao: str,
+        link: str,
+        link_type: str,
+        is_active: bool,
+    ) -> int:
+        now = self._now()
+        with self.connect() as connection:
+            if report_id:
+                connection.execute(
+                    """
+                    UPDATE report_links
+                    SET ma_bao_cao=?, ten_bao_cao=?, link=?, link_type=?, is_active=?, updated_at=?
+                    WHERE id=?
+                    """,
+                    (ma_bao_cao, ten_bao_cao, link, link_type, int(is_active), now, report_id),
+                )
+                return int(report_id)
+            cursor = connection.execute(
+                """
+                INSERT INTO report_links
+                (ma_bao_cao, ten_bao_cao, link, link_type, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (ma_bao_cao, ten_bao_cao, link, link_type, int(is_active), now, now),
+            )
+            return int(cursor.lastrowid)
+
+    def delete_report_link(self, report_id: int) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM report_links WHERE id=?", (report_id,))
 
     def list_sql_reports(self) -> list[dict[str, Any]]:
         with self.connect() as connection:
@@ -1866,6 +1950,19 @@ class AppRepository:
     def _decode_connection(row: dict[str, Any]) -> dict[str, Any]:
         row["config"] = json.loads(row.pop("config_json") or "{}")
         return row
+
+    @staticmethod
+    def _decode_report_link(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": row.get("id"),
+            "ma_bao_cao": row.get("ma_bao_cao") or "",
+            "ten_bao_cao": row.get("ten_bao_cao") or "",
+            "link": row.get("link") or "",
+            "link_type": row.get("link_type") or "other",
+            "is_active": bool(row.get("is_active")),
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        }
 
     @staticmethod
     def _decode_sql_report(row: dict[str, Any]) -> dict[str, Any]:
