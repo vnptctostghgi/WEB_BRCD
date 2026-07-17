@@ -107,8 +107,10 @@ class OtpService:
         body = str(sms.get("body") or "")
         if not body:
             return None
-        self.repository.ensure_defaults()
         filters = self.repository.list_otp_filters(enabled_only=True)
+        if not filters:
+            self.repository.ensure_defaults()
+            filters = self.repository.list_otp_filters(enabled_only=True)
         for otp_filter in filters:
             if not self._device_allowed(otp_filter, sms):
                 continue

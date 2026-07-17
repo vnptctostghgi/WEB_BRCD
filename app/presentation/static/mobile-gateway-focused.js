@@ -393,7 +393,7 @@ function startMobileSmsAutoRefresh() {
     if (!root?.classList.contains("active")) return;
     const eventStreamStale = !window.mobileGatewayEventSource
       || !window.mobileGatewayLastSmsEventAt
-      || Date.now() - window.mobileGatewayLastSmsEventAt > 35000;
+      || Date.now() - window.mobileGatewayLastSmsEventAt > 12000;
     if (!eventStreamStale || window.mobileGatewaySmsFallbackLoading) return;
     window.mobileGatewaySmsFallbackLoading = true;
     try {
@@ -405,7 +405,7 @@ function startMobileSmsAutoRefresh() {
     } finally {
       window.mobileGatewaySmsFallbackLoading = false;
     }
-  }, 7000);
+  }, 3000);
 }
 
 function startMobileGatewayEvents() {
@@ -436,7 +436,7 @@ function startMobileGatewayEvents() {
     clearTimeout(window.mobileGatewayEventReconnectTimer);
     window.mobileGatewayEventReconnectTimer = setTimeout(() => {
       if ($("#view-mobile-gateway")?.classList.contains("active")) startMobileGatewayEvents();
-    }, 5000);
+    }, 1500);
   };
 }
 

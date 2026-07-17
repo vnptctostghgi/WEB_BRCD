@@ -4,6 +4,7 @@ import asyncio
 import json
 import sqlite3
 import tempfile
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,8 @@ MEDIA_LIMITS = {
     "image/png": ("image", 20 * 1024 * 1024),
     "video/mp4": ("video", 250 * 1024 * 1024),
 }
+DEVICE_AUTH_CACHE_SECONDS = 30
+_DEVICE_AUTH_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
 def admin_table_limit(value: int | str | None = None, default: int = ADMIN_TABLE_PAGE_SIZE) -> int:
@@ -73,6 +76,19 @@ def client_ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
+def cached_device_record(repository: MobileGatewayRepository, device_id: str) -> dict[str, Any] | None:
+    now = time.monotonic()
+    cached = _DEVICE_AUTH_CACHE.get(device_id)
+    if cached and cached[0] > now:
+        return cached[1]
+    device = repository.get_device_record(device_id)
+    if device and bool(device.get("is_active")):
+        _DEVICE_AUTH_CACHE[device_id] = (now + DEVICE_AUTH_CACHE_SECONDS, device)
+    else:
+        _DEVICE_AUTH_CACHE.pop(device_id, None)
+    return device
+
+
 def epoch_millis(value: Any) -> int:
     try:
         parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
@@ -93,7 +109,7 @@ async def authenticated_device(request: Request) -> dict[str, Any]:
     signature = request.headers.get("X-Signature", "").strip()
     if not all([device_id, timestamp, nonce, body_hash, signature]):
         raise security.generic_auth_error()
-    device = repository.get_device_record(device_id)
+    device = cached_device_record(repository, device_id)
     if not device or not bool(device.get("is_active")):
         raise security.generic_auth_error()
     parsed_timestamp = security.parse_device_timestamp(timestamp)

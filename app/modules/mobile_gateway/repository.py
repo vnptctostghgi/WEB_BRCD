@@ -463,6 +463,38 @@ class MobileGatewayRepository:
         inserted: list[dict[str, Any]] = []
         skipped = 0
         now = self.now()
+        if not self.is_sqlite and hasattr(self.base, "_request"):
+            rows: list[dict[str, Any]] = []
+            for message in messages:
+                body = message.body or ""
+                rows.append(
+                    {
+                        "device_id": device_id,
+                        "external_id": message.external_id,
+                        "sender": message.sender,
+                        "normalized_sender": security.normalize_sender(message.sender),
+                        "body_encrypted": security.encrypt_text(self.settings, body, "otp"),
+                        "body_masked": body,
+                        "received_at": self.time_text(message.received_at),
+                        "subscription_id": message.subscription_id or "",
+                        "sim_slot": message.sim_slot,
+                        "synced_at": now,
+                        "is_otp_candidate": bool(security.extract_otp(body, r"(?<!\d)(\d{4,8})(?!\d)")),
+                        "used_for_otp": False,
+                        "otp_request_id": None,
+                        "created_at": now,
+                    }
+                )
+            if not rows:
+                return [], 0
+            saved_rows = self.base._request(
+                "POST",
+                "mobile_sms_messages",
+                params={"on_conflict": "device_id,external_id"},
+                json=rows,
+                headers={"Prefer": "resolution=ignore-duplicates,return=representation"},
+            ) or []
+            return [self.decode_sms(row, include_body=True) for row in saved_rows], max(0, len(rows) - len(saved_rows))
         for message in messages:
             body = message.body or ""
             row = {
