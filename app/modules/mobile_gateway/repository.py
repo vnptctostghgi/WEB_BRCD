@@ -500,7 +500,20 @@ class MobileGatewayRepository:
                         )
                         row["id"] = int(cursor.lastrowid)
                 else:
-                    row = self._insert("mobile_sms_messages", row)
+                    if hasattr(self.base, "_request"):
+                        rows = self.base._request(
+                            "POST",
+                            "mobile_sms_messages",
+                            params={"on_conflict": "device_id,external_id"},
+                            json=row,
+                            headers={"Prefer": "resolution=ignore-duplicates,return=representation"},
+                        ) or []
+                        if not rows:
+                            skipped += 1
+                            continue
+                        row = rows[0]
+                    else:
+                        row = self._insert("mobile_sms_messages", row)
                 inserted.append(self.decode_sms(row, include_body=True))
             except sqlite3.IntegrityError:
                 skipped += 1

@@ -106,14 +106,14 @@ async def authenticated_device(request: Request) -> dict[str, Any]:
     body = await security.read_request_body(request)
     if not security.verify_body_hash(body, body_hash):
         raise security.generic_auth_error()
-    repository.cleanup_nonces()
-    if repository.nonce_exists(device_id, nonce):
-        raise security.generic_auth_error()
     secret = repository.device_secret(device)
     canonical = "\n".join([request.method.upper(), request.url.path, timestamp, nonce, body_hash])
     if not secret or not security.verify_signature(secret, canonical, signature):
         raise security.generic_auth_error()
-    repository.save_nonce(device_id, nonce, (now + timedelta(seconds=skew)).isoformat(timespec="seconds"))
+    try:
+        repository.save_nonce(device_id, nonce, (now + timedelta(seconds=skew)).isoformat(timespec="seconds"))
+    except sqlite3.IntegrityError as error:
+        raise security.generic_auth_error() from error
     request.state.mobile_device_id = device_id
     request.state.mobile_repository = repository
     return {"device_id": device_id, "device": repository.decode_device(device), "repository": repository}
