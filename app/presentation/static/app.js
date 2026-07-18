@@ -105,18 +105,24 @@ const dashboardColorScaleStops = [
   { ratio: 1, rgb: [59, 130, 246] },
 ];
 const dashboardPiePalette = [
-  "#2563eb",
-  "#f59e0b",
-  "#06b6d4",
-  "#a855f7",
-  "#ef4444",
-  "#14b8a6",
-  "#eab308",
-  "#ec4899",
-  "#60a5fa",
-  "#f97316",
-  "#6366f1",
-  "#8b5cf6",
+  "#0B63B6",
+  "#D97706",
+  "#0F766E",
+  "#DC2626",
+  "#7C3AED",
+  "#64748B",
+  "#0891B2",
+  "#B45309",
+  "#2563EB",
+  "#9333EA",
+  "#475569",
+  "#0284C7",
+];
+const dashboardNamedSeriesColors = [
+  { pattern: /fiber/i, color: "#0B63B6" },
+  { pattern: /my\s*tv|mytv/i, color: "#D97706" },
+  { pattern: /mesh/i, color: "#0F766E" },
+  { pattern: /cam|camera/i, color: "#DC2626" },
 ];
 const dashboardRuntimeThemes = {
   dark: {
@@ -128,26 +134,26 @@ const dashboardRuntimeThemes = {
     gridColor: "rgba(186, 230, 253, .24)",
     valueShadow: "transparent",
     labelStroke: "rgba(2, 6, 23, .85)",
-    lineColor: "#2563eb",
-    lineFill: "rgba(37, 99, 235, .22)",
+    lineColor: "#0B63B6",
+    lineFill: "rgba(11, 99, 182, .18)",
     pieBorder: "#082f49",
-    seriesPalette: ["#38bdf8", "#f59e0b", "#6366f1", "#ef4444", "#a78bfa", "#14b8a6", "#f97316", "#60a5fa"],
+    seriesPalette: ["#0B63B6", "#D97706", "#0F766E", "#DC2626", "#7C3AED", "#64748B", "#0891B2", "#B45309"],
     piePalette: dashboardPiePalette,
   },
   light: {
     cardBackground: "#ffffff",
-    cardBorder: "rgba(14, 116, 144, .34)",
-    textColor: "#0f172a",
-    axisColor: "#111827",
-    secondaryAxisColor: "#92400e",
-    gridColor: "rgba(15, 23, 42, .14)",
+    cardBorder: "#E2E8F0",
+    textColor: "#172033",
+    axisColor: "#172033",
+    secondaryAxisColor: "#64748B",
+    gridColor: "rgba(100, 116, 139, .18)",
     valueShadow: "transparent",
     labelStroke: "rgba(255, 255, 255, .92)",
-    lineColor: "#1d4ed8",
-    lineFill: "rgba(29, 78, 216, .14)",
+    lineColor: "#0B63B6",
+    lineFill: "rgba(11, 99, 182, .12)",
     pieBorder: "#ffffff",
-    seriesPalette: ["#2563eb", "#f97316", "#06b6d4", "#dc2626", "#7c3aed", "#0891b2", "#ca8a04", "#db2777"],
-    piePalette: ["#2563eb", "#f97316", "#06b6d4", "#7c3aed", "#dc2626", "#0891b2", "#ca8a04", "#db2777", "#0284c7", "#ea580c", "#6366f1", "#9333ea"],
+    seriesPalette: ["#0B63B6", "#D97706", "#0F766E", "#DC2626", "#7C3AED", "#64748B", "#0891B2", "#B45309"],
+    piePalette: dashboardPiePalette,
   },
 };
 const chartJsSource = "https://cdn.jsdelivr.net/npm/chart.js";
@@ -928,6 +934,17 @@ function renderDashboardViewerEmpty(title, description) {
 
 function dashboardChartTheme() {
   return dashboardRuntimeThemes[dashboardRuntimeTheme] || dashboardRuntimeThemes.light;
+}
+
+function dashboardSeriesColor(theme, label, index = 0) {
+  const normalizedLabel = String(label || "");
+  const namedColor = dashboardNamedSeriesColors.find((entry) => entry.pattern.test(normalizedLabel))?.color;
+  return namedColor || theme.seriesPalette[index % theme.seriesPalette.length];
+}
+
+function dashboardPaletteForLabels(theme, labels = []) {
+  if (!labels.length) return [theme.seriesPalette[0]];
+  return labels.map((label, index) => dashboardSeriesColor(theme, label, index));
 }
 
 function applyDashboardRuntimeTheme() {
@@ -4108,7 +4125,7 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
     const useColorScale = Boolean(chartData.colorScale);
     const isPie = widgetType === "pie_chart";
     const palette = isPie
-      ? Array.from({ length: chartData.labels.length }, (_, index) => theme.piePalette[index % theme.piePalette.length])
+      ? dashboardPaletteForLabels(theme, chartData.labels)
       : useColorScale
         ? dashboardValueColors(dashboardChartPrimaryValues(chartData))
         : theme.seriesPalette;
@@ -4117,7 +4134,7 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
     const isMulti = widgetType === "multi_bar_chart" || widgetType === "horizontal_multi_bar_chart" || widgetType === "multi_line_chart";
     const isMultiLine = widgetType === "multi_line_chart";
     const chartType = isCombo || isMulti && !isMultiLine ? "bar" : isPie ? "pie" : (isLine || isMultiLine) ? "line" : "bar";
-    const seriesPalette = theme.seriesPalette;
+    const seriesPalette = isMulti ? chartData.series.map((series, index) => dashboardSeriesColor(theme, series.label, index)) : theme.seriesPalette;
     const datasets = isMulti ? chartData.series.map((series, seriesIndex) => ({
       label: series.label,
       data: series.values,
@@ -4132,7 +4149,7 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
         type: "bar",
         label: chartData.barLabel,
         data: chartData.barValues,
-        backgroundColor: useColorScale ? dashboardValueColors(chartData.barValues, .96) : theme.seriesPalette[0],
+        backgroundColor: useColorScale ? dashboardValueColors(chartData.barValues, .96) : dashboardSeriesColor(theme, chartData.barLabel, 0),
         borderColor: theme.textColor,
         borderWidth: 1.5,
         yAxisID: "y",
@@ -4141,9 +4158,9 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
         type: "line",
         label: chartData.lineLabel,
         data: chartData.lineValues,
-        borderColor: useColorScale ? (context) => dashboardLineGradient(context, 1) : theme.lineColor,
-        backgroundColor: useColorScale ? (context) => dashboardLineGradient(context, .24) : theme.lineFill,
-        pointBackgroundColor: useColorScale ? dashboardValueColors(chartData.lineValues) : theme.lineColor,
+        borderColor: useColorScale ? (context) => dashboardLineGradient(context, 1) : dashboardSeriesColor(theme, chartData.lineLabel, 1),
+        backgroundColor: useColorScale ? (context) => dashboardLineGradient(context, .24) : `${dashboardSeriesColor(theme, chartData.lineLabel, 1)}24`,
+        pointBackgroundColor: useColorScale ? dashboardValueColors(chartData.lineValues) : dashboardSeriesColor(theme, chartData.lineLabel, 1),
         pointBorderColor: theme.textColor,
         pointRadius: 4,
         borderWidth: 4,
@@ -4153,7 +4170,7 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
     ] : [{
       label: "Giá trị",
       data: chartData.values,
-      backgroundColor: isPie ? palette : isLine ? (useColorScale ? (context) => dashboardLineGradient(context, .24) : theme.lineFill) : (useColorScale ? palette : theme.seriesPalette[0]),
+      backgroundColor: isPie ? palette : isLine ? (useColorScale ? (context) => dashboardLineGradient(context, .24) : theme.lineFill) : (useColorScale ? palette : dashboardPaletteForLabels(theme, chartData.labels)),
       borderColor: isPie ? theme.pieBorder : isLine && useColorScale ? (context) => dashboardLineGradient(context, 1) : theme.lineColor,
       pointBackgroundColor: isLine ? (useColorScale ? palette : theme.lineColor) : undefined,
       pointBorderColor: isLine ? theme.textColor : undefined,
