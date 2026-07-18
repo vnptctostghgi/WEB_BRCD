@@ -4732,23 +4732,24 @@ legend {
 
 /* Modern enterprise admin theme. Presentation-only overrides; layout and behavior stay unchanged. */
 :root {
-  --primary: #0B63B6;
-  --primary-hover: #09579F;
-  --primary-light: #EAF4FF;
+  --primary: #005BAC;
+  --primary-hover: #004B8D;
+  --primary-light: #E8F1FB;
+  --primary-soft: #E8F1FB;
   --background: #F5F7FA;
   --surface: #FFFFFF;
   --surface-secondary: #F8FAFC;
-  --text-primary: #172033;
-  --text-secondary: #64748B;
+  --text-primary: #111827;
+  --text-secondary: #475569;
   --text-muted: #94A3B8;
   --border: #E2E8F0;
-  --success: #16A34A;
-  --warning: #D97706;
-  --danger: #DC2626;
-  --info: #0B63B6;
-  --radius-sm: 8px;
-  --radius-md: 10px;
-  --radius-lg: 12px;
+  --success: #15803D;
+  --warning: #B45309;
+  --danger: #B91C1C;
+  --info: #0369A1;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
   --shadow-card: 0 1px 2px rgba(15, 23, 42, .04), 0 8px 20px rgba(15, 23, 42, .035);
   --shadow-popover: 0 12px 32px rgba(15, 23, 42, .12);
 }
@@ -4778,6 +4779,21 @@ body.view-loading::before {
   background: var(--surface) !important;
   border-color: var(--border) !important;
   box-shadow: none !important;
+}
+
+.menu-button {
+  display: none !important;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md) !important;
+  background: var(--surface-secondary) !important;
+  border-color: var(--border) !important;
+}
+
+@media (max-width: 1023px) {
+  .menu-button {
+    display: grid !important;
+  }
 }
 
 .app-main {
@@ -5195,7 +5211,7 @@ fieldset,
 }
 
 .bar-track span {
-  background: linear-gradient(90deg, var(--primary), #0F766E) !important;
+  background: linear-gradient(90deg, var(--primary), var(--info)) !important;
 }
 
 .dashboard-theme-light .runtime-widget-card,
