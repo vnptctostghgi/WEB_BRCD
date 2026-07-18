@@ -156,7 +156,7 @@ let chartJsLoadPromise = null;
 let html2CanvasLoadPromise = null;
 let dashboardChartRenderToken = 0;
 let dashboardSheetRenderToken = 0;
-let dashboardRuntimeTheme = localStorage.getItem("dashboardRuntimeTheme") === "light" ? "light" : "dark";
+let dashboardRuntimeTheme = localStorage.getItem("dashboardRuntimeTheme") === "dark" ? "dark" : "light";
 let activeViewLoadToken = 0;
 const VIEW_TRANSITION_MS = 320;
 const VIEW_SETTLE_MS = 140;
@@ -927,7 +927,7 @@ function renderDashboardViewerEmpty(title, description) {
 }
 
 function dashboardChartTheme() {
-  return dashboardRuntimeThemes[dashboardRuntimeTheme] || dashboardRuntimeThemes.dark;
+  return dashboardRuntimeThemes[dashboardRuntimeTheme] || dashboardRuntimeThemes.light;
 }
 
 function applyDashboardRuntimeTheme() {
