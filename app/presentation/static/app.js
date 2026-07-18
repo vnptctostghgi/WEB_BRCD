@@ -162,6 +162,7 @@ const VIEW_TRANSITION_MS = 320;
 const VIEW_SETTLE_MS = 140;
 let viewTransitionTimer = 0;
 let viewTransitionHoldTimer = 0;
+let navigationPreloadPromise = null;
 const dataCacheTimestamps = new Map();
 const dashboardViewerLayoutCache = new Map();
 const dashboardBuilderLayoutCache = new Map();
@@ -352,9 +353,12 @@ function escapeHtml(value) {
 }
 
 async function api(url, options = {}) {
+  const hasJsonBody = options.body !== undefined && !(options.body instanceof FormData);
   const response = await fetch(url, {
     ...options,
-    headers: options.body instanceof FormData ? (options.headers || {}) : { "Content-Type": "application/json", ...(options.headers || {}) },
+    headers: options.body instanceof FormData
+      ? (options.headers || {})
+      : { ...(hasJsonBody ? { "Content-Type": "application/json" } : {}), ...(options.headers || {}) },
   });
   if (response.status === 401) {
     window.location.href = "/login";
@@ -385,6 +389,21 @@ async function api(url, options = {}) {
   if (!response.ok) throw new Error(body.detail || "Có lỗi xảy ra.");
   return body;
 }
+
+function preloadNavigation() {
+  if (!navigationPreloadPromise && document.body.dataset.role) {
+    navigationPreloadPromise = api("/api/navigation").catch((error) => ({ __navigation_error: error }));
+  }
+  return navigationPreloadPromise;
+}
+
+function consumeNavigationPreload() {
+  const promise = navigationPreloadPromise;
+  navigationPreloadPromise = null;
+  return promise || api("/api/navigation");
+}
+
+preloadNavigation();
 
 function showMessage(element, text, type = "success") {
   if (element) {
@@ -2076,7 +2095,8 @@ function openNavParents(item) {
 async function syncNavigationFromFeatures() {
   try {
     try {
-      const navigationData = await api("/api/navigation");
+      const navigationData = await consumeNavigationPreload();
+      if (navigationData?.__navigation_error) throw navigationData.__navigation_error;
       features = navigationData.features || [];
       markDataFresh("features");
       applyDashboardLayoutList(navigationData.dashboard_layouts || []);
