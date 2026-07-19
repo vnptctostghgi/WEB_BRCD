@@ -5983,6 +5983,203 @@ tbody tr:hover {
   color: var(--text-secondary) !important;
 }
 
+/* Contrast pass: clearer light-blue workspace while keeping the existing layout intact. */
+:root {
+  --primary: #0B63B6;
+  --primary-hover: #084F95;
+  --primary-light: #DDEEFF;
+  --background: #EAF4FF;
+  --surface: #FFFFFF;
+  --surface-secondary: #F6FAFF;
+  --text-primary: #0B1220;
+  --text-secondary: #334155;
+  --text-muted: #64748B;
+  --border: #BFD7F2;
+  --border-strong: #93C5FD;
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, .06), 0 10px 24px rgba(11, 99, 182, .08);
+}
+
+html,
+body,
+.app-shell,
+.app-main,
+.app-view {
+  background: var(--background) !important;
+  color: var(--text-primary) !important;
+}
+
+.sidebar {
+  background: #FFFFFF !important;
+  border-color: #C7DBF1 !important;
+}
+
+.sidebar-search input,
+.form-control,
+textarea,
+select {
+  border-color: #B6CCE6 !important;
+  background: #FFFFFF !important;
+  color: var(--text-primary) !important;
+}
+
+.sidebar-search input::placeholder,
+.form-control::placeholder,
+textarea::placeholder {
+  color: #64748B !important;
+}
+
+.data-card,
+.panel,
+.feature-card,
+.runtime-widget-card,
+.dashboard-page-card,
+.dashboard-linked-tools,
+.builder-row,
+.builder-widget-card,
+.table-scroll,
+.mobile-overview-device-card,
+.runtime-data-card,
+.metric-card,
+.sidebar-support {
+  border-color: #BFD7F2 !important;
+  background: #FFFFFF !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-card) !important;
+}
+
+.data-card :is(h1, h2, h3, h4, h5, h6, strong),
+.panel :is(h1, h2, h3, h4, h5, h6, strong),
+.table-scroll :is(th, td),
+.mobile-overview-device-card :is(strong, h2, h3, dd) {
+  color: var(--text-primary) !important;
+}
+
+.data-card :is(p, small, label, span),
+.panel :is(p, small, label, span),
+.mobile-overview-device-card dt,
+.mobile-overview-device-metrics dt {
+  color: var(--text-secondary) !important;
+}
+
+.mobile-gateway-tabs,
+.dashboard-tabs,
+.builder-tabs-wrap,
+.dashboard-runtime-tabs {
+  border-bottom-color: #9EC5EF !important;
+}
+
+.mobile-gateway-tab,
+.mobile-refresh-tab,
+.dashboard-tab,
+.builder-tab,
+.runtime-tab,
+.builder-add-tab {
+  color: #334155 !important;
+}
+
+.mobile-gateway-tab:hover,
+.mobile-refresh-tab:hover,
+.dashboard-tab:hover,
+.builder-tab:hover,
+.runtime-tab:hover,
+.builder-add-tab:hover {
+  color: #0B1220 !important;
+  border-bottom-color: #7FB5E8 !important;
+}
+
+.mobile-gateway-tab.active,
+.dashboard-tab.active,
+.builder-tab.active,
+.runtime-tab.active {
+  color: var(--primary) !important;
+  border-bottom-color: var(--primary) !important;
+  background: transparent !important;
+}
+
+.mobile-refresh-tab {
+  margin-left: auto !important;
+  min-height: 34px !important;
+  border: 1px solid #BFD7F2 !important;
+  border-radius: 8px !important;
+  background: #FFFFFF !important;
+  color: #334155 !important;
+  padding: 0 12px !important;
+}
+
+.mobile-refresh-tab:hover {
+  border-color: #7FB5E8 !important;
+  background: #F2F8FF !important;
+  color: #0B63B6 !important;
+}
+
+.mobile-overview-device-card {
+  border-color: #93C5FD !important;
+  background: linear-gradient(135deg, #F8FBFF 0%, #FFFFFF 100%) !important;
+}
+
+.mobile-overview-device-card::before {
+  background: linear-gradient(90deg, #0B63B6, #38BDF8) !important;
+}
+
+.mobile-overview-device-metrics div {
+  border-color: #CFE1F5 !important;
+  background: #F6FAFF !important;
+}
+
+.mobile-overview-device-metrics dd {
+  color: #0B1220 !important;
+  font-weight: 800 !important;
+}
+
+table {
+  color: var(--text-primary) !important;
+}
+
+thead th {
+  border-bottom-color: #BFD7F2 !important;
+  background: #EAF4FF !important;
+  color: #334155 !important;
+}
+
+tbody td {
+  border-bottom-color: #D7E6F7 !important;
+  background: #FFFFFF !important;
+  color: #0B1220 !important;
+}
+
+tbody tr:hover td {
+  background: #F2F8FF !important;
+}
+
+.status,
+.badge,
+.result {
+  border-color: rgba(51, 65, 85, .16) !important;
+  color: #0B1220 !important;
+}
+
+.status.viewer,
+.status.success,
+.badge-success {
+  background: #E8F7EE !important;
+  color: #166534 !important;
+}
+
+.status.pending,
+.status.warning,
+.badge-warning {
+  background: #FFF4DE !important;
+  color: #92400E !important;
+}
+
+.status.inactive,
+.status.error,
+.status.danger,
+.badge-danger {
+  background: #FEECEC !important;
+  color: #B91C1C !important;
+}
+
 .login-card-upgraded :is(button[type="submit"], button[type="submit"] *) {
   color: #ffffff !important;
 }
