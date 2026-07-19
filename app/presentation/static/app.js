@@ -603,7 +603,7 @@ function viewLoaderForNav(nextView, dashboardPageId) {
 }
 
 async function activateNavItem(item, options = {}) {
-  const { updateUrl = true, replaceUrl = false } = options;
+  const { updateUrl = true, replaceUrl = false, closeSidebar = false } = options;
   const loadToken = ++activeViewLoadToken;
   const nextView = item.dataset.view || "";
   const dashboardPageId = item.dataset.dashboardPageId || "";
@@ -615,7 +615,7 @@ async function activateNavItem(item, options = {}) {
   document.body.classList.remove("app-booting");
   const moduleTitle = $("#module-title");
   if (moduleTitle) moduleTitle.textContent = item.dataset.title || item.textContent.trim();
-  if (window.matchMedia("(max-width: 1023.98px)").matches) {
+  if (closeSidebar && $("#sidebar")?.classList.contains("menu-open")) {
     syncSidebarExpandedState(false);
   }
   if (updateUrl) updateFeatureUrl(item.dataset.featureCode, { replace: replaceUrl });
@@ -627,7 +627,7 @@ async function activateNavItem(item, options = {}) {
 $("#nav-tree")?.addEventListener("click", async (event) => {
   const item = event.target.closest(".nav-item[data-view]");
   if (!item || !$("#nav-tree")?.contains(item)) return;
-  await activateNavItem(item);
+  await activateNavItem(item, { closeSidebar: true });
 });
 
 document.querySelectorAll("[data-open-dialog]").forEach((button) => button.addEventListener("click", () => {
