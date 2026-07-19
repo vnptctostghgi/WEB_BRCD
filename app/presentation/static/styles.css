@@ -6283,3 +6283,54 @@ body.view-loading::before {
     grid-template-columns: minmax(22rem, 23rem) minmax(0, 1fr) !important;
   }
 }
+
+/* Sidebar expand control: keep the menu recoverable on narrow laptop widths. */
+@media (max-width: 1279.98px) {
+  .menu-button {
+    display: grid !important;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1279.98px) {
+  .sidebar {
+    position: sticky;
+    isolation: isolate;
+  }
+
+  .brand-link {
+    padding-right: 3.25rem;
+  }
+
+  .menu-button {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    z-index: 8;
+  }
+
+  #main-navigation.hidden {
+    display: grid !important;
+  }
+
+  .app-shell:has(.sidebar.menu-open) {
+    grid-template-columns: minmax(22.5rem, 24rem) minmax(0, 1fr) !important;
+  }
+
+  .sidebar.menu-open {
+    box-shadow: 8px 0 30px rgba(11, 99, 182, .12) !important;
+  }
+}
+
+@media (max-width: 1023.98px) {
+  .sidebar {
+    min-height: auto;
+  }
+
+  .sidebar.menu-open {
+    min-height: 100dvh;
+  }
+
+  .sidebar.menu-open #main-navigation {
+    display: grid !important;
+  }
+}
