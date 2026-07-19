@@ -1,4 +1,4 @@
-﻿const $ = (selector) => document.querySelector(selector);
+const $ = (selector) => document.querySelector(selector);
 const role = document.body.dataset.role;
 let mustChangePassword = ["1", "True", "true"].includes(document.body.dataset.mustChange);
 const canManageVault = document.body.dataset.canManageVault === "True";
@@ -79,22 +79,22 @@ const dashboardChartInstances = new Map();
 let pendingDashboardCharts = [];
 let pendingDashboardSheets = [];
 const dashboardLayoutDefinitions = {
-  "1_column": { total: 1, spans: [1], label: "1 cá»™t" },
-  "2_columns": { total: 2, spans: [1, 1], label: "2 cá»™t" },
-  "3_columns": { total: 3, spans: [1, 1, 1], label: "3 cá»™t" },
-  "4_columns": { total: 4, spans: [1, 1, 1, 1], label: "4 cá»™t" },
-  "5_columns": { total: 5, spans: [1, 1, 1, 1, 1], label: "5 cá»™t" },
-  "6_columns": { total: 6, spans: [1, 1, 1, 1, 1, 1], label: "6 cá»™t" },
-  "4_columns_1_3": { total: 4, spans: [1, 3], label: "4 cá»™t: 1 + 3" },
-  "4_columns_3_1": { total: 4, spans: [3, 1], label: "4 cá»™t: 3 + 1" },
-  "5_columns_1_4": { total: 5, spans: [1, 4], label: "5 cá»™t: 1 + 4" },
-  "5_columns_4_1": { total: 5, spans: [4, 1], label: "5 cá»™t: 4 + 1" },
-  "5_columns_2_3": { total: 5, spans: [2, 3], label: "5 cá»™t: 2 + 3" },
-  "5_columns_3_2": { total: 5, spans: [3, 2], label: "5 cá»™t: 3 + 2" },
-  "6_columns_1_5": { total: 6, spans: [1, 5], label: "6 cá»™t: 1 + 5" },
-  "6_columns_5_1": { total: 6, spans: [5, 1], label: "6 cá»™t: 5 + 1" },
-  "6_columns_2_4": { total: 6, spans: [2, 4], label: "6 cá»™t: 2 + 4" },
-  "6_columns_4_2": { total: 6, spans: [4, 2], label: "6 cá»™t: 4 + 2" },
+  "1_column": { total: 1, spans: [1], label: "1 cột" },
+  "2_columns": { total: 2, spans: [1, 1], label: "2 cột" },
+  "3_columns": { total: 3, spans: [1, 1, 1], label: "3 cột" },
+  "4_columns": { total: 4, spans: [1, 1, 1, 1], label: "4 cột" },
+  "5_columns": { total: 5, spans: [1, 1, 1, 1, 1], label: "5 cột" },
+  "6_columns": { total: 6, spans: [1, 1, 1, 1, 1, 1], label: "6 cột" },
+  "4_columns_1_3": { total: 4, spans: [1, 3], label: "4 cột: 1 + 3" },
+  "4_columns_3_1": { total: 4, spans: [3, 1], label: "4 cột: 3 + 1" },
+  "5_columns_1_4": { total: 5, spans: [1, 4], label: "5 cột: 1 + 4" },
+  "5_columns_4_1": { total: 5, spans: [4, 1], label: "5 cột: 4 + 1" },
+  "5_columns_2_3": { total: 5, spans: [2, 3], label: "5 cột: 2 + 3" },
+  "5_columns_3_2": { total: 5, spans: [3, 2], label: "5 cột: 3 + 2" },
+  "6_columns_1_5": { total: 6, spans: [1, 5], label: "6 cột: 1 + 5" },
+  "6_columns_5_1": { total: 6, spans: [5, 1], label: "6 cột: 5 + 1" },
+  "6_columns_2_4": { total: 6, spans: [2, 4], label: "6 cột: 2 + 4" },
+  "6_columns_4_2": { total: 6, spans: [4, 2], label: "6 cột: 4 + 2" },
 };
 const dashboardLayoutColumns = Object.fromEntries(Object.entries(dashboardLayoutDefinitions).map(([key, definition]) => [key, definition.spans.length]));
 const dashboardDataWidgetTypes = new Set(["bar_chart", "pie_chart", "line_chart", "combo_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "multi_line_chart", "data_table", "metric", "data_card"]);
@@ -217,7 +217,7 @@ function ensureMobileGatewayFocusedScriptLoaded() {
     }, { once: true });
     script.addEventListener("error", () => {
       mobileGatewayFocusedScriptPromise = null;
-      reject(new Error("KhÃ´ng táº£i Ä‘Æ°á»£c giao diá»‡n Mobile Gateway."));
+      reject(new Error("Không tải được giao diện Mobile Gateway."));
     }, { once: true });
     if (!existingScript) document.body.appendChild(script);
   });
@@ -271,7 +271,7 @@ async function runActiveViewLoader(token, loader, activeView) {
   try {
     await loader();
   } catch (error) {
-    if (token === activeViewLoadToken) showToast(error.message || "KhÃ´ng táº£i Ä‘Æ°á»£c dá»¯ liá»‡u.", "error");
+    if (token === activeViewLoadToken) showToast(error.message || "Không tải được dữ liệu.", "error");
   } finally {
     window.clearTimeout(loadingTimer);
     if (token === activeViewLoadToken) {
@@ -345,10 +345,10 @@ const navGroupIcons = {
 
 const mojibakePattern = new RegExp("(?:\\u00c3|\\u00c4|\\u00c2|\\u00c6|\\u00e1\\u00ba|\\u00e1\\u00bb|\\u00e2\\u20ac)");
 const windows1252ByteMap = new Map([
-  ["â‚¬", 0x80], ["â€š", 0x82], ["Æ’", 0x83], ["â€ž", 0x84], ["â€¦", 0x85], ["â€ ", 0x86], ["â€¡", 0x87],
-  ["Ë†", 0x88], ["â€°", 0x89], ["Å ", 0x8a], ["â€¹", 0x8b], ["Å’", 0x8c], ["Å½", 0x8e],
-  ["â€˜", 0x91], ["â€™", 0x92], ["â€œ", 0x93], ["â€", 0x94], ["â€¢", 0x95], ["â€“", 0x96], ["â€”", 0x97],
-  ["Ëœ", 0x98], ["â„¢", 0x99], ["Å¡", 0x9a], ["â€º", 0x9b], ["Å“", 0x9c], ["Å¾", 0x9e], ["Å¸", 0x9f],
+  ["€", 0x80], ["‚", 0x82], ["ƒ", 0x83], ["„", 0x84], ["…", 0x85], ["†", 0x86], ["‡", 0x87],
+  ["ˆ", 0x88], ["‰", 0x89], ["Š", 0x8a], ["‹", 0x8b], ["Œ", 0x8c], ["Ž", 0x8e],
+  ["‘", 0x91], ["’", 0x92], ["“", 0x93], ["”", 0x94], ["•", 0x95], ["–", 0x96], ["—", 0x97],
+  ["˜", 0x98], ["™", 0x99], ["š", 0x9a], ["›", 0x9b], ["œ", 0x9c], ["ž", 0x9e], ["Ÿ", 0x9f],
 ]);
 
 function repairTextEncoding(value) {
@@ -391,7 +391,7 @@ async function api(url, options = {}) {
   });
   if (response.status === 401) {
     window.location.href = "/login";
-    throw new Error("PhiÃªn Ä‘Äƒng nháº­p Ä‘Ã£ háº¿t háº¡n.");
+    throw new Error("Phiên đăng nhập đã hết hạn.");
   }
   const text = await response.text();
   let body = {};
@@ -406,16 +406,16 @@ async function api(url, options = {}) {
     throw new Error(`May chu tra ve phan hoi rong (HTTP ${response.status}). Hay thu lai hoac rut ngan dieu kien bao cao.`);
   }
   if (response.status === 403) {
-    const message = body.detail || "Báº¡n khÃ´ng cÃ³ quyá»n truy cáº­p chá»©c nÄƒng nÃ y";
+    const message = body.detail || "Bạn không có quyền truy cập chức năng này";
     showToast(message, "error");
     throw new Error(message);
   }
   if (response.status === 402) {
-    const message = body.detail || "TÃ i khoáº£n Ä‘Ã£ háº¿t háº¡n sá»­ dá»¥ng.";
+    const message = body.detail || "Tài khoản đã hết hạn sử dụng.";
     showToast(message, "error");
     throw new Error(message);
   }
-  if (!response.ok) throw new Error(body.detail || "CÃ³ lá»—i xáº£y ra.");
+  if (!response.ok) throw new Error(body.detail || "Có lỗi xảy ra.");
   return body;
 }
 
@@ -511,11 +511,11 @@ function showToast(text, type = "success") {
   toastTimer = window.setTimeout(() => toast.classList.add("hidden"), 3500);
 }
 
-function loadingRow(colspan, text = "Äang táº£i dá»¯ liá»‡u...") {
+function loadingRow(colspan, text = "Đang tải dữ liệu...") {
   return `<tr><td colspan="${colspan}" class="loading-row">${escapeHtml(text)}</td></tr>`;
 }
 
-function emptyRow(colspan, title, description = "ChÆ°a cÃ³ dá»¯ liá»‡u Ä‘á»ƒ hiá»ƒn thá»‹.") {
+function emptyRow(colspan, title, description = "Chưa có dữ liệu để hiển thị.") {
   return `<tr><td colspan="${colspan}"><div class="empty-state"><div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(description)}</p></div></div></td></tr>`;
 }
 
@@ -753,7 +753,7 @@ document.querySelectorAll("[data-logout]").forEach((button) => button.addEventLi
 async function loadNotifications() {
   const list = $("#notification-list");
   if (!list) return;
-  list.innerHTML = `<div class="dropdown-empty">Äang táº£i thÃ´ng bÃ¡o...</div>`;
+  list.innerHTML = `<div class="dropdown-empty">Đang tải thông báo...</div>`;
   try {
     const data = await api("/api/notifications");
     list.innerHTML = data.notifications.length ? data.notifications.map((item) => `
@@ -762,7 +762,7 @@ async function loadNotifications() {
         <p>${escapeHtml(item.message)}</p>
         <small>${new Date(item.created_at).toLocaleString("vi-VN")}</small>
       </article>
-    `).join("") : `<div class="dropdown-empty">ChÆ°a cÃ³ thÃ´ng bÃ¡o má»›i.</div>`;
+    `).join("") : `<div class="dropdown-empty">Chưa có thông báo mới.</div>`;
   } catch (error) {
     list.innerHTML = `<div class="dropdown-empty error">${escapeHtml(error.message)}</div>`;
   }
@@ -787,7 +787,7 @@ async function loadDashboardFiber({ force = false } = {}) {
     const response = await api("/api/dashboard/fiber");
     dashboardFiberLoaded = true;
     renderDashboardFiber(response);
-    if (message) showMessage(message, response.message || "ÄÃ£ táº£i dá»¯ liá»‡u Fiber.", response.ok ? "success" : "error");
+    if (message) showMessage(message, response.message || "Đã tải dữ liệu Fiber.", response.ok ? "success" : "error");
   } catch (error) {
     renderDashboardFiberError(error.message);
     if (message) showMessage(message, error.message, "error");
@@ -800,22 +800,22 @@ function setDashboardFiberLoading() {
   ["vnpt", "ttvt"].forEach((group) => {
     const body = $(`#dashboard-fiber-${group}-body`);
     const chart = $(`#dashboard-fiber-${group}-chart`);
-    if (body) body.innerHTML = loadingRow(3, "Äang táº£i sáº£n lÆ°á»£ng Fiber...");
-    if (chart) chart.innerHTML = `<div class="dashboard-chart-empty">Äang táº£i dá»¯ liá»‡u...</div>`;
+    if (body) body.innerHTML = loadingRow(3, "Đang tải sản lượng Fiber...");
+    if (chart) chart.innerHTML = `<div class="dashboard-chart-empty">Đang tải dữ liệu...</div>`;
   });
 }
 
 function renderDashboardFiber(response) {
   const vnptRows = response.groups?.vnpt?.rows || [];
   const ttvtRows = response.groups?.ttvt?.rows || [];
-  const period = response.period_label ? `ThÃ¡ng ${response.period_label}` : "ThÃ¡ng hiá»‡n táº¡i";
+  const period = response.period_label ? `Tháng ${response.period_label}` : "Tháng hiện tại";
   const fiberTotal = response.summary?.production?.fiber ?? response.groups?.vnpt?.total ?? 0;
 
   const summaryPeriod = $("#dashboard-summary-period");
   const fiberPeriod = $("#dashboard-fiber-period");
   const productionFiber = $("#dashboard-production-fiber");
   if (summaryPeriod) summaryPeriod.textContent = period;
-  if (fiberPeriod) fiberPeriod.textContent = `${period}, lá»c loáº¡i hÃ¬nh 58 vÃ  thuÃª bao chÆ°a cáº¯t.`;
+  if (fiberPeriod) fiberPeriod.textContent = `${period}, lọc loại hình 58 và thuê bao chưa cắt.`;
   if (productionFiber) productionFiber.textContent = formatDashboardNumber(fiberTotal);
 
   renderDashboardFiberTable("vnpt", vnptRows);
@@ -830,7 +830,7 @@ function renderDashboardFiberError(message) {
   ["vnpt", "ttvt"].forEach((group) => {
     const body = $(`#dashboard-fiber-${group}-body`);
     const chart = $(`#dashboard-fiber-${group}-chart`);
-    if (body) body.innerHTML = emptyRow(3, "KhÃ´ng táº£i Ä‘Æ°á»£c dá»¯ liá»‡u Fiber", message);
+    if (body) body.innerHTML = emptyRow(3, "Không tải được dữ liệu Fiber", message);
     if (chart) chart.innerHTML = `<div class="dashboard-chart-empty error">${escapeHtml(message)}</div>`;
   });
 }
@@ -844,14 +844,14 @@ function renderDashboardFiberTable(group, rows) {
       <td><strong>${escapeHtml(row.unit_name)}</strong></td>
       <td>${formatDashboardNumber(row.fiber_quantity)}</td>
     </tr>
-  `).join("") : emptyRow(3, "ChÆ°a cÃ³ dá»¯ liá»‡u", "API ná»™i bá»™ chÆ°a tráº£ dá»¯ liá»‡u cho nhÃ³m nÃ y.");
+  `).join("") : emptyRow(3, "Chưa có dữ liệu", "API nội bộ chưa trả dữ liệu cho nhóm này.");
 }
 
 function renderDashboardFiberChart(selector, rows) {
   const chart = $(selector);
   if (!chart) return;
   if (!rows.length) {
-    chart.innerHTML = `<div class="dashboard-chart-empty">ChÆ°a cÃ³ dá»¯ liá»‡u Ä‘á»ƒ váº½ biá»ƒu Ä‘á»“.</div>`;
+    chart.innerHTML = `<div class="dashboard-chart-empty">Chưa có dữ liệu để vẽ biểu đồ.</div>`;
     return;
   }
   const maxValue = Math.max(...rows.map((row) => Number(row.fiber_quantity) || 0), 1);
@@ -893,14 +893,14 @@ async function loadDashboardViewer() {
     }
     if (!dashboardViewerLayouts.length) {
       dashboardViewerLayout = null;
-      renderDashboardViewerEmpty("ChÆ°a cÃ³ trang Dashboard", "HÃ£y táº¡o Layout trong chá»©c nÄƒng Thiáº¿t káº¿ Layout bÃ¡o cÃ¡o.");
+      renderDashboardViewerEmpty("Chưa có trang Dashboard", "Hãy tạo Layout trong chức năng Thiết kế Layout báo cáo.");
       return;
     }
     const pageId = dashboardViewerLayout?.page_id || dashboardViewerLayouts[0].page_id;
     await openDashboardViewerLayout(pageId);
   } catch (error) {
     showMessage($("#dashboard-viewer-message"), error.message, "error");
-    renderDashboardViewerEmpty("KhÃ´ng táº£i Ä‘Æ°á»£c Dashboard Ä‘Ã£ thiáº¿t káº¿", error.message);
+    renderDashboardViewerEmpty("Không tải được Dashboard đã thiết kế", error.message);
   }
 }
 
@@ -937,7 +937,7 @@ function renderDashboardViewerPageOptions() {
   if (!select) return;
   select.innerHTML = dashboardViewerLayouts.length
     ? dashboardViewerLayouts.map((page) => `<option value="${escapeHtml(page.page_id)}">${escapeHtml(page.page_name || page.page_id)}</option>`).join("")
-    : `<option value="">ChÆ°a cÃ³ Dashboard</option>`;
+    : `<option value="">Chưa có Dashboard</option>`;
   if (dashboardViewerLayout?.page_id) select.value = dashboardViewerLayout.page_id;
 }
 
@@ -982,15 +982,15 @@ function applyDashboardRuntimeTheme() {
   const button = $("#dashboard-theme-toggle");
   if (!button) return;
   button.setAttribute("aria-pressed", String(isLight));
-  button.title = isLight ? "Chuyá»ƒn ná»n tá»‘i" : "Chuyá»ƒn ná»n sÃ¡ng";
+  button.title = isLight ? "Chuyển nền tối" : "Chuyển nền sáng";
   const label = button.querySelector("span");
-  if (label) label.textContent = isLight ? "Tá»‘i" : "SÃ¡ng";
+  if (label) label.textContent = isLight ? "Tối" : "Sáng";
   const icon = button.querySelector("use");
   if (icon) icon.setAttribute("href", isLight ? "#icon-moon" : "#icon-sun");
   const visibleIcon = button.querySelector(".theme-toggle-icon");
-  if (visibleIcon) visibleIcon.textContent = isLight ? "â˜¾" : "â˜€";
+  if (visibleIcon) visibleIcon.textContent = isLight ? "☾" : "☀";
   const visibleLabel = button.querySelector(".theme-toggle-text");
-  if (visibleLabel) visibleLabel.textContent = isLight ? "Tá»‘i" : "SÃ¡ng";
+  if (visibleLabel) visibleLabel.textContent = isLight ? "Tối" : "Sáng";
 }
 
 function toggleDashboardRuntimeTheme() {
@@ -1051,8 +1051,8 @@ function renderDashboardViewer() {
   const loadedPayload = dashboardViewerLoadedTabs[dashboardViewerTabCacheKey(tab.tab_id)];
   if (loadedAt) {
     loadedAt.textContent = loadedPayload?.loaded_at
-      ? `Dá»¯ liá»‡u Ä‘Æ°á»£c láº¥y vÃ o lÃºc: ${new Date(loadedPayload.loaded_at).toLocaleString("vi-VN")}`
-      : "Dá»¯ liá»‡u Ä‘Æ°á»£c láº¥y vÃ o lÃºc: ChÆ°a táº£i";
+      ? `Dữ liệu được lấy vào lúc: ${new Date(loadedPayload.loaded_at).toLocaleString("vi-VN")}`
+      : "Dữ liệu được lấy vào lúc: Chưa tải";
   }
   tabs.innerHTML = dashboardViewerLayout.tabs.map((item) => `
     <button class="runtime-tab ${item.tab_id === tab.tab_id ? "active" : ""}" data-viewer-tab="${escapeHtml(item.tab_id)}" type="button" role="tab" aria-selected="${item.tab_id === tab.tab_id}">
@@ -1074,8 +1074,8 @@ function renderDashboardViewer() {
   }).join("") : `
     <div class="dashboard-empty">
       <p class="eyebrow">Dashboard Builder</p>
-      <h2>Tab chÆ°a cÃ³ Layout</h2>
-      <p>Má»Ÿ chá»©c nÄƒng Thiáº¿t káº¿ Layout bÃ¡o cÃ¡o Ä‘á»ƒ thÃªm biá»ƒu Ä‘á»“ cho Tab nÃ y.</p>
+      <h2>Tab chưa có Layout</h2>
+      <p>Mở chức năng Thiết kế Layout báo cáo để thêm biểu đồ cho Tab này.</p>
     </div>
   `;
   schedulePendingDashboardCharts();
@@ -1104,7 +1104,7 @@ $("#password-form")?.addEventListener("submit", async (event) => {
 });
 
 function formatVnd(value) {
-  return `${Number(value || 0).toLocaleString("vi-VN")}Ä‘`;
+  return `${Number(value || 0).toLocaleString("vi-VN")}đ`;
 }
 
 function dateInputValue(value) {
@@ -1113,11 +1113,11 @@ function dateInputValue(value) {
 
 function billingStatusLabel(status) {
   return {
-    disabled: "Táº¯t",
-    active: "CÃ²n háº¡n",
-    expired: "Háº¿t háº¡n",
-    pending: "ChÆ°a cÃ³ háº¡n",
-  }[status] || status || "Táº¯t";
+    disabled: "Tắt",
+    active: "Còn hạn",
+    expired: "Hết hạn",
+    pending: "Chưa có hạn",
+  }[status] || status || "Tắt";
 }
 
 function billingStatusClass(status) {
@@ -1128,11 +1128,11 @@ function billingStatusClass(status) {
 }
 
 function billingPlanLabel(plan) {
-  if (!plan) return "Chá»n gÃ³i";
+  if (!plan) return "Chọn gói";
   const bonus = Number(plan.bonus_months || 0);
   const months = Number(plan.paid_months || 0);
   const total = Number(plan.total_months || months + bonus);
-  const gift = bonus ? `, dÃ¹ng ${total} thÃ¡ng` : "";
+  const gift = bonus ? `, dùng ${total} tháng` : "";
   return `${plan.name || plan.code} - ${formatVnd(plan.price_vnd)}${gift}`;
 }
 
@@ -1151,13 +1151,13 @@ function renderBillingPlanOptions(selectedCode = "monthly") {
 function renderUserBillingCell(user) {
   const status = user.billing_status || "disabled";
   if (!user.billing_enabled) {
-    return `<span class="status viewer">Táº¯t</span><small class="cell-note">KhÃ´ng kiá»ƒm soÃ¡t tÃ­nh phÃ­</small>`;
+    return `<span class="status viewer">Tắt</span><small class="cell-note">Không kiểm soát tính phí</small>`;
   }
   const notes = [];
   notes.push(user.billing_plan_name || user.billing_plan_code || "");
-  if (user.billing_expires_at) notes.push(`Háº¡n: ${dateInputValue(user.billing_expires_at)}`);
-  if (status === "active") notes.push(`CÃ²n ${Number(user.billing_days_remaining || 0)} ngÃ y`);
-  if (user.billing_bonus_months) notes.push(`Táº·ng ${Number(user.billing_bonus_months || 0)} thÃ¡ng`);
+  if (user.billing_expires_at) notes.push(`Hạn: ${dateInputValue(user.billing_expires_at)}`);
+  if (status === "active") notes.push(`Còn ${Number(user.billing_days_remaining || 0)} ngày`);
+  if (user.billing_bonus_months) notes.push(`Tặng ${Number(user.billing_bonus_months || 0)} tháng`);
   return `<span class="status ${billingStatusClass(status)}">${escapeHtml(billingStatusLabel(status))}</span>${notes.filter(Boolean).map((note) => `<small class="cell-note">${escapeHtml(note)}</small>`).join("")}`;
 }
 
@@ -1171,11 +1171,11 @@ function updateEditBillingSummary() {
   const summary = $("#edit-user-billing-summary");
   if (!summary) return;
   if (!enabled) {
-    summary.textContent = "TÃ i khoáº£n nÃ y khÃ´ng bá»‹ kiá»ƒm soÃ¡t tÃ­nh phÃ­.";
+    summary.textContent = "Tài khoản này không bị kiểm soát tính phí.";
     return;
   }
   const planText = billingPlanLabel(plan);
-  summary.textContent = expires ? `${planText}. Háº¡n dÃ¹ng Ä‘áº¿n ${expires}.` : `${planText}. ChÆ°a Ä‘áº·t háº¡n dÃ¹ng.`;
+  summary.textContent = expires ? `${planText}. Hạn dùng đến ${expires}.` : `${planText}. Chưa đặt hạn dùng.`;
 }
 
 async function loadUsers({ force = false } = {}) {
@@ -1186,7 +1186,7 @@ async function loadUsers({ force = false } = {}) {
   if (users.length && !force) {
     renderUsersTable();
   }
-  if (!users.length || force) setTableLoading("#users-table", 6, "Äang táº£i danh sÃ¡ch ngÆ°á»i dÃ¹ng...");
+  if (!users.length || force) setTableLoading("#users-table", 6, "Đang tải danh sách người dùng...");
   users = (await api("/api/admin/users")).users;
   markDataFresh("users");
   renderUsersTable();
@@ -1204,23 +1204,23 @@ function renderUsersTable() {
     user.phone,
   ].some((value) => String(value || "").toLowerCase().includes(keyword))) : users;
   const count = $("#user-count");
-  if (count) count.textContent = `${filteredUsers.length}/${users.length} ngÆ°á»i dÃ¹ng`;
+  if (count) count.textContent = `${filteredUsers.length}/${users.length} người dùng`;
   $("#users-table").innerHTML = filteredUsers.length ? filteredUsers.map((user) => `
     <tr>
-      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-user="${user.id}">Chá»‰nh sá»­a</button> <button class="table-action" data-renew-billing="${user.id}">Gia háº¡n</button> <button class="table-action danger" data-delete-user="${user.id}">XÃ³a</button></div></td>
-      <td><strong>${escapeHtml(user.username)}</strong><small class='cell-note'>${escapeHtml(user.email || user.employee_code || "")}</small>${user.must_change_password ? "<small class='cell-note'>Cáº§n Ä‘á»•i máº­t kháº©u</small>" : ""}</td>
+      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-user="${user.id}">Chỉnh sửa</button> <button class="table-action" data-renew-billing="${user.id}">Gia hạn</button> <button class="table-action danger" data-delete-user="${user.id}">Xóa</button></div></td>
+      <td><strong>${escapeHtml(user.username)}</strong><small class='cell-note'>${escapeHtml(user.email || user.employee_code || "")}</small>${user.must_change_password ? "<small class='cell-note'>Cần đổi mật khẩu</small>" : ""}</td>
       <td>${escapeHtml(user.full_name)}<small class='cell-note'>${escapeHtml(user.department || "")}</small></td>
-      <td><span class="status ${user.role === "admin" ? "admin" : "viewer"}">${user.role === "admin" ? "Quáº£n trá»‹ viÃªn" : "NgÆ°á»i xem"}</span></td>
-      <td><span class="status ${user.is_active ? "active" : "inactive"}">${user.is_active ? "Hoáº¡t Ä‘á»™ng" : "ÄÃ£ khÃ³a"}</span></td>
+      <td><span class="status ${user.role === "admin" ? "admin" : "viewer"}">${user.role === "admin" ? "Quản trị viên" : "Người xem"}</span></td>
+      <td><span class="status ${user.is_active ? "active" : "inactive"}">${user.is_active ? "Hoạt động" : "Đã khóa"}</span></td>
       <td>${renderUserBillingCell(user)}</td>
-    </tr>`).join("") : emptyRow(6, keyword ? "KhÃ´ng tÃ¬m tháº¥y ngÆ°á»i dÃ¹ng" : "ChÆ°a cÃ³ ngÆ°á»i dÃ¹ng", keyword ? "HÃ£y thá»­ nháº­p tá»« khÃ³a khÃ¡c." : "HÃ£y táº¡o hoáº·c import ngÆ°á»i dÃ¹ng tá»« Excel.");
+    </tr>`).join("") : emptyRow(6, keyword ? "Không tìm thấy người dùng" : "Chưa có người dùng", keyword ? "Hãy thử nhập từ khóa khác." : "Hãy tạo hoặc import người dùng từ Excel.");
   document.querySelectorAll("[data-edit-user]").forEach((button) => button.addEventListener("click", () => openEditUser(Number(button.dataset.editUser))));
   document.querySelectorAll("[data-renew-billing]").forEach((button) => button.addEventListener("click", () => renewUserBillingDemo(Number(button.dataset.renewBilling))));
   document.querySelectorAll("[data-delete-user]").forEach((button) => button.addEventListener("click", () => deleteUser(Number(button.dataset.deleteUser))));
 }
 
 async function deleteUser(id) {
-  if (!confirm("XÃ³a ngÆ°á»i dÃ¹ng nÃ y?")) return;
+  if (!confirm("Xóa người dùng này?")) return;
   await api(`/api/admin/users/${id}`, { method: "DELETE" });
   await loadUsers({ force: true });
 }
@@ -1230,13 +1230,13 @@ async function renewUserBillingDemo(id, selectedPlanCode = "") {
   const user = users.find((item) => item.id === id);
   const planCode = selectedPlanCode || user?.billing_plan_code || billingPlans[0]?.code || "monthly";
   const plan = billingPlans.find((item) => item.code === planCode);
-  if (!confirm(`Gia háº¡n demo cho ${user?.username || "ngÆ°á»i dÃ¹ng"} theo gÃ³i ${billingPlanLabel(plan)}?`)) return;
+  if (!confirm(`Gia hạn demo cho ${user?.username || "người dùng"} theo gói ${billingPlanLabel(plan)}?`)) return;
   try {
     const result = await api(`/api/admin/users/${id}/billing/renew`, {
       method: "POST",
       body: JSON.stringify({ plan_code: planCode }),
     });
-    showMessage($("#users-message"), `ÄÃ£ ghi nháº­n thanh toÃ¡n demo ${result.invoice.payment_code}, háº¡n má»›i ${dateInputValue(result.subscription.billing_expires_at)}.`);
+    showMessage($("#users-message"), `Đã ghi nhận thanh toán demo ${result.invoice.payment_code}, hạn mới ${dateInputValue(result.subscription.billing_expires_at)}.`);
     await loadUsers({ force: true });
   } catch (error) {
     showMessage($("#users-message"), error.message, "error");
@@ -1480,7 +1480,7 @@ async function importUserFile(event) {
   data.append("file", file);
   try {
     const result = await api("/api/admin/users/import", { method: "POST", body: data });
-    showMessage($("#users-message"), `ÄÃ£ thÃªm ${result.created_count} ngÆ°á»i dÃ¹ng, bá» qua ${result.skipped_count} dÃ²ng.`);
+    showMessage($("#users-message"), `Đã thêm ${result.created_count} người dùng, bỏ qua ${result.skipped_count} dòng.`);
     await loadUsers({ force: true });
   } catch (error) {
     showMessage($("#users-message"), error.message, "error");
@@ -1526,7 +1526,7 @@ async function loadCredentials({ force = false } = {}) {
   if (credentials.length && !force) {
     renderCredentialsTable();
   }
-  if (!credentials.length || force) setTableLoading("#credentials-table", 5, "Äang táº£i tÃ i khoáº£n website...");
+  if (!credentials.length || force) setTableLoading("#credentials-table", 5, "Đang tải tài khoản website...");
   const [credentialData] = await Promise.all([
     api("/api/credentials"),
     canManageVault ? loadCredentialWebsites({ force: false }) : Promise.resolve(),
@@ -1541,19 +1541,19 @@ function renderCredentialsTable() {
   if (!table) return;
   table.innerHTML = credentials.length ? credentials.map((credential) => {
     const actions = [];
-    if (canManageVault) actions.push(`<button class="table-action" data-edit-credential="${escapeHtml(credential.id)}" type="button">Sá»­a</button>`);
-    if (canRevealVault) actions.push(`<button class="table-action" data-reveal-credential="${escapeHtml(credential.id)}" type="button">Xem máº­t kháº©u</button>`);
-    if (canManageVault) actions.push(`<button class="table-action danger" data-delete-credential="${escapeHtml(credential.id)}" type="button">XÃ³a</button>`);
+    if (canManageVault) actions.push(`<button class="table-action" data-edit-credential="${escapeHtml(credential.id)}" type="button">Sửa</button>`);
+    if (canRevealVault) actions.push(`<button class="table-action" data-reveal-credential="${escapeHtml(credential.id)}" type="button">Xem mật khẩu</button>`);
+    if (canManageVault) actions.push(`<button class="table-action danger" data-delete-credential="${escapeHtml(credential.id)}" type="button">Xóa</button>`);
     return `
       <tr>
         <td class="table-action-cell"><div class="action-group">${actions.join("") || "<span class=\"status viewer\">Xem</span>"}</div></td>
         <td><strong>${escapeHtml(credential.website_name || "")}</strong></td>
         <td><a class="text-sky-200 hover:underline" href="${escapeHtml(credential.url || "#")}" target="_blank" rel="noopener noreferrer">${escapeHtml(credential.url || "-")}</a></td>
         <td>${escapeHtml(credential.login_username || "")}${credential.notes ? `<small class="cell-note">${escapeHtml(credential.notes)}</small>` : ""}</td>
-        <td><span class="status ${Number(credential.requires_otp) ? "pending" : "viewer"}">${Number(credential.requires_otp) ? "CÃ³ OTP" : "KhÃ´ng"}</span></td>
+        <td><span class="status ${Number(credential.requires_otp) ? "pending" : "viewer"}">${Number(credential.requires_otp) ? "Có OTP" : "Không"}</span></td>
       </tr>
     `;
-  }).join("") : emptyRow(5, "ChÆ°a cÃ³ tÃ i khoáº£n website", "Báº¥m ThÃªm tÃ i khoáº£n Ä‘á»ƒ lÆ°u tÃ i khoáº£n dÃ¹ng cho cÃ´ng viá»‡c.");
+  }).join("") : emptyRow(5, "Chưa có tài khoản website", "Bấm Thêm tài khoản để lưu tài khoản dùng cho công việc.");
   document.querySelectorAll("[data-edit-credential]").forEach((button) => {
     button.addEventListener("click", () => openCredential(Number(button.dataset.editCredential)).catch((error) => showToast(error.message, "error")));
   });
@@ -1571,7 +1571,7 @@ function fillCredentialWebsiteOptions() {
   const current = select.value;
   select.innerHTML = credentialWebsites.length
     ? credentialWebsites.map((website) => `<option value="${escapeHtml(website.id)}">${escapeHtml(website.name)} (${escapeHtml(website.url)})</option>`).join("")
-    : `<option value="">ChÆ°a cÃ³ website</option>`;
+    : `<option value="">Chưa có website</option>`;
   if (current && credentialWebsites.some((website) => String(website.id) === String(current))) select.value = current;
   updateCredentialWebsiteInfo();
 }
@@ -1582,7 +1582,7 @@ function updateCredentialWebsiteInfo() {
   const otp = $("#credential-otp");
   const website = credentialWebsites.find((item) => String(item.id) === String(select?.value || ""));
   if (url) url.value = website?.url || "";
-  if (otp) otp.textContent = website ? (Number(website.requires_otp) ? "Website nÃ y cÃ³ OTP." : "Website nÃ y khÃ´ng yÃªu cáº§u OTP.") : "Chá»n website Ä‘á»ƒ xem thÃ´ng tin OTP.";
+  if (otp) otp.textContent = website ? (Number(website.requires_otp) ? "Website này có OTP." : "Website này không yêu cầu OTP.") : "Chọn website để xem thông tin OTP.";
 }
 
 async function openCredential(id = "") {
@@ -1614,7 +1614,7 @@ async function saveCredential(event) {
       notes: data.notes || "",
     })});
     $("#credential-dialog")?.close();
-    showToast("ÄÃ£ lÆ°u tÃ i khoáº£n website.");
+    showToast("Đã lưu tài khoản website.");
     await loadCredentials({ force: true });
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
@@ -1624,17 +1624,17 @@ async function saveCredential(event) {
 async function revealCredential(id) {
   try {
     const response = await api(`/api/credentials/${id}/reveal`, { method: "POST" });
-    window.prompt("Máº­t kháº©u", response.password || "");
+    window.prompt("Mật khẩu", response.password || "");
   } catch (error) {
     showToast(error.message, "error");
   }
 }
 
 async function deleteCredential(id) {
-  if (!confirm("XÃ³a tÃ i khoáº£n website nÃ y?")) return;
+  if (!confirm("Xóa tài khoản website này?")) return;
   try {
     await api(`/api/credentials/${id}`, { method: "DELETE" });
-    showToast("ÄÃ£ xÃ³a tÃ i khoáº£n website.");
+    showToast("Đã xóa tài khoản website.");
     await loadCredentials({ force: true });
   } catch (error) {
     showToast(error.message, "error");
@@ -1649,7 +1649,7 @@ async function loadAdminWebsites({ force = false } = {}) {
   if (websites.length && !force) {
     renderWebsitesTable();
   }
-  if (!websites.length || force) setTableLoading("#websites-table", 5, "Äang táº£i danh má»¥c website...");
+  if (!websites.length || force) setTableLoading("#websites-table", 5, "Đang tải danh mục website...");
   websites = (await api("/api/admin/websites")).websites;
   markDataFresh("websites");
   renderWebsitesTable();
@@ -1660,13 +1660,13 @@ function renderWebsitesTable() {
   if (!table) return;
   table.innerHTML = websites.length ? websites.map((website) => `
     <tr>
-      <td class="table-action-cell"><button class="table-action" data-edit-website="${website.id}" type="button">Sá»­a</button></td>
+      <td class="table-action-cell"><button class="table-action" data-edit-website="${website.id}" type="button">Sửa</button></td>
       <td><strong>${escapeHtml(website.name)}</strong></td>
       <td><a class="text-sky-200 hover:underline" href="${escapeHtml(website.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(website.url)}</a></td>
-      <td><span class="status ${website.requires_otp ? "pending" : "viewer"}">${website.requires_otp ? "CÃ³ OTP" : "KhÃ´ng"}</span></td>
-      <td><span class="status ${website.is_active ? "active" : "inactive"}">${website.is_active ? "Äang dÃ¹ng" : "Ngá»«ng dÃ¹ng"}</span></td>
+      <td><span class="status ${website.requires_otp ? "pending" : "viewer"}">${website.requires_otp ? "Có OTP" : "Không"}</span></td>
+      <td><span class="status ${website.is_active ? "active" : "inactive"}">${website.is_active ? "Đang dùng" : "Ngừng dùng"}</span></td>
     </tr>
-  `).join("") : emptyRow(5, "ChÆ°a cÃ³ website", "Báº¥m ThÃªm website Ä‘á»ƒ táº¡o danh má»¥c dÃ¹ng chung.");
+  `).join("") : emptyRow(5, "Chưa có website", "Bấm Thêm website để tạo danh mục dùng chung.");
   document.querySelectorAll("[data-edit-website]").forEach((button) => {
     button.addEventListener("click", () => openWebsite(Number(button.dataset.editWebsite)));
   });
@@ -1699,7 +1699,7 @@ async function saveWebsite(event) {
       is_active: form.is_active.checked,
     })});
     $("#website-dialog")?.close();
-    showToast("ÄÃ£ lÆ°u danh má»¥c website.");
+    showToast("Đã lưu danh mục website.");
     markDataStale("credentialWebsites");
     await loadAdminWebsites({ force: true });
   } catch (error) {
@@ -1730,7 +1730,7 @@ async function saveBulkPermissions() {
   const user_ids = selectedNumbers("#permission-users");
   const feature_codes = selectedValues("#permission-features");
   await api("/api/admin/permissions/bulk", { method: "PUT", body: JSON.stringify({ user_ids, feature_codes }) });
-  alert("ÄÃ£ lÆ°u phÃ¢n quyá»n ngÆ°á»i dÃ¹ng.");
+  alert("Đã lưu phân quyền người dùng.");
 }
 
 async function loadDataPermissionManager() {
@@ -1754,7 +1754,7 @@ async function saveDataPermissions() {
   const user_ids = selectedNumbers("#data-permission-users");
   const region_codes = selectedValues("#data-region-options");
   await api("/api/admin/data-permissions/bulk", { method: "PUT", body: JSON.stringify({ user_ids, region_codes }) });
-  alert("ÄÃ£ lÆ°u phÃ¢n quyá»n dá»¯ liá»‡u.");
+  alert("Đã lưu phân quyền dữ liệu.");
 }
 
 async function loadRoles({ force = false } = {}) {
@@ -1765,7 +1765,7 @@ async function loadRoles({ force = false } = {}) {
   if (systemRoles.length && !force) {
     renderRolesTable();
   }
-  if (!systemRoles.length || force) setTableLoading("#roles-table", 6, "Äang táº£i vai trÃ² ngÆ°á»i dÃ¹ng...");
+  if (!systemRoles.length || force) setTableLoading("#roles-table", 6, "Đang tải vai trò người dùng...");
   systemRoles = (await api("/api/admin/roles")).roles;
   markDataFresh("roles");
   renderRolesTable();
@@ -1774,14 +1774,14 @@ async function loadRoles({ force = false } = {}) {
 function renderRolesTable() {
   $("#roles-table").innerHTML = systemRoles.length ? systemRoles.map((roleItem) => `
     <tr>
-      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-role="${escapeHtml(roleItem.code)}">Sá»­a</button> <button class="table-action danger" data-delete-role="${escapeHtml(roleItem.code)}">XÃ³a</button></div></td>
+      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-role="${escapeHtml(roleItem.code)}">Sửa</button> <button class="table-action danger" data-delete-role="${escapeHtml(roleItem.code)}">Xóa</button></div></td>
       <td><strong>${escapeHtml(roleItem.code)}</strong></td>
       <td>${escapeHtml(roleItem.name)}</td>
       <td>${escapeHtml(roleItem.description || "")}</td>
-      <td><span class="status ${roleItem.is_active ? "active" : "inactive"}">${roleItem.is_active ? "Äang dÃ¹ng" : "Ngá»«ng dÃ¹ng"}</span></td>
+      <td><span class="status ${roleItem.is_active ? "active" : "inactive"}">${roleItem.is_active ? "Đang dùng" : "Ngừng dùng"}</span></td>
       <td>${escapeHtml(roleItem.sort_order)}</td>
     </tr>
-  `).join("") : emptyRow(6, "ChÆ°a cÃ³ vai trÃ²", "ThÃªm vai trÃ² Ä‘á»ƒ chuáº©n hÃ³a nhÃ³m ngÆ°á»i dÃ¹ng.");
+  `).join("") : emptyRow(6, "Chưa có vai trò", "Thêm vai trò để chuẩn hóa nhóm người dùng.");
   document.querySelectorAll("[data-edit-role]").forEach((button) => button.addEventListener("click", () => openRole(button.dataset.editRole)));
   document.querySelectorAll("[data-delete-role]").forEach((button) => button.addEventListener("click", () => deleteRole(button.dataset.deleteRole)));
 }
@@ -1819,7 +1819,7 @@ async function saveRole(event) {
     form.elements.namedItem("code").readOnly = false;
     form.is_active.checked = true;
     $("#role-dialog").close();
-    showMessage($("#roles-message"), "ÄÃ£ lÆ°u vai trÃ².");
+    showMessage($("#roles-message"), "Đã lưu vai trò.");
     await loadRoles({ force: true });
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
@@ -1827,10 +1827,10 @@ async function saveRole(event) {
 }
 
 async function deleteRole(code) {
-  if (!confirm(`XÃ³a vai trÃ² ${code}?`)) return;
+  if (!confirm(`Xóa vai trò ${code}?`)) return;
   try {
     await api(`/api/admin/roles/${encodeURIComponent(code)}`, { method: "DELETE" });
-    showMessage($("#roles-message"), `ÄÃ£ xÃ³a vai trÃ² ${code}.`);
+    showMessage($("#roles-message"), `Đã xóa vai trò ${code}.`);
     await loadRoles({ force: true });
   } catch (error) {
     showMessage($("#roles-message"), error.message, "error");
@@ -1952,13 +1952,13 @@ function featureIcon(feature) {
 
 function dashboardRuntimeErrorSummary(response) {
   const failedWidgets = Array.isArray(response?.failed_widgets) ? response.failed_widgets : [];
-  if (!failedWidgets.length) return response?.message || "Má»™t sá»‘ biá»ƒu Ä‘á»“ chÆ°a táº£i Ä‘Æ°á»£c dá»¯ liá»‡u.";
+  if (!failedWidgets.length) return response?.message || "Một số biểu đồ chưa tải được dữ liệu.";
   const details = failedWidgets.slice(0, 3).map((item) => {
-    const label = item.title || item.sql_code || `Ã” ${item.row_id || "?"}.${item.position || "?"}`;
-    const error = item.message || item.details?.error || "KhÃ´ng rÃµ lá»—i.";
+    const label = item.title || item.sql_code || `Ô ${item.row_id || "?"}.${item.position || "?"}`;
+    const error = item.message || item.details?.error || "Không rõ lỗi.";
     return `${label}: ${error}`;
   }).join(" | ");
-  return `${response?.message || "Má»™t sá»‘ biá»ƒu Ä‘á»“ chÆ°a táº£i Ä‘Æ°á»£c dá»¯ liá»‡u."} ${details}`;
+  return `${response?.message || "Một số biểu đồ chưa tải được dữ liệu."} ${details}`;
 }
 
 function iconMarkup(icon) {
@@ -2029,7 +2029,7 @@ function renderNavigationNode(node, level = 0) {
     return `
       <details class="${groupClass}">
         <summary data-feature-code="${escapeHtml(node.feature.code)}">
-          <span class="chevron">â€º</span>${iconMarkup(featureIcon(node.feature))}<strong>${escapeHtml(node.feature.name || node.feature.code)}</strong>
+          <span class="chevron">›</span>${iconMarkup(featureIcon(node.feature))}<strong>${escapeHtml(node.feature.name || node.feature.code)}</strong>
         </summary>
       </details>
     `;
@@ -2040,7 +2040,7 @@ function renderNavigationNode(node, level = 0) {
   return `
     <details class="${groupClass}">
       <summary data-feature-code="${escapeHtml(node.feature.code)}">
-        <span class="chevron">â€º</span>${iconMarkup(featureIcon(node.feature))}<strong>${escapeHtml(node.feature.name || node.feature.code)}</strong>
+        <span class="chevron">›</span>${iconMarkup(featureIcon(node.feature))}<strong>${escapeHtml(node.feature.name || node.feature.code)}</strong>
       </summary>
       ${children}
     </details>
@@ -2112,7 +2112,7 @@ async function syncNavigationFromFeatures() {
   } catch {
     await activateNavForCurrentPath();
     document.body.classList.remove("app-booting");
-    // Náº¿u API layout chÆ°a sáºµn sÃ ng, sidebar váº«n dÃ¹ng cáº¥u trÃºc tÄ©nh Ä‘Ã£ render tá»« server.
+    // Nếu API layout chưa sẵn sàng, sidebar vẫn dùng cấu trúc tĩnh đã render từ server.
   }
 }
 
@@ -2157,9 +2157,9 @@ function renderMenuLayoutPager(totalRows) {
   const totalPages = Math.max(1, Math.ceil(totalRows / TABLE_PAGE_SIZE));
   menuLayoutPage = Math.min(Math.max(1, menuLayoutPage), totalPages);
   pager.innerHTML = `
-    <span>Trang ${menuLayoutPage}/${totalPages} Â· ${Math.min(totalRows, TABLE_PAGE_SIZE)} dÃ²ng/trang</span>
+    <span>Trang ${menuLayoutPage}/${totalPages} · ${Math.min(totalRows, TABLE_PAGE_SIZE)} dòng/trang</span>
     <div class="action-group">
-      <button class="btn-secondary" data-menu-page="${menuLayoutPage - 1}" type="button" ${menuLayoutPage <= 1 ? "disabled" : ""}>Trang trÆ°á»›c</button>
+      <button class="btn-secondary" data-menu-page="${menuLayoutPage - 1}" type="button" ${menuLayoutPage <= 1 ? "disabled" : ""}>Trang trước</button>
       <button class="btn-secondary" data-menu-page="${menuLayoutPage + 1}" type="button" ${menuLayoutPage >= totalPages ? "disabled" : ""}>Trang sau</button>
     </div>
   `;
@@ -2198,7 +2198,7 @@ function descendantCodesForFeature(code) {
 
 function renderParentOptions(feature) {
   const descendants = descendantCodesForFeature(feature.code);
-  return [`<option value="">KhÃ´ng thuá»™c nhÃ³m</option>`]
+  return [`<option value="">Không thuộc nhóm</option>`]
     .concat(sortFeaturesForTree(menuLayoutState).filter((item) => item.code !== feature.code).map((item) => {
       const selected = (feature.parent_code || "") === item.code ? " selected" : "";
       const disabled = descendants.has(item.code) ? " disabled" : "";
@@ -2221,16 +2221,16 @@ function renderMenuLayout() {
       <tr data-feature-row="${escapeHtml(feature.code)}">
         <td class="table-action-cell">
           <div class="action-group menu-move-actions">
-            <button class="table-action" data-menu-move="up" data-menu-code="${escapeHtml(feature.code)}" type="button" ${siblingIndex <= 0 ? "disabled" : ""}>LÃªn</button>
-            <button class="table-action" data-menu-move="down" data-menu-code="${escapeHtml(feature.code)}" type="button" ${siblingIndex >= siblings.length - 1 ? "disabled" : ""}>Xuá»‘ng</button>
+            <button class="table-action" data-menu-move="up" data-menu-code="${escapeHtml(feature.code)}" type="button" ${siblingIndex <= 0 ? "disabled" : ""}>Lên</button>
+            <button class="table-action" data-menu-move="down" data-menu-code="${escapeHtml(feature.code)}" type="button" ${siblingIndex >= siblings.length - 1 ? "disabled" : ""}>Xuống</button>
           </div>
         </td>
-        <td><div class="menu-feature-cell" style="--menu-level:${level}"><strong>${escapeHtml(feature.code)}</strong><small>Cáº¥p ${level + 1}</small></div></td>
+        <td><div class="menu-feature-cell" style="--menu-level:${level}"><strong>${escapeHtml(feature.code)}</strong><small>Cấp ${level + 1}</small></div></td>
         <td><input class="form-control" name="name" value="${escapeHtml(feature.name)}" /></td>
         <td><select class="form-control" name="parent_code">${renderParentOptions(feature)}</select></td>
       </tr>
     `;
-  }).join("") : emptyRow(4, "ChÆ°a cÃ³ chá»©c nÄƒng", "Danh má»¥c chá»©c nÄƒng chÆ°a cÃ³ dá»¯ liá»‡u.");
+  }).join("") : emptyRow(4, "Chưa có chức năng", "Danh mục chức năng chưa có dữ liệu.");
 
   document.querySelectorAll("#menu-layout-table select[name='parent_code']").forEach((select) => {
     select.addEventListener("change", () => changeMenuParent(select.closest("tr").dataset.featureRow, select.value));
@@ -2301,7 +2301,7 @@ async function saveMenuLayout(button = null) {
   const originalLabel = saveButton?.textContent;
   if (saveButton) {
     saveButton.disabled = true;
-    saveButton.textContent = "Äang lÆ°u...";
+    saveButton.textContent = "Đang lưu...";
   }
   try {
     collectMenuLayoutStateFromDom();
@@ -2317,13 +2317,13 @@ async function saveMenuLayout(button = null) {
       sort_order: Number(feature.sort_order || 0),
     }));
     await api("/api/admin/features/layout", { method: "PUT", body: JSON.stringify({ features: payload }) });
-    showMessage($("#menu-layout-message"), "ÄÃ£ lÆ°u cáº¥u trÃºc menu. Trang sáº½ táº£i láº¡i Ä‘á»ƒ hiá»ƒn thá»‹ cÃ¢y menu má»›i.");
+    showMessage($("#menu-layout-message"), "Đã lưu cấu trúc menu. Trang sẽ tải lại để hiển thị cây menu mới.");
     window.setTimeout(() => window.location.reload(), 600);
   } catch (error) {
     showMessage($("#menu-layout-message"), error.message, "error");
     if (saveButton) {
       saveButton.disabled = false;
-      saveButton.textContent = originalLabel || "LÆ°u cáº¥u trÃºc menu";
+      saveButton.textContent = originalLabel || "Lưu cấu trúc menu";
     }
   }
 }
@@ -2336,7 +2336,7 @@ function dashboardLayoutTemplate(pageName = "Dashboard Kinh doanh", pageId = "DA
     tabs: [
       {
         tab_id: `tab_${Date.now()}`,
-        tab_name: "Tab má»›i",
+        tab_name: "Tab mới",
         order: 1,
         grid_layout: options.empty ? [] : [
           { row_id: 1, layout_type: "2_columns", widgets: [] },
@@ -2429,22 +2429,22 @@ function dashboardLayoutColumnCount(layoutType) {
 }
 
 function dashboardWidgetTypeLabel(type) {
-  if (type === "google_sheet_embed") return "NhÃºng Google Sheet";
+  if (type === "google_sheet_embed") return "Nhúng Google Sheet";
   const extraLabels = {
-    multi_bar_chart: "Biá»ƒu Ä‘á»“ cá»™t nhiá»u Ä‘Æ¡n vá»‹",
+    multi_bar_chart: "Biểu đồ cột nhiều đơn vị",
     horizontal_multi_bar_chart: "Bi\u1ec3u \u0111\u1ed3 c\u1ed9t ngang nhi\u1ec1u \u0111\u01a1n v\u1ecb",
-    multi_line_chart: "Biá»ƒu Ä‘á»“ Ä‘Æ°á»ng nhiá»u Ä‘Æ¡n vá»‹",
+    multi_line_chart: "Biểu đồ đường nhiều đơn vị",
   };
   if (extraLabels[type]) return extraLabels[type];
   return {
-    bar_chart: "Biá»ƒu Ä‘á»“ cá»™t",
-    pie_chart: "Biá»ƒu Ä‘á»“ trÃ²n",
-    line_chart: "Biá»ƒu Ä‘á»“ Ä‘Æ°á»ng",
-    combo_chart: "Biá»ƒu Ä‘á»“ káº¿t há»£p",
-    data_table: "Báº£ng sá»‘ liá»‡u",
-    metric: "Tháº» sá»‘ liá»‡u",
-    data_card: "Tháº» dá»¯ liá»‡u",
-    text_title: "TiÃªu Ä‘á» text",
+    bar_chart: "Biểu đồ cột",
+    pie_chart: "Biểu đồ tròn",
+    line_chart: "Biểu đồ đường",
+    combo_chart: "Biểu đồ kết hợp",
+    data_table: "Bảng số liệu",
+    metric: "Thẻ số liệu",
+    data_card: "Thẻ dữ liệu",
+    text_title: "Tiêu đề text",
   }[type] || type;
 }
 
@@ -2504,7 +2504,7 @@ function dashboardParamFiltersToText(params, existingFilters = {}) {
 function dashboardSqlOptions(selectedCode, selectedReportId = null) {
   const normalizedSelectedCode = normalizeDashboardSqlCode(selectedCode);
   const normalizedReportId = selectedReportId === null || selectedReportId === undefined || selectedReportId === "" ? "" : String(selectedReportId);
-  const options = [`<option value="">Chá»n mÃ£ SQL</option>`].concat(sqlReports.map((report) => {
+  const options = [`<option value="">Chọn mã SQL</option>`].concat(sqlReports.map((report) => {
     const code = dashboardReportCode(report);
     const name = dashboardReportName(report);
     const reportId = String(report.id || "");
@@ -2513,17 +2513,17 @@ function dashboardSqlOptions(selectedCode, selectedReportId = null) {
     return `<option value="${escapeHtml(code)}" data-report-id="${escapeHtml(reportId)}"${selected}>${escapeHtml(code)} (${escapeHtml(name)})</option>`;
   }).filter(Boolean));
   if (selectedCode && !dashboardReportByCode(selectedCode)) {
-    options.push(`<option value="${escapeHtml(selectedCode)}" selected>${escapeHtml(selectedCode)} (chÆ°a cÃ³ trong cáº¥u hÃ¬nh SQL)</option>`);
+    options.push(`<option value="${escapeHtml(selectedCode)}" selected>${escapeHtml(selectedCode)} (chưa có trong cấu hình SQL)</option>`);
   }
   return options.join("");
 }
 
 function dashboardWidgetParamHint(sqlCode) {
-  if (!sqlCode) return "Chá»n mÃ£ SQL tá»« danh má»¥c Cáº¥u hÃ¬nh bÃ¡o cÃ¡o Ä‘á»™ng.";
+  if (!sqlCode) return "Chọn mã SQL từ danh mục Cấu hình báo cáo động.";
   const report = dashboardReportByCode(sqlCode);
-  if (!report) return "MÃ£ nÃ y chÆ°a cÃ³ trong Cáº¥u hÃ¬nh bÃ¡o cÃ¡o Ä‘á»™ng. HÃ£y thÃªm SQL hoáº·c Ä‘á»•i sang mÃ£ khÃ¡c.";
+  if (!report) return "Mã này chưa có trong Cấu hình báo cáo động. Hãy thêm SQL hoặc đổi sang mã khác.";
   const params = dashboardReportParams(report);
-  return params.length ? `Tham sá»‘ há»— trá»£: ${params.join(", ")}` : "BÃ¡o cÃ¡o nÃ y khÃ´ng cÃ³ tham sá»‘ lá»c.";
+  return params.length ? `Tham số hỗ trợ: ${params.join(", ")}` : "Báo cáo này không có tham số lọc.";
 }
 
 function dashboardFiltersToText(filters) {
@@ -2554,12 +2554,12 @@ function parseDashboardFilters(value, strict = false) {
       // Report a single clear validation error below.
     }
     if (strict) {
-      throw new Error("Bá»™ lá»c máº·c Ä‘á»‹nh pháº£i lÃ  má»™t JSON object hoáº·c nhiá»u dÃ²ng JSON object, vÃ­ dá»¥: {\"LOAIHINH\":\"58\"}");
+      throw new Error("Bộ lọc mặc định phải là một JSON object hoặc nhiều dòng JSON object, ví dụ: {\"LOAIHINH\":\"58\"}");
     }
     return {};
   }
   if (parsedLineCount > 0) return merged;
-  if (strict) throw new Error("Bá»™ lá»c máº·c Ä‘á»‹nh pháº£i lÃ  JSON object há»£p lá»‡, vÃ­ dá»¥: {\"status\":\"1\"}.");
+  if (strict) throw new Error("Bộ lọc mặc định phải là JSON object hợp lệ, ví dụ: {\"status\":\"1\"}.");
   return {};
 }
 
@@ -2586,7 +2586,7 @@ async function loadDashboardBuilder({ force = false } = {}) {
     if (message) message.className = "result hidden";
     return;
   }
-  if (pageList) pageList.innerHTML = `<div class="dashboard-empty"><p>Äang táº£i danh sÃ¡ch trang bÃ¡o cÃ¡o...</p></div>`;
+  if (pageList) pageList.innerHTML = `<div class="dashboard-empty"><p>Đang tải danh sách trang báo cáo...</p></div>`;
   try {
     const preferredPageId = dashboardBuilderLayout?.page_id || "";
     const [pagesData, reportsData, featuresData] = await Promise.all([
@@ -2612,7 +2612,7 @@ async function loadDashboardBuilder({ force = false } = {}) {
     if (message) message.className = "result hidden";
   } catch (error) {
     if (message) showMessage(message, error.message, "error");
-    $("#dashboard-layout-pages").innerHTML = emptyRow(3, "KhÃ´ng táº£i Ä‘Æ°á»£c Dashboard Builder", error.message);
+    $("#dashboard-layout-pages").innerHTML = emptyRow(3, "Không tải được Dashboard Builder", error.message);
   }
 }
 
@@ -2629,7 +2629,7 @@ async function refreshDashboardSqlReports(button = null) {
       renderDashboardBuilder();
     }
     if (dashboardViewerLayout) renderDashboardViewer();
-    if (message) showMessage(message, "ÄÃ£ lÃ m má»›i danh má»¥c bÃ¡o cÃ¡o SQL.");
+    if (message) showMessage(message, "Đã làm mới danh mục báo cáo SQL.");
   } catch (error) {
     if (message) showMessage(message, error.message, "error");
   } finally {
@@ -2681,9 +2681,9 @@ async function openDashboardLayout(pageId) {
 }
 
 function createDashboardPage() {
-  const pageName = prompt("Nháº­p tÃªn trang bÃ¡o cÃ¡o má»›i:", "Dashboard má»›i");
+  const pageName = prompt("Nhập tên trang báo cáo mới:", "Dashboard mới");
   if (pageName === null) return;
-  const cleanedName = pageName.trim() || "Dashboard má»›i";
+  const cleanedName = pageName.trim() || "Dashboard mới";
   dashboardBuilderLayout = dashboardLayoutTemplate(cleanedName, dashboardPageIdFromName(cleanedName), { parentCode: $("#dashboard-parent-code")?.value || dashboardDefaultParentCode() });
   dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0].tab_id;
   renderDashboardBuilder();
@@ -2738,8 +2738,8 @@ function renderDashboardBuilderTabs() {
   container.innerHTML = dashboardBuilderLayout.tabs.map((tab) => `
     <button class="builder-tab ${tab.tab_id === dashboardBuilderActiveTabId ? "active" : ""}" draggable="true" data-tab-id="${escapeHtml(tab.tab_id)}" type="button" role="tab" aria-selected="${tab.tab_id === dashboardBuilderActiveTabId}">
       <span>${escapeHtml(tab.tab_name)}</span>
-      <span class="builder-tab-edit" data-rename-tab="${escapeHtml(tab.tab_id)}" title="Äá»•i tÃªn Tab">âœŽ</span>
-      <span class="builder-tab-delete" data-delete-tab="${escapeHtml(tab.tab_id)}" title="XÃ³a Tab">Ã—</span>
+      <span class="builder-tab-edit" data-rename-tab="${escapeHtml(tab.tab_id)}" title="Đổi tên Tab">✎</span>
+      <span class="builder-tab-delete" data-delete-tab="${escapeHtml(tab.tab_id)}" title="Xóa Tab">×</span>
     </button>
   `).join("");
 }
@@ -2762,7 +2762,7 @@ function handleDashboardPageAction(event) {
 }
 
 async function deleteDashboardPage(pageId) {
-  if (!confirm(`XÃ³a trang bÃ¡o cÃ¡o ${pageId}?`)) return;
+  if (!confirm(`Xóa trang báo cáo ${pageId}?`)) return;
   try {
     const deletedName = dashboardBuilderLayout?.page_id === pageId
       ? dashboardBuilderLayout.page_name
@@ -2777,7 +2777,7 @@ async function deleteDashboardPage(pageId) {
       if (key.startsWith(`${pageId}:`)) delete dashboardViewerLoadedTabs[key];
     });
     markDataStale("dashboardBuilder", "dashboardLayoutPages", "dashboardViewerLayouts");
-    showMessage($("#dashboard-builder-message"), "ÄÃ£ xÃ³a trang bÃ¡o cÃ¡o.");
+    showMessage($("#dashboard-builder-message"), "Đã xóa trang báo cáo.");
     await loadDashboardLayoutPages();
     let deletedPage = dashboardLayouts.find((page) => page.page_id === pageId);
     if (!deletedPage) {
@@ -2816,11 +2816,11 @@ function handleDashboardBuilderTabClick(event) {
 }
 
 async function purgeUnsavedDashboardPage(featureCode) {
-  if (!featureCode || !confirm("XÃ³a háº³n má»¥c Dashboard chÆ°a lÆ°u nÃ y khá»i cÃ¢y chá»©c nÄƒng?")) return;
+  if (!featureCode || !confirm("Xóa hẳn mục Dashboard chưa lưu này khỏi cây chức năng?")) return;
   try {
     await api(`/api/admin/dashboard-layout-pages/${encodeURIComponent(featureCode)}`, { method: "DELETE" });
     markDataStale("dashboardBuilder", "dashboardLayoutPages", "dashboardViewerLayouts");
-    showMessage($("#dashboard-builder-message"), "ÄÃ£ xÃ³a háº³n má»¥c Dashboard chÆ°a lÆ°u.");
+    showMessage($("#dashboard-builder-message"), "Đã xóa hẳn mục Dashboard chưa lưu.");
     await loadDashboardLayoutPages();
     if (dashboardLayouts.length) {
       await openDashboardPage(dashboardLayouts[0].page_id);
@@ -2843,7 +2843,7 @@ function handleDashboardBuilderTabRename(event) {
 function renameDashboardTab(tabId) {
   const tab = dashboardBuilderLayout.tabs.find((item) => item.tab_id === tabId);
   if (!tab) return;
-  const newName = prompt("Äá»•i tÃªn Tab:", tab.tab_name);
+  const newName = prompt("Đổi tên Tab:", tab.tab_name);
   if (newName === null) return;
   tab.tab_name = repairTextEncoding(newName.trim() || tab.tab_name);
   renderDashboardBuilder();
@@ -2908,10 +2908,10 @@ function addDashboardTab() {
 
 function deleteDashboardTab(tabId) {
   if (!dashboardBuilderLayout || dashboardBuilderLayout.tabs.length <= 1) {
-    showToast("Dashboard cáº§n cÃ³ Ã­t nháº¥t má»™t Tab.", "error");
+    showToast("Dashboard cần có ít nhất một Tab.", "error");
     return;
   }
-  if (!confirm("XÃ³a Tab nÃ y?")) return;
+  if (!confirm("Xóa Tab này?")) return;
   dashboardBuilderLayout.tabs = dashboardBuilderLayout.tabs.filter((tab) => tab.tab_id !== tabId);
   dashboardBuilderLayout.tabs.forEach((tab, index) => { tab.order = index + 1; });
   dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0]?.tab_id || "";
@@ -2988,8 +2988,8 @@ function renderDashboardWorkspace() {
   workspace.innerHTML = tab.grid_layout?.length ? tab.grid_layout.map((row, index) => renderDashboardBuilderRow(row, index)).join("") : `
     <div class="dashboard-empty">
       <p class="eyebrow">Workspace Grid</p>
-      <h2>Tab nÃ y chÆ°a cÃ³ Layout</h2>
-      <p>Báº¥m ThÃªm Layout 1, 2, 3 hoáº·c 4 cá»™t Ä‘á»ƒ báº¯t Ä‘áº§u bá»‘ trÃ­ tiÃªu Ä‘á», tháº» dá»¯ liá»‡u vÃ  biá»ƒu Ä‘á»“.</p>
+      <h2>Tab này chưa có Layout</h2>
+      <p>Bấm Thêm Layout 1, 2, 3 hoặc 4 cột để bắt đầu bố trí tiêu đề, thẻ dữ liệu và biểu đồ.</p>
     </div>
   `;
 }
@@ -3012,7 +3012,7 @@ function dashboardColorScaleOption(widget) {
   return `
     <label class="checkbox-label dashboard-color-scale-option">
       <input type="checkbox" name="color_scale" ${dashboardConfigChecked(widget, "color_scale")} />
-      <span>Báº­t thang mÃ u Äá» - Xanh dÆ°Æ¡ng</span>
+      <span>Bật thang màu Đỏ - Xanh dương</span>
     </label>
   `;
 }
@@ -3022,56 +3022,56 @@ function renderDashboardWidgetAdvancedConfig(widget) {
   const orientation = widget.chart_config?.orientation || "vertical";
   return `
     <div class="dashboard-widget-config ${type === "bar_chart" ? "active" : ""}" data-config-for="bar_chart">
-      <label>HÆ°á»›ng biá»ƒu Ä‘á»“ cá»™t<select class="form-control" name="chart_orientation"><option value="vertical" ${orientation !== "horizontal" ? "selected" : ""}>Cá»™t Ä‘á»©ng</option><option value="horizontal" ${orientation === "horizontal" ? "selected" : ""}>Cá»™t ngang</option></select></label>
+      <label>Hướng biểu đồ cột<select class="form-control" name="chart_orientation"><option value="vertical" ${orientation !== "horizontal" ? "selected" : ""}>Cột đứng</option><option value="horizontal" ${orientation === "horizontal" ? "selected" : ""}>Cột ngang</option></select></label>
       <div class="grid gap-2 md:grid-cols-2">
-        <label>Cá»™t nhÃ£n<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="Tá»± nháº­n diá»‡n náº¿u Ä‘á»ƒ trá»‘ng" /></label>
-        <label>Cá»™t giÃ¡ trá»‹<input class="form-control" name="value_column" value="${dashboardConfigValue(widget, "value_column")}" placeholder="Tá»± nháº­n diá»‡n náº¿u Ä‘á»ƒ trá»‘ng" /></label>
+        <label>Cột nhãn<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="Tự nhận diện nếu để trống" /></label>
+        <label>Cột giá trị<input class="form-control" name="value_column" value="${dashboardConfigValue(widget, "value_column")}" placeholder="Tự nhận diện nếu để trống" /></label>
       </div>
       ${dashboardColorScaleOption(widget)}
     </div>
     <div class="dashboard-widget-config ${type === "line_chart" ? "active" : ""}" data-config-for="line_chart">
       <div class="grid gap-2 md:grid-cols-2">
-        <label>Cá»™t nhÃ£n<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="Tá»± nháº­n diá»‡n náº¿u Ä‘á»ƒ trá»‘ng" /></label>
-        <label>Cá»™t giÃ¡ trá»‹<input class="form-control" name="value_column" value="${dashboardConfigValue(widget, "value_column")}" placeholder="Tá»± nháº­n diá»‡n náº¿u Ä‘á»ƒ trá»‘ng" /></label>
+        <label>Cột nhãn<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="Tự nhận diện nếu để trống" /></label>
+        <label>Cột giá trị<input class="form-control" name="value_column" value="${dashboardConfigValue(widget, "value_column")}" placeholder="Tự nhận diện nếu để trống" /></label>
       </div>
       ${dashboardColorScaleOption(widget)}
     </div>
     <div class="dashboard-widget-config ${type === "multi_bar_chart" || type === "horizontal_multi_bar_chart" ? "active" : ""}" data-config-for="multi_bar_chart,horizontal_multi_bar_chart">
       <div class="grid gap-2 md:grid-cols-2">
-        <label>Cá»™t nhÃ£n<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="VÃ­ dá»¥: ten_don_vi" /></label>
-        <label>CÃ¡c cá»™t dá»¯ liá»‡u<input class="form-control" name="series_columns" value="${dashboardConfigValue(widget, "series_columns")}" placeholder="fiber,mytv,cam,mesh" /></label>
-        <label>NhÃ£n hiá»ƒn thá»‹<input class="form-control" name="series_labels" value="${dashboardConfigValue(widget, "series_labels")}" placeholder="Fiber, MyTV, CAM, Mesh" /></label>
+        <label>Cột nhãn<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="Ví dụ: ten_don_vi" /></label>
+        <label>Các cột dữ liệu<input class="form-control" name="series_columns" value="${dashboardConfigValue(widget, "series_columns")}" placeholder="fiber,mytv,cam,mesh" /></label>
+        <label>Nhãn hiển thị<input class="form-control" name="series_labels" value="${dashboardConfigValue(widget, "series_labels")}" placeholder="Fiber, MyTV, CAM, Mesh" /></label>
       </div>
       ${dashboardColorScaleOption(widget)}
     </div>
     <div class="dashboard-widget-config ${type === "multi_line_chart" ? "active" : ""}" data-config-for="multi_line_chart">
       <div class="grid gap-2 md:grid-cols-2">
-        <label>Cá»™t nhÃ£n<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="VÃ­ dá»¥: ten_don_vi" /></label>
-        <label>CÃ¡c cá»™t dá»¯ liá»‡u<input class="form-control" name="series_columns" value="${dashboardConfigValue(widget, "series_columns")}" placeholder="fiber,mytv,cam,mesh" /></label>
-        <label>NhÃ£n hiá»ƒn thá»‹<input class="form-control" name="series_labels" value="${dashboardConfigValue(widget, "series_labels")}" placeholder="Fiber, MyTV, CAM, Mesh" /></label>
+        <label>Cột nhãn<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="Ví dụ: ten_don_vi" /></label>
+        <label>Các cột dữ liệu<input class="form-control" name="series_columns" value="${dashboardConfigValue(widget, "series_columns")}" placeholder="fiber,mytv,cam,mesh" /></label>
+        <label>Nhãn hiển thị<input class="form-control" name="series_labels" value="${dashboardConfigValue(widget, "series_labels")}" placeholder="Fiber, MyTV, CAM, Mesh" /></label>
       </div>
       ${dashboardColorScaleOption(widget)}
     </div>
     <div class="dashboard-widget-config ${type === "combo_chart" ? "active" : ""}" data-config-for="combo_chart">
       <div class="grid gap-2 md:grid-cols-2">
-        <label>Cá»™t nhÃ£n<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="VÃ­ dá»¥: ten_don_vi" /></label>
-        <label>NhÃ£n cá»™t<input class="form-control" name="bar_label" value="${dashboardConfigValue(widget, "bar_label", "Cá»™t")}" /></label>
-        <label>Cá»™t dá»¯ liá»‡u dáº¡ng cá»™t<input class="form-control" name="bar_column" value="${dashboardConfigValue(widget, "bar_column")}" placeholder="VÃ­ dá»¥: san_luong" /></label>
-        <label>NhÃ£n Ä‘Æ°á»ng<input class="form-control" name="line_label" value="${dashboardConfigValue(widget, "line_label", "ÄÆ°á»ng")}" /></label>
-        <label>Cá»™t dá»¯ liá»‡u dáº¡ng Ä‘Æ°á»ng<input class="form-control" name="line_column" value="${dashboardConfigValue(widget, "line_column")}" placeholder="VÃ­ dá»¥: ty_le" /></label>
+        <label>Cột nhãn<input class="form-control" name="label_column" value="${dashboardConfigValue(widget, "label_column")}" placeholder="Ví dụ: ten_don_vi" /></label>
+        <label>Nhãn cột<input class="form-control" name="bar_label" value="${dashboardConfigValue(widget, "bar_label", "Cột")}" /></label>
+        <label>Cột dữ liệu dạng cột<input class="form-control" name="bar_column" value="${dashboardConfigValue(widget, "bar_column")}" placeholder="Ví dụ: san_luong" /></label>
+        <label>Nhãn đường<input class="form-control" name="line_label" value="${dashboardConfigValue(widget, "line_label", "Đường")}" /></label>
+        <label>Cột dữ liệu dạng đường<input class="form-control" name="line_column" value="${dashboardConfigValue(widget, "line_column")}" placeholder="Ví dụ: ty_le" /></label>
       </div>
       ${dashboardColorScaleOption(widget)}
     </div>
     <div class="dashboard-widget-config ${type === "data_card" ? "active" : ""}" data-config-for="data_card">
-      <label>áº¢nh biá»ƒu tÆ°á»£ng<input class="form-control" name="icon_url" value="${escapeHtml(widget.icon_url || "")}" placeholder="https://.../icon.png" /></label>
-      <label>Ghi chÃº tháº»<textarea class="form-control" name="text_content" rows="2" placeholder="DÃ²ng ghi chÃº dÆ°á»›i sá»‘ liá»‡u">${escapeHtml(widget.text_content || "")}</textarea></label>
+      <label>Ảnh biểu tượng<input class="form-control" name="icon_url" value="${escapeHtml(widget.icon_url || "")}" placeholder="https://.../icon.png" /></label>
+      <label>Ghi chú thẻ<textarea class="form-control" name="text_content" rows="2" placeholder="Dòng ghi chú dưới số liệu">${escapeHtml(widget.text_content || "")}</textarea></label>
     </div>
     <div class="dashboard-widget-config ${type === "google_sheet_embed" ? "active" : ""}" data-config-for="google_sheet_embed">
-      <label>Link Google Sheet xuáº¥t báº£n lÃªn web<input class="form-control" name="embed_url" value="${dashboardConfigValue(widget, "embed_url")}" placeholder="https://docs.google.com/spreadsheets/d/e/.../pubhtml" /></label>
-      <small>Chá»‰ dÃ¹ng link Google Sheet public hoáº·c Xuáº¥t báº£n lÃªn web. Há»‡ thá»‘ng sáº½ tá»± láº¥y Ä‘Ãºng báº£ng vÃ  co chiá»u cao theo ná»™i dung.</small>
+      <label>Link Google Sheet xuất bản lên web<input class="form-control" name="embed_url" value="${dashboardConfigValue(widget, "embed_url")}" placeholder="https://docs.google.com/spreadsheets/d/e/.../pubhtml" /></label>
+      <small>Chỉ dùng link Google Sheet public hoặc Xuất bản lên web. Hệ thống sẽ tự lấy đúng bảng và co chiều cao theo nội dung.</small>
     </div>
     <div class="dashboard-widget-config ${type === "text_title" ? "active" : ""}" data-config-for="text_title">
-      <label>Ná»™i dung text<textarea class="form-control" name="text_content" rows="3" placeholder="Nháº­p mÃ´ táº£ hoáº·c tiÃªu Ä‘á» phá»¥">${escapeHtml(widget.text_content || "")}</textarea></label>
+      <label>Nội dung text<textarea class="form-control" name="text_content" rows="3" placeholder="Nhập mô tả hoặc tiêu đề phụ">${escapeHtml(widget.text_content || "")}</textarea></label>
     </div>
   `;
 }
@@ -3090,11 +3090,11 @@ function renderDashboardBuilderRow(row, index) {
     const showFilterField = requiresSql && (params.length || Object.keys(existingFilters).length);
     return `
       <div class="builder-widget-card dashboard-layout-cell" style="${dashboardCellStyle(row.layout_type, cellIndex)}" data-position="${position}">
-        <small>Ã” ${position}</small>
-        <label>TiÃªu Ä‘á»<input class="form-control" name="title" value="${escapeHtml(widget.title || "")}" placeholder="TÃªn biá»ƒu Ä‘á»“, tháº» hoáº·c tiÃªu Ä‘á»" /></label>
-        <label>Loáº¡i hiá»ƒn thá»‹<select class="form-control" name="type">${dashboardWidgetTypeOptions(widget.type)}</select></label>
-        <label class="dashboard-sql-field ${requiresSql ? "" : "hidden"}">MÃ£ SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "", widget.report_id)}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
-        <label class="dashboard-filter-field ${showFilterField ? "" : "hidden"}">Bá»™ lá»c máº·c Ä‘á»‹nh<textarea class="form-control dashboard-filter-json" name="filters" rows="3" placeholder='{"LOAIHINH":""}'>${escapeHtml(filterText)}</textarea></label>
+        <small>Ô ${position}</small>
+        <label>Tiêu đề<input class="form-control" name="title" value="${escapeHtml(widget.title || "")}" placeholder="Tên biểu đồ, thẻ hoặc tiêu đề" /></label>
+        <label>Loại hiển thị<select class="form-control" name="type">${dashboardWidgetTypeOptions(widget.type)}</select></label>
+        <label class="dashboard-sql-field ${requiresSql ? "" : "hidden"}">Mã SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "", widget.report_id)}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
+        <label class="dashboard-filter-field ${showFilterField ? "" : "hidden"}">Bộ lọc mặc định<textarea class="form-control dashboard-filter-json" name="filters" rows="3" placeholder='{"LOAIHINH":""}'>${escapeHtml(filterText)}</textarea></label>
         ${renderDashboardWidgetAdvancedConfig(widget)}
       </div>
     `;
@@ -3102,12 +3102,12 @@ function renderDashboardBuilderRow(row, index) {
   return `
     <section class="builder-row" draggable="true" data-row-id="${escapeHtml(row.row_id || index + 1)}">
       <div class="builder-row-header">
-        <div><p class="eyebrow">DÃ²ng Layout ${index + 1}</p><div class="builder-row-title">KÃ©o dÃ²ng nÃ y Ä‘á»ƒ Ä‘á»•i thá»© tá»± trong Tab</div></div>
-        <label>Loáº¡i Layout<select class="form-control" name="layout_type">${dashboardLayoutTypeOptions(row.layout_type)}</select></label>
+        <div><p class="eyebrow">Dòng Layout ${index + 1}</p><div class="builder-row-title">Kéo dòng này để đổi thứ tự trong Tab</div></div>
+        <label>Loại Layout<select class="form-control" name="layout_type">${dashboardLayoutTypeOptions(row.layout_type)}</select></label>
         <div class="action-group">
-          <button class="table-action" data-move-dashboard-row="up" data-row-id="${escapeHtml(row.row_id || index + 1)}" type="button" ${index <= 0 ? "disabled" : ""}>LÃªn</button>
-          <button class="table-action" data-move-dashboard-row="down" data-row-id="${escapeHtml(row.row_id || index + 1)}" type="button" ${index >= ((currentDashboardTab()?.grid_layout || []).length - 1) ? "disabled" : ""}>Xuá»‘ng</button>
-          <button class="table-action danger" data-delete-dashboard-row="${escapeHtml(row.row_id || index + 1)}" type="button">XÃ³a dÃ²ng</button>
+          <button class="table-action" data-move-dashboard-row="up" data-row-id="${escapeHtml(row.row_id || index + 1)}" type="button" ${index <= 0 ? "disabled" : ""}>Lên</button>
+          <button class="table-action" data-move-dashboard-row="down" data-row-id="${escapeHtml(row.row_id || index + 1)}" type="button" ${index >= ((currentDashboardTab()?.grid_layout || []).length - 1) ? "disabled" : ""}>Xuống</button>
+          <button class="table-action danger" data-delete-dashboard-row="${escapeHtml(row.row_id || index + 1)}" type="button">Xóa dòng</button>
         </div>
       </div>
       <div class="${dashboardGridClass(row.layout_type)}" style="${dashboardGridStyle(row.layout_type)}">${cells}</div>
@@ -3194,7 +3194,7 @@ function handleDashboardWorkspaceInput() {
 
 function deleteDashboardRow(rowId) {
   const tab = currentDashboardTab();
-  if (!tab || !confirm("XÃ³a dÃ²ng Layout nÃ y?")) return;
+  if (!tab || !confirm("Xóa dòng Layout này?")) return;
   tab.grid_layout = (tab.grid_layout || []).filter((row) => String(row.row_id) !== String(rowId));
   renderDashboardBuilder();
 }
@@ -3262,8 +3262,8 @@ async function saveDashboardLayout(button = null) {
     await syncNavigationFromFeatures();
     dashboardBuilderLoadedTabs = {};
     renderDashboardBuilder();
-    showMessage($("#dashboard-builder-message"), "ÄÃ£ lÆ°u Layout bÃ¡o cÃ¡o.");
-    showToast("ÄÃ£ lÆ°u Layout bÃ¡o cÃ¡o.");
+    showMessage($("#dashboard-builder-message"), "Đã lưu Layout báo cáo.");
+    showToast("Đã lưu Layout báo cáo.");
     renderDashboardPreview();
   } catch (error) {
     showMessage($("#dashboard-builder-message"), error.message, "error");
@@ -3295,7 +3295,7 @@ async function loadDashboardPreviewTab(tabId, { force = false } = {}) {
     return;
   }
   if (!dashboardPageIsSaved()) {
-    showMessage($("#dashboard-preview-message"), "HÃ£y lÆ°u Layout trÆ°á»›c khi táº£i dá»¯ liá»‡u preview.", "error");
+    showMessage($("#dashboard-preview-message"), "Hãy lưu Layout trước khi tải dữ liệu preview.", "error");
     return;
   }
   const button = $("#refresh-dashboard-preview");
@@ -3305,7 +3305,7 @@ async function loadDashboardPreviewTab(tabId, { force = false } = {}) {
     dashboardBuilderLoadedTabs[key] = response;
     if (dashboardBuilderLayout?.page_id === pageId && dashboardBuilderActiveTabId === tabId) {
       renderDashboardPreview();
-      if (response.ok) showMessage($("#dashboard-preview-message"), response.message || "ÄÃ£ táº£i dá»¯ liá»‡u Tab dashboard.", "success");
+      if (response.ok) showMessage($("#dashboard-preview-message"), response.message || "Đã tải dữ liệu Tab dashboard.", "success");
       else $("#dashboard-preview-message")?.classList.add("hidden");
     }
   } catch (error) {
@@ -3343,8 +3343,8 @@ function renderDashboardPreview() {
   }).join("") : `
     <div class="dashboard-empty">
       <p class="eyebrow">Preview</p>
-      <h2>Tab chÆ°a cÃ³ Layout</h2>
-      <p>ThÃªm Layout vÃ  chá»n mÃ£ SQL Ä‘á»ƒ xem dá»¯ liá»‡u dashboard táº¡i Ä‘Ã¢y.</p>
+      <h2>Tab chưa có Layout</h2>
+      <p>Thêm Layout và chọn mã SQL để xem dữ liệu dashboard tại đây.</p>
     </div>
   `;
   schedulePendingDashboardCharts();
@@ -3353,21 +3353,21 @@ function renderDashboardPreview() {
 
 function renderRuntimeWidget(widget, widgetData, elementId, options = {}) {
   if (!widget) {
-    return `<article class="runtime-widget-card"><div class="runtime-widget-empty">Ã” trá»‘ng</div></article>`;
+    return `<article class="runtime-widget-card"><div class="runtime-widget-empty">Ô trống</div></article>`;
   }
-  const title = widget.title || widget.sql_code || "TiÃªu Ä‘á»";
+  const title = widget.title || widget.sql_code || "Tiêu đề";
   if (widget.type === "text_title") return renderRuntimeTextTitleWidget(widget);
   if (widget.type === "google_sheet_embed") return renderRuntimeGoogleSheetWidget(widget);
   if (!widget.sql_code) {
-    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">ChÆ°a chá»n mÃ£ SQL cho Ã´ nÃ y.</div></article>`;
+    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Chưa chọn mã SQL cho ô này.</div></article>`;
   }
   const result = widgetData?.data;
   if (!result) {
-    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">ChÆ°a táº£i dá»¯ liá»‡u. Má»Ÿ Tab nÃ y Ä‘á»ƒ há»‡ thá»‘ng gá»i API.</div></article>`;
+    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Chưa tải dữ liệu. Mở Tab này để hệ thống gọi API.</div></article>`;
   }
   if (!result.ok) {
     const details = result.details ? `<small>${escapeHtml(JSON.stringify(result.details))}</small>` : "";
-    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-error">${escapeHtml(result.message || "KhÃ´ng táº£i Ä‘Æ°á»£c dá»¯ liá»‡u.")}${details}</div></article>`;
+    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-error">${escapeHtml(result.message || "Không tải được dữ liệu.")}${details}</div></article>`;
   }
   if (widget.type === "data_table") return renderRuntimeTableWidget(title, result);
   if (widget.type === "metric") return renderRuntimeMetricWidget(title, result, widget.sql_code);
@@ -3401,14 +3401,14 @@ function renderRuntimeGoogleSheetWidget(widget) {
   const title = widget.title || "Google Sheet";
   const embedUrl = dashboardTrustedGoogleSheetUrl(widget.chart_config?.embed_url || "");
   if (!embedUrl) {
-    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Nháº­p link Google Sheet Ä‘Ã£ xuáº¥t báº£n lÃªn web.</div></article>`;
+    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Nhập link Google Sheet đã xuất bản lên web.</div></article>`;
   }
   const elementId = `google-sheet-${Math.random().toString(36).slice(2, 10)}`;
   pendingDashboardSheets.push({ elementId, url: embedUrl });
   return `
     <article class="runtime-widget-card runtime-embed-card">
       <div class="runtime-sheet-table" id="${escapeHtml(elementId)}" data-dashboard-sheet-state="loading">
-        <div class="runtime-widget-empty">Äang táº£i báº£ng Google Sheet...</div>
+        <div class="runtime-widget-empty">Đang tải bảng Google Sheet...</div>
       </div>
     </article>
   `;
@@ -3432,7 +3432,7 @@ function renderRuntimeTableWidget(title, result) {
       <div class="table-scroll">
         <table>
           <thead>${columns.length ? `<tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>` : ""}</thead>
-          <tbody>${rows.length ? rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(row[column])}</td>`).join("")}</tr>`).join("") : emptyRow(Math.max(columns.length, 1), "KhÃ´ng cÃ³ dá»¯ liá»‡u", "API chÆ°a tráº£ dÃ²ng dá»¯ liá»‡u nÃ o.")}</tbody>
+          <tbody>${rows.length ? rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(row[column])}</td>`).join("")}</tr>`).join("") : emptyRow(Math.max(columns.length, 1), "Không có dữ liệu", "API chưa trả dòng dữ liệu nào.")}</tbody>
         </table>
       </div>
     </article>
@@ -3511,7 +3511,7 @@ function dashboardRowChartHeight(row, dataByWidget) {
 function renderRuntimeChartWidget(title, result, widget, elementId, options = {}) {
   const chartData = dashboardRuntimeChartData(widget, result);
   if (!chartData.labels.length || (Array.isArray(chartData.series) && !chartData.series.length)) {
-    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">KhÃ´ng cÃ³ dá»¯ liá»‡u Ä‘á»ƒ váº½ biá»ƒu Ä‘á»“.</div></article>`;
+    return `<article class="runtime-widget-card"><h3>${escapeHtml(title)}</h3><div class="runtime-widget-empty">Không có dữ liệu để vẽ biểu đồ.</div></article>`;
   }
   const chartHeight = Math.max(dashboardChartHeight(widget.type, chartData), Number(options.chartHeight) || 0);
   pendingDashboardCharts.push({ elementId, widgetType: widget.type, chartData, chartConfig: widget.chart_config || {} });
@@ -3519,7 +3519,7 @@ function renderRuntimeChartWidget(title, result, widget, elementId, options = {}
     <article class="runtime-widget-card runtime-chart-card">
       <div class="runtime-widget-heading">
         <h3>${escapeHtml(title)}</h3>
-        <button class="runtime-copy-chart" data-copy-chart="${escapeHtml(elementId)}" type="button" title="Chá»¥p Ä‘Ãºng giao diá»‡n biá»ƒu Ä‘á»“">Chá»¥p áº£nh</button>
+        <button class="runtime-copy-chart" data-copy-chart="${escapeHtml(elementId)}" type="button" title="Chụp đúng giao diện biểu đồ">Chụp ảnh</button>
       </div>
       <div class="runtime-chart-box" style="--chart-height:${chartHeight}px"><canvas id="${escapeHtml(elementId)}"></canvas></div>
     </article>
@@ -3580,8 +3580,8 @@ function renderHighResolutionChart(canvasId, width, height, scale) {
 async function copyDashboardChartImage(canvasId) {
   const chartCanvas = document.getElementById(canvasId);
   const card = chartCanvas?.closest(".runtime-widget-card");
-  const title = card?.querySelector("h3")?.textContent?.trim() || "Biá»ƒu Ä‘á»“";
-  if (!chartCanvas || !card) throw new Error("KhÃ´ng tÃ¬m tháº¥y biá»ƒu Ä‘á»“ Ä‘á»ƒ sao chÃ©p.");
+  const title = card?.querySelector("h3")?.textContent?.trim() || "Biểu đồ";
+  if (!chartCanvas || !card) throw new Error("Không tìm thấy biểu đồ để sao chép.");
 
   let blob = null;
   try {
@@ -3658,7 +3658,7 @@ async function renderDashboardChartCardBlob(chartCanvas, card, title, canvasId) 
 
 function canvasToPngBlob(canvas) {
   return new Promise((resolve, reject) => {
-    canvas.toBlob((item) => item ? resolve(item) : reject(new Error("KhÃ´ng táº¡o Ä‘Æ°á»£c áº£nh biá»ƒu Ä‘á»“.")), "image/png");
+    canvas.toBlob((item) => item ? resolve(item) : reject(new Error("Không tạo được ảnh biểu đồ.")), "image/png");
   });
 }
 
@@ -3753,7 +3753,7 @@ async function captureDashboardViewerAreaBlob(area) {
   resizeDashboardCharts();
   const embedsReady = await waitDashboardEmbedsReady(area);
   if (!embedsReady) {
-    throw new Error("Trang nhÃºng chÆ°a táº£i xong, vui lÃ²ng Ä‘á»£i vÃ i giÃ¢y rá»“i chá»¥p láº¡i.");
+    throw new Error("Trang nhúng chưa tải xong, vui lòng đợi vài giây rồi chụp lại.");
   }
   if (dashboardHasExternalIframes(area)) {
     throw new Error("IFRAME_CAPTURE_REQUIRED");
@@ -3799,7 +3799,7 @@ async function captureDashboardViewerPageImage() {
   const button = $("#capture-dashboard-viewer");
   const area = $("#dashboard-viewer-capture-area");
   if (!area || !area.querySelector("#dashboard-viewer-workspace")) {
-    showToast("KhÃ´ng tÃ¬m tháº¥y vÃ¹ng Dashboard Ä‘á»ƒ chá»¥p.", "error");
+    showToast("Không tìm thấy vùng Dashboard để chụp.", "error");
     return;
   }
   setButtonLoading(button, true);
@@ -3814,16 +3814,16 @@ async function captureDashboardViewerPageImage() {
     if (navigator.clipboard?.write && window.ClipboardItem) {
       try {
         await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-        showToast("ÄÃ£ sao chÃ©p áº£nh toÃ n bá»™ Dashboard.");
+        showToast("Đã sao chép ảnh toàn bộ Dashboard.");
         return;
       } catch {
         // Some browsers block image clipboard writes, so fall back to download.
       }
     }
     downloadDashboardChartImage(blob, dashboardCaptureFileName());
-    showToast("TrÃ¬nh duyá»‡t cháº·n clipboard, Ä‘Ã£ táº£i áº£nh Dashboard PNG.");
+    showToast("Trình duyệt chặn clipboard, đã tải ảnh Dashboard PNG.");
   } catch (error) {
-    showToast(error.message || "KhÃ´ng chá»¥p Ä‘Æ°á»£c Dashboard.", "error");
+    showToast(error.message || "Không chụp được Dashboard.", "error");
   } finally {
     setButtonLoading(button, false);
   }
@@ -3833,12 +3833,12 @@ async function saveDashboardCaptureToZalo(button) {
   const picker = $("#dashboard-zalo-schedule-picker");
   if (!picker?.value) {
     if (!zaloAutoMessages.length) await loadZaloAutoMessages({ force: true });
-    showToast("Chá»n lá»‹ch Zalo nháº­n áº£nh trÆ°á»›c.", "error");
+    showToast("Chọn lịch Zalo nhận ảnh trước.", "error");
     return;
   }
   const area = $("#dashboard-viewer-capture-area");
   if (!area || !area.querySelector("#dashboard-viewer-workspace")) {
-    showToast("KhÃ´ng tÃ¬m tháº¥y vÃ¹ng Dashboard Ä‘á»ƒ chá»¥p.", "error");
+    showToast("Không tìm thấy vùng Dashboard để chụp.", "error");
     return;
   }
   setButtonLoading(button, true);
@@ -3851,10 +3851,10 @@ async function saveDashboardCaptureToZalo(button) {
       blob = await captureDashboardViewerAreaBlob(area);
     }
     const response = await uploadZaloAutoMessageCapture(picker.value, blob, window.location.pathname);
-    showToast(response.capture_url ? "ÄÃ£ lÆ°u áº£nh chá»¥p cho lá»‹ch Zalo." : "ÄÃ£ lÆ°u áº£nh chá»¥p.");
+    showToast(response.capture_url ? "Đã lưu ảnh chụp cho lịch Zalo." : "Đã lưu ảnh chụp.");
     await loadZaloAutoMessages({ force: true });
   } catch (error) {
-    showToast(error.message || "KhÃ´ng lÆ°u Ä‘Æ°á»£c áº£nh chá»¥p Zalo.", "error");
+    showToast(error.message || "Không lưu được ảnh chụp Zalo.", "error");
   } finally {
     setButtonLoading(button, false);
   }
@@ -3866,7 +3866,7 @@ async function handleDashboardRuntimeAction(event) {
   try {
     copyButton.disabled = true;
     const mode = await copyDashboardChartImage(copyButton.dataset.copyChart);
-    showToast(mode === "clipboard" ? "ÄÃ£ sao chÃ©p áº£nh biá»ƒu Ä‘á»“." : "TrÃ¬nh duyá»‡t cháº·n clipboard, Ä‘Ã£ táº£i áº£nh PNG.");
+    showToast(mode === "clipboard" ? "Đã sao chép ảnh biểu đồ." : "Trình duyệt chặn clipboard, đã tải ảnh PNG.");
   } catch (error) {
     showToast(error.message, "error");
   } finally {
@@ -3881,7 +3881,7 @@ function extractDashboardChartData(result, chartConfig = {}) {
   const valueColumn = pickDashboardNumericColumn(rows, columns, chartConfig.value_column || "");
   const labelColumn = pickDashboardLabelColumn(rows, columns, chartConfig.label_column || "", new Set([valueColumn]));
   return {
-    labels: rows.map((row, index) => String(row[labelColumn] ?? `DÃ²ng ${index + 1}`)),
+    labels: rows.map((row, index) => String(row[labelColumn] ?? `Dòng ${index + 1}`)),
     values: rows.map((row) => parseDashboardNumber(row[valueColumn]) || 0),
     orientation: chartConfig.orientation || "vertical",
     colorScale: Boolean(chartConfig.color_scale),
@@ -3896,11 +3896,11 @@ function extractDashboardComboChartData(result, chartConfig = {}) {
   const lineColumn = pickDashboardNumericColumn(rows, columns, chartConfig.line_column || "", new Set([barColumn]));
   const labelColumn = pickDashboardLabelColumn(rows, columns, chartConfig.label_column || "", new Set([barColumn, lineColumn]));
   return {
-    labels: rows.map((row, index) => String(row[labelColumn] ?? `DÃ²ng ${index + 1}`)),
+    labels: rows.map((row, index) => String(row[labelColumn] ?? `Dòng ${index + 1}`)),
     barValues: rows.map((row) => parseDashboardNumber(row[barColumn]) || 0),
     lineValues: rows.map((row) => parseDashboardNumber(row[lineColumn]) || 0),
-    barLabel: chartConfig.bar_label || barColumn || "Cá»™t",
-    lineLabel: chartConfig.line_label || lineColumn || "ÄÆ°á»ng",
+    barLabel: chartConfig.bar_label || barColumn || "Cột",
+    lineLabel: chartConfig.line_label || lineColumn || "Đường",
     colorScale: Boolean(chartConfig.color_scale),
   };
 }
@@ -3920,7 +3920,7 @@ function extractDashboardMultiSeriesChartData(result, chartConfig = {}) {
   const labelColumn = pickDashboardLabelColumn(rows, columns, chartConfig.label_column || "", new Set(seriesColumns));
   const configuredLabels = dashboardConfigList(chartConfig.series_labels);
   return {
-    labels: rows.map((row, index) => String(row[labelColumn] ?? `DÃ²ng ${index + 1}`)),
+    labels: rows.map((row, index) => String(row[labelColumn] ?? `Dòng ${index + 1}`)),
     series: seriesColumns.map((column, index) => ({
       label: configuredLabels[index] || column,
       values: rows.map((row) => parseDashboardNumber(row[column]) || 0),
@@ -4031,7 +4031,7 @@ function ensureHtml2CanvasLoaded() {
     script.onload = () => resolve(window.html2canvas);
     script.onerror = () => {
       html2CanvasLoadPromise = null;
-      reject(new Error("KhÃ´ng táº£i Ä‘Æ°á»£c cÃ´ng cá»¥ chá»¥p áº£nh biá»ƒu Ä‘á»“."));
+      reject(new Error("Không tải được công cụ chụp ảnh biểu đồ."));
     };
     document.head.appendChild(script);
   });
@@ -4056,11 +4056,11 @@ function schedulePendingDashboardSheets() {
     try {
       const response = await api(`/api/google-sheet-table?url=${encodeURIComponent(url)}`);
       if (token !== dashboardSheetRenderToken) return;
-      target.innerHTML = response.html || `<div class="runtime-widget-empty">KhÃ´ng tÃ¬m tháº¥y báº£ng trong Google Sheet.</div>`;
+      target.innerHTML = response.html || `<div class="runtime-widget-empty">Không tìm thấy bảng trong Google Sheet.</div>`;
       target.dataset.dashboardSheetState = response.html ? "loaded" : "empty";
     } catch (error) {
       if (token !== dashboardSheetRenderToken) return;
-      target.innerHTML = `<div class="runtime-widget-error">${escapeHtml(error.message || "KhÃ´ng táº£i Ä‘Æ°á»£c báº£ng Google Sheet.")}</div>`;
+      target.innerHTML = `<div class="runtime-widget-error">${escapeHtml(error.message || "Không tải được bảng Google Sheet.")}</div>`;
       target.dataset.dashboardSheetState = "error";
     }
   });
@@ -4137,7 +4137,7 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
         yAxisID: "y1",
       },
     ] : [{
-      label: "GiÃ¡ trá»‹",
+      label: "Giá trị",
       data: chartData.values,
       backgroundColor: isPie ? palette : isLine ? (useColorScale ? (context) => dashboardLineGradient(context, .24) : theme.lineFill) : (useColorScale ? palette : dashboardPaletteForLabels(theme, chartData.labels)),
       borderColor: isPie ? theme.pieBorder : isLine && useColorScale ? (context) => dashboardLineGradient(context, 1) : theme.lineColor,
@@ -4234,13 +4234,13 @@ async function loadRegions({ force = false } = {}) {
 function renderRegionsTable() {
   $("#regions-table").innerHTML = regions.length ? regions.map((region) => `
     <tr>
-      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-region="${escapeHtml(region.code)}">Sá»­a</button> <button class="table-action danger" data-delete-region="${escapeHtml(region.code)}">XÃ³a</button></div></td>
+      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-region="${escapeHtml(region.code)}">Sửa</button> <button class="table-action danger" data-delete-region="${escapeHtml(region.code)}">Xóa</button></div></td>
       <td><strong>${escapeHtml(region.code)}</strong></td>
       <td>${escapeHtml(region.name)}</td>
-      <td><span class="status ${region.is_active ? "active" : "inactive"}">${region.is_active ? "Äang dÃ¹ng" : "Ngá»«ng dÃ¹ng"}</span></td>
+      <td><span class="status ${region.is_active ? "active" : "inactive"}">${region.is_active ? "Đang dùng" : "Ngừng dùng"}</span></td>
       <td>${escapeHtml(region.sort_order)}</td>
     </tr>
-  `).join("") : emptyRow(5, "ChÆ°a cÃ³ phÃ¢n vÃ¹ng", "ThÃªm phÃ¢n vÃ¹ng Ä‘á»ƒ phÃ¢n quyá»n dá»¯ liá»‡u.");
+  `).join("") : emptyRow(5, "Chưa có phân vùng", "Thêm phân vùng để phân quyền dữ liệu.");
   document.querySelectorAll("[data-edit-region]").forEach((button) => button.addEventListener("click", () => openRegion(button.dataset.editRegion)));
   document.querySelectorAll("[data-delete-region]").forEach((button) => button.addEventListener("click", () => deleteRegion(button.dataset.deleteRegion)));
 }
@@ -4272,7 +4272,7 @@ async function saveRegion(event) {
     form.elements.namedItem("code").readOnly = false;
     form.is_active.checked = true;
     $("#region-dialog").close();
-    showMessage($("#regions-message"), "ÄÃ£ lÆ°u phÃ¢n vÃ¹ng.");
+    showMessage($("#regions-message"), "Đã lưu phân vùng.");
     await loadRegions({ force: true });
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
@@ -4280,10 +4280,10 @@ async function saveRegion(event) {
 }
 
 async function deleteRegion(code) {
-  if (!confirm(`XÃ³a phÃ¢n vÃ¹ng ${code}? CÃ¡c phÃ¢n quyá»n dá»¯ liá»‡u liÃªn quan cÅ©ng sáº½ Ä‘Æ°á»£c xÃ³a.`)) return;
+  if (!confirm(`Xóa phân vùng ${code}? Các phân quyền dữ liệu liên quan cũng sẽ được xóa.`)) return;
   try {
     await api(`/api/admin/regions/${encodeURIComponent(code)}`, { method: "DELETE" });
-    showMessage($("#regions-message"), `ÄÃ£ xÃ³a phÃ¢n vÃ¹ng ${code}.`);
+    showMessage($("#regions-message"), `Đã xóa phân vùng ${code}.`);
     await loadRegions({ force: true });
   } catch (error) {
     showMessage($("#regions-message"), error.message, "error");
@@ -4298,7 +4298,7 @@ async function loadWorkTasks({ force = false } = {}) {
   if (workTasks.length && !force) {
     renderWorkTasks();
   }
-  if (!workTasks.length || force) setTableLoading("#work-tasks-table", 9, "Äang táº£i lá»‹ch cÃ´ng viá»‡c...");
+  if (!workTasks.length || force) setTableLoading("#work-tasks-table", 9, "Đang tải lịch công việc...");
   workTasks = (await api("/api/admin/work-tasks")).tasks;
   markDataFresh("workTasks");
   renderWorkTasks();
@@ -4311,21 +4311,21 @@ function renderWorkTasks() {
     <tr>
       <td class="table-action-cell">
         <div class="action-group">
-          <button class="table-action" data-edit-work-task="${escapeHtml(task.task_id)}">Sá»­a</button>
-          <button class="table-action" data-complete-work-task="${escapeHtml(task.task_id)}">HoÃ n thÃ nh</button>
-          <button class="table-action danger" data-delete-work-task="${escapeHtml(task.task_id)}">XÃ³a</button>
+          <button class="table-action" data-edit-work-task="${escapeHtml(task.task_id)}">Sửa</button>
+          <button class="table-action" data-complete-work-task="${escapeHtml(task.task_id)}">Hoàn thành</button>
+          <button class="table-action danger" data-delete-work-task="${escapeHtml(task.task_id)}">Xóa</button>
         </div>
       </td>
       <td><strong>${escapeHtml(task.task_id)}</strong></td>
-      <td>${escapeHtml(task.ten_cong_viec)}${task.last_notified_at ? `<small class="cell-note">ÄÃ£ nháº¯c: ${escapeHtml(new Date(task.last_notified_at).toLocaleString("vi-VN"))}</small>` : ""}</td>
+      <td>${escapeHtml(task.ten_cong_viec)}${task.last_notified_at ? `<small class="cell-note">Đã nhắc: ${escapeHtml(new Date(task.last_notified_at).toLocaleString("vi-VN"))}</small>` : ""}</td>
       <td><span class="status viewer">${escapeHtml(task.type)}</span></td>
       <td><strong>${escapeHtml(task.time)}</strong></td>
       <td>${escapeHtml(task.weekday || "-")}</td>
       <td>${escapeHtml(task.once_date || "-")}</td>
       <td>${escapeHtml(task.group || "-")}</td>
-      <td><span class="status ${task.check ? "active" : "inactive"}">${task.check ? "ÄÃ£ xong" : "Äang chá»"}</span></td>
+      <td><span class="status ${task.check ? "active" : "inactive"}">${task.check ? "Đã xong" : "Đang chờ"}</span></td>
     </tr>
-  `).join("") : emptyRow(9, "ChÆ°a cÃ³ lá»‹ch cÃ´ng viá»‡c", "HÃ£y thÃªm cÃ´ng viá»‡c Ä‘á»ƒ há»‡ thá»‘ng nháº¯c qua Telegram Ä‘Ãºng giá».");
+  `).join("") : emptyRow(9, "Chưa có lịch công việc", "Hãy thêm công việc để hệ thống nhắc qua Telegram đúng giờ.");
   document.querySelectorAll("[data-edit-work-task]").forEach((button) => button.addEventListener("click", () => openWorkTask(button.dataset.editWorkTask)));
   document.querySelectorAll("[data-complete-work-task]").forEach((button) => button.addEventListener("click", () => completeWorkTask(button.dataset.completeWorkTask)));
   document.querySelectorAll("[data-delete-work-task]").forEach((button) => button.addEventListener("click", () => deleteWorkTask(button.dataset.deleteWorkTask)));
@@ -4368,8 +4368,8 @@ async function saveWorkTask(event) {
     form.elements.namedItem("time").value = "07:00";
     form.elements.namedItem("group").value = "ME";
     $("#work-task-dialog").close();
-    showMessage($("#work-tasks-message"), "ÄÃ£ lÆ°u cÃ´ng viá»‡c.");
-    showToast("ÄÃ£ lÆ°u lá»‹ch cÃ´ng viá»‡c.");
+    showMessage($("#work-tasks-message"), "Đã lưu công việc.");
+    showToast("Đã lưu lịch công việc.");
     await loadWorkTasks({ force: true });
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
@@ -4378,10 +4378,10 @@ async function saveWorkTask(event) {
 }
 
 async function completeWorkTask(taskId) {
-  if (!confirm(`XÃ¡c nháº­n Ä‘Ã£ hoÃ n thÃ nh ${taskId}? Lá»‹ch nÃ y sáº½ Ä‘Æ°á»£c táº¯t vÃ  áº©n khá»i danh sÃ¡ch.`)) return;
+  if (!confirm(`Xác nhận đã hoàn thành ${taskId}? Lịch này sẽ được tắt và ẩn khỏi danh sách.`)) return;
   try {
     const result = await api(`/api/admin/work-tasks/${encodeURIComponent(taskId)}/complete`, { method: "POST" });
-    showMessage($("#work-tasks-message"), result.message || "ÄÃ£ hoÃ n thÃ nh cÃ´ng viá»‡c.");
+    showMessage($("#work-tasks-message"), result.message || "Đã hoàn thành công việc.");
     await loadWorkTasks({ force: true });
   } catch (error) {
     showMessage($("#work-tasks-message"), error.message, "error");
@@ -4389,10 +4389,10 @@ async function completeWorkTask(taskId) {
 }
 
 async function deleteWorkTask(taskId) {
-  if (!confirm(`XÃ³a lá»‹ch cÃ´ng viá»‡c ${taskId}?`)) return;
+  if (!confirm(`Xóa lịch công việc ${taskId}?`)) return;
   try {
     await api(`/api/admin/work-tasks/${encodeURIComponent(taskId)}`, { method: "DELETE" });
-    showMessage($("#work-tasks-message"), `ÄÃ£ xÃ³a lá»‹ch ${taskId}.`);
+    showMessage($("#work-tasks-message"), `Đã xóa lịch ${taskId}.`);
     await loadWorkTasks({ force: true });
   } catch (error) {
     showMessage($("#work-tasks-message"), error.message, "error");
@@ -4400,13 +4400,13 @@ async function deleteWorkTask(taskId) {
 }
 
 const reportLinkTypeLabels = {
-  auto: "Tá»± nháº­n diá»‡n",
+  auto: "Tự nhận diện",
   google_sheet: "Google Sheet",
   google_doc: "Google Doc",
   google_slide: "Google Slides",
   google_form: "Google Form",
   pdf: "PDF",
-  other: "Link khÃ¡c",
+  other: "Link khác",
 };
 
 function reportLinkTypeOptions(selected = "auto") {
@@ -4435,8 +4435,8 @@ async function loadReportLinks({ force = false } = {}) {
   }
   if (!reportLinks.length || force) {
     const table = $("#report-links-table");
-    if (table) table.innerHTML = loadingRow(5, "Äang táº£i danh sÃ¡ch link bÃ¡o cÃ¡o...");
-    renderReportLinkAdminLoading("Äang táº£i cáº¥u hÃ¬nh link bÃ¡o cÃ¡o...");
+    if (table) table.innerHTML = loadingRow(5, "Đang tải danh sách link báo cáo...");
+    renderReportLinkAdminLoading("Đang tải cấu hình link báo cáo...");
   }
   try {
     const data = await api("/api/report-links");
@@ -4446,9 +4446,9 @@ async function loadReportLinks({ force = false } = {}) {
     renderReportLinkAdminEditor();
   } catch (error) {
     const table = $("#report-links-table");
-    if (table) table.innerHTML = emptyRow(5, "KhÃ´ng táº£i Ä‘Æ°á»£c danh sÃ¡ch link bÃ¡o cÃ¡o", error.message);
+    if (table) table.innerHTML = emptyRow(5, "Không tải được danh sách link báo cáo", error.message);
     const editor = $("#report-link-admin-editor");
-    if (editor) editor.innerHTML = `<div class="empty-state"><div><strong>KhÃ´ng táº£i Ä‘Æ°á»£c cáº¥u hÃ¬nh link</strong><p>${escapeHtml(error.message)}</p></div></div>`;
+    if (editor) editor.innerHTML = `<div class="empty-state"><div><strong>Không tải được cấu hình link</strong><p>${escapeHtml(error.message)}</p></div></div>`;
   }
 }
 
@@ -4459,7 +4459,7 @@ function renderReportLinksTable() {
   const rows = reportLinks.filter((report) => reportLinkMatchesSearch(report, query));
   table.innerHTML = rows.length
     ? rows.map((report) => renderReportLinkRow(report)).join("")
-    : emptyRow(5, "ChÆ°a cÃ³ link bÃ¡o cÃ¡o", query ? "KhÃ´ng cÃ³ link nÃ o khá»›p Ä‘iá»u kiá»‡n tÃ¬m kiáº¿m." : "Quáº£n trá»‹ viÃªn cÃ³ thá»ƒ thÃªm link trong Quáº£n trá»‹ káº¿t ná»‘i.");
+    : emptyRow(5, "Chưa có link báo cáo", query ? "Không có link nào khớp điều kiện tìm kiếm." : "Quản trị viên có thể thêm link trong Quản trị kết nối.");
   document.querySelectorAll("[data-copy-report-link]").forEach((button) => {
     button.addEventListener("click", () => copyReportLink(button.dataset.copyReportLink));
   });
@@ -4467,20 +4467,20 @@ function renderReportLinksTable() {
 
 function renderReportLinkRow(report) {
   const downloadAction = report.download_url
-    ? `<a class="table-action" href="${escapeHtml(report.download_url)}"><svg class="button-svg"><use href="#icon-download"></use></svg><span>Táº£i</span></a>`
+    ? `<a class="table-action" href="${escapeHtml(report.download_url)}"><svg class="button-svg"><use href="#icon-download"></use></svg><span>Tải</span></a>`
     : "";
   const statusBadge = report.is_active
-    ? `<span class="status active">Báº­t</span>`
-    : `<span class="status inactive">Táº¯t</span>`;
+    ? `<span class="status active">Bật</span>`
+    : `<span class="status inactive">Tắt</span>`;
   return `
     <tr>
       <td class="table-action-cell"><div class="action-group report-link-actions">
-        <a class="table-action" href="${escapeHtml(report.link || "#")}" target="_blank" rel="noopener">Má»Ÿ</a>
+        <a class="table-action" href="${escapeHtml(report.link || "#")}" target="_blank" rel="noopener">Mở</a>
         <button class="table-action" type="button" data-copy-report-link="${escapeHtml(report.link || "")}">Copy</button>
         ${downloadAction}
       </div></td>
       <td><code class="compact-code">${escapeHtml(report.ma_bao_cao || "")}</code></td>
-      <td><strong>${escapeHtml(report.ten_bao_cao || "")}</strong><small class="cell-note">${escapeHtml(report.link_type_label || reportLinkTypeLabels[report.link_type] || report.link_type || "Link khÃ¡c")} ${role === "admin" ? ` Â· ${statusBadge}` : ""}</small></td>
+      <td><strong>${escapeHtml(report.ten_bao_cao || "")}</strong><small class="cell-note">${escapeHtml(report.link_type_label || reportLinkTypeLabels[report.link_type] || report.link_type || "Link khác")} ${role === "admin" ? ` · ${statusBadge}` : ""}</small></td>
       <td><a class="report-link-url" href="${escapeHtml(report.link || "#")}" target="_blank" rel="noopener">${escapeHtml(report.link || "")}</a></td>
       <td>${statusBadge}</td>
     </tr>`;
@@ -4489,9 +4489,9 @@ function renderReportLinkRow(report) {
 async function copyReportLink(link) {
   try {
     await copyTextToClipboard(link);
-    showToast("ÄÃ£ sao chÃ©p link.");
+    showToast("Đã sao chép link.");
   } catch (error) {
-    showToast(error.message || "KhÃ´ng sao chÃ©p Ä‘Æ°á»£c link.", "error");
+    showToast(error.message || "Không sao chép được link.", "error");
   }
 }
 
@@ -4506,7 +4506,7 @@ function refreshReportLinkPicker() {
   const search = ($("#report-link-admin-search")?.value || "").trim().toLowerCase();
   const current = picker.value;
   const filtered = reportLinks.filter((report) => reportLinkMatchesSearch(report, search));
-  picker.innerHTML = `<option value="">ThÃªm link má»›i / chÆ°a chá»n link</option>${filtered.map((report) => `<option value="${escapeHtml(report.ma_bao_cao)}">${escapeHtml(report.ten_bao_cao)} (${escapeHtml(report.ma_bao_cao)})</option>`).join("")}`;
+  picker.innerHTML = `<option value="">Thêm link mới / chưa chọn link</option>${filtered.map((report) => `<option value="${escapeHtml(report.ma_bao_cao)}">${escapeHtml(report.ten_bao_cao)} (${escapeHtml(report.ma_bao_cao)})</option>`).join("")}`;
   if (current && filtered.some((report) => report.ma_bao_cao === current)) picker.value = current;
 }
 
@@ -4554,14 +4554,14 @@ function renderReportLinkEditor(report, isDraft = false) {
   return `
     <div class="sql-report-editor-card report-link-editor-card" data-report-link-row="${escapeHtml(rowKey)}" data-report-link-id="${escapeHtml(report.id || "")}">
       <div class="section-heading">
-        <div><p class="eyebrow">${isDraft ? "ThÃªm link" : "Chá»‰nh link"}</p><h3>${isDraft ? "Táº¡o link bÃ¡o cÃ¡o má»›i" : escapeHtml(report.ten_bao_cao || report.ma_bao_cao)}</h3></div>
-        <div class="action-group"><button class="table-action ${isDraft ? "" : "hidden"}" data-save-report-link-inline="${escapeHtml(rowKey)}">LÆ°u</button>${isDraft ? "" : `<button class="table-action danger" data-delete-report-link="${escapeHtml(rowKey)}">XÃ³a</button>`}</div>
+        <div><p class="eyebrow">${isDraft ? "Thêm link" : "Chỉnh link"}</p><h3>${isDraft ? "Tạo link báo cáo mới" : escapeHtml(report.ten_bao_cao || report.ma_bao_cao)}</h3></div>
+        <div class="action-group"><button class="table-action ${isDraft ? "" : "hidden"}" data-save-report-link-inline="${escapeHtml(rowKey)}">Lưu</button>${isDraft ? "" : `<button class="table-action danger" data-delete-report-link="${escapeHtml(rowKey)}">Xóa</button>`}</div>
       </div>
-      <label>MÃ£ bÃ¡o cÃ¡o<input class="form-control inline-admin-input" data-inline-report-link-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="Tá»± sinh khi lÆ°u" readonly /></label>
-      <label>TÃªn bÃ¡o cÃ¡o<input class="form-control inline-admin-input" data-inline-report-link-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="TÃªn bÃ¡o cÃ¡o" /></label>
+      <label>Mã báo cáo<input class="form-control inline-admin-input" data-inline-report-link-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="Tự sinh khi lưu" readonly /></label>
+      <label>Tên báo cáo<input class="form-control inline-admin-input" data-inline-report-link-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="Tên báo cáo" /></label>
       <label>Link<input class="form-control inline-admin-input" data-inline-report-link-field="link" value="${escapeHtml(report.link || "")}" placeholder="https://docs.google.com/..." /></label>
-      <label>Loáº¡i link<select class="form-control inline-admin-input" data-inline-report-link-field="link_type">${reportLinkTypeOptions(linkType)}</select><small class="cell-note">Sheet táº£i xuá»‘ng dáº¡ng Excel chá»‰ chá»©a value; Doc táº£i Word, Slides táº£i PPTX, PDF táº£i PDF. Google Form vÃ  link khÃ¡c khÃ´ng hiá»‡n nÃºt táº£i.</small></label>
-      <label class="checkbox-label inline-checkbox"><input type="checkbox" data-inline-report-link-active ${report.is_active ? "checked" : ""} /> Báº­t cho táº¥t cáº£ ngÆ°á»i dÃ¹ng</label>
+      <label>Loại link<select class="form-control inline-admin-input" data-inline-report-link-field="link_type">${reportLinkTypeOptions(linkType)}</select><small class="cell-note">Sheet tải xuống dạng Excel chỉ chứa value; Doc tải Word, Slides tải PPTX, PDF tải PDF. Google Form và link khác không hiện nút tải.</small></label>
+      <label class="checkbox-label inline-checkbox"><input type="checkbox" data-inline-report-link-active ${report.is_active ? "checked" : ""} /> Bật cho tất cả người dùng</label>
     </div>`;
 }
 
@@ -4589,7 +4589,7 @@ async function saveInlineReportLink(rowKey, button) {
     is_active: Boolean(row.querySelector("[data-inline-report-link-active]")?.checked),
   };
   if (!payload.ten_bao_cao || !payload.link) {
-    showToast("Vui lÃ²ng nháº­p tÃªn bÃ¡o cÃ¡o vÃ  link.", "error");
+    showToast("Vui lòng nhập tên báo cáo và link.", "error");
     return;
   }
   setButtonLoading(button, true);
@@ -4597,8 +4597,8 @@ async function saveInlineReportLink(rowKey, button) {
     const response = await api("/api/admin/report-links", { method: "POST", body: JSON.stringify(payload) });
     reportLinkDrafts = reportLinkDrafts.filter((item) => item._rowKey !== rowKey);
     markDataStale("reportLinks");
-    showMessage($("#report-link-admin-message"), "ÄÃ£ lÆ°u link bÃ¡o cÃ¡o.");
-    showToast("ÄÃ£ lÆ°u link bÃ¡o cÃ¡o.");
+    showMessage($("#report-link-admin-message"), "Đã lưu link báo cáo.");
+    showToast("Đã lưu link báo cáo.");
     await loadReportLinks({ force: true });
     const picker = $("#report-link-picker");
     if (picker && response.ma_bao_cao) {
@@ -4621,11 +4621,11 @@ async function deleteInlineReportLink(rowKey) {
   }
   const row = document.querySelector(`[data-report-link-row="${CSS.escape(rowKey)}"]`);
   const reportId = row?.dataset.reportLinkId;
-  if (!reportId || !confirm("XÃ³a link bÃ¡o cÃ¡o nÃ y?")) return;
+  if (!reportId || !confirm("Xóa link báo cáo này?")) return;
   try {
     await api(`/api/admin/report-links/${reportId}`, { method: "DELETE" });
     markDataStale("reportLinks");
-    showMessage($("#report-link-admin-message"), "ÄÃ£ xÃ³a link bÃ¡o cÃ¡o.");
+    showMessage($("#report-link-admin-message"), "Đã xóa link báo cáo.");
     await loadReportLinks({ force: true });
   } catch (error) {
     showMessage($("#report-link-admin-message"), error.message, "error");
@@ -4634,7 +4634,7 @@ async function deleteInlineReportLink(rowKey) {
 
 async function loadSystem({ force = false } = {}) {
   if (!force && isDataFresh("system") && isDataFresh("connections") && isDataFresh("sqlReports") && isDataFresh("oneBssReports") && isDataFresh("reportLinks") && isDataFresh("dataMining")) return;
-  $("#system-cards").innerHTML = loadingRow(1, "Äang táº£i thÃ´ng tin há»‡ thá»‘ng...");
+  $("#system-cards").innerHTML = loadingRow(1, "Đang tải thông tin hệ thống...");
   const [data] = await Promise.all([
     api("/api/admin/system"),
     loadConnections({ force }),
@@ -4647,10 +4647,10 @@ async function loadSystem({ force = false } = {}) {
   ]);
   markDataFresh("system");
   $("#system-cards").innerHTML = [
-    ["APP", "MÃ´i trÆ°á»ng", data.environment],
-    ["STO", "Database chÃ­nh", data.storage_backend],
-    ["API", "API dá»¯ liá»‡u", data.internal_api_mock_mode ? "Mock ná»™i bá»™" : data.internal_api_url],
-    ["USR", "NgÆ°á»i dÃ¹ng hoáº¡t Ä‘á»™ng", `${data.active_user_count}/${data.user_count}`],
+    ["APP", "Môi trường", data.environment],
+    ["STO", "Database chính", data.storage_backend],
+    ["API", "API dữ liệu", data.internal_api_mock_mode ? "Mock nội bộ" : data.internal_api_url],
+    ["USR", "Người dùng hoạt động", `${data.active_user_count}/${data.user_count}`],
   ].map(([icon, label, value]) => `<article class="metric-card"><div class="metric-icon">${icon}</div><div><span>${label}</span><strong>${escapeHtml(value)}</strong></div></article>`).join("");
 }
 
@@ -4662,7 +4662,7 @@ async function loadConnections({ force = false } = {}) {
   if (connections.length && !force) {
     renderConnectionsTable();
   }
-  if (!connections.length || force) renderConnectionEditorLoading("Äang táº£i káº¿t ná»‘i há»‡ thá»‘ng...");
+  if (!connections.length || force) renderConnectionEditorLoading("Đang tải kết nối hệ thống...");
   const data = await api("/api/admin/connections");
   connections = data.connections;
   markDataFresh("connections");
@@ -4676,7 +4676,7 @@ function renderConnectionsTable() {
   const selectedCode = $("#connection-picker")?.value || "";
   const selectedConnection = selectedCode ? connections.find((connection) => connection.code === selectedCode) : null;
   if (!selectedConnection) {
-    editor.innerHTML = `<div class="empty-state"><div><strong>ChÆ°a chá»n káº¿t ná»‘i</strong><p>HÃ£y tÃ¬m hoáº·c chá»n má»™t káº¿t ná»‘i há»‡ thá»‘ng Ä‘á»ƒ chá»‰nh cáº¥u hÃ¬nh.</p></div></div>`;
+    editor.innerHTML = `<div class="empty-state"><div><strong>Chưa chọn kết nối</strong><p>Hãy tìm hoặc chọn một kết nối hệ thống để chỉnh cấu hình.</p></div></div>`;
     return;
   }
   editor.innerHTML = renderConnectionEditor(selectedConnection);
@@ -4717,7 +4717,7 @@ function refreshConnectionPicker() {
     const text = [connection.name, connection.code, connection.connection_type, connection.description, connection.secret_ref, ...configKeys].join(" ").toLowerCase();
     return text.includes(search);
   });
-  picker.innerHTML = `<option value="">Chá»n káº¿t ná»‘i cáº§n cáº¥u hÃ¬nh</option>${filteredConnections.map((connection) => `<option value="${escapeHtml(connection.code)}">${escapeHtml(connection.name || connection.code)} (${escapeHtml(connection.code)})</option>`).join("")}`;
+  picker.innerHTML = `<option value="">Chọn kết nối cần cấu hình</option>${filteredConnections.map((connection) => `<option value="${escapeHtml(connection.code)}">${escapeHtml(connection.name || connection.code)} (${escapeHtml(connection.code)})</option>`).join("")}`;
   if (current && filteredConnections.some((connection) => connection.code === current)) picker.value = current;
 }
 
@@ -4729,21 +4729,21 @@ function renderConnectionEditor(connection) {
   return `
     <div class="connection-editor-card" data-connection-row="${escapeHtml(connection.code)}">
       <div class="section-heading">
-        <div><p class="eyebrow">Chá»‰nh káº¿t ná»‘i</p><h3>${escapeHtml(connection.name || connection.code)}</h3><p>${escapeHtml(connection.code)}</p></div>
-        <div class="action-group"><button class="table-action hidden" data-save-connection-inline="${escapeHtml(connection.code)}">LÆ°u</button><button class="table-action" data-test-connection="${escapeHtml(connection.code)}"><span class="button-label">Kiá»ƒm tra</span><span class="spinner"></span></button></div>
+        <div><p class="eyebrow">Chỉnh kết nối</p><h3>${escapeHtml(connection.name || connection.code)}</h3><p>${escapeHtml(connection.code)}</p></div>
+        <div class="action-group"><button class="table-action hidden" data-save-connection-inline="${escapeHtml(connection.code)}">Lưu</button><button class="table-action" data-test-connection="${escapeHtml(connection.code)}"><span class="button-label">Kiểm tra</span><span class="spinner"></span></button></div>
       </div>
-      <label>TÃªn<input class="form-control inline-admin-input" data-inline-connection-field="name" value="${escapeHtml(connection.name || "")}" /></label>
-      <label>MÃ£<code class="compact-code">${escapeHtml(connection.code)}</code></label>
-      <label>Loáº¡i
+      <label>Tên<input class="form-control inline-admin-input" data-inline-connection-field="name" value="${escapeHtml(connection.name || "")}" /></label>
+      <label>Mã<code class="compact-code">${escapeHtml(connection.code)}</code></label>
+      <label>Loại
         <select class="form-control inline-admin-input" data-inline-connection-field="connection_type">
           ${["internal_api", "supabase", "ftp", "drive", "telegram", "zalo"].map((type) => `<option value="${type}" ${connection.connection_type === type ? "selected" : ""}>${type}</option>`).join("")}
         </select>
       </label>
-      <label class="checkbox-label inline-checkbox"><input type="checkbox" data-inline-connection-active ${connection.is_active ? "checked" : ""} /> Äang dÃ¹ng</label>
-      <label>Danh sÃ¡ch biáº¿n<div class="connection-variable-list">${variables.length ? variables.map((item) => `<span class="status viewer">${escapeHtml(item)}</span>`).join(" ") : "KhÃ´ng cÃ³"}</div></label>
+      <label class="checkbox-label inline-checkbox"><input type="checkbox" data-inline-connection-active ${connection.is_active ? "checked" : ""} /> Đang dùng</label>
+      <label>Danh sách biến<div class="connection-variable-list">${variables.length ? variables.map((item) => `<span class="status viewer">${escapeHtml(item)}</span>`).join(" ") : "Không có"}</div></label>
       ${renderDriveOauthPanel(connection)}
-      <label>MÃ´ táº£<textarea class="form-control inline-admin-note connection-description" data-inline-connection-field="description" rows="3" placeholder="MÃ´ táº£">${escapeHtml(connection.description || "")}</textarea></label>
-      <label>Báº£ng lá»‡nh / Cáº¥u hÃ¬nh<textarea class="form-control inline-admin-code connection-editor-code" data-inline-connection-field="config_json" rows="14">${escapeHtml(configText)}</textarea></label>
+      <label>Mô tả<textarea class="form-control inline-admin-note connection-description" data-inline-connection-field="description" rows="3" placeholder="Mô tả">${escapeHtml(connection.description || "")}</textarea></label>
+      <label>Bảng lệnh / Cấu hình<textarea class="form-control inline-admin-code connection-editor-code" data-inline-connection-field="config_json" rows="14">${escapeHtml(configText)}</textarea></label>
       <div class="cell-note" id="connection-result-${escapeHtml(connection.code)}"></div>
     </div>`;
 }
@@ -4760,12 +4760,12 @@ function renderDriveOauthPanel(connection) {
     <div class="drive-oauth-panel">
       <div>
         <strong>Google Drive OAuth</strong>
-        <p>${connected ? `ÄÃ£ káº¿t ná»‘i${email ? `: ${escapeHtml(email)}` : ""}${connectedAt ? ` (${escapeHtml(connectedAt)})` : ""}` : "ChÆ°a káº¿t ná»‘i tÃ i khoáº£n Google Drive cá»§a anh."}</p>
-        <p>${folder ? `ThÆ° má»¥c máº·c Ä‘á»‹nh: ${escapeHtml(folder)}` : "OneBSS sáº½ Æ°u tiÃªn thÆ° má»¥c trong link lÆ°u bÃ¡o cÃ¡o."}</p>
+        <p>${connected ? `Đã kết nối${email ? `: ${escapeHtml(email)}` : ""}${connectedAt ? ` (${escapeHtml(connectedAt)})` : ""}` : "Chưa kết nối tài khoản Google Drive của anh."}</p>
+        <p>${folder ? `Thư mục mặc định: ${escapeHtml(folder)}` : "OneBSS sẽ ưu tiên thư mục trong link lưu báo cáo."}</p>
       </div>
       <div class="action-group">
-        <button class="btn-secondary" type="button" data-connect-google-drive><span class="button-label">${connected ? "Káº¿t ná»‘i láº¡i Drive" : "Káº¿t ná»‘i Google Drive"}</span><span class="spinner"></span></button>
-        <button class="table-action danger ${connected ? "" : "hidden"}" type="button" data-disconnect-google-drive><span class="button-label">Ngáº¯t káº¿t ná»‘i</span><span class="spinner"></span></button>
+        <button class="btn-secondary" type="button" data-connect-google-drive><span class="button-label">${connected ? "Kết nối lại Drive" : "Kết nối Google Drive"}</span><span class="spinner"></span></button>
+        <button class="table-action danger ${connected ? "" : "hidden"}" type="button" data-disconnect-google-drive><span class="button-label">Ngắt kết nối</span><span class="spinner"></span></button>
       </div>
     </div>`;
 }
@@ -4781,7 +4781,7 @@ async function saveInlineConnection(code, button) {
   try {
     config = JSON.parse(row.querySelector('[data-inline-connection-field="config_json"]')?.value || "{}");
   } catch {
-    showToast("Cáº¥u hÃ¬nh JSON chÆ°a Ä‘Ãºng Ä‘á»‹nh dáº¡ng.", "error");
+    showToast("Cấu hình JSON chưa đúng định dạng.", "error");
     return;
   }
   setButtonLoading(button, true);
@@ -4794,7 +4794,7 @@ async function saveInlineConnection(code, button) {
       is_active: Boolean(row.querySelector("[data-inline-connection-active]")?.checked),
     })});
     button.classList.add("hidden");
-    showToast("ÄÃ£ lÆ°u káº¿t ná»‘i há»‡ thá»‘ng.");
+    showToast("Đã lưu kết nối hệ thống.");
     await loadConnections({ force: true });
   } catch (error) {
     showToast(error.message, "error");
@@ -4824,7 +4824,7 @@ async function saveConnection(event) {
   try {
     config = data.config_json ? JSON.parse(data.config_json) : {};
   } catch {
-    showMessage(form.querySelector(".result"), "Cáº¥u hÃ¬nh JSON chÆ°a Ä‘Ãºng Ä‘á»‹nh dáº¡ng.", "error");
+    showMessage(form.querySelector(".result"), "Cấu hình JSON chưa đúng định dạng.", "error");
     return;
   }
   try {
@@ -4853,7 +4853,7 @@ async function connectGoogleDrive(button) {
     } else {
       window.location.href = result.authorization_url;
     }
-    showToast("Äang má»Ÿ trang cáº¥p quyá»n Google Drive...");
+    showToast("Đang mở trang cấp quyền Google Drive...");
   } catch (error) {
     if (popup) popup.close();
     showToast(error.message, "error");
@@ -4863,11 +4863,11 @@ async function connectGoogleDrive(button) {
 }
 
 async function disconnectGoogleDrive(button) {
-  if (!confirm("Ngáº¯t káº¿t ná»‘i Google Drive OAuth? File OneBSS sáº½ khÃ´ng upload Ä‘Æ°á»£c vÃ o Drive cÃ¡ nhÃ¢n cho tá»›i khi káº¿t ná»‘i láº¡i.")) return;
+  if (!confirm("Ngắt kết nối Google Drive OAuth? File OneBSS sẽ không upload được vào Drive cá nhân cho tới khi kết nối lại.")) return;
   setButtonLoading(button, true);
   try {
     await api("/api/google-drive/oauth/disconnect", { method: "POST" });
-    showToast("ÄÃ£ ngáº¯t káº¿t ná»‘i Google Drive.");
+    showToast("Đã ngắt kết nối Google Drive.");
     await loadConnections({ force: true });
   } catch (error) {
     showToast(error.message, "error");
@@ -4878,18 +4878,18 @@ async function disconnectGoogleDrive(button) {
 
 window.addEventListener("message", async (event) => {
   if (event.origin !== window.location.origin || event.data?.type !== "google-drive-oauth") return;
-  showToast(event.data.message || (event.data.ok ? "ÄÃ£ káº¿t ná»‘i Google Drive." : "Káº¿t ná»‘i Google Drive lá»—i."), event.data.ok ? "success" : "error");
+  showToast(event.data.message || (event.data.ok ? "Đã kết nối Google Drive." : "Kết nối Google Drive lỗi."), event.data.ok ? "success" : "error");
   await loadConnections({ force: true });
 });
 
 async function testConnection(code, button) {
   const resultBox = $(`#connection-result-${CSS.escape(code)}`);
   if (resultBox) resultBox.textContent = "";
-  showToast("Äang kiá»ƒm tra káº¿t ná»‘i...");
+  showToast("Đang kiểm tra kết nối...");
   setButtonLoading(button, true);
   try {
     const result = await api(`/api/admin/connections/${code}/test`, { method: "POST" });
-    const details = result.details ? ` Chi tiáº¿t: ${JSON.stringify(result.details)}` : "";
+    const details = result.details ? ` Chi tiết: ${JSON.stringify(result.details)}` : "";
     showToast(`${result.message}${details}`.slice(0, 360), result.ok ? "success" : "error");
   } catch (error) {
     showToast(error.message, "error");
@@ -4907,8 +4907,8 @@ async function loadDataMining({ force = false } = {}) {
     renderDataMiningRuns();
     return;
   }
-  setTableLoading("#data-mining-schedules-table", 7, "Äang táº£i lá»‹ch Ä‘Ã o dá»¯ liá»‡u...");
-  setTableLoading("#data-mining-runs-table", 5, "Äang táº£i nháº­t kÃ½ Ä‘Ã o dá»¯ liá»‡u...");
+  setTableLoading("#data-mining-schedules-table", 7, "Đang tải lịch đào dữ liệu...");
+  setTableLoading("#data-mining-runs-table", 5, "Đang tải nhật ký đào dữ liệu...");
   try {
     const [scheduleData, runData] = await Promise.all([
       api("/api/admin/data-mining/schedules"),
@@ -4920,15 +4920,15 @@ async function loadDataMining({ force = false } = {}) {
     renderDataMiningSchedules();
     renderDataMiningRuns();
   } catch (error) {
-    scheduleTable.innerHTML = emptyRow(7, "KhÃ´ng táº£i Ä‘Æ°á»£c lá»‹ch Ä‘Ã o dá»¯ liá»‡u", error.message);
-    runsTable.innerHTML = emptyRow(5, "KhÃ´ng táº£i Ä‘Æ°á»£c nháº­t kÃ½ Ä‘Ã o dá»¯ liá»‡u", error.message);
+    scheduleTable.innerHTML = emptyRow(7, "Không tải được lịch đào dữ liệu", error.message);
+    runsTable.innerHTML = emptyRow(5, "Không tải được nhật ký đào dữ liệu", error.message);
   }
 }
 
 function dataMiningScheduleText(schedule) {
-  if (schedule.schedule_type === "Weekly") return `HÃ ng tuáº§n ${schedule.weekday || "-"} lÃºc ${schedule.run_time || "-"}`;
-  if (schedule.schedule_type === "Monthly") return `NgÃ y ${schedule.month_day || 1} hÃ ng thÃ¡ng lÃºc ${schedule.run_time || "-"}`;
-  return `HÃ ng ngÃ y lÃºc ${schedule.run_time || "-"}`;
+  if (schedule.schedule_type === "Weekly") return `Hàng tuần ${schedule.weekday || "-"} lúc ${schedule.run_time || "-"}`;
+  if (schedule.schedule_type === "Monthly") return `Ngày ${schedule.month_day || 1} hàng tháng lúc ${schedule.run_time || "-"}`;
+  return `Hàng ngày lúc ${schedule.run_time || "-"}`;
 }
 
 function renderDataMiningSchedules() {
@@ -4936,7 +4936,7 @@ function renderDataMiningSchedules() {
   if (!table) return;
   table.innerHTML = dataMiningSchedules.length
     ? dataMiningSchedules.map((schedule) => renderDataMiningScheduleRow(schedule)).join("")
-    : emptyRow(7, "ChÆ°a cÃ³ lá»‹ch Ä‘Ã o dá»¯ liá»‡u", "Báº¥m ThÃªm lá»‹ch Ä‘á»ƒ cáº¥u hÃ¬nh tá»± Ä‘á»™ng láº¥y bÃ¡o cÃ¡o OneBSS.");
+    : emptyRow(7, "Chưa có lịch đào dữ liệu", "Bấm Thêm lịch để cấu hình tự động lấy báo cáo OneBSS.");
   document.querySelectorAll("[data-edit-data-mining]").forEach((button) => button.addEventListener("click", () => openDataMiningSchedule(button.dataset.editDataMining)));
   document.querySelectorAll("[data-run-data-mining]").forEach((button) => button.addEventListener("click", () => runDataMiningScheduleNow(button.dataset.runDataMining, button)));
   document.querySelectorAll("[data-delete-data-mining]").forEach((button) => button.addEventListener("click", () => deleteDataMiningSchedule(button.dataset.deleteDataMining)));
@@ -4945,17 +4945,17 @@ function renderDataMiningSchedules() {
 function renderDataMiningScheduleRow(schedule) {
   const paramsText = JSON.stringify(schedule.parameters || {});
   const lastRun = schedule.last_run_at ? new Date(schedule.last_run_at).toLocaleString("vi-VN") : "";
-  const fileText = schedule.file_name_template || "Theo tÃªn bÃ¡o cÃ¡o";
-  const storageText = schedule.storage_link || "LÆ°u ná»™i bá»™";
+  const fileText = schedule.file_name_template || "Theo tên báo cáo";
+  const storageText = schedule.storage_link || "Lưu nội bộ";
   return `
     <tr>
       <td><strong>${escapeHtml(schedule.name || schedule.schedule_id)}</strong><small class="cell-note">${escapeHtml(schedule.report_url || "")}</small></td>
       <td>${escapeHtml(dataMiningScheduleText(schedule))}</td>
       <td><code>${escapeHtml(fileText)}</code><small class="cell-note">${escapeHtml(storageText)}</small></td>
       <td class="compact-code-cell">${renderCompactCode(paramsText)}</td>
-      <td><span class="status ${schedule.is_active ? "viewer" : "inactive"}">${schedule.is_active ? "Äang báº­t" : "Táº¡m táº¯t"}</span>${schedule.last_status ? `<small class="cell-note">${escapeHtml(schedule.last_status)}</small>` : ""}${schedule.last_error ? `<small class="cell-note text-red-700">${escapeHtml(schedule.last_error)}</small>` : ""}</td>
+      <td><span class="status ${schedule.is_active ? "viewer" : "inactive"}">${schedule.is_active ? "Đang bật" : "Tạm tắt"}</span>${schedule.last_status ? `<small class="cell-note">${escapeHtml(schedule.last_status)}</small>` : ""}${schedule.last_error ? `<small class="cell-note text-red-700">${escapeHtml(schedule.last_error)}</small>` : ""}</td>
       <td>${lastRun ? escapeHtml(lastRun) : "-"}${schedule.last_file_name ? `<small class="cell-note">${escapeHtml(schedule.last_file_name)}</small>` : ""}</td>
-      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-data-mining="${escapeHtml(schedule.schedule_id)}">Sá»­a</button><button class="table-action" data-run-data-mining="${escapeHtml(schedule.schedule_id)}"><span class="button-label">Cháº¡y thá»­</span><span class="spinner"></span></button><button class="table-action danger" data-delete-data-mining="${escapeHtml(schedule.schedule_id)}">XÃ³a</button></div></td>
+      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-data-mining="${escapeHtml(schedule.schedule_id)}">Sửa</button><button class="table-action" data-run-data-mining="${escapeHtml(schedule.schedule_id)}"><span class="button-label">Chạy thử</span><span class="spinner"></span></button><button class="table-action danger" data-delete-data-mining="${escapeHtml(schedule.schedule_id)}">Xóa</button></div></td>
     </tr>`;
 }
 
@@ -4964,14 +4964,14 @@ function renderDataMiningRuns() {
   if (!table) return;
   table.innerHTML = dataMiningRuns.length
     ? dataMiningRuns.map((run) => renderDataMiningRunRow(run)).join("")
-    : emptyRow(5, "ChÆ°a cÃ³ lÆ°á»£t cháº¡y", "Khi lá»‹ch cháº¡y hoáº·c báº¥m Cháº¡y thá»­, káº¿t quáº£ sáº½ xuáº¥t hiá»‡n á»Ÿ Ä‘Ã¢y.");
+    : emptyRow(5, "Chưa có lượt chạy", "Khi lịch chạy hoặc bấm Chạy thử, kết quả sẽ xuất hiện ở đây.");
 }
 
 function renderDataMiningRunRow(run) {
   const startedAt = run.started_at ? new Date(run.started_at).toLocaleString("vi-VN") : "-";
   const ok = run.status === "success";
   const storageLink = run.storage_link && /^https?:\/\//.test(run.storage_link)
-    ? `<small class="cell-note"><a href="${escapeHtml(run.storage_link)}" target="_blank" rel="noopener">Má»Ÿ file lÆ°u trá»¯</a></small>`
+    ? `<small class="cell-note"><a href="${escapeHtml(run.storage_link)}" target="_blank" rel="noopener">Mở file lưu trữ</a></small>`
     : "";
   const file = run.file_path ? `<code>${escapeHtml(run.file_name || run.file_path)}</code><small class="cell-note">${escapeHtml(run.file_path)}</small>${storageLink}` : (storageLink || "-");
   return `
@@ -5011,7 +5011,7 @@ async function saveDataMiningSchedule(event) {
   try {
     parameters = data.parameters_json ? JSON.parse(data.parameters_json) : {};
   } catch {
-    showMessage(form.querySelector(".result"), "Tham sá»‘ JSON chÆ°a Ä‘Ãºng Ä‘á»‹nh dáº¡ng.", "error");
+    showMessage(form.querySelector(".result"), "Tham số JSON chưa đúng định dạng.", "error");
     return;
   }
   try {
@@ -5029,8 +5029,8 @@ async function saveDataMiningSchedule(event) {
       is_active: Boolean(form.elements.namedItem("is_active")?.checked),
     })});
     $("#data-mining-dialog")?.close();
-    showMessage($("#data-mining-result"), "ÄÃ£ lÆ°u lá»‹ch Ä‘Ã o dá»¯ liá»‡u.");
-    showToast("ÄÃ£ lÆ°u lá»‹ch Ä‘Ã o dá»¯ liá»‡u.");
+    showMessage($("#data-mining-result"), "Đã lưu lịch đào dữ liệu.");
+    showToast("Đã lưu lịch đào dữ liệu.");
     await loadDataMining({ force: true });
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
@@ -5040,16 +5040,16 @@ async function saveDataMiningSchedule(event) {
 
 async function runDataMiningScheduleNow(scheduleId, button) {
   const schedule = dataMiningSchedules.find((item) => item.schedule_id === scheduleId);
-  const otp = prompt("Nháº­p OTP OneBSS náº¿u Ä‘ang cÃ³ mÃ£. CÃ³ thá»ƒ Ä‘á»ƒ trá»‘ng náº¿u phiÃªn OneBSS cÃ²n hiá»‡u lá»±c.");
+  const otp = prompt("Nhập OTP OneBSS nếu đang có mã. Có thể để trống nếu phiên OneBSS còn hiệu lực.");
   if (otp === null) return;
   const defaultParameters = JSON.stringify(schedule?.parameters || {}, null, 2);
-  const parametersText = prompt("Nháº­p JSON tham sá»‘ cho láº§n cháº¡y nÃ y. Äá»ƒ trá»‘ng náº¿u muá»‘n dÃ¹ng tham sá»‘ trong lá»‹ch.", defaultParameters);
+  const parametersText = prompt("Nhập JSON tham số cho lần chạy này. Để trống nếu muốn dùng tham số trong lịch.", defaultParameters);
   if (parametersText === null) return;
   let parameters = {};
   try {
     parameters = parametersText.trim() ? JSON.parse(parametersText) : {};
   } catch {
-    showMessage($("#data-mining-result"), "Tham sá»‘ JSON cháº¡y thá»­ chÆ°a Ä‘Ãºng Ä‘á»‹nh dáº¡ng.", "error");
+    showMessage($("#data-mining-result"), "Tham số JSON chạy thử chưa đúng định dạng.", "error");
     return;
   }
   setButtonLoading(button, true);
@@ -5058,7 +5058,7 @@ async function runDataMiningScheduleNow(scheduleId, button) {
       method: "POST",
       body: JSON.stringify({ otp, allow_device_registration: true, parameters }),
     });
-    const message = response.message || response.result?.message || (response.ok ? "ÄÃ£ Ä‘Æ°a lá»‹ch Ä‘Ã o dá»¯ liá»‡u vÃ o hÃ ng Ä‘á»£i." : "ChÆ°a cháº¡y xong lá»‹ch Ä‘Ã o dá»¯ liá»‡u.");
+    const message = response.message || response.result?.message || (response.ok ? "Đã đưa lịch đào dữ liệu vào hàng đợi." : "Chưa chạy xong lịch đào dữ liệu.");
     showMessage($("#data-mining-result"), message, response.ok ? "success" : "error");
     await loadDataMining({ force: true });
   } catch (error) {
@@ -5069,10 +5069,10 @@ async function runDataMiningScheduleNow(scheduleId, button) {
 }
 
 async function deleteDataMiningSchedule(scheduleId) {
-  if (!confirm(`XÃ³a lá»‹ch Ä‘Ã o dá»¯ liá»‡u ${scheduleId}?`)) return;
+  if (!confirm(`Xóa lịch đào dữ liệu ${scheduleId}?`)) return;
   try {
     await api(`/api/admin/data-mining/schedules/${encodeURIComponent(scheduleId)}`, { method: "DELETE" });
-    showMessage($("#data-mining-result"), `ÄÃ£ xÃ³a lá»‹ch ${scheduleId}.`);
+    showMessage($("#data-mining-result"), `Đã xóa lịch ${scheduleId}.`);
     await loadDataMining({ force: true });
   } catch (error) {
     showMessage($("#data-mining-result"), error.message, "error");
@@ -5088,7 +5088,7 @@ async function loadZaloAutoMessages({ force = false } = {}) {
     return;
   }
   if (zaloAutoMessages.length && !force) renderZaloAutoMessages();
-  if (!zaloAutoMessages.length || force) setTableLoading("#zalo-auto-messages-table", 6, "Äang táº£i lá»‹ch gá»­i Zalo...");
+  if (!zaloAutoMessages.length || force) setTableLoading("#zalo-auto-messages-table", 6, "Đang tải lịch gửi Zalo...");
   try {
     const data = await api("/api/admin/zalo/auto-messages");
     zaloAutoMessages = data.schedules || [];
@@ -5096,7 +5096,7 @@ async function loadZaloAutoMessages({ force = false } = {}) {
     renderZaloAutoMessages();
     fillZaloAutoMessagePickers();
   } catch (error) {
-    table.innerHTML = emptyRow(6, "KhÃ´ng táº£i Ä‘Æ°á»£c lá»‹ch gá»­i Zalo", error.message);
+    table.innerHTML = emptyRow(6, "Không tải được lịch gửi Zalo", error.message);
   }
 }
 
@@ -5108,7 +5108,7 @@ function fillZaloAutoMessagePickers() {
     .filter((schedule) => schedule.is_active)
     .map((schedule) => `<option value="${escapeHtml(schedule.schedule_id)}">${escapeHtml(schedule.name || schedule.schedule_id)}</option>`)
     .join("");
-  picker.innerHTML = `<option value="">Lá»‹ch Zalo</option>${options}`;
+  picker.innerHTML = `<option value="">Lịch Zalo</option>${options}`;
   if (current && zaloAutoMessages.some((schedule) => schedule.schedule_id === current)) picker.value = current;
 }
 
@@ -5172,10 +5172,10 @@ function applyZaloChatTargetSelection(chatId, { updateName = true } = {}) {
 }
 
 function zaloScheduleText(schedule) {
-  if (schedule.schedule_type === "TimeWindow") return `Khung giá»: ${(schedule.time_slots || []).join(", ") || "-"}`;
-  if (schedule.schedule_type === "Weekly") return `HÃ ng tuáº§n ${schedule.weekday || "-"} lÃºc ${schedule.run_time || "-"}`;
-  if (schedule.schedule_type === "Monthly") return `NgÃ y ${schedule.month_day || 1} háº±ng thÃ¡ng lÃºc ${schedule.run_time || "-"}`;
-  return `Háº±ng ngÃ y lÃºc ${schedule.run_time || "-"}`;
+  if (schedule.schedule_type === "TimeWindow") return `Khung giờ: ${(schedule.time_slots || []).join(", ") || "-"}`;
+  if (schedule.schedule_type === "Weekly") return `Hàng tuần ${schedule.weekday || "-"} lúc ${schedule.run_time || "-"}`;
+  if (schedule.schedule_type === "Monthly") return `Ngày ${schedule.month_day || 1} hằng tháng lúc ${schedule.run_time || "-"}`;
+  return `Hằng ngày lúc ${schedule.run_time || "-"}`;
 }
 
 function renderZaloAutoMessages() {
@@ -5183,16 +5183,16 @@ function renderZaloAutoMessages() {
   if (!table) return;
   table.innerHTML = zaloAutoMessages.length
     ? zaloAutoMessages.map((schedule) => renderZaloAutoMessageRow(schedule)).join("")
-    : emptyRow(6, "ChÆ°a cÃ³ lá»‹ch gá»­i Zalo", "Báº¥m ThÃªm lá»‹ch Ä‘á»ƒ cáº¥u hÃ¬nh lá»‹ch gá»­i áº£nh chá»¥p tá»± Ä‘á»™ng.");
+    : emptyRow(6, "Chưa có lịch gửi Zalo", "Bấm Thêm lịch để cấu hình lịch gửi ảnh chụp tự động.");
   document.querySelectorAll("[data-edit-zalo-auto-message]").forEach((button) => button.addEventListener("click", () => openZaloAutoMessage(button.dataset.editZaloAutoMessage)));
   document.querySelectorAll("[data-send-zalo-auto-message]").forEach((button) => button.addEventListener("click", () => sendZaloAutoMessageNow(button.dataset.sendZaloAutoMessage, button)));
   document.querySelectorAll("[data-delete-zalo-auto-message]").forEach((button) => button.addEventListener("click", () => deleteZaloAutoMessage(button.dataset.deleteZaloAutoMessage)));
 }
 
 function renderZaloAutoMessageRow(schedule) {
-  const targetParts = schedule.chat_id ? [schedule.target_type === "person" ? "CÃ¡ nhÃ¢n" : "NhÃ³m", schedule.chat_name, schedule.chat_id].filter(Boolean) : [];
-  const targetText = targetParts.length ? targetParts.join(" Â· ") : "ChÆ°a cáº¥u hÃ¬nh Ä‘Ã­ch nháº­n";
-  const imageText = schedule.latest_capture_url ? "Láº§n chá»¥p gáº§n nháº¥t" : "Tá»± chá»¥p má»›i khi gá»­i";
+  const targetParts = schedule.chat_id ? [schedule.target_type === "person" ? "Cá nhân" : "Nhóm", schedule.chat_name, schedule.chat_id].filter(Boolean) : [];
+  const targetText = targetParts.length ? targetParts.join(" · ") : "Chưa cấu hình đích nhận";
+  const imageText = schedule.latest_capture_url ? "Lần chụp gần nhất" : "Tự chụp mới khi gửi";
   const lastSent = schedule.last_sent_at ? new Date(schedule.last_sent_at).toLocaleString("vi-VN") : "";
   return `
     <tr>
@@ -5200,8 +5200,8 @@ function renderZaloAutoMessageRow(schedule) {
       <td>${escapeHtml(zaloScheduleText(schedule))}</td>
       <td><code>${escapeHtml(targetText)}</code></td>
       <td>${escapeHtml(imageText)}${schedule.latest_capture?.created_at ? `<small class="cell-note">${escapeHtml(new Date(schedule.latest_capture.created_at).toLocaleString("vi-VN"))}</small>` : ""}</td>
-      <td><span class="status ${schedule.is_active ? "viewer" : "inactive"}">${schedule.is_active ? "Äang cháº¡y" : "Táº¡m táº¯t"}</span>${lastSent ? `<small class="cell-note">ÄÃ£ gá»­i: ${escapeHtml(lastSent)}</small>` : ""}${schedule.last_error ? `<small class="cell-note text-red-700">${escapeHtml(schedule.last_error)}</small>` : ""}</td>
-      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-zalo-auto-message="${escapeHtml(schedule.schedule_id)}">Sá»­a</button><button class="table-action" data-send-zalo-auto-message="${escapeHtml(schedule.schedule_id)}"><span class="button-label">Gá»­i thá»­</span><span class="spinner"></span></button><button class="table-action danger" data-delete-zalo-auto-message="${escapeHtml(schedule.schedule_id)}">XÃ³a</button></div></td>
+      <td><span class="status ${schedule.is_active ? "viewer" : "inactive"}">${schedule.is_active ? "Đang chạy" : "Tạm tắt"}</span>${lastSent ? `<small class="cell-note">Đã gửi: ${escapeHtml(lastSent)}</small>` : ""}${schedule.last_error ? `<small class="cell-note text-red-700">${escapeHtml(schedule.last_error)}</small>` : ""}</td>
+      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-zalo-auto-message="${escapeHtml(schedule.schedule_id)}">Sửa</button><button class="table-action" data-send-zalo-auto-message="${escapeHtml(schedule.schedule_id)}"><span class="button-label">Gửi thử</span><span class="spinner"></span></button><button class="table-action danger" data-delete-zalo-auto-message="${escapeHtml(schedule.schedule_id)}">Xóa</button></div></td>
     </tr>`;
 }
 
@@ -5269,8 +5269,8 @@ async function saveZaloAutoMessage(event) {
     })});
     if (file) await uploadZaloAutoMessageCapture(response.schedule.schedule_id, file, data.page_url || "/");
     $("#zalo-auto-message-dialog").close();
-    showMessage($("#zalo-auto-message-result"), "ÄÃ£ lÆ°u lá»‹ch gá»­i Zalo.");
-    showToast("ÄÃ£ lÆ°u lá»‹ch gá»­i Zalo.");
+    showMessage($("#zalo-auto-message-result"), "Đã lưu lịch gửi Zalo.");
+    showToast("Đã lưu lịch gửi Zalo.");
     await loadZaloAutoMessages({ force: true });
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
@@ -5304,10 +5304,10 @@ async function sendZaloAutoMessageNow(scheduleId, button) {
 }
 
 async function deleteZaloAutoMessage(scheduleId) {
-  if (!confirm(`XÃ³a lá»‹ch gá»­i Zalo ${scheduleId}?`)) return;
+  if (!confirm(`Xóa lịch gửi Zalo ${scheduleId}?`)) return;
   try {
     await api(`/api/admin/zalo/auto-messages/${encodeURIComponent(scheduleId)}`, { method: "DELETE" });
-    showMessage($("#zalo-auto-message-result"), `ÄÃ£ xÃ³a lá»‹ch ${scheduleId}.`);
+    showMessage($("#zalo-auto-message-result"), `Đã xóa lịch ${scheduleId}.`);
     await loadZaloAutoMessages({ force: true });
   } catch (error) {
     showMessage($("#zalo-auto-message-result"), error.message, "error");
@@ -5320,30 +5320,30 @@ async function loadZaloMessageLogs({ force = false } = {}) {
   if (!force && isDataFresh("zaloMessageLogs")) {
     table.innerHTML = zaloMessageLogs.length
       ? zaloMessageLogs.map((log) => renderZaloMessageLog(log)).join("")
-      : emptyRow(5, "ChÆ°a cÃ³ tin nháº¯n Zalo", "Khi ngÆ°á»i dÃ¹ng mention hoáº·c tráº£ lá»i bot trong nhÃ³m, log sáº½ xuáº¥t hiá»‡n á»Ÿ Ä‘Ã¢y.");
+      : emptyRow(5, "Chưa có tin nhắn Zalo", "Khi người dùng mention hoặc trả lời bot trong nhóm, log sẽ xuất hiện ở đây.");
     fillZaloChatTargetOptions();
     return;
   }
-  setTableLoading("#zalo-message-logs-table", 5, "Äang táº£i nháº­t kÃ½ Zalo Bot...");
+  setTableLoading("#zalo-message-logs-table", 5, "Đang tải nhật ký Zalo Bot...");
   try {
     const data = await api(`/api/admin/zalo/message-logs?limit=${TABLE_PAGE_SIZE}`);
     zaloMessageLogs = data.logs || [];
     markDataFresh("zaloMessageLogs");
     table.innerHTML = zaloMessageLogs.length
       ? zaloMessageLogs.map((log) => renderZaloMessageLog(log)).join("")
-      : emptyRow(5, "ChÆ°a cÃ³ tin nháº¯n Zalo", "Khi ngÆ°á»i dÃ¹ng mention hoáº·c tráº£ lá»i bot trong nhÃ³m, log sáº½ xuáº¥t hiá»‡n á»Ÿ Ä‘Ã¢y.");
+      : emptyRow(5, "Chưa có tin nhắn Zalo", "Khi người dùng mention hoặc trả lời bot trong nhóm, log sẽ xuất hiện ở đây.");
     fillZaloChatTargetOptions();
   } catch (error) {
-    table.innerHTML = emptyRow(5, "KhÃ´ng táº£i Ä‘Æ°á»£c nháº­t kÃ½ Zalo", error.message);
+    table.innerHTML = emptyRow(5, "Không tải được nhật ký Zalo", error.message);
   }
 }
 
 function renderZaloMessageLog(log) {
-  const directionLabel = log.direction === "out" ? "Bot gá»­i" : "Bot nháº­n";
+  const directionLabel = log.direction === "out" ? "Bot gửi" : "Bot nhận";
   const directionClass = log.direction === "out" ? "admin" : "viewer";
   const chatParts = [log.chat_type, log.chat_id].filter(Boolean);
   const sender = log.sender_name || log.sender_id || "";
-  const chatText = chatParts.length ? chatParts.join(" Â· ") : "-";
+  const chatText = chatParts.length ? chatParts.join(" · ") : "-";
   const bodyText = log.text || log.raw_preview || "-";
   const keyNote = [log.raw_keys?.length ? `root: ${log.raw_keys.join(", ")}` : "", log.result_keys?.length ? `result: ${log.result_keys.join(", ")}` : "", log.message_keys?.length ? `message: ${log.message_keys.join(", ")}` : ""].filter(Boolean).join(" | ");
   return `
@@ -5352,7 +5352,7 @@ function renderZaloMessageLog(log) {
       <td><span class="status ${directionClass}">${directionLabel}</span></td>
       <td><code>${escapeHtml(chatText)}</code>${sender ? `<small class="cell-note">${escapeHtml(sender)}</small>` : ""}</td>
       <td class="compact-code-cell"><pre class="compact-code">${escapeHtml(bodyText)}</pre>${keyNote ? `<small class="cell-note">${escapeHtml(keyNote)}</small>` : ""}</td>
-      <td><span class="status ${log.ok ? "viewer" : "inactive"}">${log.ok ? "OK" : "Lá»—i"}</span></td>
+      <td><span class="status ${log.ok ? "viewer" : "inactive"}">${log.ok ? "OK" : "Lỗi"}</span></td>
     </tr>`;
 }
 
@@ -5383,7 +5383,7 @@ async function loadSqlReports({ force = false } = {}) {
     renderSqlReports();
     fillDynamicReportSelect();
   }
-  if (!sqlReports.length || force) renderSqlReportEditorLoading("Äang táº£i cáº¥u hÃ¬nh SQL...");
+  if (!sqlReports.length || force) renderSqlReportEditorLoading("Đang tải cấu hình SQL...");
   try {
     const data = await api("/api/admin/sql-reports");
     sqlReports = data.reports || [];
@@ -5398,7 +5398,7 @@ async function loadSqlReports({ force = false } = {}) {
   } catch (error) {
     showMessage($("#sql-reports-message"), error.message, "error");
     const editor = $("#sql-report-editor");
-    if (editor) editor.innerHTML = `<div class="empty-state"><div><strong>KhÃ´ng táº£i Ä‘Æ°á»£c cáº¥u hÃ¬nh SQL</strong><p>${escapeHtml(error.message)}</p></div></div>`;
+    if (editor) editor.innerHTML = `<div class="empty-state"><div><strong>Không tải được cấu hình SQL</strong><p>${escapeHtml(error.message)}</p></div></div>`;
   }
 }
 
@@ -5436,7 +5436,7 @@ function refreshSqlReportPicker() {
     const text = [report.ten_bao_cao, report.ma_bao_cao, ...(report.cac_tham_so || [])].join(" ").toLowerCase();
     return text.includes(search);
   });
-  picker.innerHTML = `<option value="">ThÃªm SQL má»›i / chÆ°a chá»n SQL</option>${filteredReports.map((report) => `<option value="${escapeHtml(report.ma_bao_cao)}">${escapeHtml(report.ten_bao_cao)} (${escapeHtml(report.ma_bao_cao)})</option>`).join("")}`;
+  picker.innerHTML = `<option value="">Thêm SQL mới / chưa chọn SQL</option>${filteredReports.map((report) => `<option value="${escapeHtml(report.ma_bao_cao)}">${escapeHtml(report.ten_bao_cao)} (${escapeHtml(report.ma_bao_cao)})</option>`).join("")}`;
   if (current && filteredReports.some((report) => report.ma_bao_cao === current)) picker.value = current;
 }
 
@@ -5460,13 +5460,13 @@ function renderSqlReportEditor(report, isDraft = false) {
   return `
     <div class="sql-report-editor-card" data-sql-row="${escapeHtml(rowKey)}" data-sql-report-id="${escapeHtml(report.id || "")}">
       <div class="section-heading">
-        <div><p class="eyebrow">${isDraft ? "ThÃªm SQL" : "Chá»‰nh SQL"}</p><h3>${isDraft ? "Táº¡o lá»‡nh SQL má»›i" : escapeHtml(report.ten_bao_cao || report.ma_bao_cao)}</h3></div>
-        <div class="action-group"><button class="table-action ${isDraft ? "" : "hidden"}" data-save-sql-report-inline="${escapeHtml(rowKey)}">LÆ°u</button>${isDraft ? "" : `<button class="table-action danger" data-delete-sql-report="${escapeHtml(rowKey)}">XÃ³a</button>`}</div>
+        <div><p class="eyebrow">${isDraft ? "Thêm SQL" : "Chỉnh SQL"}</p><h3>${isDraft ? "Tạo lệnh SQL mới" : escapeHtml(report.ten_bao_cao || report.ma_bao_cao)}</h3></div>
+        <div class="action-group"><button class="table-action ${isDraft ? "" : "hidden"}" data-save-sql-report-inline="${escapeHtml(rowKey)}">Lưu</button>${isDraft ? "" : `<button class="table-action danger" data-delete-sql-report="${escapeHtml(rowKey)}">Xóa</button>`}</div>
       </div>
-      <label>TÃªn<input class="form-control inline-admin-input" data-inline-sql-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="TÃªn bÃ¡o cÃ¡o" /></label>
-      <label>MÃ£<input class="form-control inline-admin-input" data-inline-sql-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="VD: BC_THUE_BAO" /></label>
-      <label>Danh sÃ¡ch biáº¿n<input class="form-control inline-admin-input inline-admin-params" data-inline-sql-field="cac_tham_so" value="${escapeHtml(params)}" placeholder="LOAIHINH, MONTH, DONVI" /><small class="cell-note">Má»—i biáº¿n cÃ¡ch nhau báº±ng dáº¥u pháº©y.</small></label>
-      <label>Báº£ng lá»‡nh<textarea class="form-control inline-admin-code sql-report-editor-code" data-inline-sql-field="cau_lenh_sql" rows="16" placeholder="SELECT ...;">${escapeHtml(report.cau_lenh_sql || "")}</textarea></label>
+      <label>Tên<input class="form-control inline-admin-input" data-inline-sql-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="Tên báo cáo" /></label>
+      <label>Mã<input class="form-control inline-admin-input" data-inline-sql-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="VD: BC_THUE_BAO" /></label>
+      <label>Danh sách biến<input class="form-control inline-admin-input inline-admin-params" data-inline-sql-field="cac_tham_so" value="${escapeHtml(params)}" placeholder="LOAIHINH, MONTH, DONVI" /><small class="cell-note">Mỗi biến cách nhau bằng dấu phẩy.</small></label>
+      <label>Bảng lệnh<textarea class="form-control inline-admin-code sql-report-editor-code" data-inline-sql-field="cau_lenh_sql" rows="16" placeholder="SELECT ...;">${escapeHtml(report.cau_lenh_sql || "")}</textarea></label>
     </div>`;
 }
 
@@ -5497,15 +5497,15 @@ async function saveInlineSqlReport(rowKey, button) {
     cac_tham_so: params,
   };
   if (!payload.ten_bao_cao || !payload.ma_bao_cao || !payload.cau_lenh_sql.trim()) {
-    showToast("Vui lÃ²ng nháº­p Ä‘á»§ tÃªn, mÃ£ vÃ  báº£ng lá»‡nh SQL.", "error");
+    showToast("Vui lòng nhập đủ tên, mã và bảng lệnh SQL.", "error");
     return;
   }
   setButtonLoading(button, true);
   try {
     await api("/api/admin/sql-reports", { method: "POST", body: JSON.stringify(payload) });
     sqlReportDrafts = sqlReportDrafts.filter((item) => item._rowKey !== rowKey);
-    showMessage($("#sql-reports-message"), "ÄÃ£ lÆ°u cáº¥u hÃ¬nh SQL.");
-    showToast("ÄÃ£ lÆ°u cáº¥u hÃ¬nh SQL.");
+    showMessage($("#sql-reports-message"), "Đã lưu cấu hình SQL.");
+    showToast("Đã lưu cấu hình SQL.");
     await loadSqlReports({ force: true });
     const picker = $("#sql-report-picker");
     if (picker && sqlReports.some((report) => report.ma_bao_cao === payload.ma_bao_cao)) {
@@ -5559,8 +5559,8 @@ async function saveSqlReport(event) {
       cac_tham_so: params,
     })});
     $("#sql-report-dialog")?.close();
-    showMessage($("#sql-reports-message"), "ÄÃ£ lÆ°u cáº¥u hÃ¬nh SQL.");
-    showToast("ÄÃ£ lÆ°u cáº¥u hÃ¬nh SQL.");
+    showMessage($("#sql-reports-message"), "Đã lưu cấu hình SQL.");
+    showToast("Đã lưu cấu hình SQL.");
     await loadSqlReports({ force: true });
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
@@ -5568,10 +5568,10 @@ async function saveSqlReport(event) {
 }
 
 async function deleteSqlReport(reportId) {
-  if (!confirm("XÃ³a cáº¥u hÃ¬nh SQL nÃ y?")) return;
+  if (!confirm("Xóa cấu hình SQL này?")) return;
   try {
     await api(`/api/admin/sql-reports/${reportId}`, { method: "DELETE" });
-    showMessage($("#sql-reports-message"), "ÄÃ£ xÃ³a cáº¥u hÃ¬nh SQL.");
+    showMessage($("#sql-reports-message"), "Đã xóa cấu hình SQL.");
     await loadSqlReports({ force: true });
   } catch (error) {
     showMessage($("#sql-reports-message"), error.message, "error");
@@ -5588,7 +5588,7 @@ async function loadOneBssReports({ force = false } = {}) {
     renderOneBssReports();
     fillOneBssRunSelect();
   }
-  if (!oneBssReports.length || force) renderOneBssReportEditorLoading("Äang táº£i cáº¥u hÃ¬nh OneBSS...");
+  if (!oneBssReports.length || force) renderOneBssReportEditorLoading("Đang tải cấu hình OneBSS...");
   try {
     const data = await api("/api/admin/onebss-reports");
     oneBssReports = data.reports || [];
@@ -5598,7 +5598,7 @@ async function loadOneBssReports({ force = false } = {}) {
   } catch (error) {
     showMessage($("#onebss-reports-message"), error.message, "error");
     const editor = $("#onebss-report-editor");
-    if (editor) editor.innerHTML = `<div class="empty-state"><div><strong>KhÃ´ng táº£i Ä‘Æ°á»£c cáº¥u hÃ¬nh OneBSS</strong><p>${escapeHtml(error.message)}</p></div></div>`;
+    if (editor) editor.innerHTML = `<div class="empty-state"><div><strong>Không tải được cấu hình OneBSS</strong><p>${escapeHtml(error.message)}</p></div></div>`;
   }
 }
 
@@ -5653,7 +5653,7 @@ function refreshOneBssReportPicker() {
     const text = [report.ten_bao_cao, report.ma_bao_cao, report.report_url, report.storage_link, JSON.stringify(report.parameters || {}), ...(report.danh_sach_bien || [])].join(" ").toLowerCase();
     return text.includes(search);
   });
-  picker.innerHTML = `<option value="">ThÃªm bÃ¡o cÃ¡o má»›i / chÆ°a chá»n bÃ¡o cÃ¡o</option>${filteredReports.map((report) => `<option value="${escapeHtml(report.ma_bao_cao)}">${escapeHtml(report.ten_bao_cao)} (${escapeHtml(report.ma_bao_cao)})</option>`).join("")}`;
+  picker.innerHTML = `<option value="">Thêm báo cáo mới / chưa chọn báo cáo</option>${filteredReports.map((report) => `<option value="${escapeHtml(report.ma_bao_cao)}">${escapeHtml(report.ten_bao_cao)} (${escapeHtml(report.ma_bao_cao)})</option>`).join("")}`;
   if (current && filteredReports.some((report) => report.ma_bao_cao === current)) picker.value = current;
 }
 
@@ -5717,7 +5717,7 @@ function parseOneBssPastedJson(text) {
       }
     }
   }
-  throw new Error("JSON máº«u chÆ°a Ä‘Ãºng Ä‘á»‹nh dáº¡ng. CÃ³ thá»ƒ dÃ¡n JSON chuáº©n hoáº·c máº«u object copy tá»« trÃ¬nh duyá»‡t.");
+  throw new Error("JSON mẫu chưa đúng định dạng. Có thể dán JSON chuẩn hoặc mẫu object copy từ trình duyệt.");
 }
 
 function oneBssParameterKeyFromDescriptor(item) {
@@ -5843,7 +5843,7 @@ function applyOneBssSampleJson(sampleInput) {
   const status = row.querySelector("[data-onebss-sample-status]");
   if (!String(sampleInput.value || "").trim()) {
     if (status) {
-      status.textContent = "DÃ¡n JSON máº«u Ä‘á»ƒ tá»± tÃ¡ch biáº¿n vÃ  táº¡o tham sá»‘ cháº¡y.";
+      status.textContent = "Dán JSON mẫu để tự tách biến và tạo tham số chạy.";
       delete status.dataset.tone;
     }
     return;
@@ -5856,13 +5856,13 @@ function applyOneBssSampleJson(sampleInput) {
     updateOneBssVariableListFromParameters(row);
     if (status) {
       const count = oneBssParameterVariables(parameters).length;
-      status.textContent = count ? `ÄÃ£ tÃ¡ch ${count} biáº¿n vÃ  tá»± cáº¥u hÃ¬nh cháº¡y 3 phÃ¢n vÃ¹ng.` : "JSON máº«u chÆ°a cÃ³ biáº¿n bÃ¡o cÃ¡o.";
+      status.textContent = count ? `Đã tách ${count} biến và tự cấu hình chạy 3 phân vùng.` : "JSON mẫu chưa có biến báo cáo.";
       status.dataset.tone = count ? "success" : "warning";
     }
     markOneBssReportDirty(row);
   } catch (error) {
     if (status) {
-      status.textContent = error.message || "KhÃ´ng chuyá»ƒn Ä‘Æ°á»£c JSON máº«u.";
+      status.textContent = error.message || "Không chuyển được JSON mẫu.";
       status.dataset.tone = "error";
     }
   }
@@ -5875,18 +5875,18 @@ function renderOneBssReportEditor(report, isDraft = false) {
   return `
     <div class="sql-report-editor-card" data-onebss-row="${escapeHtml(rowKey)}" data-onebss-report-id="${escapeHtml(report.id || "")}">
       <div class="section-heading">
-        <div><p class="eyebrow">${isDraft ? "ThÃªm bÃ¡o cÃ¡o OneBSS" : "Chá»‰nh bÃ¡o cÃ¡o OneBSS"}</p><h3>${isDraft ? "Táº¡o cáº¥u hÃ¬nh bÃ¡o cÃ¡o má»›i" : escapeHtml(report.ten_bao_cao || report.ma_bao_cao)}</h3></div>
-        <div class="action-group"><button class="table-action ${isDraft ? "" : "hidden"}" data-save-onebss-report-inline="${escapeHtml(rowKey)}">LÆ°u</button>${isDraft ? "" : `<button class="table-action danger" data-delete-onebss-report="${escapeHtml(rowKey)}">XÃ³a</button>`}</div>
+        <div><p class="eyebrow">${isDraft ? "Thêm báo cáo OneBSS" : "Chỉnh báo cáo OneBSS"}</p><h3>${isDraft ? "Tạo cấu hình báo cáo mới" : escapeHtml(report.ten_bao_cao || report.ma_bao_cao)}</h3></div>
+        <div class="action-group"><button class="table-action ${isDraft ? "" : "hidden"}" data-save-onebss-report-inline="${escapeHtml(rowKey)}">Lưu</button>${isDraft ? "" : `<button class="table-action danger" data-delete-onebss-report="${escapeHtml(rowKey)}">Xóa</button>`}</div>
       </div>
-      <label>MÃ£ bÃ¡o cÃ¡o<input class="form-control inline-admin-input" data-inline-onebss-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="Tá»± sinh náº¿u Ä‘á»ƒ trá»‘ng" /></label>
-      <label>TÃªn bÃ¡o cÃ¡o<input class="form-control inline-admin-input" data-inline-onebss-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="TÃªn bÃ¡o cÃ¡o OneBSS" /></label>
+      <label>Mã báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="Tự sinh nếu để trống" /></label>
+      <label>Tên báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="Tên báo cáo OneBSS" /></label>
       <div class="onebss-parameter-converter">
-        <label>JSON máº«u tá»« trÃ¬nh duyá»‡t<textarea class="form-control inline-admin-input font-mono text-xs onebss-sample-json" data-onebss-sample-json rows="10" placeholder='{p_phanvung_id: "66", p_nhanvienkd_id: "0", p_nhanvienkt_id: "0"}'></textarea><small class="cell-note" data-onebss-sample-status>DÃ¡n JSON chuáº©n hoáº·c máº«u object copy tá»« trÃ¬nh duyá»‡t Ä‘á»ƒ tá»± tÃ¡ch biáº¿n vÃ  táº¡o tham sá»‘ cháº¡y.</small></label>
-        <label>Tham sá»‘ xuáº¥t trá»±c tiáº¿p JSON<textarea class="form-control inline-admin-input font-mono text-xs" data-inline-onebss-field="parameters" rows="10" placeholder='{"P_PHANVUNG_ID":{"$each":["13","47","66"]},"P_TUNGAY":"{{month_start}}","P_DENNGAY":"{{today}}"}'>${escapeHtml(parameterJson === "{}" ? "" : parameterJson)}</textarea><small class="cell-note">JSON nÃ y lÃ  tham sá»‘ cháº¡y tháº­t. P_PHANVUNG_ID sáº½ cháº¡y láº§n lÆ°á»£t 13, 47, 66 khi Ä‘Æ°á»£c sinh tá»« máº«u.</small></label>
+        <label>JSON mẫu từ trình duyệt<textarea class="form-control inline-admin-input font-mono text-xs onebss-sample-json" data-onebss-sample-json rows="10" placeholder='{p_phanvung_id: "66", p_nhanvienkd_id: "0", p_nhanvienkt_id: "0"}'></textarea><small class="cell-note" data-onebss-sample-status>Dán JSON chuẩn hoặc mẫu object copy từ trình duyệt để tự tách biến và tạo tham số chạy.</small></label>
+        <label>Tham số xuất trực tiếp JSON<textarea class="form-control inline-admin-input font-mono text-xs" data-inline-onebss-field="parameters" rows="10" placeholder='{"P_PHANVUNG_ID":{"$each":["13","47","66"]},"P_TUNGAY":"{{month_start}}","P_DENNGAY":"{{today}}"}'>${escapeHtml(parameterJson === "{}" ? "" : parameterJson)}</textarea><small class="cell-note">JSON này là tham số chạy thật. P_PHANVUNG_ID sẽ chạy lần lượt 13, 47, 66 khi được sinh từ mẫu.</small></label>
       </div>
-      <label>Danh sÃ¡ch biáº¿n<input class="form-control inline-admin-input inline-admin-params" data-inline-onebss-field="danh_sach_bien" value="${escapeHtml(params)}" placeholder="P_PHANVUNG_ID, P_LOAI_NGAY, P_TUNGAY, P_DENNGAY, P_LOAI_BAOCAO, P_LOAI_BIENDONG" readonly /><small class="cell-note">Tá»± tÃ¡ch tá»« JSON máº«u hoáº·c tá»« JSON tham sá»‘ xuáº¥t trá»±c tiáº¿p.</small></label>
-      <label>Link láº¥y bÃ¡o cÃ¡o<input class="form-control inline-admin-input" data-inline-onebss-field="report_url" value="${escapeHtml(report.report_url || "")}" placeholder="https://onebss.vnpt.vn/#/report/bi?..." /></label>
-      <label>Link lÆ°u bÃ¡o cÃ¡o<input class="form-control inline-admin-input" data-inline-onebss-field="storage_link" value="${escapeHtml(report.storage_link || "")}" placeholder="Link thÆ° má»¥c Google Drive hoáº·c thÆ° má»¥c ná»™i bá»™" /></label>
+      <label>Danh sách biến<input class="form-control inline-admin-input inline-admin-params" data-inline-onebss-field="danh_sach_bien" value="${escapeHtml(params)}" placeholder="P_PHANVUNG_ID, P_LOAI_NGAY, P_TUNGAY, P_DENNGAY, P_LOAI_BAOCAO, P_LOAI_BIENDONG" readonly /><small class="cell-note">Tự tách từ JSON mẫu hoặc từ JSON tham số xuất trực tiếp.</small></label>
+      <label>Link lấy báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="report_url" value="${escapeHtml(report.report_url || "")}" placeholder="https://onebss.vnpt.vn/#/report/bi?..." /></label>
+      <label>Link lưu báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="storage_link" value="${escapeHtml(report.storage_link || "")}" placeholder="Link thư mục Google Drive hoặc thư mục nội bộ" /></label>
     </div>`;
 }
 
@@ -5915,7 +5915,7 @@ async function saveInlineOneBssReport(rowKey, button) {
     try {
       parameters = JSON.parse(parameterText);
     } catch {
-      showToast("Tham sá»‘ xuáº¥t trá»±c tiáº¿p JSON chÆ°a Ä‘Ãºng Ä‘á»‹nh dáº¡ng.", "error");
+      showToast("Tham số xuất trực tiếp JSON chưa đúng định dạng.", "error");
       return;
     }
   }
@@ -5930,7 +5930,7 @@ async function saveInlineOneBssReport(rowKey, button) {
     storage_link: row.querySelector('[data-inline-onebss-field="storage_link"]')?.value.trim() || "",
   };
   if (!payload.ten_bao_cao || !payload.report_url) {
-    showToast("Vui lÃ²ng nháº­p tÃªn bÃ¡o cÃ¡o vÃ  link láº¥y bÃ¡o cÃ¡o OneBSS.", "error");
+    showToast("Vui lòng nhập tên báo cáo và link lấy báo cáo OneBSS.", "error");
     return;
   }
   setButtonLoading(button, true);
@@ -5938,8 +5938,8 @@ async function saveInlineOneBssReport(rowKey, button) {
     const response = await api("/api/admin/onebss-reports", { method: "POST", body: JSON.stringify(payload) });
     oneBssReportDrafts = oneBssReportDrafts.filter((item) => item._rowKey !== rowKey);
     markDataStale("oneBssReports", "oneBssMining");
-    showMessage($("#onebss-reports-message"), "ÄÃ£ lÆ°u cáº¥u hÃ¬nh OneBSS.");
-    showToast("ÄÃ£ lÆ°u cáº¥u hÃ¬nh OneBSS.");
+    showMessage($("#onebss-reports-message"), "Đã lưu cấu hình OneBSS.");
+    showToast("Đã lưu cấu hình OneBSS.");
     await loadOneBssReports({ force: true });
     const picker = $("#onebss-report-picker");
     if (picker && response.ma_bao_cao) {
@@ -5962,11 +5962,11 @@ async function deleteInlineOneBssReport(rowKey) {
   }
   const row = document.querySelector(`[data-onebss-row="${CSS.escape(rowKey)}"]`);
   const reportId = row?.dataset.onebssReportId;
-  if (!reportId || !confirm("XÃ³a cáº¥u hÃ¬nh bÃ¡o cÃ¡o OneBSS nÃ y?")) return;
+  if (!reportId || !confirm("Xóa cấu hình báo cáo OneBSS này?")) return;
   try {
     await api(`/api/admin/onebss-reports/${reportId}`, { method: "DELETE" });
     markDataStale("oneBssReports", "oneBssMining");
-    showMessage($("#onebss-reports-message"), "ÄÃ£ xÃ³a cáº¥u hÃ¬nh OneBSS.");
+    showMessage($("#onebss-reports-message"), "Đã xóa cấu hình OneBSS.");
     await loadOneBssReports({ force: true });
   } catch (error) {
     showMessage($("#onebss-reports-message"), error.message, "error");
@@ -5995,7 +5995,7 @@ function fillDynamicReportSelect() {
   const current = select.value;
   select.innerHTML = sqlReports.length
     ? sqlReports.map((report) => `<option value="${escapeHtml(report.ma_bao_cao)}">${escapeHtml(report.ten_bao_cao)} (${escapeHtml(report.ma_bao_cao)})</option>`).join("")
-    : `<option value="">ChÆ°a cÃ³ bÃ¡o cÃ¡o</option>`;
+    : `<option value="">Chưa có báo cáo</option>`;
   if (current && sqlReports.some((report) => report.ma_bao_cao === current)) select.value = current;
 }
 
@@ -6022,9 +6022,9 @@ function renderDynamicReportFilters() {
       return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter" name="${escapeHtml(param)}" type="date" /></label>`;
     }
     if (lower.includes("status") || lower.includes("trang_thai")) {
-      return `<label>${escapeHtml(param)}<select class="form-control dynamic-filter" name="${escapeHtml(param)}"><option value="">Táº¥t cáº£</option><option value="1">Äang hoáº¡t Ä‘á»™ng</option><option value="0">KhÃ´ng hoáº¡t Ä‘á»™ng</option></select></label>`;
+      return `<label>${escapeHtml(param)}<select class="form-control dynamic-filter" name="${escapeHtml(param)}"><option value="">Tất cả</option><option value="1">Đang hoạt động</option><option value="0">Không hoạt động</option></select></label>`;
     }
-    return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter" name="${escapeHtml(param)}" placeholder="Nháº­p ${escapeHtml(param)}" /></label>`;
+    return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter" name="${escapeHtml(param)}" placeholder="Nhập ${escapeHtml(param)}" /></label>`;
   }).join("");
 }
 
@@ -6057,8 +6057,8 @@ function clearDynamicReportCache() {
   dynamicReportFilteredRows = [];
   dynamicReportSearchActive = false;
   $("#dynamic-report-head") && ($("#dynamic-report-head").innerHTML = "");
-  $("#dynamic-report-body") && ($("#dynamic-report-body").innerHTML = emptyRow(1, "ChÆ°a cÃ³ dá»¯ liá»‡u", "Báº¥m Láº¥y dá»¯ liá»‡u Ä‘á»ƒ táº£i bÃ¡o cÃ¡o."));
-  $("#dynamic-report-page-info") && ($("#dynamic-report-page-info").textContent = "ChÆ°a cÃ³ dá»¯ liá»‡u");
+  $("#dynamic-report-body") && ($("#dynamic-report-body").innerHTML = emptyRow(1, "Chưa có dữ liệu", "Bấm Lấy dữ liệu để tải báo cáo."));
+  $("#dynamic-report-page-info") && ($("#dynamic-report-page-info").textContent = "Chưa có dữ liệu");
   $("#dynamic-report-prev") && ($("#dynamic-report-prev").disabled = true);
   $("#dynamic-report-next") && ($("#dynamic-report-next").disabled = true);
 }
@@ -6075,7 +6075,7 @@ function normalizeDynamicSearchText(value) {
 async function applyDynamicReportSearch() {
   const message = $("#dynamic-report-message");
   if (!dynamicReportColumns.length) {
-    showMessage(message, "Báº¥m Láº¥y dá»¯ liá»‡u trÆ°á»›c Ä‘á»ƒ há»‡ thá»‘ng nháº­n danh sÃ¡ch cá»™t, sau Ä‘Ã³ má»›i TÃ¬m.", "error");
+    showMessage(message, "Bấm Lấy dữ liệu trước để hệ thống nhận danh sách cột, sau đó mới Tìm.", "error");
     return;
   }
   const search = ($("#dynamic-report-search")?.value || "").trim();
@@ -6090,7 +6090,7 @@ async function loadDynamicReportData({ includeSearch = dynamicReportSearchActive
   const button = $("#run-dynamic-report");
   if (!select || !select.value) {
     $("#dynamic-report-head").innerHTML = "";
-    $("#dynamic-report-body").innerHTML = emptyRow(1, "ChÆ°a cÃ³ bÃ¡o cÃ¡o", "HÃ£y thÃªm cáº¥u hÃ¬nh SQL trong Quáº£n trá»‹ káº¿t ná»‘i.");
+    $("#dynamic-report-body").innerHTML = emptyRow(1, "Chưa có báo cáo", "Hãy thêm cấu hình SQL trong Quản trị kết nối.");
     return;
   }
   setButtonLoading(button, true);
@@ -6099,7 +6099,7 @@ async function loadDynamicReportData({ includeSearch = dynamicReportSearchActive
       method: "POST",
       body: JSON.stringify(dynamicReportPayload({ includeSearch })),
     });
-    if (response.ok === false) throw new Error(response.message || "KhÃ´ng táº£i Ä‘Æ°á»£c dá»¯ liá»‡u bÃ¡o cÃ¡o.");
+    if (response.ok === false) throw new Error(response.message || "Không tải được dữ liệu báo cáo.");
     const rows = Array.isArray(response.rows) ? response.rows : [];
     dynamicReportColumns = response.columns || dynamicReportColumns;
     if (!dynamicReportColumns.length && rows[0]) dynamicReportColumns = Object.keys(rows[0]);
@@ -6108,7 +6108,7 @@ async function loadDynamicReportData({ includeSearch = dynamicReportSearchActive
     dynamicReportLoaded = true;
     renderDynamicReportTable(response);
     loadDynamicReportHistory({ silent: true }).catch(() => {});
-    showMessage(message, response.message || (includeSearch ? "ÄÃ£ táº£i káº¿t quáº£ tÃ¬m kiáº¿m." : "ÄÃ£ táº£i dá»¯ liá»‡u bÃ¡o cÃ¡o."));
+    showMessage(message, response.message || (includeSearch ? "Đã tải kết quả tìm kiếm." : "Đã tải dữ liệu báo cáo."));
   } catch (error) {
     showMessage(message, error.message, "error");
   } finally {
@@ -6154,19 +6154,19 @@ function dynamicReportHistoryItemKey(job) {
 
 function dynamicReportHistoryTypeLabel(value) {
   const normalized = String(value || "").toLowerCase();
-  if (normalized === "export") return "Xuáº¥t file";
-  return "Láº¥y dá»¯ liá»‡u";
+  if (normalized === "export") return "Xuất file";
+  return "Lấy dữ liệu";
 }
 
 function dynamicReportExportStatusLabel(status) {
   const normalized = String(status || "").toLowerCase();
-  if (normalized === "cancel_requested") return "Äang ngá»«ng";
-  if (normalized === "cancelled") return "ÄÃ£ ngá»«ng";
-  if (normalized === "success") return "ÄÃ£ láº¥y";
-  if (normalized === "complete") return "HoÃ n táº¥t";
-  if (normalized === "failed") return "Lá»—i";
-  if (normalized === "running") return "Äang cháº¡y";
-  if (normalized === "queued") return "Äang chá»";
+  if (normalized === "cancel_requested") return "Đang ngừng";
+  if (normalized === "cancelled") return "Đã ngừng";
+  if (normalized === "success") return "Đã lấy";
+  if (normalized === "complete") return "Hoàn tất";
+  if (normalized === "failed") return "Lỗi";
+  if (normalized === "running") return "Đang chạy";
+  if (normalized === "queued") return "Đang chờ";
   return status || "-";
 }
 
@@ -6229,13 +6229,13 @@ function dynamicReportExportResultHtml(job, status) {
   const link = job.drive_url || job.download_url || "";
   const action = [];
   if (link) {
-    action.push(`<a class="table-action" href="${escapeHtml(link)}" target="_blank" rel="noopener">Má»Ÿ file</a>`);
+    action.push(`<a class="table-action" href="${escapeHtml(link)}" target="_blank" rel="noopener">Mở file</a>`);
   } else {
-    action.push(`<span>${escapeHtml(job.message || (status === "failed" ? "Xuáº¥t file lá»—i" : "Äang xá»­ lÃ½"))}</span>`);
+    action.push(`<span>${escapeHtml(job.message || (status === "failed" ? "Xuất file lỗi" : "Đang xử lý"))}</span>`);
   }
   if (job.can_cancel || dynamicReportExportIsActive(job)) {
     const isStopping = status === "cancel_requested";
-    const label = status === "queued" ? "XÃ³a lá»‡nh" : isStopping ? "Äang ngá»«ng" : "Ngá»«ng lá»‡nh";
+    const label = status === "queued" ? "Xóa lệnh" : isStopping ? "Đang ngừng" : "Ngừng lệnh";
     action.push(`<button class="table-action danger" data-dynamic-report-job-action="cancel" data-job-id="${escapeHtml(job.job_id || "")}" type="button" ${isStopping ? "disabled" : ""}>${label}</button>`);
   }
   return `<div class="action-group">${action.join("")}</div>`;
@@ -6245,11 +6245,11 @@ function renderDynamicReportExportJobs() {
   const body = $("#dynamic-report-export-results");
   if (!body) return;
   const heading = document.querySelector(".dynamic-report-export-heading h2");
-  if (heading) heading.textContent = "HÃ ng Ä‘á»£i vÃ  lá»‹ch sá»­ káº¿t quáº£";
+  if (heading) heading.textContent = "Hàng đợi và lịch sử kết quả";
   const head = body.closest("table")?.querySelector("thead");
-  if (head) head.innerHTML = "<tr><th>Thá»i gian</th><th>Thá»© tá»±</th><th>Loáº¡i</th><th>BÃ¡o cÃ¡o</th><th>Tráº¡ng thÃ¡i</th><th>Sá»‘ dÃ²ng</th><th>Káº¿t quáº£ / thao tÃ¡c</th></tr>";
+  if (head) head.innerHTML = "<tr><th>Thời gian</th><th>Thứ tự</th><th>Loại</th><th>Báo cáo</th><th>Trạng thái</th><th>Số dòng</th><th>Kết quả / thao tác</th></tr>";
   if (!dynamicReportExportJobs.length) {
-    body.innerHTML = emptyRow(7, "ChÆ°a cÃ³ hÃ ng Ä‘á»£i", "Káº¿t quáº£ láº¥y dá»¯ liá»‡u vÃ  xuáº¥t file sáº½ xuáº¥t hiá»‡n á»Ÿ Ä‘Ã¢y.");
+    body.innerHTML = emptyRow(7, "Chưa có hàng đợi", "Kết quả lấy dữ liệu và xuất file sẽ xuất hiện ở đây.");
     return;
   }
   body.innerHTML = dynamicReportExportJobs.map((job) => {
@@ -6334,8 +6334,8 @@ async function monitorDynamicReportExportJob(jobId) {
       const job = repairDataEncoding(await api(`/api/reports/export-jobs/${encodeURIComponent(jobId)}`));
       upsertDynamicReportExportJob(job);
       if (!dynamicReportExportIsActive(job)) {
-        if (job.status === "complete") showToast(job.message || "ÄÃ£ xuáº¥t file xong. Báº¥m Má»Ÿ file trong báº£ng lá»‹ch sá»­.");
-        if (job.status === "cancelled") showToast(job.message || "ÄÃ£ ngá»«ng lá»‡nh xuáº¥t file.");
+        if (job.status === "complete") showToast(job.message || "Đã xuất file xong. Bấm Mở file trong bảng lịch sử.");
+        if (job.status === "cancelled") showToast(job.message || "Đã ngừng lệnh xuất file.");
         break;
       }
     }
@@ -6357,7 +6357,7 @@ async function handleDynamicReportExportAction(event) {
   try {
     const job = repairDataEncoding(await api(`/api/reports/export-jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" }));
     upsertDynamicReportExportJob(job);
-    showToast(job.message || "ÄÃ£ gá»­i lá»‡nh ngá»«ng/xÃ³a job.");
+    showToast(job.message || "Đã gửi lệnh ngừng/xóa job.");
   } catch (error) {
     showToast(error.message, "error");
   } finally {
@@ -6378,21 +6378,21 @@ async function waitDynamicReportExportJob(jobId, button) {
       if (job.status === "queued") setDynamicReportExportStatus(job.message);
     }
     if (job.status === "complete") return job;
-    if (job.status === "failed") throw new Error(job.message || "KhÃ´ng xuáº¥t Ä‘Æ°á»£c file Excel.");
+    if (job.status === "failed") throw new Error(job.message || "Không xuất được file Excel.");
   }
-  throw new Error("Táº¡o file Excel quÃ¡ lÃ¢u. HÃ£y kiá»ƒm tra láº¡i job xuáº¥t hoáº·c thu háº¹p Ä‘iá»u kiá»‡n bÃ¡o cÃ¡o.");
+  throw new Error("Tạo file Excel quá lâu. Hãy kiểm tra lại job xuất hoặc thu hẹp điều kiện báo cáo.");
 }
 
 function downloadDynamicReportExportJob(job) {
-  if (!job.download_url) throw new Error("Job xuáº¥t Excel chÆ°a cÃ³ link táº£i file.");
+  if (!job.download_url) throw new Error("Job xuất Excel chưa có link tải file.");
   if (job.drive_url) {
-    setDynamicReportExportStatus(job.message || "ÄÃ£ xuáº¥t file Excel lÃªn Google Drive.", "success", job);
+    setDynamicReportExportStatus(job.message || "Đã xuất file Excel lên Google Drive.", "success", job);
     const opened = window.open(job.drive_url, "_blank", "noopener");
     if (!opened) window.location.href = job.drive_url;
     return;
   }
   setDynamicReportExportStatus(
-    `${job.message || "ÄÃ£ táº¡o file Excel."} Náº¿u trÃ¬nh duyá»‡t chÆ°a tá»± táº£i, báº¥m link nÃ y:`,
+    `${job.message || "Đã tạo file Excel."} Nếu trình duyệt chưa tự tải, bấm link này:`,
     "success",
     job,
   );
@@ -6405,11 +6405,11 @@ async function exportDynamicReport() {
   const button = $("#export-dynamic-report");
   let activeExportJob = null;
   if (!select || !select.value) {
-    showMessage(message, "Chá»n loáº¡i bÃ¡o cÃ¡o trÆ°á»›c khi xuáº¥t file.", "error");
+    showMessage(message, "Chọn loại báo cáo trước khi xuất file.", "error");
     return;
   }
   if (!dynamicReportColumns.length) {
-    showMessage(message, "Báº¥m Láº¥y dá»¯ liá»‡u trÆ°á»›c, sau Ä‘Ã³ má»›i xuáº¥t file Excel.", "error");
+    showMessage(message, "Bấm Lấy dữ liệu trước, sau đó mới xuất file Excel.", "error");
     return;
   }
   setButtonLoading(button, true);
@@ -6424,12 +6424,12 @@ async function exportDynamicReport() {
       report_name: select.selectedOptions?.[0]?.textContent || "",
       created_at: new Date().toISOString(),
     });
-    if (!started.job_id) throw new Error("KhÃ´ng tháº¥y job xuáº¥t file.");
-    showMessage(message, started.message || "Äang xuáº¥t file Excel á»Ÿ cháº¿ Ä‘á»™ ná»n.");
-    setDynamicReportExportStatus(started.message || "Äang xuáº¥t file Excel á»Ÿ cháº¿ Ä‘á»™ ná»n.");
+    if (!started.job_id) throw new Error("Không thấy job xuất file.");
+    showMessage(message, started.message || "Đang xuất file Excel ở chế độ nền.");
+    setDynamicReportExportStatus(started.message || "Đang xuất file Excel ở chế độ nền.");
     monitorDynamicReportExportJob(started.job_id);
     loadDynamicReportHistory({ silent: true }).catch(() => {});
-    showMessage(message, "ÄÃ£ Ä‘Æ°a lá»‡nh xuáº¥t file vÃ o hÃ ng Ä‘á»£i. Khi xong, link sáº½ hiá»‡n á»Ÿ báº£ng bÃªn dÆ°á»›i.");
+    showMessage(message, "Đã đưa lệnh xuất file vào hàng đợi. Khi xong, link sẽ hiện ở bảng bên dưới.");
     return;
   } catch (error) {
     upsertDynamicReportExportJob({
@@ -6458,11 +6458,11 @@ function renderDynamicReportTable(response) {
   $("#dynamic-report-head").innerHTML = columns.length ? `<tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>` : "";
   $("#dynamic-report-body").innerHTML = rows.length
     ? rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(row[column])}</td>`).join("")}</tr>`).join("")
-    : emptyRow(Math.max(columns.length, 1), "KhÃ´ng cÃ³ dá»¯ liá»‡u", "Thá»­ thay Ä‘á»•i Ä‘iá»u kiá»‡n lá»c hoáº·c kiá»ƒm tra cÃ¢u SQL.");
+    : emptyRow(Math.max(columns.length, 1), "Không có dữ liệu", "Thử thay đổi điều kiện lọc hoặc kiểm tra câu SQL.");
   const page = response.pagination?.page || dynamicReportPage;
   const pageSize = response.pagination?.page_size || Number($("#dynamic-report-page-size")?.value || 20);
   dynamicReportPage = page;
-  $("#dynamic-report-page-info").textContent = `Trang ${page} Â· ${rows.length}/${dynamicReportTotal} dÃ²ng`;
+  $("#dynamic-report-page-info").textContent = `Trang ${page} · ${rows.length}/${dynamicReportTotal} dòng`;
   $("#dynamic-report-prev").disabled = page <= 1;
   $("#dynamic-report-next").disabled = page * pageSize >= dynamicReportTotal;
 }
@@ -6491,7 +6491,7 @@ async function loadOneBssMining({ force = false } = {}) {
   } catch (error) {
     showMessage($("#onebss-run-message"), error.message, "error");
     const history = $("#onebss-run-history");
-    if (history) history.innerHTML = emptyRow(6, "KhÃ´ng táº£i Ä‘Æ°á»£c dá»¯ liá»‡u OneBSS", error.message);
+    if (history) history.innerHTML = emptyRow(6, "Không tải được dữ liệu OneBSS", error.message);
   }
 }
 
@@ -6501,7 +6501,7 @@ function fillOneBssRunSelect() {
   const current = select.value;
   select.innerHTML = oneBssReports.length
     ? oneBssReports.map((report) => `<option value="${escapeHtml(report.ma_bao_cao)}">${escapeHtml(report.ten_bao_cao)} (${escapeHtml(report.ma_bao_cao)})</option>`).join("")
-    : `<option value="">ChÆ°a cÃ³ bÃ¡o cÃ¡o OneBSS</option>`;
+    : `<option value="">Chưa có báo cáo OneBSS</option>`;
   if (current && oneBssReports.some((report) => report.ma_bao_cao === current)) select.value = current;
 }
 
@@ -6522,7 +6522,7 @@ function renderOneBssRunParameters() {
   const jsonTemplate = JSON.stringify(report?.parameters || {}, null, 2);
   container.innerHTML = `
     ${variables.length ? `<div class="compact-code-cell">${renderCompactCode(variables.join(", "))}</div>` : ""}
-    <label>Tham sá»‘ Ä‘Ã£ cáº¥u hÃ¬nh<textarea class="form-control onebss-param-json font-mono text-xs" rows="9" readonly placeholder="ChÆ°a cáº¥u hÃ¬nh tham sá»‘ trong Quáº£n trá»‹ dá»¯ liá»‡u OneBSS">${escapeHtml(jsonTemplate === "{}" ? "" : jsonTemplate)}</textarea></label>
+    <label>Tham số đã cấu hình<textarea class="form-control onebss-param-json font-mono text-xs" rows="9" readonly placeholder="Chưa cấu hình tham số trong Quản trị dữ liệu OneBSS">${escapeHtml(jsonTemplate === "{}" ? "" : jsonTemplate)}</textarea></label>
   `;
 }
 
@@ -6536,7 +6536,7 @@ function collectOneBssRunParameters() {
     try {
       return JSON.parse(jsonBox.value);
     } catch {
-      throw new Error("Tham sá»‘ lá»c JSON chÆ°a Ä‘Ãºng Ä‘á»‹nh dáº¡ng.");
+      throw new Error("Tham số lọc JSON chưa đúng định dạng.");
     }
   }
   const report = selectedOneBssReport();
@@ -6636,16 +6636,16 @@ function oneBssJobIsActive(status) {
 
 function oneBssRunStatusLabel(status) {
   const normalized = String(status || "").toLowerCase();
-  if (normalized === "queued") return "Äang chá»";
-  if (normalized === "running") return "Äang cháº¡y";
-  if (normalized === "otp_required" || normalized === "manual_otp_required") return "Chá» OTP";
-  if (normalized === "otp_invalid") return "OTP lá»—i";
-  if (normalized === "success") return "HoÃ n táº¥t";
-  if (normalized === "cancelled") return "ÄÃ£ há»§y";
-  if (normalized === "failed") return "Lá»—i";
-  if (normalized === "google_drive_upload_failed") return "Lá»—i Drive";
-  if (normalized === "google_drive_not_configured") return "Thiáº¿u Drive";
-  if (normalized === "storage_failed") return "Lá»—i lÆ°u";
+  if (normalized === "queued") return "Đang chờ";
+  if (normalized === "running") return "Đang chạy";
+  if (normalized === "otp_required" || normalized === "manual_otp_required") return "Chờ OTP";
+  if (normalized === "otp_invalid") return "OTP lỗi";
+  if (normalized === "success") return "Hoàn tất";
+  if (normalized === "cancelled") return "Đã hủy";
+  if (normalized === "failed") return "Lỗi";
+  if (normalized === "google_drive_upload_failed") return "Lỗi Drive";
+  if (normalized === "google_drive_not_configured") return "Thiếu Drive";
+  if (normalized === "storage_failed") return "Lỗi lưu";
   return status || "-";
 }
 
@@ -6753,7 +6753,7 @@ async function runOneBssReport(otp = "", options = {}) {
   const message = $("#onebss-run-message");
   const report = selectedOneBssReport();
   if (!select || !select.value || !report) {
-    showMessage(message, "ChÆ°a cÃ³ cáº¥u hÃ¬nh bÃ¡o cÃ¡o OneBSS.", "error");
+    showMessage(message, "Chưa có cấu hình báo cáo OneBSS.", "error");
     return;
   }
   let parameters = {};
@@ -6789,12 +6789,12 @@ async function runOneBssReport(otp = "", options = {}) {
       if (response.status === "otp_invalid") oneBssOtpManualSubmitStarted = false;
       showOneBssOtpPanel(oneBssPendingOtpRequestId ? "Dang doi OTP tu tin nhan. Anh co the nhap tay neu nhan duoc truoc." : "");
       if (oneBssPendingOtpRequestId && !oneBssOtpManualSubmitStarted) startOneBssOtpPolling(oneBssPendingOtpRequestId);
-      showMessage(message, response.message || "OneBSS yÃªu cáº§u OTP.", response.status === "otp_invalid" ? "error" : "info");
+      showMessage(message, response.message || "OneBSS yêu cầu OTP.", response.status === "otp_invalid" ? "error" : "info");
       return;
     }
     oneBssPendingSessionId = "";
     resetOneBssOtpState();
-    showMessage(message, response.message || (response.ok ? "ÄÃ£ láº¥y bÃ¡o cÃ¡o OneBSS." : "Láº¥y bÃ¡o cÃ¡o OneBSS lá»—i."), response.ok ? "success" : "error");
+    showMessage(message, response.message || (response.ok ? "Đã lấy báo cáo OneBSS." : "Lấy báo cáo OneBSS lỗi."), response.ok ? "success" : "error");
     await refreshOneBssRunHistory(select.value);
   } catch (error) {
     showMessage(message, error.message, "error");
@@ -6817,7 +6817,7 @@ function renderOneBssRunHistory() {
   if (!table) return;
   table.innerHTML = oneBssReportRuns.length
     ? oneBssReportRuns.map((run) => renderOneBssRunRow(run)).join("")
-    : emptyRow(6, "ChÆ°a cÃ³ lÆ°á»£t láº¥y bÃ¡o cÃ¡o", "Káº¿t quáº£ láº¥y OneBSS sáº½ xuáº¥t hiá»‡n á»Ÿ Ä‘Ã¢y sau khi báº¥m Láº¥y bÃ¡o cÃ¡o.");
+    : emptyRow(6, "Chưa có lượt lấy báo cáo", "Kết quả lấy OneBSS sẽ xuất hiện ở đây sau khi bấm Lấy báo cáo.");
 }
 
 function renderOneBssRunRow(run) {
@@ -6830,7 +6830,7 @@ function renderOneBssRunRow(run) {
     && /^https?:\/\//.test(run.storage_link)
     && (isUploadedDriveFile || /\/file\/d\/|[?&]id=/.test(run.storage_link));
   const fileLink = isDirectFileLink
-    ? `<a href="${escapeHtml(run.storage_link)}" target="_blank" rel="noopener">Má»Ÿ file</a>`
+    ? `<a href="${escapeHtml(run.storage_link)}" target="_blank" rel="noopener">Mở file</a>`
     : (run.file_path ? `<code>${escapeHtml(run.file_name || run.file_path)}</code><small class="cell-note">${escapeHtml(run.file_path)}</small>` : "-");
   return `
     <tr>
@@ -6952,14 +6952,14 @@ function renderOneBssRunRow(run) {
 
 function truncateText(value, maxLength = 120) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
-  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}â€¦` : text;
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
 }
 
 async function cancelOneBssRun(runId, button = null) {
   const id = String(runId || "").trim();
   const message = $("#onebss-run-message");
   if (!id) return;
-  if (!confirm("Há»§y task láº¥y bÃ¡o cÃ¡o OneBSS nÃ y?")) return;
+  if (!confirm("Hủy task lấy báo cáo OneBSS này?")) return;
   try {
     if (button) button.disabled = true;
     const response = repairDataEncoding(await api(`/api/onebss-reports/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" }));
@@ -6972,7 +6972,7 @@ async function cancelOneBssRun(runId, button = null) {
       resetOneBssOtpState();
     }
     renderOneBssRunHistory();
-    showMessage(message, response.message || "ÄÃ£ há»§y task OneBSS.");
+    showMessage(message, response.message || "Đã hủy task OneBSS.");
     await refreshOneBssRunHistory($("#onebss-run-report-select")?.value || "");
   } catch (error) {
     showMessage(message, error.message, "error");
@@ -7054,12 +7054,12 @@ async function loadAudit({ force = false } = {}) {
   if (auditLogs.length && !force) {
     renderAuditLogs();
   }
-  if (!auditLogs.length || force) setTableLoading("#audit-table", 4, "Äang táº£i nháº­t kÃ½ hoáº¡t Ä‘á»™ng...");
+  if (!auditLogs.length || force) setTableLoading("#audit-table", 4, "Đang tải nhật ký hoạt động...");
   auditLogs = (await api("/api/admin/audit-logs")).logs;
   markDataFresh("auditLogs");
   renderAuditLogs();
 }
 
 function renderAuditLogs() {
-  $("#audit-table").innerHTML = auditLogs.length ? auditLogs.map((log) => `<tr><td>${new Date(log.created_at).toLocaleString("vi-VN")}</td><td><strong>${escapeHtml(log.actor)}</strong></td><td>${escapeHtml(log.action)}</td><td>${escapeHtml(log.details)}</td></tr>`).join("") : emptyRow(4, "ChÆ°a cÃ³ nháº­t kÃ½", "CÃ¡c thao tÃ¡c quan trá»ng sáº½ xuáº¥t hiá»‡n táº¡i Ä‘Ã¢y.");
+  $("#audit-table").innerHTML = auditLogs.length ? auditLogs.map((log) => `<tr><td>${new Date(log.created_at).toLocaleString("vi-VN")}</td><td><strong>${escapeHtml(log.actor)}</strong></td><td>${escapeHtml(log.action)}</td><td>${escapeHtml(log.details)}</td></tr>`).join("") : emptyRow(4, "Chưa có nhật ký", "Các thao tác quan trọng sẽ xuất hiện tại đây.");
 }
