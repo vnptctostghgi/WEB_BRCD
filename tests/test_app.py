@@ -1517,6 +1517,7 @@ def test_dynamic_report_export_job_downloads_full_result_set(monkeypatch) -> Non
         }
 
     monkeypatch.setattr(routes.InternalApiClient, "run_sql_report", fake_run_sql_report)
+    monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings, storage_link="": "")
 
     with TestClient(app) as client:
         login(client)
