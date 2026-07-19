@@ -1991,7 +1991,7 @@ def render_index_page(request: Request, feature_path: str) -> Response:
     return templates.TemplateResponse(
         request=request,
         name="index.html",
-        context={"app_name": get_settings().app_name, "user": user},
+        context={"app_name": get_settings().app_name, "user": user, "shell_only": not feature_path.strip("/")},
     )
 
 

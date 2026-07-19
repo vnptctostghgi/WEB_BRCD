@@ -618,6 +618,10 @@ async function activateNavItem(item, options = {}) {
   const loadToken = ++activeViewLoadToken;
   const nextView = item.dataset.view || "";
   const dashboardPageId = item.dataset.dashboardPageId || "";
+  if (nextView && !$(`#view-${nextView}`)) {
+    window.location.href = featurePathFromCode(item.dataset.featureCode);
+    return;
+  }
   document.body.classList.remove("app-shell-idle");
   $("#view-dashboard")?.classList.toggle("dashboard-dynamic-mode", Boolean(dashboardPageId));
   document.querySelectorAll(".nav-item").forEach((element) => element.classList.remove("active"));
