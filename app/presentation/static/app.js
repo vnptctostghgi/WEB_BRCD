@@ -314,6 +314,17 @@ function setActiveAppView(viewName) {
   return nextView;
 }
 
+function enterIdleShell() {
+  activeViewLoadToken += 1;
+  document.body.classList.remove("app-booting", "view-loading");
+  document.body.classList.add("app-shell-idle");
+  document.querySelectorAll(".nav-item.active").forEach((item) => item.classList.remove("active"));
+  document.querySelectorAll(".app-view.active, .app-view.view-entering, .app-view.view-exiting, .app-view.view-preparing").forEach((view) => {
+    view.classList.remove("active", "view-entering", "view-exiting", "view-preparing");
+  });
+  releaseAppViewHeight(0);
+}
+
 const navFeatureConfig = {
   quanlycongviec: { view: "work-tasks", icon: "list", keywords: "quan ly cong viec task lich telegram nhac viec" },
   taikhoanweb: { view: "vault", icon: "vault", keywords: "tai khoan web mat khau" },
@@ -607,6 +618,7 @@ async function activateNavItem(item, options = {}) {
   const loadToken = ++activeViewLoadToken;
   const nextView = item.dataset.view || "";
   const dashboardPageId = item.dataset.dashboardPageId || "";
+  document.body.classList.remove("app-shell-idle");
   $("#view-dashboard")?.classList.toggle("dashboard-dynamic-mode", Boolean(dashboardPageId));
   document.querySelectorAll(".nav-item").forEach((element) => element.classList.remove("active"));
   item.classList.add("active");
@@ -2113,15 +2125,18 @@ async function syncNavigationFromFeatures() {
     }
     const tree = $("#nav-tree");
     if (!tree) return;
-    const activeCode = tree.querySelector(".nav-item.active")?.dataset.featureCode || "dashboard";
+    const routeCode = featureCodeFromCurrentPath();
+    const activeCode = tree.querySelector(".nav-item.active")?.dataset.featureCode || "";
     const html = buildFeatureTree(features)
       .filter((node) => navNodeHasVisibleItem(node))
       .map((node) => renderNavigationNode(node))
       .join("");
     if (html.trim()) tree.innerHTML = html;
-    const activeItem = preferredNavItem(activeCode);
+    const activeItem = routeCode ? preferredNavItem(routeCode || activeCode) : null;
     if (activeItem) {
-      await activateNavItem(activeItem, { updateUrl: !featureCodeFromCurrentPath(), replaceUrl: true });
+      await activateNavItem(activeItem, { updateUrl: false, replaceUrl: true });
+    } else {
+      enterIdleShell();
     }
     filterNavigation($("#menu-search")?.value || "");
   } catch {
@@ -2133,8 +2148,11 @@ async function syncNavigationFromFeatures() {
 
 async function activateNavForCurrentPath() {
   const routeCode = featureCodeFromCurrentPath();
-  if (!routeCode && window.location.pathname !== "/") return false;
-  const item = preferredNavItem(routeCode || "dashboard");
+  if (!routeCode) {
+    enterIdleShell();
+    return false;
+  }
+  const item = preferredNavItem(routeCode);
   if (!item) return false;
   openNavParents(item);
   await activateNavItem(item, { updateUrl: false });
