@@ -106,11 +106,11 @@ const dashboardColorScaleStops = [
 ];
 const dashboardPiePalette = [
   "#2563EB",
-  "#F59E0B",
-  "#0891B2",
-  "#DC2626",
   "#7C3AED",
-  "#64748B",
+  "#06B6D4",
+  "#F59E0B",
+  "#F43F5E",
+  "#DC2626",
   "#0D9488",
   "#B45309",
   "#0369A1",
@@ -137,7 +137,7 @@ const dashboardRuntimeThemes = {
     lineColor: "#2563EB",
     lineFill: "rgba(37, 99, 235, .18)",
     pieBorder: "#082f49",
-    seriesPalette: ["#2563EB", "#F59E0B", "#0891B2", "#DC2626", "#7C3AED", "#64748B", "#0D9488", "#B45309"],
+    seriesPalette: ["#2563EB", "#7C3AED", "#06B6D4", "#F59E0B", "#F43F5E", "#DC2626", "#0D9488", "#475569"],
     piePalette: dashboardPiePalette,
   },
   light: {
@@ -152,7 +152,7 @@ const dashboardRuntimeThemes = {
     lineColor: "#2563EB",
     lineFill: "rgba(37, 99, 235, .12)",
     pieBorder: "#ffffff",
-    seriesPalette: ["#2563EB", "#F59E0B", "#0891B2", "#DC2626", "#7C3AED", "#64748B", "#0D9488", "#B45309"],
+    seriesPalette: ["#2563EB", "#7C3AED", "#06B6D4", "#F59E0B", "#F43F5E", "#DC2626", "#0D9488", "#475569"],
     piePalette: dashboardPiePalette,
   },
 };
