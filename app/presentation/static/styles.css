@@ -6234,3 +6234,52 @@ body.view-loading::before {
     font-size: .92rem !important;
   }
 }
+
+/* Sidebar visibility fix: keep long menu labels readable on laptop widths. */
+@media (min-width: 1024px) {
+  .app-shell {
+    grid-template-columns: minmax(20rem, 21rem) minmax(0, 1fr) !important;
+  }
+
+  .sidebar {
+    overflow-x: visible !important;
+  }
+
+  .nav-item,
+  .nav-group summary {
+    gap: .7rem !important;
+    padding-right: .8rem !important;
+  }
+
+  .nav-item.child {
+    padding-left: 1.65rem !important;
+  }
+
+  .nav-item.subchild {
+    padding-left: 1.95rem !important;
+  }
+
+  .nav-item span,
+  .nav-group summary strong {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+}
+
+@media (min-width: 1280px) {
+  .app-shell {
+    grid-template-columns: minmax(21rem, 22rem) minmax(0, 1fr) !important;
+  }
+}
+
+@media (min-width: 1536px) {
+  .app-shell {
+    grid-template-columns: minmax(22rem, 23rem) minmax(0, 1fr) !important;
+  }
+}
