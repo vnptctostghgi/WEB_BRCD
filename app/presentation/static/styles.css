@@ -6406,7 +6406,7 @@ body.view-loading::before {
 
 @media (min-width: 1024px) {
   .app-shell {
-    grid-template-columns: minmax(17rem, 18.25rem) minmax(0, 1fr) !important;
+    grid-template-columns: minmax(20.5rem, 22rem) minmax(0, 1fr) !important;
   }
 
   .sidebar {
@@ -6449,7 +6449,7 @@ body.view-loading::before {
 
 @media (min-width: 1536px) {
   .app-shell {
-    grid-template-columns: minmax(18rem, 19.5rem) minmax(0, 1fr) !important;
+    grid-template-columns: minmax(22rem, 23.5rem) minmax(0, 1fr) !important;
   }
 
   .app-shell:has(.sidebar.menu-open) {
