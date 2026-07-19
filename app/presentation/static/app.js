@@ -233,7 +233,39 @@ function releaseAppViewHeight(delay = VIEW_SETTLE_MS) {
 function markViewSettled(view) {
   if (!view?.classList.contains("active")) return;
   view.classList.add("view-settled");
+  scheduleViewMotionReveal(view);
   window.setTimeout(() => view.classList.remove("view-settled"), 320);
+}
+
+function scheduleViewMotionReveal(view = document.querySelector(".app-view.active")) {
+  if (!view || window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return;
+  const targets = [
+    ".page-header",
+    ".section-heading",
+    ".dashboard-tabs",
+    ".builder-tabs-wrap",
+    ".dashboard-runtime-tabs",
+    ".mobile-gateway-tabs",
+    ".metric-card",
+    ".data-card",
+    ".panel",
+    ".feature-card",
+    ".runtime-widget-card",
+    ".dashboard-page-card",
+    ".dashboard-linked-tools",
+    ".table-scroll",
+  ].join(",");
+  const elements = Array.from(view.querySelectorAll(targets)).filter((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }).slice(0, 14);
+  elements.forEach((element, index) => {
+    element.style.setProperty("--reveal-index", String(index));
+    element.classList.remove("motion-revealed");
+  });
+  window.requestAnimationFrame(() => {
+    elements.forEach((element) => element.classList.add("motion-revealed"));
+  });
 }
 
 async function runActiveViewLoader(token, loader, activeView) {
@@ -276,6 +308,7 @@ function setActiveAppView(viewName) {
   if (!currentView || currentView === nextView || reduceMotion) {
     document.querySelectorAll(".app-view").forEach((view) => view.classList.remove("active", "view-exiting", "view-entering"));
     nextView.classList.add("active");
+    scheduleViewMotionReveal(nextView);
     releaseAppViewHeight(0);
     return nextView;
   }
@@ -286,6 +319,7 @@ function setActiveAppView(viewName) {
   viewTransitionTimer = window.setTimeout(() => {
     currentView.classList.remove("view-exiting");
     nextView.classList.remove("view-entering");
+    scheduleViewMotionReveal(nextView);
     releaseAppViewHeight();
   }, VIEW_TRANSITION_MS);
   return nextView;

@@ -5573,3 +5573,307 @@ tbody tr:hover {
     box-shadow: 0 1px 2px rgba(15, 23, 42, .04) !important;
   }
 }
+
+/* TikTok reference motion: soft shell reveal, staggered cards, and lightweight hover depth. */
+:root {
+  --motion-ease: cubic-bezier(.16, 1, .3, 1);
+  --motion-fast: 180ms;
+  --motion-medium: 520ms;
+  --motion-slow: 760ms;
+}
+
+.app-shell {
+  animation: app-shell-arrive var(--motion-slow) var(--motion-ease) both;
+}
+
+.sidebar {
+  animation: sidebar-arrive 620ms var(--motion-ease) both;
+}
+
+.brand-link,
+.sidebar-search,
+.nav-tree > *,
+.sidebar-bottom {
+  animation: sidebar-item-arrive 520ms var(--motion-ease) both;
+  animation-delay: calc(55ms * var(--sidebar-item-index, 0));
+}
+
+.brand-link {
+  --sidebar-item-index: 0;
+}
+
+.sidebar-search {
+  --sidebar-item-index: 1;
+}
+
+.nav-tree > :nth-child(1) {
+  --sidebar-item-index: 2;
+}
+
+.nav-tree > :nth-child(2) {
+  --sidebar-item-index: 3;
+}
+
+.nav-tree > :nth-child(3) {
+  --sidebar-item-index: 4;
+}
+
+.nav-tree > :nth-child(4) {
+  --sidebar-item-index: 5;
+}
+
+.nav-tree > :nth-child(5) {
+  --sidebar-item-index: 6;
+}
+
+.sidebar-bottom {
+  --sidebar-item-index: 7;
+}
+
+.app-view.active {
+  animation: active-view-focus var(--motion-medium) var(--motion-ease) both;
+  transform-origin: 50% 24px;
+}
+
+.app-view.view-entering {
+  animation: active-view-enter var(--motion-medium) var(--motion-ease) both;
+}
+
+.app-view.view-exiting {
+  animation: active-view-exit 240ms ease both;
+}
+
+.app-view :is(.page-header, .section-heading, .dashboard-tabs, .builder-tabs-wrap, .dashboard-runtime-tabs, .mobile-gateway-tabs, .metric-card, .data-card, .panel, .feature-card, .runtime-widget-card, .dashboard-page-card, .dashboard-linked-tools, .table-scroll) {
+  will-change: transform, opacity, filter;
+}
+
+.motion-revealed {
+  animation: content-card-reveal var(--motion-medium) var(--motion-ease) both;
+  animation-delay: calc(min(var(--reveal-index, 0), 12) * 42ms);
+}
+
+.metric-card,
+.data-card,
+.panel,
+.feature-card,
+.runtime-widget-card,
+.dashboard-page-card,
+.dashboard-linked-tools,
+.table-scroll,
+.btn-primary,
+.btn-secondary,
+.table-action,
+.icon-button,
+.top-icon-button,
+.nav-item {
+  transition:
+    transform var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) ease,
+    background var(--motion-fast) ease,
+    color var(--motion-fast) ease !important;
+}
+
+.metric-card:hover,
+.feature-card:hover,
+.runtime-widget-card:hover,
+.dashboard-page-card:hover,
+.dashboard-linked-tools:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 34px rgba(37, 99, 235, .11) !important;
+}
+
+.data-card:hover,
+.panel:hover {
+  transform: translateY(-1px);
+}
+
+.btn-primary:hover,
+.btn-secondary:hover,
+.table-action:hover,
+.icon-button:hover,
+.top-icon-button:hover {
+  transform: translateY(-1px) !important;
+}
+
+.nav-item.active {
+  position: relative;
+  border-left-color: transparent !important;
+}
+
+.nav-item.active::after {
+  content: "";
+  position: absolute;
+  inset: 8px auto 8px 0;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--primary);
+  animation: active-menu-bar 340ms var(--motion-ease) both;
+}
+
+.nav-item.active .nav-svg {
+  animation: active-icon-pop 340ms var(--motion-ease) both;
+}
+
+.loading-row {
+  position: relative;
+  overflow: hidden;
+}
+
+.loading-row::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-110%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .68), transparent);
+  animation: skeleton-shimmer 1.35s ease-in-out infinite;
+}
+
+@keyframes app-shell-arrive {
+  from {
+    opacity: 0;
+    filter: blur(10px);
+    transform: scale(.985);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: scale(1);
+  }
+}
+
+@keyframes sidebar-arrive {
+  from {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateX(-18px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateX(0);
+  }
+}
+
+@keyframes sidebar-item-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes active-view-focus {
+  from {
+    opacity: .72;
+    filter: blur(8px);
+    transform: translateY(12px) scale(.992);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes active-view-enter {
+  from {
+    opacity: 0;
+    filter: blur(10px);
+    transform: translateY(18px) scale(.986);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes active-view-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px) scale(.992);
+  }
+}
+
+@keyframes content-card-reveal {
+  from {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateY(16px) scale(.985);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes active-menu-bar {
+  from {
+    opacity: 0;
+    transform: scaleY(.2);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@keyframes active-icon-pop {
+  0% {
+    transform: scale(.88);
+  }
+  70% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes skeleton-shimmer {
+  to {
+    transform: translateX(110%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell,
+  .sidebar,
+  .brand-link,
+  .sidebar-search,
+  .nav-tree > *,
+  .sidebar-bottom,
+  .app-view.active,
+  .app-view.view-entering,
+  .app-view.view-exiting,
+  .motion-revealed,
+  .nav-item.active::after,
+  .nav-item.active .nav-svg,
+  .loading-row::after {
+    animation: none !important;
+  }
+
+  .metric-card:hover,
+  .feature-card:hover,
+  .runtime-widget-card:hover,
+  .dashboard-page-card:hover,
+  .dashboard-linked-tools:hover,
+  .data-card:hover,
+  .panel:hover,
+  .btn-primary:hover,
+  .btn-secondary:hover,
+  .table-action:hover,
+  .icon-button:hover,
+  .top-icon-button:hover {
+    transform: none !important;
+  }
+}
