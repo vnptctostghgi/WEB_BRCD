@@ -1,6 +1,28 @@
 // Focused Mobile Gateway UI for SMS + OTP. Loaded after app.js on purpose.
 const MOBILE_GATEWAY_TABLE_PAGE_SIZE = window.TABLE_PAGE_SIZE || 20;
 
+function mobileFormatTime(value) {
+  if (!value) return "-";
+  try {
+    return new Date(value).toLocaleString("vi-VN");
+  } catch {
+    return "-";
+  }
+}
+
+function mobileDeviceLabel(deviceId) {
+  const device = mobileGatewayDevices.find((item) => item.device_id === deviceId);
+  return device ? `${device.name || device.device_id}` : (deviceId || "-");
+}
+
+function mobileGatewayDateStart(value) {
+  return value ? `${value}T00:00:00+00:00` : "";
+}
+
+function mobileGatewayDateEnd(value) {
+  return value ? `${value}T23:59:59+00:00` : "";
+}
+
 function normalizeMobileGatewayUi() {
   const root = $("#view-mobile-gateway");
   if (!root) return;
@@ -529,6 +551,28 @@ function startMobileSendStatusRefresh() {
     if (!root?.classList.contains("active")) return;
     loadMobileSendCommands().catch((error) => console.warn("Mobile send status refresh failed", error));
   }, 5000);
+}
+
+async function loadMobileOtpData() {
+  const [filters, latest] = await Promise.all([
+    api("/api/admin/mobile-gateway/otp/filters"),
+    api(`/api/admin/mobile-gateway/otp/latest?limit=${MOBILE_GATEWAY_TABLE_PAGE_SIZE}`),
+  ]);
+  mobileGatewayOtpFilters = filters.filters || [];
+  mobileGatewayOtpLatest = latest.items || [];
+  renderMobileOtpFilterForm();
+  renderMobileOtpFilters();
+  renderMobileOtpLatest();
+}
+
+function startMobileOtpTicker() {
+  if (window.mobileGatewayOtpTicker) return;
+  window.mobileGatewayOtpTicker = setInterval(renderMobileOtpLatest, 1000);
+  window.mobileGatewayOtpRefresh = setInterval(() => {
+    if ($("#view-mobile-gateway")?.classList.contains("active")) {
+      loadMobileOtpData().catch((error) => console.warn("Mobile OTP refresh failed", error));
+    }
+  }, 15000);
 }
 
 function renderMobileOtpFilterForm() {

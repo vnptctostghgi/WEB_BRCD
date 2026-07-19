@@ -6,6 +6,7 @@ import uuid
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.application.connection_service import ConnectionService
@@ -78,6 +79,7 @@ app.add_middleware(
     same_site="lax",
     https_only=settings.is_production,
 )
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 app.mount("/static", StaticFiles(directory="app/presentation/static"), name="static")
 app.include_router(mobile_gateway_router)
 app.include_router(mobile_gateway_admin_router)
