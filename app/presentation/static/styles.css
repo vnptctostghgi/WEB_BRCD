@@ -6007,3 +6007,33 @@ body.view-loading::before {
   filter: none !important;
   transform: none !important;
 }
+
+/* Sidebar cleanup requested: remove the lower decorative X and lock brand to two clean lines. */
+.sidebar::after {
+  content: none !important;
+  display: none !important;
+}
+
+.brand-title {
+  display: grid !important;
+  max-height: none !important;
+  overflow: visible !important;
+  gap: .08rem;
+  color: var(--text-primary) !important;
+  font-size: .98rem !important;
+  font-weight: 900 !important;
+  line-height: 1.08 !important;
+  text-transform: uppercase;
+  white-space: normal !important;
+  -webkit-line-clamp: unset !important;
+}
+
+.brand-title span {
+  display: block;
+}
+
+@media (max-width: 380px) {
+  .brand-title {
+    font-size: .92rem !important;
+  }
+}
