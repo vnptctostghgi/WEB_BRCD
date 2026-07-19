@@ -6334,3 +6334,46 @@ body.view-loading::before {
     display: grid !important;
   }
 }
+
+/* Reliable sidebar toggle: the expand button must remain available on every viewport. */
+.menu-button {
+  display: grid !important;
+}
+
+@media (min-width: 1024px) {
+  .sidebar {
+    position: sticky;
+    isolation: isolate;
+  }
+
+  .brand-link {
+    padding-right: 3.5rem;
+  }
+
+  .menu-button {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    z-index: 12;
+    width: 40px !important;
+    height: 40px !important;
+  }
+
+  #main-navigation.hidden {
+    display: grid !important;
+  }
+
+  .app-shell:has(.sidebar.menu-open) {
+    grid-template-columns: minmax(24rem, 26rem) minmax(0, 1fr) !important;
+  }
+
+  .sidebar.menu-open {
+    box-shadow: 8px 0 32px rgba(11, 99, 182, .14) !important;
+  }
+}
+
+@media (min-width: 1536px) {
+  .app-shell:has(.sidebar.menu-open) {
+    grid-template-columns: minmax(25rem, 28rem) minmax(0, 1fr) !important;
+  }
+}

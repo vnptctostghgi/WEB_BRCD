@@ -534,10 +534,24 @@ function setButtonLoading(button, isLoading) {
   button.classList.toggle("loading", isLoading);
 }
 
+function syncSidebarExpandedState(open) {
+  const sidebar = $("#sidebar");
+  const button = $("#menu-button");
+  if (!sidebar || !button) return;
+  sidebar.classList.toggle("menu-open", open);
+  button.setAttribute("aria-expanded", String(open));
+  if (window.matchMedia("(min-width: 1024px)").matches) {
+    localStorage.setItem("sidebarExpanded", open ? "true" : "false");
+  }
+}
+
 $("#menu-button")?.addEventListener("click", () => {
-  const open = $("#sidebar").classList.toggle("menu-open");
-  $("#menu-button").setAttribute("aria-expanded", String(open));
+  syncSidebarExpandedState(!$("#sidebar")?.classList.contains("menu-open"));
 });
+
+if (localStorage.getItem("sidebarExpanded") === "true" && window.matchMedia("(min-width: 1024px)").matches) {
+  syncSidebarExpandedState(true);
+}
 
 document.querySelectorAll(".nav-group").forEach((group) => {
   group.open = false;
@@ -601,8 +615,9 @@ async function activateNavItem(item, options = {}) {
   document.body.classList.remove("app-booting");
   const moduleTitle = $("#module-title");
   if (moduleTitle) moduleTitle.textContent = item.dataset.title || item.textContent.trim();
-  $("#sidebar").classList.remove("menu-open");
-  $("#menu-button")?.setAttribute("aria-expanded", "false");
+  if (window.matchMedia("(max-width: 1023.98px)").matches) {
+    syncSidebarExpandedState(false);
+  }
   if (updateUrl) updateFeatureUrl(item.dataset.featureCode, { replace: replaceUrl });
   const loader = viewLoaderForNav(nextView, dashboardPageId);
   if (loader) runActiveViewLoader(loadToken, loader, activeView);
