@@ -138,6 +138,38 @@ function normalizeMobileOtpFormDefaults(root) {
   if (startPrefix && String(startPrefix.value || "").trim() === "1364") startPrefix.value = "0";
 }
 
+function normalizeMobileGatewayTabName(tabName) {
+  return tabName === "devices" ? "devices-config" : (tabName || "overview");
+}
+
+function activateMobileGatewayTab(tabName) {
+  const root = $("#view-mobile-gateway");
+  if (!root) return;
+  const allowedTabs = ["overview", "devices-config", "sms", "send", "otp"];
+  const activeTab = normalizeMobileGatewayTabName(tabName);
+  const safeTab = allowedTabs.includes(activeTab) ? activeTab : "overview";
+  root.querySelectorAll("[data-mobile-tab]").forEach((button) => {
+    const buttonTab = normalizeMobileGatewayTabName(button.dataset.mobileTab);
+    const isActive = buttonTab === safeTab;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+  });
+  root.querySelectorAll("[data-mobile-panel]").forEach((panel) => {
+    const panelTab = normalizeMobileGatewayTabName(panel.dataset.mobilePanel);
+    panel.classList.toggle("active", panelTab === safeTab);
+  });
+  if (safeTab === "devices-config") {
+    loadMobileGatewayDevices().catch((error) => showToast(error.message, "error"));
+    loadMobilePairingCodes().catch((error) => showToast(error.message, "error"));
+  } else if (safeTab === "sms") {
+    loadMobileGatewaySms().catch((error) => showToast(error.message, "error"));
+  } else if (safeTab === "send") {
+    loadMobileSendCommands().catch((error) => showToast(error.message, "error"));
+  } else if (safeTab === "otp") {
+    loadMobileOtpData().catch((error) => showToast(error.message, "error"));
+  }
+}
+
 function bindMobileGatewayFocusedEvents() {
   document.querySelectorAll("#view-mobile-gateway [data-mobile-tab]").forEach((button) => {
     if (button.dataset.boundFocusedClick) return;
