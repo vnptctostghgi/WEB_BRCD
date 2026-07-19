@@ -169,6 +169,7 @@ const VIEW_SETTLE_MS = 140;
 let viewTransitionTimer = 0;
 let viewTransitionHoldTimer = 0;
 let navigationPreloadPromise = null;
+let mobileGatewayFocusedScriptPromise = null;
 const dataCacheTimestamps = new Map();
 const dashboardViewerLayoutCache = new Map();
 const dashboardBuilderLayoutCache = new Map();
@@ -199,6 +200,28 @@ function nextPaint() {
   return new Promise((resolve) => {
     window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
   });
+}
+
+function ensureMobileGatewayFocusedScriptLoaded() {
+  const existingScript = document.querySelector("script[data-mobile-gateway-focused='true']");
+  if (existingScript?.dataset.loaded === "true") return Promise.resolve();
+  if (mobileGatewayFocusedScriptPromise) return mobileGatewayFocusedScriptPromise;
+  mobileGatewayFocusedScriptPromise = new Promise((resolve, reject) => {
+    const script = existingScript || document.createElement("script");
+    script.src = "/static/mobile-gateway-focused.js?v=10";
+    script.defer = true;
+    script.dataset.mobileGatewayFocused = "true";
+    script.addEventListener("load", () => {
+      script.dataset.loaded = "true";
+      resolve();
+    }, { once: true });
+    script.addEventListener("error", () => {
+      mobileGatewayFocusedScriptPromise = null;
+      reject(new Error("Không tải được giao diện Mobile Gateway."));
+    }, { once: true });
+    if (!existingScript) document.body.appendChild(script);
+  });
+  return mobileGatewayFocusedScriptPromise;
 }
 
 function getViewTransitionHeight(...views) {
@@ -233,39 +256,7 @@ function releaseAppViewHeight(delay = VIEW_SETTLE_MS) {
 function markViewSettled(view) {
   if (!view?.classList.contains("active")) return;
   view.classList.add("view-settled");
-  scheduleViewMotionReveal(view);
   window.setTimeout(() => view.classList.remove("view-settled"), 320);
-}
-
-function scheduleViewMotionReveal(view = document.querySelector(".app-view.active")) {
-  if (!view || window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return;
-  const targets = [
-    ".page-header",
-    ".section-heading",
-    ".dashboard-tabs",
-    ".builder-tabs-wrap",
-    ".dashboard-runtime-tabs",
-    ".mobile-gateway-tabs",
-    ".metric-card",
-    ".data-card",
-    ".panel",
-    ".feature-card",
-    ".runtime-widget-card",
-    ".dashboard-page-card",
-    ".dashboard-linked-tools",
-    ".table-scroll",
-  ].join(",");
-  const elements = Array.from(view.querySelectorAll(targets)).filter((element) => {
-    const rect = element.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
-  }).slice(0, 14);
-  elements.forEach((element, index) => {
-    element.style.setProperty("--reveal-index", String(index));
-    element.classList.remove("motion-revealed");
-  });
-  window.requestAnimationFrame(() => {
-    elements.forEach((element) => element.classList.add("motion-revealed"));
-  });
 }
 
 async function runActiveViewLoader(token, loader, activeView) {
@@ -308,7 +299,6 @@ function setActiveAppView(viewName) {
   if (!currentView || currentView === nextView || reduceMotion) {
     document.querySelectorAll(".app-view").forEach((view) => view.classList.remove("active", "view-exiting", "view-entering"));
     nextView.classList.add("active");
-    scheduleViewMotionReveal(nextView);
     releaseAppViewHeight(0);
     return nextView;
   }
@@ -319,7 +309,6 @@ function setActiveAppView(viewName) {
   viewTransitionTimer = window.setTimeout(() => {
     currentView.classList.remove("view-exiting");
     nextView.classList.remove("view-entering");
-    scheduleViewMotionReveal(nextView);
     releaseAppViewHeight();
   }, VIEW_TRANSITION_MS);
   return nextView;
@@ -585,7 +574,10 @@ function viewLoaderForNav(nextView, dashboardPageId) {
   if (nextView === "reports") return () => loadDynamicReports();
   if (nextView === "onebss-mining") return () => loadOneBssMining();
   if (nextView === "report-links") return () => loadReportLinks();
-  if (nextView === "mobile-gateway") return () => loadMobileGateway();
+  if (nextView === "mobile-gateway") return async () => {
+    await ensureMobileGatewayFocusedScriptLoaded();
+    return loadMobileGateway();
+  };
   if (nextView === "dashboard-builder") return () => loadDashboardBuilder();
   if (nextView === "menu-admin") return () => loadMenuLayout();
   if (nextView === "work-tasks") return () => loadWorkTasks();

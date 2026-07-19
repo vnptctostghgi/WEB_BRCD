@@ -5877,3 +5877,133 @@ tbody tr:hover {
     transform: none !important;
   }
 }
+
+/* Stability and contrast rollback: keep the cleaner theme, remove heavy motion. */
+.app-shell,
+.sidebar,
+.brand-link,
+.sidebar-search,
+.nav-tree > *,
+.sidebar-bottom,
+.app-view.active,
+.app-view.view-entering,
+.app-view.view-exiting,
+.motion-revealed,
+.nav-item.active::after,
+.nav-item.active .nav-svg,
+.loading-row::after {
+  animation: none !important;
+}
+
+.app-view :is(.page-header, .section-heading, .dashboard-tabs, .builder-tabs-wrap, .dashboard-runtime-tabs, .mobile-gateway-tabs, .metric-card, .data-card, .panel, .feature-card, .runtime-widget-card, .dashboard-page-card, .dashboard-linked-tools, .table-scroll) {
+  will-change: auto !important;
+}
+
+.metric-card,
+.data-card,
+.panel,
+.feature-card,
+.runtime-widget-card,
+.dashboard-page-card,
+.dashboard-linked-tools,
+.table-scroll,
+.btn-primary,
+.btn-secondary,
+.table-action,
+.icon-button,
+.top-icon-button,
+.nav-item {
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    color 120ms ease !important;
+}
+
+.metric-card:hover,
+.feature-card:hover,
+.runtime-widget-card:hover,
+.dashboard-page-card:hover,
+.dashboard-linked-tools:hover,
+.data-card:hover,
+.panel:hover,
+.btn-primary:hover,
+.btn-secondary:hover,
+.table-action:hover,
+.icon-button:hover,
+.top-icon-button:hover {
+  transform: none !important;
+}
+
+.app-shell,
+.app-main,
+.app-view,
+.app-shell :is(.data-card, .panel, .feature-card, .runtime-widget-card, .dashboard-page-card, .dashboard-linked-tools, .builder-row, .builder-widget-card, .table-scroll, .top-dropdown, .dialog-form, .modal-panel, .mobile-overview-device-card, .runtime-data-card, .metric-card, .sidebar-support) {
+  color: var(--text-primary) !important;
+}
+
+.app-shell :is(.data-card, .panel, .feature-card, .runtime-widget-card, .dashboard-page-card, .dashboard-linked-tools, .builder-row, .builder-widget-card, .table-scroll, .top-dropdown, .dialog-form, .modal-panel, .mobile-overview-device-card, .runtime-data-card, .metric-card, .sidebar-support) :is(h1, h2, h3, h4, h5, h6, p, span, small, strong, label, div, td, th, li) {
+  color: inherit;
+}
+
+.app-shell :is(.subtitle, .empty-state, .loading-row, .runtime-data-card-note, .metric-preview span, .metric-preview small, .dashboard-linked-tools small, .builder-widget-card small, .table-muted, .muted, .help-text) {
+  color: var(--text-secondary) !important;
+}
+
+.app-shell :is(.btn-primary, .btn-primary *, button[type="submit"].btn-primary, button[type="submit"].btn-primary *) {
+  color: #ffffff !important;
+}
+
+.app-shell :is(.nav-item.active, .nav-item.active *, .tab-button.active, .dashboard-tab.active, .mobile-gateway-tab.active) {
+  color: var(--primary) !important;
+}
+
+.app-shell :is(.status.success, .badge-success, .result.success) {
+  color: #166534 !important;
+}
+
+.app-shell :is(.status.warning, .badge-warning, .result.warning) {
+  color: #92400e !important;
+}
+
+.app-shell :is(.status.error, .status.danger, .badge-danger, .result.error, .dropdown-action.danger, .table-action.danger, .btn-danger) {
+  color: var(--danger) !important;
+}
+
+.login-upgraded {
+  color: var(--text-primary) !important;
+}
+
+.login-card-upgraded,
+.login-card-upgraded :is(h1, h2, h3, h4, p, span, small, strong, label, div) {
+  color: var(--text-primary) !important;
+}
+
+.login-card-upgraded :is(.text-slate-500, .text-slate-600, .text-slate-700) {
+  color: var(--text-secondary) !important;
+}
+
+.login-card-upgraded :is(button[type="submit"], button[type="submit"] *) {
+  color: #ffffff !important;
+}
+
+.login-visual,
+.login-visual :is(h1, h2, h3, h4, p, span, small, strong, label, div) {
+  color: #ffffff !important;
+}
+
+body.view-loading::before {
+  opacity: 0 !important;
+  animation: none !important;
+}
+
+.app-view.view-preparing {
+  animation: none !important;
+}
+
+.app-view.view-settled,
+.app-view.view-entering,
+.app-view.view-exiting {
+  filter: none !important;
+  transform: none !important;
+}
