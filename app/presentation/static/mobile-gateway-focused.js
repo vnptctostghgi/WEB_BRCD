@@ -213,6 +213,19 @@ async function loadMobileGateway({ force = false } = {}) {
   }
 }
 
+async function loadMobileGatewayOverview() {
+  const data = await api("/api/admin/mobile-gateway/overview");
+  mobileGatewayOverview = data.overview || {};
+  renderMobileGatewayOverview();
+}
+
+async function loadMobileGatewayDevices() {
+  const data = await api("/api/admin/mobile-gateway/devices");
+  mobileGatewayDevices = data.devices || [];
+  renderMobileGatewayDevices();
+  renderMobileGatewayDeviceOptions();
+}
+
 function renderMobileGatewayOverview() {
   const overviewTarget = $("#mobile-overview-cards");
   if (overviewTarget) {
@@ -310,6 +323,24 @@ function renderMobileGatewayDevices() {
   document.querySelectorAll("[data-mobile-delete]").forEach((button) => button.addEventListener("click", () => deleteMobileDevice(button.dataset.mobileDelete)));
   renderMobileGatewayDeviceOptions();
   renderMobileGatewayOverview();
+}
+
+async function toggleMobileDeviceActive(deviceId) {
+  const device = mobileGatewayDevices.find((item) => item.device_id === deviceId);
+  if (!device) return;
+  const action = device.is_active ? "revoke" : "reactivate";
+  await api(`/api/admin/mobile-gateway/devices/${encodeURIComponent(deviceId)}/${action}`, { method: "POST" });
+  await loadMobileGatewayDevices();
+}
+
+async function deleteMobileDevice(deviceId) {
+  if (!deviceId) return;
+  const device = mobileGatewayDevices.find((item) => item.device_id === deviceId);
+  const label = device?.name || deviceId;
+  if (!confirm(`Xóa thiết bị đã ngừng kết nối: ${label}? SMS đã đồng bộ vẫn được giữ lại.`)) return;
+  await api(`/api/admin/mobile-gateway/devices/${encodeURIComponent(deviceId)}/delete`, { method: "POST" });
+  showToast("Đã xóa thiết bị khỏi danh sách.");
+  await loadMobileGateway({ force: true });
 }
 
 function renderMobilePairingCountdown(statusText = "") {

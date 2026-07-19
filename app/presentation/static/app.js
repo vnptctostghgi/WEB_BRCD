@@ -162,7 +162,7 @@ let chartJsLoadPromise = null;
 let html2CanvasLoadPromise = null;
 let dashboardChartRenderToken = 0;
 let dashboardSheetRenderToken = 0;
-let dashboardRuntimeTheme = localStorage.getItem("dashboardRuntimeTheme") === "dark" ? "dark" : "light";
+let dashboardRuntimeTheme = "light";
 let activeViewLoadToken = 0;
 const VIEW_TRANSITION_MS = 320;
 const VIEW_SETTLE_MS = 140;
@@ -208,7 +208,7 @@ function ensureMobileGatewayFocusedScriptLoaded() {
   if (mobileGatewayFocusedScriptPromise) return mobileGatewayFocusedScriptPromise;
   mobileGatewayFocusedScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/mobile-gateway-focused.js?v=11";
+    script.src = "/static/mobile-gateway-focused.js?v=12";
     script.defer = true;
     script.dataset.mobileGatewayFocused = "true";
     script.addEventListener("load", () => {
