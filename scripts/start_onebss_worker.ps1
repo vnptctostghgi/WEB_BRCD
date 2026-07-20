@@ -1,5 +1,6 @@
 param(
   [switch]$SetupOnly,
+  [switch]$SkipPlaywright,
   [switch]$NoPause
 )
 
@@ -53,6 +54,7 @@ foreach ($name in @(
   "ONEBSS_DRIVE_UPLOAD_TIMEOUT_SECONDS",
   "ONEBSS_WORKER_ID",
   "ONEBSS_WORKER_POLL_SECONDS",
+  "ONEBSS_WORKER_HEARTBEAT_SECONDS",
   "ONEBSS_USERNAME",
   "ONEBSS_PASSWORD",
   "ONEBSS_LOGIN_URL",
@@ -117,7 +119,9 @@ if ($needsSetup) {
   Write-Host "Dang cai thu vien rieng cho may tram. Viec nay chi lau o lan dau..." -ForegroundColor Cyan
   Invoke-External $VenvPython "-m" "pip" "install" "--upgrade" "pip"
   Invoke-External $VenvPython "-m" "pip" "install" "-r" $RequirementsFile
-  Invoke-External $VenvPython "-m" "playwright" "install" "chromium"
+  if (-not $SkipPlaywright) {
+    Invoke-External $VenvPython "-m" "playwright" "install" "chromium"
+  }
   Set-Content -Path $SetupMarker -Value (Get-Date).ToString("o")
 }
 

@@ -25,6 +25,7 @@ FEATURE_ROWS = [
     ("quantridanhmuc", "Quản trị danh mục", "quantriweb", 25),
     ("quantrivaitro", "Quản trị vai trò", "quantridanhmuc", 26),
     ("quantrimenu", "Quản trị menu", "quantriweb", 27),
+    ("maytram", "Máy trạm", "quantriweb", 28),
     ("quanlycongviec", "Quản lý công việc", None, 28),
     ("truyvansql", "Truy vấn SQL", None, 30),
     ("baocaomoi", "Báo cáo mới", None, 35),

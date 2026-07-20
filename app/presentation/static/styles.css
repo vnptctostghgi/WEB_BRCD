@@ -6490,3 +6490,44 @@ body.view-loading::before {
     padding-right: .25rem;
   }
 }
+
+.workstation-role-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: 1rem;
+}
+
+.workstation-role-card {
+  display: grid;
+  gap: .75rem;
+  border: 1px solid rgba(148, 163, 184, .32);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .72);
+  padding: 1rem;
+}
+
+.workstation-role-card h3 {
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.workstation-role-card p {
+  color: #475569;
+  font-size: .9rem;
+  line-height: 1.55;
+}
+
+.workstation-setup-command {
+  display: block;
+  margin-top: .75rem;
+  min-height: 9rem;
+  white-space: pre-wrap;
+}
+
+.workstation-task-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-top: 1rem;
+}

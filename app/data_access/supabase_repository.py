@@ -41,6 +41,7 @@ FEATURE_ROWS = [
     {"code": "quantridanhmuc", "name": "Quản trị danh mục", "parent_code": "quantriweb", "sort_order": 25},
     {"code": "quantrivaitro", "name": "Quản trị vai trò", "parent_code": "quantridanhmuc", "sort_order": 26},
     {"code": "quantrimenu", "name": "Quản trị menu", "parent_code": "quantriweb", "sort_order": 27},
+    {"code": "maytram", "name": "Máy trạm", "parent_code": "quantriweb", "sort_order": 28},
     {"code": "quanlycongviec", "name": "Quản lý công việc", "parent_code": None, "sort_order": 28},
     {"code": "truyvansql", "name": "Truy vấn SQL", "parent_code": None, "sort_order": 30},
     {"code": "baocaomoi", "name": "Báo cáo mới", "parent_code": None, "sort_order": 35},

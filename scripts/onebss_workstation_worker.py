@@ -6,6 +6,7 @@ import mimetypes
 import os
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ class OneBssTaskCancelled(OneBssProgressCancelled):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+WORKER_VERSION = "2026.07.20-workstation"
 
 
 def response_is_cancelled(data: dict[str, Any]) -> bool:
@@ -66,6 +68,29 @@ def request_json(client: httpx.Client, method: str, path: str, **kwargs: Any) ->
                 file=sys.stderr,
             )
             time.sleep(delay_seconds)
+
+
+def send_heartbeat(client: httpx.Client, worker_id: str, status: str = "idle", message: str = "", details: dict[str, Any] | None = None) -> None:
+    payload = {
+        "worker_id": worker_id,
+        "status": status,
+        "roles": ["onebss_worker", "excel_export", "drive_upload"],
+        "version": WORKER_VERSION,
+        "local_time": datetime.now().isoformat(timespec="seconds"),
+        "message": message,
+        "details": {
+            "pid": os.getpid(),
+            "python": sys.version.split()[0],
+            **(details or {}),
+        },
+    }
+    try:
+        response = client.post("/api/workstation/heartbeat", json=payload)
+        if response.status_code == 404:
+            return
+        response.raise_for_status()
+    except Exception as error:
+        print(f"Khong gui duoc heartbeat may tram: {describe_request_error(error)}", file=sys.stderr)
 
 
 def wait_for_otp(client: httpx.Client, run_id: str, poll_seconds: float, progress_callback=None) -> str:
@@ -299,6 +324,7 @@ def main() -> int:
     parser.add_argument("--token", default=os.getenv("INTERNAL_API_TOKEN", ""))
     parser.add_argument("--worker-id", default=os.getenv("ONEBSS_WORKER_ID", "onebss-workstation"))
     parser.add_argument("--poll-seconds", type=float, default=float(os.getenv("ONEBSS_WORKER_POLL_SECONDS", "5")))
+    parser.add_argument("--heartbeat-seconds", type=float, default=float(os.getenv("ONEBSS_WORKER_HEARTBEAT_SECONDS", "60")))
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
     if not args.token:
@@ -306,11 +332,26 @@ def main() -> int:
 
     headers = {"Authorization": f"Bearer {args.token}"}
     with httpx.Client(base_url=args.base_url.rstrip("/"), headers=headers, timeout=httpx.Timeout(60.0, connect=20.0)) as client:
+        send_heartbeat(client, args.worker_id, "starting", "May tram OneBSS dang khoi dong.")
+        last_heartbeat = time.monotonic()
         while True:
+            now = time.monotonic()
+            if now - last_heartbeat >= max(15.0, args.heartbeat_seconds):
+                send_heartbeat(client, args.worker_id, "idle", "May tram OneBSS dang cho task.")
+                last_heartbeat = now
             claim = request_json(client, "POST", "/api/onebss-worker/tasks/claim", json={"worker_id": args.worker_id})
             task = claim.get("task") if isinstance(claim.get("task"), dict) else None
             if task:
+                send_heartbeat(
+                    client,
+                    args.worker_id,
+                    "busy",
+                    f"Dang xu ly task {task.get('run_id') or ''}.",
+                    {"run_id": task.get("run_id") or "", "report": (task.get("report") or {}).get("ma_bao_cao") if isinstance(task.get("report"), dict) else ""},
+                )
                 process_task(client, task, args.worker_id, args.poll_seconds)
+                send_heartbeat(client, args.worker_id, "idle", "May tram OneBSS da quay lai trang thai cho task.")
+                last_heartbeat = time.monotonic()
             if args.once:
                 return 0
             time.sleep(args.poll_seconds)

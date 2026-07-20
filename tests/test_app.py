@@ -6,6 +6,7 @@ import uuid
 from io import BytesIO
 from datetime import datetime
 from pathlib import Path
+from zipfile import ZipFile
 
 import openpyxl
 import pytest
@@ -74,6 +75,42 @@ def test_feature_path_opens_current_app_shell() -> None:
         response = client.get("/quantrimenu")
         assert response.status_code == 200
         assert 'data-feature-code="quantrimenu"' in response.text
+
+
+def test_admin_can_open_workstation_overview_and_download_setup_package() -> None:
+    with TestClient(app) as client:
+        login(client)
+        overview = client.get("/api/admin/workstation/overview")
+        assert overview.status_code == 200
+        payload = overview.json()
+        assert payload["hardware_profile"]["cpu"] == "Core i3"
+        assert any(role["code"] == "onebss_worker" for role in payload["roles"])
+        assert payload["setup"]["package_url"] == "/api/admin/workstation/setup-package"
+
+        package = client.get("/api/admin/workstation/setup-package")
+        assert package.status_code == 200
+        assert package.headers["content-type"] == "application/zip"
+        with ZipFile(BytesIO(package.content)) as archive:
+            names = set(archive.namelist())
+        assert "VNPTCTO_WORKSTATION_SETUP/SETUP_VNPTCTO_WORKSTATION.bat" in names
+        assert "VNPTCTO_WORKSTATION_SETUP/scripts/setup_vnptcto_workstation.ps1" in names
+        assert "VNPTCTO_WORKSTATION_SETUP/scripts/test_vnptcto_workstation.ps1" in names
+
+
+def test_workstation_heartbeat_uses_worker_token() -> None:
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/workstation/heartbeat",
+            json={"worker_id": "ws-test", "status": "idle", "roles": ["onebss_worker"]},
+            headers={"Authorization": "Bearer test-worker-token"},
+        )
+        assert response.status_code == 200
+        assert response.json()["worker_id"] == "ws-test"
+
+        login(client)
+        overview = client.get("/api/admin/workstation/overview")
+        workers = overview.json()["workers"]
+        assert any(worker["worker_id"] == "ws-test" and worker["status"] == "online" for worker in workers)
 
 
 def test_favicon_redirects_to_system_logo() -> None:

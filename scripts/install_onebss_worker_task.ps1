@@ -1,6 +1,7 @@
 param(
   [string]$TaskName = "VNPTCTO OneBSS Worker",
-  [switch]$StartNow
+  [switch]$StartNow,
+  [switch]$NoPause
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,4 +50,6 @@ if ($StartNow) {
   Start-ScheduledTask -TaskName $TaskName
   Write-Host "Da khoi dong worker chay nen. Ban co the dong cua so nay." -ForegroundColor Green
 }
-Read-Host "Nhan Enter de dong" | Out-Null
+if (-not $NoPause) {
+  Read-Host "Nhan Enter de dong" | Out-Null
+}

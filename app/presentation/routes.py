@@ -9,7 +9,7 @@ import tempfile
 import threading
 import time
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from html import escape as html_escape
 from html.parser import HTMLParser
 import re
@@ -17,6 +17,7 @@ import sqlite3
 from io import BytesIO
 from typing import Any, Literal
 from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse, urlunparse
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import httpx
 import openpyxl
@@ -102,6 +103,75 @@ ONEBSS_REPORT_FINAL_STATUSES = {"success", "failed", "cancelled", "storage_faile
 DATA_MINING_RUN_SEMAPHORE = threading.Semaphore(1)
 EXCEL_MAX_ROWS_PER_SHEET = 1_048_576
 ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
+WORKSTATION_HEARTBEATS: dict[str, dict[str, Any]] = {}
+WORKSTATION_HEARTBEATS_LOCK = threading.Lock()
+WORKSTATION_HEARTBEAT_TTL_SECONDS = 10 * 60
+WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
+WORKSTATION_SETUP_INCLUDE_PATHS = (
+    ".env.example",
+    "README.md",
+    "HUONG_DAN_MAY_TRAM_ONEBSS.md",
+    "SETUP_VNPTCTO_WORKSTATION.bat",
+    "START_ONEBSS_WORKER.bat",
+    "START_ONEBSS_WORKER_BACKGROUND.bat",
+    "INSTALL_ONEBSS_WORKER_AUTOSTART.bat",
+    "UNINSTALL_ONEBSS_WORKER_AUTOSTART.bat",
+    "app",
+    "docs",
+    "scripts",
+    "requirements.txt",
+)
+WORKSTATION_SETUP_SKIP_NAMES = {
+    ".git",
+    ".pytest_cache",
+    ".venv-onebss-worker",
+    "__pycache__",
+    "_onebss_secret_config",
+}
+WORKSTATION_ROLE_PLAN = [
+    {
+        "code": "onebss_worker",
+        "title": "Worker đào dữ liệu OneBSS",
+        "description": "Nhận hàng đợi từ web, chạy OneBSS bằng Playwright, nhận OTP qua Mobile Gateway và trả file kết quả.",
+        "status": "ready",
+    },
+    {
+        "code": "sql_export_worker",
+        "title": "Worker SQL nặng / export Excel",
+        "description": "Chạy API trung gian tại máy trạm để truy vấn Oracle, xuất Excel lớn và upload Google Drive ngoài Render.",
+        "status": "ready",
+    },
+    {
+        "code": "temp_backup_drive",
+        "title": "Lưu file tạm, backup, đồng bộ Drive",
+        "description": "Tạo sẵn thư mục temp, exports, backups, logs và cấu hình Drive OAuth/service account cho máy trạm.",
+        "status": "ready",
+    },
+    {
+        "code": "queue_cache",
+        "title": "Redis/queue nội bộ nhỏ",
+        "description": "Chuẩn bị chỗ cấu hình Redis cục bộ; hệ OneBSS hiện vẫn dùng hàng đợi web để không phụ thuộc dịch vụ mới.",
+        "status": "prepared",
+    },
+    {
+        "code": "staging_database",
+        "title": "Database test/staging",
+        "description": "Tạo cấu trúc thư mục data/staging; có thể bật SQLite/Postgres test sau khi chốt DB chạy trên máy trạm.",
+        "status": "prepared",
+    },
+    {
+        "code": "logs_cron_scheduler",
+        "title": "Giám sát log, cron/scheduler",
+        "description": "Cài Scheduled Task cho worker, API trung gian và health-check để tự chạy lại sau reboot.",
+        "status": "ready",
+    },
+    {
+        "code": "render_fallback",
+        "title": "Dự phòng khi Render/API lỗi",
+        "description": "Giữ worker nền trên máy trạm để task trên web nằm trong hàng đợi và được xử lý lại khi web/API hồi phục.",
+        "status": "ready",
+    },
+]
 DASHBOARD_LAYOUT_TYPES = {
     "1_column": 1,
     "2_columns": 2,
@@ -419,6 +489,16 @@ class OneBssWorkerResultPayload(BaseModel):
     storage_link: str = ""
     storage_status: str = ""
     duration_ms: int = 0
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkstationHeartbeatPayload(BaseModel):
+    worker_id: str = "onebss-workstation"
+    status: str = "idle"
+    roles: list[str] = Field(default_factory=list)
+    version: str = ""
+    local_time: str = ""
+    message: str = ""
     details: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -1957,6 +2037,231 @@ def merge_protected_connection_config(existing: dict[str, Any] | None, incoming:
     return merged
 
 
+def configured_secret(value: Any) -> bool:
+    try:
+        return bool(value.get_secret_value().strip())
+    except AttributeError:
+        return bool(str(value or "").strip())
+
+
+def parse_datetime_value(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def newest_datetime(*values: Any) -> datetime | None:
+    parsed_values = [parsed for parsed in (parse_datetime_value(value) for value in values) if parsed]
+    return max(parsed_values) if parsed_values else None
+
+
+def iso_datetime(value: datetime | None) -> str:
+    return value.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z") if value else ""
+
+
+def workstation_status_from_age(age_seconds: float | None) -> str:
+    if age_seconds is None:
+        return "unknown"
+    if age_seconds <= 120:
+        return "online"
+    if age_seconds <= WORKSTATION_HEARTBEAT_TTL_SECONDS:
+        return "recent"
+    return "offline"
+
+
+def workstation_public_config(request: Request) -> dict[str, Any]:
+    settings = get_settings()
+    public_url = str(getattr(settings, "app_public_url", "") or "").strip().rstrip("/")
+    if not public_url:
+        forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip()
+        forwarded_host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",", 1)[0].strip()
+        public_url = f"{forwarded_proto}://{forwarded_host}" if forwarded_proto and forwarded_host else str(request.base_url).rstrip("/")
+    return {
+        "web_base_url": public_url,
+        "internal_api_url": settings.internal_api_url,
+        "internal_api_mock_mode": bool(settings.internal_api_mock_mode),
+        "internal_api_token_configured": configured_secret(settings.internal_api_token),
+        "onebss_server_credentials_configured": bool(settings.onebss_username.strip() and configured_secret(settings.onebss_password)),
+        "google_drive_server_configured": bool(
+            settings.google_drive_folder_id.strip()
+            or configured_secret(settings.google_drive_service_account_json_base64)
+            or configured_secret(settings.google_drive_service_account_json)
+            or settings.google_drive_service_account_file.strip()
+            or settings.google_drive_oauth_client_id.strip()
+        ),
+        "data_mining_download_dir": settings.data_mining_download_dir,
+        "storage_backend": settings.app_database_backend,
+    }
+
+
+def workstation_run_last_seen(run: dict[str, Any]) -> datetime | None:
+    return newest_datetime(run.get("updated_at"), run.get("claimed_at"), run.get("started_at"), run.get("finished_at"))
+
+
+def workstation_runs_overview(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    status_counts: dict[str, int] = {}
+    workers: dict[str, dict[str, Any]] = {}
+    for run in runs:
+        status_value = str(run.get("status") or "unknown").lower()
+        status_counts[status_value] = status_counts.get(status_value, 0) + 1
+        worker_id = str(run.get("worker_id") or "").strip()
+        if not worker_id:
+            continue
+        seen_at = workstation_run_last_seen(run)
+        current = workers.get(worker_id)
+        if not current or (seen_at and (not current.get("last_seen_at_dt") or seen_at > current["last_seen_at_dt"])):
+            workers[worker_id] = {
+                "worker_id": worker_id,
+                "last_seen_at_dt": seen_at,
+                "last_task_status": status_value,
+                "last_task_id": run.get("run_id") or "",
+                "last_task_message": run.get("message") or "",
+                "last_task_report": run.get("ten_bao_cao") or run.get("ma_bao_cao") or "",
+            }
+        if status_value in ONEBSS_REPORT_ACTIVE_STATUSES:
+            workers.setdefault(worker_id, {"worker_id": worker_id, "last_seen_at_dt": seen_at})
+            workers[worker_id]["active_task_count"] = int(workers[worker_id].get("active_task_count") or 0) + 1
+    latest_runs = []
+    for run in runs[:10]:
+        latest_runs.append(
+            {
+                "run_id": run.get("run_id") or "",
+                "report": run.get("ten_bao_cao") or run.get("ma_bao_cao") or "",
+                "status": run.get("status") or "",
+                "message": run.get("message") or "",
+                "worker_id": run.get("worker_id") or "",
+                "updated_at": run.get("updated_at") or run.get("started_at") or "",
+            }
+        )
+    return {
+        "status_counts": status_counts,
+        "queued": status_counts.get("queued", 0),
+        "active": sum(status_counts.get(status_value, 0) for status_value in ONEBSS_REPORT_ACTIVE_STATUSES),
+        "waiting_otp": sum(status_counts.get(status_value, 0) for status_value in {"otp_required", "otp_invalid", "manual_otp_required"}),
+        "final": sum(status_counts.get(status_value, 0) for status_value in ONEBSS_REPORT_FINAL_STATUSES),
+        "workers": workers,
+        "latest_runs": latest_runs,
+    }
+
+
+def workstation_heartbeat_records() -> list[dict[str, Any]]:
+    now = time.time()
+    stale_cutoff = now - 24 * 60 * 60
+    with WORKSTATION_HEARTBEATS_LOCK:
+        stale_keys = [
+            worker_id
+            for worker_id, heartbeat in WORKSTATION_HEARTBEATS.items()
+            if float(heartbeat.get("received_at_ts") or 0) < stale_cutoff
+        ]
+        for worker_id in stale_keys:
+            WORKSTATION_HEARTBEATS.pop(worker_id, None)
+        return [dict(heartbeat) for heartbeat in WORKSTATION_HEARTBEATS.values()]
+
+
+def workstation_workers_response(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    now_ts = time.time()
+    run_overview = workstation_runs_overview(runs)
+    by_worker: dict[str, dict[str, Any]] = {}
+    for heartbeat in workstation_heartbeat_records():
+        worker_id = str(heartbeat.get("worker_id") or "").strip()
+        if not worker_id:
+            continue
+        received_at_ts = float(heartbeat.get("received_at_ts") or 0)
+        age_seconds = max(0.0, now_ts - received_at_ts) if received_at_ts else None
+        by_worker[worker_id] = {
+            "worker_id": worker_id,
+            "status": workstation_status_from_age(age_seconds),
+            "runtime_status": heartbeat.get("status") or "idle",
+            "roles": heartbeat.get("roles") if isinstance(heartbeat.get("roles"), list) else [],
+            "version": heartbeat.get("version") or "",
+            "message": heartbeat.get("message") or "",
+            "last_seen_at": heartbeat.get("received_at") or "",
+            "last_seen_age_seconds": int(age_seconds or 0),
+            "source": "heartbeat",
+            "details": heartbeat.get("details") if isinstance(heartbeat.get("details"), dict) else {},
+        }
+    for worker_id, worker in run_overview["workers"].items():
+        item = by_worker.setdefault(
+            worker_id,
+            {
+                "worker_id": worker_id,
+                "status": "unknown",
+                "runtime_status": "unknown",
+                "roles": ["onebss_worker"],
+                "version": "",
+                "message": "",
+                "last_seen_at": "",
+                "last_seen_age_seconds": 0,
+                "source": "task_history",
+                "details": {},
+            },
+        )
+        last_seen_at = worker.get("last_seen_at_dt")
+        if not item.get("last_seen_at") and last_seen_at:
+            age_seconds = max(0.0, (datetime.now(UTC) - last_seen_at).total_seconds())
+            item["last_seen_at"] = iso_datetime(last_seen_at)
+            item["last_seen_age_seconds"] = int(age_seconds)
+            item["status"] = workstation_status_from_age(age_seconds)
+        item["active_task_count"] = int(worker.get("active_task_count") or item.get("active_task_count") or 0)
+        item["last_task_status"] = worker.get("last_task_status") or ""
+        item["last_task_id"] = worker.get("last_task_id") or ""
+        item["last_task_message"] = worker.get("last_task_message") or ""
+        item["last_task_report"] = worker.get("last_task_report") or ""
+    return sorted(by_worker.values(), key=lambda item: (item.get("status") != "online", item.get("worker_id") or ""))
+
+
+def workstation_setup_readme() -> str:
+    return """VNPTCTO workstation setup
+
+1. Giai nen goi ZIP nay vao mot thu muc tam.
+2. Bam chuot phai SETUP_VNPTCTO_WORKSTATION.bat va chon Run as administrator.
+3. Nhap INTERNAL_API_TOKEN, tai khoan OneBSS va cac cau hinh API trung gian khi script hoi.
+4. Sau khi xong, kiem tra Scheduled Task:
+   - VNPTCTO OneBSS Worker
+   - VNPTCTO API Trung Gian
+   - VNPTCTO API Watchdog
+   - VNPTCTO Workstation Health Check
+
+Script co the chay lai nhieu lan. No se giu cau hinh dang co, tao backup khi can va chi cap nhat phan thieu.
+"""
+
+
+def add_setup_path_to_zip(archive: ZipFile, source_root: Path, relative_path: str) -> None:
+    source = source_root / relative_path
+    if not source.exists():
+        return
+    if source.is_file():
+        archive.write(source, f"{WORKSTATION_SETUP_PACKAGE_ROOT}/{relative_path.replace(chr(92), '/')}")
+        return
+    for path in source.rglob("*"):
+        if not path.is_file():
+            continue
+        if any(part in WORKSTATION_SETUP_SKIP_NAMES for part in path.parts):
+            continue
+        if path.suffix.lower() in {".pyc", ".pyo"}:
+            continue
+        arcname = path.relative_to(source_root).as_posix()
+        archive.write(path, f"{WORKSTATION_SETUP_PACKAGE_ROOT}/{arcname}")
+
+
+def workstation_setup_package_bytes() -> bytes:
+    source_root = Path.cwd()
+    stream = BytesIO()
+    with ZipFile(stream, "w", ZIP_DEFLATED) as archive:
+        archive.writestr(f"{WORKSTATION_SETUP_PACKAGE_ROOT}/README_SETUP.txt", workstation_setup_readme())
+        for relative_path in WORKSTATION_SETUP_INCLUDE_PATHS:
+            add_setup_path_to_zip(archive, source_root, relative_path)
+    stream.seek(0)
+    return stream.getvalue()
+
+
 @router.get("/login", response_class=HTMLResponse)
 def login_page(request: Request) -> Response:
     next_path = request.query_params.get("next") or "/"
@@ -2300,6 +2605,85 @@ def storage_health(request: Request) -> dict:
     if hasattr(repository, "health_check"):
         return repository.health_check()
     return {"ok": True, "backend": "sqlite"}
+
+
+@router.post("/api/workstation/heartbeat")
+def workstation_heartbeat(request: Request, payload: WorkstationHeartbeatPayload) -> dict:
+    onebss_worker_token(request)
+    worker_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", payload.worker_id.strip())[:120] or "onebss-workstation"
+    now = datetime.now(UTC)
+    heartbeat = {
+        "worker_id": worker_id,
+        "status": payload.status.strip().lower()[:40] or "idle",
+        "roles": [str(role).strip()[:80] for role in payload.roles if str(role).strip()][:20],
+        "version": payload.version.strip()[:80],
+        "local_time": payload.local_time.strip()[:80],
+        "message": payload.message.strip()[:240],
+        "details": payload.details if isinstance(payload.details, dict) else {},
+        "received_at": iso_datetime(now),
+        "received_at_ts": time.time(),
+    }
+    with WORKSTATION_HEARTBEATS_LOCK:
+        WORKSTATION_HEARTBEATS[worker_id] = heartbeat
+    return {"ok": True, "worker_id": worker_id, "received_at": heartbeat["received_at"]}
+
+
+@router.get("/api/admin/workstation/overview")
+def workstation_overview(request: Request) -> dict:
+    admin_user(request)
+    repository = build_app_repository()
+    runs: list[dict[str, Any]] = []
+    run_error = ""
+    try:
+        runs = repository.list_onebss_report_runs(limit=100)
+    except RuntimeError as error:
+        run_error = str(error)
+    run_overview = workstation_runs_overview(runs)
+    return {
+        "ok": True,
+        "generated_at": iso_datetime(datetime.now(UTC)),
+        "hardware_profile": {
+            "cpu": "Core i3",
+            "ram": "12GB",
+            "storage": "SSD 1TB + 512GB",
+            "fit": "Tot cho worker nen, truy van/export va luu file tam neu gioi han so job dong thoi.",
+        },
+        "roles": WORKSTATION_ROLE_PLAN,
+        "queue": {
+            "queued": run_overview["queued"],
+            "active": run_overview["active"],
+            "waiting_otp": run_overview["waiting_otp"],
+            "final": run_overview["final"],
+            "status_counts": run_overview["status_counts"],
+            "latest_runs": run_overview["latest_runs"],
+            "error": run_error,
+        },
+        "workers": workstation_workers_response(runs),
+        "config": workstation_public_config(request),
+        "setup": {
+            "package_url": "/api/admin/workstation/setup-package",
+            "script_name": "SETUP_VNPTCTO_WORKSTATION.bat",
+            "install_root": "D:\\Tool_Tram_VNPTCTO.COM",
+            "task_names": [
+                "VNPTCTO OneBSS Worker",
+                "VNPTCTO API Trung Gian",
+                "VNPTCTO API Watchdog",
+                "VNPTCTO Workstation Health Check",
+            ],
+        },
+    }
+
+
+@router.get("/api/admin/workstation/setup-package")
+def download_workstation_setup_package(request: Request) -> Response:
+    admin_user(request)
+    payload = workstation_setup_package_bytes()
+    filename = f"VNPTCTO_WORKSTATION_SETUP_{datetime.now():%Y%m%d_%H%M}.zip"
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=\"{filename}\""},
+    )
 
 
 @router.get("/api/google-drive/oauth/status")

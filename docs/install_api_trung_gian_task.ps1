@@ -70,7 +70,12 @@ if (-not (Test-Path -LiteralPath (Join-Path $ApiDir ".env"))) {
 }
 
 New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
-$PythonExe = Find-PythonExe
+$VenvPythonExe = Join-Path $ApiDir ".venv\Scripts\python.exe"
+if (Test-Path -LiteralPath $VenvPythonExe) {
+    $PythonExe = $VenvPythonExe
+} else {
+    $PythonExe = Find-PythonExe
+}
 
 $startBatContent = @"
 @echo off
