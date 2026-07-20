@@ -6491,38 +6491,39 @@ body.view-loading::before {
   }
 }
 
-.workstation-role-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
-  gap: 1rem;
-}
-
-.workstation-role-card {
+.workstation-admin-panel {
   display: grid;
   gap: .75rem;
-  border: 1px solid rgba(148, 163, 184, .32);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, .72);
-  padding: 1rem;
 }
 
-.workstation-role-card h3 {
-  font-size: 1rem;
-  font-weight: 800;
-  line-height: 1.25;
+.workstation-admin-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: .75rem;
+  border-bottom: 1px solid rgba(148, 163, 184, .2);
+  padding: .65rem 0;
 }
 
-.workstation-role-card p {
-  color: #475569;
-  font-size: .9rem;
-  line-height: 1.55;
+.workstation-admin-row:first-child {
+  padding-top: 0;
 }
 
-.workstation-setup-command {
+.workstation-admin-row:last-child {
+  border-bottom: 0;
+}
+
+.workstation-admin-row strong {
   display: block;
-  margin-top: .75rem;
-  min-height: 9rem;
-  white-space: pre-wrap;
+  color: #0f172a;
+  font-size: .95rem;
+}
+
+.workstation-admin-row small {
+  display: block;
+  margin-top: .15rem;
+  color: #64748b;
+  line-height: 1.35;
 }
 
 .workstation-task-list {

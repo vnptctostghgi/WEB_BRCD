@@ -4701,13 +4701,11 @@ async function loadWorkstation({ force = false } = {}) {
     return;
   }
   const cards = $("#workstation-cards");
-  const roles = $("#workstation-role-grid");
   const workers = $("#workstation-workers-table");
   const runs = $("#workstation-runs-table");
   if (cards) cards.innerHTML = loadingRow(1, "Dang tai trang thai may tram...");
-  if (roles) roles.innerHTML = `<div class="loading-row">Dang tai vai tro may tram...</div>`;
-  if (workers) workers.innerHTML = loadingRow(7, "Dang tai worker...");
-  if (runs) runs.innerHTML = loadingRow(6, "Dang tai hang doi OneBSS...");
+  if (workers) workers.innerHTML = loadingRow(5, "Dang tai worker...");
+  if (runs) runs.innerHTML = loadingRow(5, "Dang tai task OneBSS...");
   try {
     workstationOverview = repairDataEncoding(await api("/api/admin/workstation/overview"));
     markDataFresh("workstation");
@@ -4715,9 +4713,8 @@ async function loadWorkstation({ force = false } = {}) {
   } catch (error) {
     showMessage($("#workstation-message"), error.message, "error");
     if (cards) cards.innerHTML = "";
-    if (roles) roles.innerHTML = "";
-    if (workers) workers.innerHTML = emptyRow(7, "Khong tai duoc trang thai may tram", error.message);
-    if (runs) runs.innerHTML = emptyRow(6, "Khong tai duoc hang doi OneBSS", error.message);
+    if (workers) workers.innerHTML = emptyRow(5, "Khong tai duoc trang thai may tram", error.message);
+    if (runs) runs.innerHTML = emptyRow(5, "Khong tai duoc task OneBSS", error.message);
   }
 }
 
@@ -4745,22 +4742,26 @@ function workstationAgeText(seconds) {
   return `${Math.round(value / 3600)} gio truoc`;
 }
 
-function workstationReadyText(value) {
-  return value ? "Da cau hinh" : "Can cau hinh";
+function workstationIssueCount(config, queue) {
+  return [
+    !config.internal_api_token_configured,
+    Boolean(config.internal_api_mock_mode),
+    !config.google_drive_server_configured,
+    Number(queue.waiting_otp || 0) > 0,
+  ].filter(Boolean).length;
 }
 
 function renderWorkstationOverview() {
   const data = workstationOverview || {};
   const queue = data.queue || {};
   const config = data.config || {};
-  const hardware = data.hardware_profile || {};
+  const workers = Array.isArray(data.workers) ? data.workers : [];
+  const onlineWorkers = workers.filter((worker) => String(worker.status || "").toLowerCase() === "online").length;
   const cards = [
-    ["CPU", "Cau hinh", `${hardware.cpu || "Core i3"} / ${hardware.ram || "12GB"}`],
-    ["SSD", "Luu tru", hardware.storage || "SSD 1TB + 512GB"],
-    ["JOB", "Hang doi OneBSS", `${Number(queue.queued || 0)} cho / ${Number(queue.active || 0)} dang chay`],
-    ["OTP", "Dang doi OTP", Number(queue.waiting_otp || 0)],
-    ["API", "Token may tram", workstationReadyText(config.internal_api_token_configured)],
-    ["DRV", "Drive server", workstationReadyText(config.google_drive_server_configured)],
+    ["WS", "Worker online", `${onlineWorkers}/${workers.length || 0}`],
+    ["JOB", "OneBSS", `${Number(queue.queued || 0)} cho / ${Number(queue.active || 0)} chay`],
+    ["OTP", "Doi OTP", Number(queue.waiting_otp || 0)],
+    ["CFG", "Can xu ly", workstationIssueCount(config, queue)],
   ];
   const cardsEl = $("#workstation-cards");
   if (cardsEl) {
@@ -4768,69 +4769,44 @@ function renderWorkstationOverview() {
       .map(([icon, label, value]) => `<article class="metric-card"><div class="metric-icon">${escapeHtml(icon)}</div><div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div></article>`)
       .join("");
   }
-  renderWorkstationRoles(data.roles || []);
   renderWorkstationWorkers(data.workers || []);
   renderWorkstationRuns(queue.latest_runs || [], queue.error || "");
   renderWorkstationSetup(data);
   showMessage($("#workstation-message"), "");
 }
 
-function renderWorkstationRoles(roles) {
-  const container = $("#workstation-role-grid");
-  if (!container) return;
-  if (!roles.length) {
-    container.innerHTML = `<div class="empty-state"><div><strong>Chua co cau hinh vai tro</strong><p>Web chua tra ve danh sach vai tro may tram.</p></div></div>`;
-    return;
-  }
-  container.innerHTML = roles.map((role) => `
-    <article class="workstation-role-card">
-      <div class="section-heading">
-        <div><p class="eyebrow">${escapeHtml(role.status === "ready" ? "San sang" : "Da chuan bi")}</p><h3>${escapeHtml(role.title || role.code)}</h3></div>
-        <span class="status ${role.status === "ready" ? "success" : "viewer"}">${escapeHtml(role.status || "")}</span>
-      </div>
-      <p>${escapeHtml(role.description || "")}</p>
-    </article>
-  `).join("");
-}
-
 function renderWorkstationWorkers(workers) {
   const table = $("#workstation-workers-table");
   if (!table) return;
   if (!workers.length) {
-    table.innerHTML = emptyRow(7, "Chua thay worker online", "Sau khi cai bo setup va worker gui heartbeat, may tram se hien o day.");
+    table.innerHTML = emptyRow(5, "Chua thay worker online", "Cai bo setup tren may tram de worker tu bao trang thai ve web.");
     return;
   }
-  table.innerHTML = workers.map((worker) => {
-    const roles = Array.isArray(worker.roles) ? worker.roles.join(", ") : "";
-    return `
+  table.innerHTML = workers.map((worker) => `
       <tr>
         <td><code class="compact-code">${escapeHtml(worker.worker_id || "")}</code></td>
         <td><span class="status ${workstationStatusClass(worker.status)}">${escapeHtml(workstationStatusLabel(worker.status))}</span></td>
-        <td>${escapeHtml(worker.runtime_status || "")}</td>
         <td>${escapeHtml(workstationAgeText(worker.last_seen_age_seconds))}<small class="cell-note">${escapeHtml(worker.last_seen_at || "")}</small></td>
-        <td>${escapeHtml(roles || "-")}</td>
         <td>${escapeHtml(worker.last_task_report || "-")}<small class="cell-note">${escapeHtml(worker.last_task_status || "")}</small></td>
         <td>${escapeHtml(worker.message || worker.last_task_message || "-")}</td>
       </tr>
-    `;
-  }).join("");
+  `).join("");
 }
 
 function renderWorkstationRuns(runs, errorMessage = "") {
   const table = $("#workstation-runs-table");
   if (!table) return;
   if (errorMessage) {
-    table.innerHTML = emptyRow(6, "Chua doc duoc lich su OneBSS", errorMessage);
+    table.innerHTML = emptyRow(5, "Chua doc duoc task OneBSS", errorMessage);
     return;
   }
   if (!runs.length) {
-    table.innerHTML = emptyRow(6, "Chua co task OneBSS", "Khi web tao task dao du lieu, lich su gan nhat se hien tai day.");
+    table.innerHTML = emptyRow(5, "Chua co task OneBSS", "Task gan nhat se hien tai day khi web bat dau dao du lieu.");
     return;
   }
   table.innerHTML = runs.map((run) => `
     <tr>
       <td>${escapeHtml(run.updated_at || "")}</td>
-      <td><code class="compact-code">${escapeHtml(run.run_id || "")}</code></td>
       <td>${escapeHtml(run.report || "")}</td>
       <td><span class="status viewer">${escapeHtml(run.status || "")}</span></td>
       <td>${escapeHtml(run.worker_id || "-")}</td>
@@ -4844,20 +4820,25 @@ function renderWorkstationSetup(data) {
   const config = data.config || {};
   const packageLink = $("#workstation-setup-package");
   if (packageLink) packageLink.href = setup.package_url || "/api/admin/workstation/setup-package";
-  const command = $("#workstation-setup-command");
-  if (command) {
-    command.textContent = [
-      "1. Tai goi ZIP tu nut Tai bo setup.",
-      "2. Giai nen ZIP tren may tram.",
-      `3. Bam chuot phai ${setup.script_name || "SETUP_VNPTCTO_WORKSTATION.bat"} va chon Run as administrator.`,
-      `4. Thu muc cai dat mac dinh: ${setup.install_root || "D:\\Tool_Tram_VNPTCTO.COM"}.`,
-      `5. Web URL: ${config.web_base_url || "https://vnptcto.com"}.`,
-    ].join("\n");
+  const panel = $("#workstation-admin-panel");
+  if (panel) {
+    const checks = [
+      ["Token worker", config.internal_api_token_configured, "Dung de nhan task va gui heartbeat."],
+      ["API du lieu", !config.internal_api_mock_mode, config.internal_api_mock_mode ? "Dang o che do mock." : config.internal_api_url || ""],
+      ["Google Drive", config.google_drive_server_configured, "Dung cho upload file ket qua."],
+      ["Bo cai", true, setup.script_name || "SETUP_VNPTCTO_WORKSTATION.bat"],
+    ];
+    panel.innerHTML = checks.map(([label, ok, note]) => `
+      <div class="workstation-admin-row">
+        <span class="status ${ok ? "success" : "warning"}">${ok ? "OK" : "Can cau hinh"}</span>
+        <div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(note || "")}</small></div>
+      </div>
+    `).join("");
   }
   const tasks = $("#workstation-task-list");
   if (tasks) {
     const taskNames = Array.isArray(setup.task_names) ? setup.task_names : [];
-    tasks.innerHTML = taskNames.map((task) => `<span class="status viewer">${escapeHtml(task)}</span>`).join("");
+    tasks.innerHTML = taskNames.slice(0, 4).map((task) => `<span class="status viewer">${escapeHtml(task)}</span>`).join("");
   }
 }
 

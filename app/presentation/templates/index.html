@@ -11,9 +11,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="preload" href="/api/navigation" as="fetch" crossorigin="use-credentials" />
-    <link rel="preload" href="/static/app.js?v=158" as="script" />
+    <link rel="preload" href="/static/app.js?v=159" as="script" />
     <link rel="stylesheet" href="/static/tailwind-built.css?v=1" />
-    <link rel="stylesheet" href="/static/styles.css?v=115" />
+    <link rel="stylesheet" href="/static/styles.css?v=116" />
   </head>
   <body class="app-booting min-h-screen bg-sky-50 text-slate-900 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-billing-blocked="{{ user.billing_access_blocked }}" data-can-manage-vault="{{ user.role == 'admin' or 'themvasuataikhoan' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'xemmatkhaudaluu' in user.permissions }}">
     <svg class="icon-sprite" aria-hidden="true">
@@ -495,46 +495,37 @@
 
         <section class="app-view" id="view-workstation">
           <div class="page-header">
-            <div><p class="eyebrow">Máy trạm VNPTCTO</p><h1>Điều phối máy trạm</h1><p class="subtitle">Theo dõi worker OneBSS, hàng đợi xử lý, cấu hình dự phòng và tải bộ setup chạy một lần cho máy Core i3/RAM 12GB/SSD.</p></div>
-            <div class="action-group"><a class="btn-primary" id="workstation-setup-package" href="/api/admin/workstation/setup-package">Tải bộ setup</a><button class="btn-secondary" id="refresh-workstation" type="button">Làm mới</button></div>
+            <div><p class="eyebrow">Quản trị vận hành</p><h1>Máy trạm</h1><p class="subtitle">Theo dõi worker, hàng đợi và các cấu hình bắt buộc để máy trạm xử lý việc nền cho web.</p></div>
+            <div class="action-group"><a class="btn-primary" id="workstation-setup-package" href="/api/admin/workstation/setup-package">Tải bộ cài</a><button class="btn-secondary" id="refresh-workstation" type="button">Làm mới</button></div>
           </div>
           <div id="workstation-message" class="result hidden mb-4"></div>
-          <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-6" id="workstation-cards"></section>
+          <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" id="workstation-cards"></section>
 
-          <section class="data-card mt-4">
-            <div class="section-heading">
-              <div><p class="eyebrow">Vai trò</p><h2>Năng lực máy trạm</h2><p>Web điều phối trước; máy trạm chỉ nhận việc, xử lý nền, lưu file và trả trạng thái về web.</p></div>
-            </div>
-            <div class="workstation-role-grid" id="workstation-role-grid"></div>
-          </section>
-
-          <section class="data-card mt-4">
-            <div class="section-heading">
-              <div><p class="eyebrow">Worker</p><h2>Máy trạm đang kết nối</h2><p>Trạng thái online lấy từ heartbeat của worker; nếu worker cũ chưa có heartbeat, web vẫn suy ra từ lịch sử task OneBSS gần nhất.</p></div>
-            </div>
-            <div class="table-scroll">
-              <table class="compact-admin-table inline-admin-table">
-                <thead><tr><th>Worker</th><th>Trạng thái</th><th>Runtime</th><th>Lần thấy gần nhất</th><th>Vai trò</th><th>Task cuối</th><th>Thông báo</th></tr></thead>
-                <tbody id="workstation-workers-table"></tbody>
-              </table>
-            </div>
-          </section>
-
-          <section class="grid gap-4 xl:grid-cols-[1fr_.9fr] mt-4">
+          <section class="grid gap-4 xl:grid-cols-[1.1fr_.9fr] mt-4">
             <section class="data-card">
-              <div class="section-heading"><div><p class="eyebrow">OneBSS</p><h2>Hàng đợi gần nhất</h2></div></div>
+              <div class="section-heading"><div><p class="eyebrow">Worker</p><h2>Trạng thái máy trạm</h2></div></div>
               <div class="table-scroll">
                 <table class="compact-admin-table inline-admin-table">
-                  <thead><tr><th>Thời gian</th><th>Task</th><th>Báo cáo</th><th>Trạng thái</th><th>Worker</th><th>Thông báo</th></tr></thead>
-                  <tbody id="workstation-runs-table"></tbody>
+                  <thead><tr><th>Worker</th><th>Trạng thái</th><th>Cập nhật</th><th>Task hiện tại</th><th>Ghi chú</th></tr></thead>
+                  <tbody id="workstation-workers-table"></tbody>
                 </table>
               </div>
             </section>
             <section class="data-card">
-              <div class="section-heading"><div><p class="eyebrow">Setup</p><h2>Bộ cài một lần</h2><p>Gói ZIP chứa source web hiện tại, worker OneBSS, API trung gian, health-check và script cài Scheduled Task.</p></div></div>
-              <pre class="compact-code workstation-setup-command" id="workstation-setup-command"></pre>
+              <div class="section-heading"><div><p class="eyebrow">Cài đặt</p><h2>Thao tác quản trị</h2></div></div>
+              <div class="workstation-admin-panel" id="workstation-admin-panel"></div>
               <div class="workstation-task-list" id="workstation-task-list"></div>
             </section>
+          </section>
+
+          <section class="data-card mt-4">
+            <div class="section-heading"><div><p class="eyebrow">OneBSS</p><h2>Task gần nhất</h2></div></div>
+            <div class="table-scroll">
+              <table class="compact-admin-table inline-admin-table">
+                <thead><tr><th>Thời gian</th><th>Báo cáo</th><th>Trạng thái</th><th>Worker</th><th>Thông báo</th></tr></thead>
+                <tbody id="workstation-runs-table"></tbody>
+              </table>
+            </div>
           </section>
         </section>
 
@@ -709,6 +700,6 @@
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script defer src="/static/app.js?v=158"></script>
+    <script defer src="/static/app.js?v=159"></script>
   </body>
 </html>
