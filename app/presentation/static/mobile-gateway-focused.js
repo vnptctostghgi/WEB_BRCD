@@ -118,7 +118,7 @@ function normalizeMobileGatewayUi() {
           <div class="table-scroll mt-4"><table><thead><tr><th>Mã OTP</th><th>Người gửi</th><th>Số ký tự</th><th>Cắt từ vị trí</th><th>Tự động</th></tr></thead><tbody id="mobile-otp-filters-table"></tbody></table></div>
         </div>
         <div class="data-card mobile-otp-card">
-          <div class="section-heading compact"><div><p class="eyebrow">OTP</p><h2>OTP mới nhất</h2></div><button class="btn-secondary" id="mobile-refresh-otp" type="button">Làm mới</button></div>
+          <div class="section-heading compact"><div><p class="eyebrow">OTP</p><h2>OTP mới nhất</h2></div></div>
           <div class="table-scroll"><table><thead><tr><th>Mã OTP</th><th>Người gửi</th><th>OTP</th><th>Thời gian nhận SMS</th><th>Trạng thái 60s</th></tr></thead><tbody id="mobile-otp-latest-table"></tbody></table></div>
         </div>
       </section>`;
@@ -205,7 +205,6 @@ function bindMobileGatewayFocusedEvents() {
     loadMobileGatewaySms({ force: true });
   });
   bind("#mobile-save-otp-filter", "click", saveMobileOtpFilter);
-  bind("#mobile-refresh-otp", "click", loadMobileOtpData);
   bind("#mobile-send-sms-form", "submit", (event) => {
     event.preventDefault();
     sendMobileSms();
