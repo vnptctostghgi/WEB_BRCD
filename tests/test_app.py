@@ -4026,7 +4026,19 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "view-dashboard-builder" not in home.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" in dashboard.text
+        assert dashboard.text.count('class="app-view') == 1
 
+        client.post("/api/auth/logout")
+        login(client)
+        reports = client.get("/truyvansql")
+        assert reports.status_code == 200
+        assert "view-reports" in reports.text
+        assert "view-mobile-gateway" not in reports.text
+        assert "sql-report-dialog" not in reports.text
+        assert reports.text.count('class="app-view') == 1
+
+        client.post("/api/auth/logout")
+        login(client, "viewer_builder", "Viewer@Builder123")
         forbidden_urls = [
             "/api/admin/dashboard-layouts",
             "/api/admin/dashboard-layout-pages",

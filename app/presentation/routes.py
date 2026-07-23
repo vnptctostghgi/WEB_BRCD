@@ -2360,6 +2360,35 @@ def dashboard(request: Request) -> Response:
     return render_index_page(request, "")
 
 
+ROUTE_VIEW_BY_FEATURE_CODE = {
+    "quanlycongviec": "work-tasks",
+    "taikhoanweb": "vault",
+    "quantringuoidung": "users",
+    "quantrimenu": "menu-admin",
+    "quantridanhmuc": "catalogs",
+    "quantriketnoi": "system",
+    "internalemail": "internal-email",
+    "mobilegateway": "mobile-gateway",
+    "maytram": "workstation",
+    "phanquyennguoidung": "permissions",
+    "phanquyendulieunguoidung": "data-permissions",
+    "nhatkyhoatdong": "audit",
+    "truyvansql": "reports",
+    "thietkelayoutbaocao": "dashboard-builder",
+    "daodulieuonebss": "onebss-mining",
+    "linkbaocao": "report-links",
+    "publicmessages": "public-messages",
+    "dashboard": "dashboard",
+}
+
+
+def initial_view_for_feature_path(feature_path: str) -> str:
+    normalized = normalize_feature_code(feature_path)
+    if not normalized:
+        return ""
+    return ROUTE_VIEW_BY_FEATURE_CODE.get(normalized, "dashboard")
+
+
 def render_index_page(request: Request, feature_path: str) -> Response:
     try:
         user = current_user(request)
@@ -2367,10 +2396,22 @@ def render_index_page(request: Request, feature_path: str) -> Response:
         next_path = "/" + feature_path.strip("/") if feature_path else "/"
         next_query = f"?next={quote(next_path, safe='/')}" if next_path != "/" else ""
         return RedirectResponse(f"/login{next_query}", status_code=status.HTTP_303_SEE_OTHER)
+    shell_only = not feature_path.strip("/")
+    initial_view = "" if shell_only else initial_view_for_feature_path(feature_path)
+
+    def render_view(view_name: str) -> bool:
+        return not initial_view or initial_view == view_name
+
     return templates.TemplateResponse(
         request=request,
         name="index.html",
-        context={"app_name": get_settings().app_name, "user": user, "shell_only": not feature_path.strip("/")},
+        context={
+            "app_name": get_settings().app_name,
+            "user": user,
+            "shell_only": shell_only,
+            "initial_view": initial_view,
+            "render_view": render_view,
+        },
     )
 
 
