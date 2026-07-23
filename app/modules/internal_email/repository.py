@@ -7,6 +7,8 @@ from typing import Any
 
 
 class InternalEmailRepository:
+    OPTIONAL_OTP_COLUMNS = {"otp_code", "otp_code_masked", "otp_service_code", "otp_request_id"}
+
     def __init__(self, base_repository: Any) -> None:
         self.base = base_repository
         self.is_sqlite = hasattr(base_repository, "connect")
@@ -50,13 +52,49 @@ class InternalEmailRepository:
     def _decode_message(row: dict[str, Any]) -> dict[str, Any]:
         item = dict(row)
         item["is_otp_candidate"] = bool(item.get("is_otp_candidate"))
-        if "otp_code" not in item:
-            item["otp_code"] = ""
+        for column in InternalEmailRepository.OPTIONAL_OTP_COLUMNS:
+            if column not in item:
+                item[column] = ""
         item["body_preview"] = InternalEmailRepository._body_preview(
             str(item.get("body_masked") or ""),
             str(item.get("otp_code") or ""),
         )
         return item
+
+    @classmethod
+    def _without_missing_otp_columns(cls, payload: dict[str, Any], error: RuntimeError) -> dict[str, Any]:
+        text = str(error).lower()
+        if not any(marker in text for marker in ("schema cache", "could not find", "does not exist", "column")):
+            return payload
+        missing = {column for column in cls.OPTIONAL_OTP_COLUMNS if column.lower() in text}
+        if not missing and "internal_email_messages" in text:
+            missing = set(cls.OPTIONAL_OTP_COLUMNS)
+        if not missing:
+            return payload
+        return {key: value for key, value in payload.items() if key not in missing}
+
+    def _insert_message_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(row)
+        while True:
+            try:
+                return self._insert("internal_email_messages", payload)
+            except RuntimeError as error:
+                retry_payload = self._without_missing_otp_columns(payload, error)
+                if retry_payload == payload:
+                    raise
+                payload = retry_payload
+
+    def _patch_message_row(self, params: dict[str, str], row: dict[str, Any]) -> None:
+        payload = dict(row)
+        while True:
+            try:
+                self._patch("internal_email_messages", params, payload)
+                return
+            except RuntimeError as error:
+                retry_payload = self._without_missing_otp_columns(payload, error)
+                if retry_payload == payload:
+                    raise
+                payload = retry_payload
 
     def get_message_by_uid(self, account_key: str, mailbox: str, uid: str) -> dict[str, Any] | None:
         if self.is_sqlite:
@@ -154,14 +192,13 @@ class InternalEmailRepository:
             if existing:
                 payload_for_patch = dict(row)
                 payload_for_patch.pop("created_at", None)
-                self._patch(
-                    "internal_email_messages",
+                self._patch_message_row(
                     {"account_key": f"eq.{account_key}", "mailbox": f"eq.{mailbox}", "uid": f"eq.{uid}"},
                     payload_for_patch,
                 )
                 saved = self.get_message_by_uid(account_key, mailbox, uid) or row
             else:
-                saved = self._insert("internal_email_messages", row)
+                saved = self._insert_message_row(row)
         except sqlite3.IntegrityError:
             saved = self.get_message_by_uid(account_key, mailbox, uid) or row
             created = False
@@ -195,7 +232,7 @@ class InternalEmailRepository:
                     (otp_service_code, otp_code, otp_code_masked, otp_request_id, now, message_id),
                 )
             return
-        self._patch("internal_email_messages", {"id": f"eq.{message_id}"}, payload)
+        self._patch_message_row({"id": f"eq.{message_id}"}, payload)
 
     def list_messages(self, limit: int = 20, otp_only: bool = False) -> list[dict[str, Any]]:
         safe_limit = min(max(int(limit or 20), 1), 100)

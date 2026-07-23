@@ -1,5 +1,6 @@
 import os
 import json
+import sqlite3
 import threading
 import time
 import uuid
@@ -2189,6 +2190,92 @@ def test_internal_email_parser_masks_otp_preview() -> None:
     assert parsed["metadata"]["otp_code"] == "123456"
     assert "123456" not in parsed["metadata"]["body_masked"]
     assert "******" in parsed["metadata"]["body_masked"]
+
+
+def test_internal_email_migration_upgrades_legacy_otp_columns(tmp_path) -> None:
+    from app.modules.internal_email.migrations import ensure_internal_email_sqlite_schema
+
+    database_path = tmp_path / "legacy_internal_email.db"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE internal_email_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_key TEXT NOT NULL DEFAULT 'internal_email',
+                mailbox TEXT NOT NULL DEFAULT 'INBOX',
+                uid TEXT NOT NULL,
+                message_id TEXT NOT NULL DEFAULT '',
+                sender TEXT NOT NULL DEFAULT '',
+                sender_email TEXT NOT NULL DEFAULT '',
+                subject TEXT NOT NULL DEFAULT '',
+                body_masked TEXT NOT NULL DEFAULT '',
+                received_at TEXT NOT NULL,
+                synced_at TEXT NOT NULL,
+                is_otp_candidate INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(account_key, mailbox, uid)
+            )
+            """
+        )
+        ensure_internal_email_sqlite_schema(connection)
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(internal_email_messages)").fetchall()}
+
+    assert {"otp_code", "otp_code_masked", "otp_service_code", "otp_request_id"}.issubset(columns)
+
+
+def test_internal_email_repository_tolerates_supabase_legacy_otp_columns() -> None:
+    from app.modules.internal_email.repository import InternalEmailRepository
+
+    class LegacySupabaseLikeRepository:
+        def __init__(self) -> None:
+            self.rows = []
+            self.patched_payload = {}
+
+        def _get(self, table, params):
+            assert table == "internal_email_messages"
+            if params.get("uid") == "eq.legacy-otp":
+                return list(self.rows)
+            return []
+
+        def _insert(self, table, payload):
+            assert table == "internal_email_messages"
+            if "otp_code_masked" in payload:
+                raise RuntimeError("Could not find the 'otp_code_masked' column of 'internal_email_messages' in the schema cache")
+            row = {**payload, "id": 1}
+            self.rows = [row]
+            return row
+
+        def _patch(self, table, params, payload):
+            assert table == "internal_email_messages"
+            if "otp_code_masked" in payload:
+                raise RuntimeError("Could not find the 'otp_code_masked' column of 'internal_email_messages' in the schema cache")
+            self.patched_payload = payload
+
+    base_repository = LegacySupabaseLikeRepository()
+    repository = InternalEmailRepository(base_repository)
+
+    saved, created = repository.save_message(
+        {
+            "account_key": "internal_email",
+            "mailbox": "INBOX",
+            "uid": "legacy-otp",
+            "message_id": "<legacy@example.vn>",
+            "sender": "VNPT",
+            "sender_email": "noreply@vnpt.vn",
+            "subject": "Ma OTP",
+            "body_masked": "Ma OTP la ******.",
+            "received_at": repository.now(),
+            "synced_at": repository.now(),
+            "otp_code": "123456",
+        }
+    )
+    repository.mark_message_otp(saved["id"], "onebss", "123456", "******", "REQ1")
+
+    assert created is True
+    assert saved["otp_code_masked"] == ""
+    assert base_repository.patched_payload["is_otp_candidate"] is True
+    assert "otp_code_masked" not in base_repository.patched_payload
 
 
 def test_internal_email_messages_return_full_otp_for_copy() -> None:

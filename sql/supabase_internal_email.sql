@@ -47,6 +47,15 @@ create table if not exists public.internal_email_messages (
 alter table public.internal_email_messages
 add column if not exists otp_code text not null default '';
 
+alter table public.internal_email_messages
+add column if not exists otp_code_masked text not null default '';
+
+alter table public.internal_email_messages
+add column if not exists otp_service_code text not null default '';
+
+alter table public.internal_email_messages
+add column if not exists otp_request_id text not null default '';
+
 create index if not exists internal_email_messages_received_idx
 on public.internal_email_messages (received_at desc, id desc);
 

@@ -43,5 +43,12 @@ def ensure_internal_email_sqlite_schema(connection: sqlite3.Connection) -> None:
         """
     )
     columns = {row[1] for row in connection.execute("PRAGMA table_info(internal_email_messages)").fetchall()}
-    if "otp_code" not in columns:
-        connection.execute("ALTER TABLE internal_email_messages ADD COLUMN otp_code TEXT NOT NULL DEFAULT ''")
+    text_columns = (
+        "otp_code",
+        "otp_code_masked",
+        "otp_service_code",
+        "otp_request_id",
+    )
+    for column in text_columns:
+        if column not in columns:
+            connection.execute(f"ALTER TABLE internal_email_messages ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
