@@ -212,7 +212,7 @@ function ensureMobileGatewayFocusedScriptLoaded() {
   if (mobileGatewayFocusedScriptPromise) return mobileGatewayFocusedScriptPromise;
   mobileGatewayFocusedScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/mobile-gateway-focused.js?v=17";
+    script.src = "/static/mobile-gateway-focused.js?v=18";
     script.defer = true;
     script.dataset.mobileGatewayFocused = "true";
     script.addEventListener("load", () => {

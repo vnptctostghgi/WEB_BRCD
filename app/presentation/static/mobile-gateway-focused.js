@@ -562,12 +562,20 @@ function renderMobileSmsTable(items, markNew = false) {
   window.mobileGatewayKnownSmsReady = true;
 }
 
+function isMobileGatewayViewActive() {
+  const root = $("#view-mobile-gateway");
+  if (!root) return false;
+  if (root.classList.contains("active")) return true;
+  if (document.querySelector('.nav-item.active[data-view="mobile-gateway"]')) return true;
+  const style = window.getComputedStyle ? window.getComputedStyle(root) : null;
+  return root.offsetParent !== null && style?.display !== "none" && style?.visibility !== "hidden";
+}
+
 function startMobileSmsAutoRefresh() {
   if (window.mobileGatewaySmsAutoRefresh) return;
   window.mobileGatewayLastSmsEventAt = window.mobileGatewayLastSmsEventAt || 0;
   window.mobileGatewaySmsAutoRefresh = setInterval(async () => {
-    const root = $("#view-mobile-gateway");
-    if (!root?.classList.contains("active")) return;
+    if (document.hidden || !isMobileGatewayViewActive()) return;
     const eventStreamStale = !window.mobileGatewayEventSource
       || !window.mobileGatewayLastSmsEventAt
       || Date.now() - window.mobileGatewayLastSmsEventAt > 12000;
@@ -593,7 +601,7 @@ function startMobileGatewayEvents() {
     window.mobileGatewayLastSmsEventAt = Date.now();
     clearTimeout(window.mobileGatewayEventReloadTimer);
     window.mobileGatewayEventReloadTimer = setTimeout(() => {
-      if (!$("#view-mobile-gateway")?.classList.contains("active")) return;
+      if (!isMobileGatewayViewActive()) return;
       mobileGatewaySmsPage = 1;
       loadMobileGatewaySms({ silent: true, markNew: true });
       loadMobileGatewayOverview();
@@ -612,7 +620,7 @@ function startMobileGatewayEvents() {
     window.mobileGatewayEventSource = null;
     clearTimeout(window.mobileGatewayEventReconnectTimer);
     window.mobileGatewayEventReconnectTimer = setTimeout(() => {
-      if ($("#view-mobile-gateway")?.classList.contains("active")) startMobileGatewayEvents();
+      if (isMobileGatewayViewActive()) startMobileGatewayEvents();
     }, 1500);
   };
 }
