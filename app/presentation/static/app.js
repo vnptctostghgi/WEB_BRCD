@@ -6484,6 +6484,22 @@ async function applyDynamicReportSearch() {
   await loadDynamicReportData({ includeSearch: dynamicReportSearchActive });
 }
 
+async function waitDynamicReportRunJob(jobId, { message = null } = {}) {
+  let lastMessage = "";
+  for (let attempt = 0; attempt < 900; attempt += 1) {
+    await sleep(attempt === 0 ? 250 : 1200);
+    const job = repairDataEncoding(await api(`/api/reports/run-jobs/${encodeURIComponent(jobId)}`));
+    upsertDynamicReportExportJob(job);
+    if (job.message && job.message !== lastMessage) {
+      lastMessage = job.message;
+      if (message) showMessage(message, job.message);
+    }
+    if (job.status === "complete") return job;
+    if (job.status === "failed") throw new Error(job.message || "Khong tai duoc du lieu bao cao.");
+  }
+  throw new Error("Truy van SQL qua lau. Hay thu hep dieu kien loc hoac kiem tra hang doi.");
+}
+
 async function loadDynamicReportData({ includeSearch = dynamicReportSearchActive } = {}) {
   const select = $("#dynamic-report-select");
   const message = $("#dynamic-report-message");
@@ -6495,10 +6511,20 @@ async function loadDynamicReportData({ includeSearch = dynamicReportSearchActive
   }
   setButtonLoading(button, true);
   try {
-    const response = await api("/api/reports/run", {
+    const started = repairDataEncoding(await api("/api/reports/run-jobs", {
       method: "POST",
       body: JSON.stringify(dynamicReportPayload({ includeSearch })),
+    }));
+    upsertDynamicReportExportJob({
+      ...started,
+      event_type: "load",
+      report_code: select.value,
+      report_name: select.selectedOptions?.[0]?.textContent || "",
+      created_at: new Date().toISOString(),
     });
+    showMessage(message, started.message || "Da dua truy van SQL vao hang doi.");
+    if (!started.job_id) throw new Error("Khong thay job truy van SQL.");
+    const response = await waitDynamicReportRunJob(started.job_id, { message });
     if (response.ok === false) throw new Error(response.message || "Không tải được dữ liệu báo cáo.");
     const rows = Array.isArray(response.rows) ? response.rows : [];
     dynamicReportColumns = response.columns || dynamicReportColumns;

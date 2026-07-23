@@ -357,3 +357,16 @@ if (["1", "True", "true"].includes(document.body.dataset.mustChange)) {
 }
 
 syncNavigationFromFeatures();
+
+function warmFeatureBundle() {
+  if (document.querySelector("link[data-feature-bundle-warm='true']")) return;
+  const link = document.createElement("link");
+  link.rel = "preload";
+  link.as = "script";
+  link.href = "/static/app.js?v=170";
+  link.dataset.featureBundleWarm = "true";
+  document.head.appendChild(link);
+}
+
+const scheduleIdle = window.requestIdleCallback || ((callback) => window.setTimeout(callback, 1500));
+scheduleIdle(warmFeatureBundle, { timeout: 3500 });

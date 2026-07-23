@@ -1,6 +1,7 @@
 from pathlib import Path
 import base64
 import binascii
+from concurrent.futures import ThreadPoolExecutor
 import hmac
 import json
 import logging
@@ -82,7 +83,16 @@ FAILED_LOGIN_COUNTS: dict[str, int] = {}
 NAVIGATION_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 NAVIGATION_CACHE_LOCK = threading.Lock()
 NAVIGATION_CACHE_TTL_SECONDS = 60
+CONFIG_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+CONFIG_CACHE_LOCK = threading.Lock()
+CONFIG_CACHE_TTL_SECONDS = 120
 MAX_USER_IMPORT_BYTES = 2 * 1024 * 1024
+DYNAMIC_REPORT_RUN_JOBS: dict[str, dict[str, Any]] = {}
+DYNAMIC_REPORT_RUN_JOBS_LOCK = threading.Lock()
+DYNAMIC_REPORT_RUN_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dynamic-report-run")
+DYNAMIC_REPORT_RUN_JOB_TTL_SECONDS = 30 * 60
+DYNAMIC_REPORT_RUN_ACTIVE_STATUSES = {"queued", "running"}
+DYNAMIC_REPORT_RUN_FINAL_STATUSES = {"complete", "failed", "cancelled"}
 DYNAMIC_REPORT_EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 DYNAMIC_REPORT_EXPORT_JOBS_LOCK = threading.Lock()
 DYNAMIC_REPORT_EXPORT_JOB_FILE_LOCK = threading.Lock()
@@ -1615,6 +1625,27 @@ def clear_navigation_cache() -> None:
         NAVIGATION_CACHE.clear()
 
 
+def clear_config_cache(*keys: str) -> None:
+    with CONFIG_CACHE_LOCK:
+        if keys:
+            for key in keys:
+                CONFIG_CACHE.pop(key, None)
+        else:
+            CONFIG_CACHE.clear()
+
+
+def cached_config_response(key: str, loader) -> dict[str, Any]:
+    now = time.time()
+    with CONFIG_CACHE_LOCK:
+        cached = CONFIG_CACHE.get(key)
+        if cached and now - cached[0] <= CONFIG_CACHE_TTL_SECONDS:
+            return cached[1]
+    response = loader()
+    with CONFIG_CACHE_LOCK:
+        CONFIG_CACHE[key] = (now, response)
+    return response
+
+
 def navigation_cache_key(user: dict) -> str:
     permissions = sorted({str(code) for code in user.get("permissions", []) if str(code)})
     return json.dumps(
@@ -2430,8 +2461,8 @@ def system_status(request: Request) -> dict:
         },
         "query_policy": {
             "pagination_required": True,
-            "page_size_min": 20,
-            "page_size_max": 50,
+            "page_size_min": 10,
+            "page_size_max": 20,
             "data_source": "internal_fastapi",
         },
     }
@@ -2991,6 +3022,7 @@ def save_sql_report(request: Request, payload: SqlReportPayload) -> dict:
     except RuntimeError as error:
         raise_sql_report_schema_error(error)
     repository.add_audit_log(actor["username"], "sql_report_saved", f"Lưu cấu hình SQL {ma_bao_cao}")
+    clear_config_cache("report_configs")
     if hasattr(repository, "delete_dashboard_chart_cache_for_sql_report"):
         repository.delete_dashboard_chart_cache_for_sql_report(
             report_id=report_id,
@@ -3014,6 +3046,7 @@ def delete_sql_report(request: Request, report_id: int) -> dict:
     except RuntimeError as error:
         raise_sql_report_schema_error(error)
     repository.add_audit_log(actor["username"], "sql_report_deleted", f"Xóa cấu hình SQL {report_id}")
+    clear_config_cache("report_configs")
     return {"ok": True}
 
 
@@ -3058,6 +3091,7 @@ def save_admin_onebss_report(request: Request, payload: OneBssReportPayload) -> 
         repository.add_audit_log(actor["username"], "onebss_report_saved", f"Luu cau hinh OneBSS {ma_bao_cao}")
     except Exception:
         logger.exception("Cannot write OneBSS report saved audit log")
+    clear_config_cache("onebss_report_configs")
     return {"ok": True, "id": report_id, "ma_bao_cao": ma_bao_cao}
 
 
@@ -3070,6 +3104,7 @@ def delete_admin_onebss_report(request: Request, report_id: int) -> dict:
     except RuntimeError as error:
         raise_onebss_report_schema_error(error)
     repository.add_audit_log(actor["username"], "onebss_report_deleted", f"Xoa cau hinh OneBSS {report_id}")
+    clear_config_cache("onebss_report_configs")
     return {"ok": True}
 
 
@@ -3239,21 +3274,24 @@ def load_google_sheet_table(request: Request, url: str) -> dict:
 @router.get("/api/reports/configs")
 def list_report_configs(request: Request) -> dict:
     admin_user(request)
-    try:
-        reports = build_app_repository().list_sql_reports()
-    except RuntimeError as error:
-        raise_sql_report_schema_error(error)
-    return {
-        "reports": [
-            {
-                "id": report["id"],
-                "ten_bao_cao": report["ten_bao_cao"],
-                "ma_bao_cao": report["ma_bao_cao"],
-                "cac_tham_so": report.get("cac_tham_so") or [],
-            }
-            for report in reports
-        ]
-    }
+    def load() -> dict[str, Any]:
+        try:
+            reports = build_app_repository().list_sql_reports()
+        except RuntimeError as error:
+            raise_sql_report_schema_error(error)
+        return {
+            "reports": [
+                {
+                    "id": report["id"],
+                    "ten_bao_cao": report["ten_bao_cao"],
+                    "ma_bao_cao": report["ma_bao_cao"],
+                    "cac_tham_so": report.get("cac_tham_so") or [],
+                }
+                for report in reports
+            ]
+        }
+
+    return cached_config_response("report_configs", load)
 
 
 def _excel_cell_value(value: Any) -> Any:
@@ -3787,6 +3825,197 @@ def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload, creat
     finally:
         if acquired:
             semaphore.release()
+
+
+def _cleanup_dynamic_report_run_jobs() -> None:
+    now = time.time()
+    with DYNAMIC_REPORT_RUN_JOBS_LOCK:
+        expired_ids = [
+            job_id
+            for job_id, job in DYNAMIC_REPORT_RUN_JOBS.items()
+            if job.get("status") not in DYNAMIC_REPORT_RUN_ACTIVE_STATUSES
+            and now - float(job.get("updated_at") or job.get("created_at") or now) > DYNAMIC_REPORT_RUN_JOB_TTL_SECONDS
+        ]
+        for job_id in expired_ids:
+            DYNAMIC_REPORT_RUN_JOBS.pop(job_id, None)
+
+
+def _set_dynamic_report_run_job(job_id: str, **updates: Any) -> dict[str, Any]:
+    now = time.time()
+    with DYNAMIC_REPORT_RUN_JOBS_LOCK:
+        job = DYNAMIC_REPORT_RUN_JOBS.get(job_id) or {"job_id": job_id, "created_at": now}
+        job.update(updates)
+        job["updated_at"] = now
+        DYNAMIC_REPORT_RUN_JOBS[job_id] = job
+        return dict(job)
+
+
+def _get_dynamic_report_run_job(job_id: str) -> dict[str, Any] | None:
+    with DYNAMIC_REPORT_RUN_JOBS_LOCK:
+        job = DYNAMIC_REPORT_RUN_JOBS.get(job_id)
+        return dict(job) if job else None
+
+
+def _dynamic_report_run_queue_position(job_id: str, job: dict[str, Any]) -> int:
+    if str(job.get("status") or "").lower() != "queued":
+        return 0
+    created_at = float(job.get("created_at") or time.time())
+    with DYNAMIC_REPORT_RUN_JOBS_LOCK:
+        queued_before = [
+            current
+            for current_id, current in DYNAMIC_REPORT_RUN_JOBS.items()
+            if current_id != job_id
+            and str(current.get("status") or "").lower() == "queued"
+            and float(current.get("created_at") or created_at) <= created_at
+        ]
+    return len(queued_before) + 1
+
+
+def _dynamic_report_run_job_response(job_id: str, job: dict[str, Any]) -> dict[str, Any]:
+    status_value = str(job.get("status") or "queued").lower()
+    response: dict[str, Any] = {
+        "ok": status_value != "failed",
+        "job_id": job_id,
+        "history_id": job.get("history_id") or job_id,
+        "event_type": "load",
+        "status": status_value,
+        "message": job.get("message") or "",
+        "report_code": job.get("report_code") or "",
+        "report_name": job.get("report_name") or "",
+        "ma_bao_cao": job.get("report_code") or "",
+        "ten_bao_cao": job.get("report_name") or "",
+        "created_at": job.get("created_at") or "",
+        "queue_position": _dynamic_report_run_queue_position(job_id, job),
+        "can_cancel": False,
+    }
+    if status_value == "complete" and isinstance(job.get("result"), dict):
+        response.update(job["result"])
+        response["ok"] = True
+        response["status"] = "complete"
+        response["job_id"] = job_id
+    if status_value == "failed":
+        response["details"] = job.get("details") or {}
+    return response
+
+
+def _run_dynamic_report_run_job(job_id: str, payload: RunReportPayload, actor: str) -> None:
+    _set_dynamic_report_run_job(job_id, status="running", message="Dang truy van SQL trong hang doi noi bo.")
+    try:
+        result = build_database_service().run_dynamic_report(
+            ma_bao_cao=payload.ma_bao_cao.strip().upper(),
+            filters=payload.filters,
+            page=payload.page,
+            page_size=payload.page_size,
+            search=payload.search,
+            search_columns=payload.search_columns,
+        )
+        pagination = result.get("pagination") if isinstance(result.get("pagination"), dict) else {}
+        rows = result.get("rows") if isinstance(result.get("rows"), list) else []
+        status_value = "success" if result.get("ok", True) else "failed"
+        _record_dynamic_report_history(
+            actor=actor,
+            event_type="load",
+            status_value=status_value,
+            ma_bao_cao=payload.ma_bao_cao,
+            report=result.get("report") if isinstance(result.get("report"), dict) else None,
+            rows=len(rows),
+            total=pagination.get("total") or len(rows),
+            message=str(result.get("message") or ""),
+            filters=payload.filters,
+            search=payload.search,
+            search_columns=payload.search_columns,
+            history_id=job_id,
+            job_id=job_id,
+        )
+        if result.get("ok") is False:
+            _set_dynamic_report_run_job(
+                job_id,
+                status="failed",
+                message=result.get("message") or "Khong tai duoc du lieu bao cao.",
+                result=result,
+                rows=len(rows),
+                total=pagination.get("total") or len(rows),
+            )
+            return
+        _set_dynamic_report_run_job(
+            job_id,
+            status="complete",
+            message=result.get("message") or "Da tai du lieu bao cao.",
+            result=result,
+            rows=len(rows),
+            total=pagination.get("total") or len(rows),
+        )
+    except RuntimeError as error:
+        try:
+            raise_sql_report_schema_error(error)
+        except HTTPException as http_error:
+            message = str(http_error.detail)
+        else:
+            message = str(error)
+        _set_dynamic_report_run_job(job_id, status="failed", message=message, details={"error": str(error)})
+        _record_dynamic_report_history(
+            actor=actor,
+            event_type="load",
+            status_value="failed",
+            ma_bao_cao=payload.ma_bao_cao,
+            message=message,
+            filters=payload.filters,
+            search=payload.search,
+            search_columns=payload.search_columns,
+            history_id=job_id,
+            job_id=job_id,
+            details={"error": str(error)},
+        )
+    except Exception as error:
+        logger.exception("Dynamic report run job failed: %s", error)
+        message = f"Khong tai duoc du lieu bao cao: {error}"
+        _set_dynamic_report_run_job(job_id, status="failed", message=message, details={"error": str(error)})
+        _record_dynamic_report_history(
+            actor=actor,
+            event_type="load",
+            status_value="failed",
+            ma_bao_cao=payload.ma_bao_cao,
+            message=message,
+            filters=payload.filters,
+            search=payload.search,
+            search_columns=payload.search_columns,
+            history_id=job_id,
+            job_id=job_id,
+            details={"error": str(error)},
+        )
+
+
+@router.post("/api/reports/run-jobs")
+def start_dynamic_report_run_job(request: Request, payload: RunReportPayload) -> dict:
+    actor = admin_user(request)
+    _cleanup_dynamic_report_run_jobs()
+    job_id = uuid.uuid4().hex
+    now = time.time()
+    report_info = _dynamic_report_history_report(payload.ma_bao_cao)
+    with DYNAMIC_REPORT_RUN_JOBS_LOCK:
+        DYNAMIC_REPORT_RUN_JOBS[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "message": "Da dua truy van SQL vao hang doi noi bo.",
+            "created_at": now,
+            "updated_at": now,
+            "created_by": actor["username"],
+            "report_code": report_info["ma_bao_cao"],
+            "report_name": report_info["ten_bao_cao"],
+        }
+        job_snapshot = dict(DYNAMIC_REPORT_RUN_JOBS[job_id])
+    DYNAMIC_REPORT_RUN_EXECUTOR.submit(_run_dynamic_report_run_job, job_id, payload, actor["username"])
+    return _dynamic_report_run_job_response(job_id, job_snapshot)
+
+
+@router.get("/api/reports/run-jobs/{job_id}")
+def get_dynamic_report_run_job(request: Request, job_id: str) -> dict:
+    admin_user(request)
+    _cleanup_dynamic_report_run_jobs()
+    job = _get_dynamic_report_run_job(job_id)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay job truy van SQL.")
+    return _dynamic_report_run_job_response(job_id, job)
 
 
 @router.post("/api/reports/run")
@@ -4391,11 +4620,14 @@ def _start_onebss_report_job_thread(job_id: str, **kwargs: Any) -> None:
 @router.get("/api/onebss-reports/configs")
 def list_onebss_report_configs(request: Request) -> dict:
     admin_user(request)
-    try:
-        reports = build_app_repository().list_onebss_reports()
-    except RuntimeError as error:
-        raise_onebss_report_schema_error(error)
-    return {"reports": reports}
+    def load() -> dict[str, Any]:
+        try:
+            reports = build_app_repository().list_onebss_reports()
+        except RuntimeError as error:
+            raise_onebss_report_schema_error(error)
+        return {"reports": reports}
+
+    return cached_config_response("onebss_report_configs", load)
 
 
 @router.get("/api/onebss-reports/runs")

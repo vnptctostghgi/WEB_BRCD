@@ -115,7 +115,7 @@ class DatabaseService:
             }
 
         safe_page = max(1, page)
-        safe_page_size = max(20, min(page_size, self._dynamic_report_fetch_page_size()))
+        safe_page_size = 10 if page_size <= 10 else 20
         allowed_params = [str(param).strip().lstrip(":") for param in (report.get("cac_tham_so") or []) if str(param).strip()]
         allowed_param_by_upper = {param.upper(): param for param in allowed_params}
         safe_filters: dict[str, Any] = {}

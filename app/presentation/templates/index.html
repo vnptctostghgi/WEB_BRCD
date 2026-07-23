@@ -12,9 +12,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="preload" href="/api/navigation" as="fetch" crossorigin="use-credentials" />
     {% if shell_only %}
-    <link rel="preload" href="/static/shell.js?v=1" as="script" />
+    <link rel="preload" href="/static/shell.js?v=2" as="script" />
     {% else %}
-    <link rel="preload" href="/static/app.js?v=169" as="script" />
+    <link rel="preload" href="/static/app.js?v=170" as="script" />
     {% endif %}
     <link rel="stylesheet" href="/static/tailwind-built.css?v=1" />
     <link rel="stylesheet" href="/static/styles.css?v=118" />
@@ -330,7 +330,7 @@
               <div class="dynamic-report-controls">
                 <label class="dynamic-report-report">Loại báo cáo<select class="form-control" id="dynamic-report-select" name="ma_bao_cao"></select></label>
                 <label class="dynamic-report-search">Tìm kiếm gần đúng<input class="form-control" id="dynamic-report-search" name="search" placeholder="Nhập tên, mã thuê bao, địa chỉ..." autocomplete="off" /></label>
-                <label class="dynamic-report-page-size">Số dòng<select class="form-control" id="dynamic-report-page-size"><option value="20">20</option><option value="30">30</option><option value="50">50</option></select></label>
+                <label class="dynamic-report-page-size">Số dòng<select class="form-control" id="dynamic-report-page-size"><option value="10">10</option><option value="20" selected>20</option></select></label>
               </div>
               <div class="dynamic-report-filter-row">
                 <div id="dynamic-report-filters" class="dynamic-report-filters"></div>
@@ -784,9 +784,9 @@
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
     {% if shell_only %}
-    <script defer src="/static/shell.js?v=1"></script>
+    <script defer src="/static/shell.js?v=2"></script>
     {% else %}
-    <script defer src="/static/app.js?v=169"></script>
+    <script defer src="/static/app.js?v=170"></script>
     {% endif %}
   </body>
 </html>
