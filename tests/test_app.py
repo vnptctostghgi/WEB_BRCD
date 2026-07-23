@@ -4016,13 +4016,13 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
         assert "/static/shell.js?v=2" in home.text
-        assert "/static/app.js?v=173" not in home.text
+        assert "/static/app.js?v=174" not in home.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
-        assert "/static/app.js?v=173" in dashboard.text
+        assert "/static/app.js?v=174" in dashboard.text
         assert "view-dashboard-builder" not in home.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" in dashboard.text
@@ -4040,23 +4040,30 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=173" in workstation.text
+        assert "/static/app.js?v=174" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=173" in work_tasks.text
+        assert "/static/app.js?v=174" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=173" in report_links.text
+        assert "/static/app.js?v=174" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
+
+        system = client.get("/quantriketnoi")
+        assert system.status_code == 200
+        assert "view-system" in system.text
+        assert "/static/app.js?v=174" in system.text
+        assert "/static/data-mining.js" not in system.text
+        assert system.text.count('class="app-view') == 1
 
         client.post("/api/auth/logout")
         login(client, "viewer_builder", "Viewer@Builder123")
