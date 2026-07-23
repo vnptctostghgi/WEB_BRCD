@@ -171,6 +171,7 @@ let viewTransitionTimer = 0;
 let viewTransitionHoldTimer = 0;
 let navigationPreloadPromise = null;
 let mobileGatewayFocusedScriptPromise = null;
+let internalEmailScriptPromise = null;
 const dataCacheTimestamps = new Map();
 const dashboardViewerLayoutCache = new Map();
 const dashboardBuilderLayoutCache = new Map();
@@ -209,7 +210,7 @@ function ensureMobileGatewayFocusedScriptLoaded() {
   if (mobileGatewayFocusedScriptPromise) return mobileGatewayFocusedScriptPromise;
   mobileGatewayFocusedScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/mobile-gateway-focused.js?v=14";
+    script.src = "/static/mobile-gateway-focused.js?v=16";
     script.defer = true;
     script.dataset.mobileGatewayFocused = "true";
     script.addEventListener("load", () => {
@@ -223,6 +224,28 @@ function ensureMobileGatewayFocusedScriptLoaded() {
     if (!existingScript) document.body.appendChild(script);
   });
   return mobileGatewayFocusedScriptPromise;
+}
+
+function ensureInternalEmailScriptLoaded() {
+  const existingScript = document.querySelector("script[data-internal-email='true']");
+  if (existingScript?.dataset.loaded === "true") return Promise.resolve();
+  if (internalEmailScriptPromise) return internalEmailScriptPromise;
+  internalEmailScriptPromise = new Promise((resolve, reject) => {
+    const script = existingScript || document.createElement("script");
+    script.src = "/static/internal-email.js?v=2";
+    script.defer = true;
+    script.dataset.internalEmail = "true";
+    script.addEventListener("load", () => {
+      script.dataset.loaded = "true";
+      resolve();
+    }, { once: true });
+    script.addEventListener("error", () => {
+      internalEmailScriptPromise = null;
+      reject(new Error("Khong tai duoc module Mail noi bo."));
+    }, { once: true });
+    if (!existingScript) document.body.appendChild(script);
+  });
+  return internalEmailScriptPromise;
 }
 
 function getViewTransitionHeight(...views) {
@@ -332,7 +355,8 @@ const navFeatureConfig = {
   quantringuoidung: { view: "users", icon: "users", keywords: "quan tri nguoi dung user" },
   quantrimenu: { view: "menu-admin", icon: "list", keywords: "quan tri menu sap xep di chuyen module" },
   quantridanhmuc: { view: "catalogs", icon: "list", keywords: "quan tri danh muc phan vung vai tro bien" },
-  quantriketnoi: { view: "system", icon: "plug", keywords: "quan tri ket noi api db ftp drive telegram zalo" },
+  quantriketnoi: { view: "system", icon: "plug", keywords: "quan tri ket noi api db ftp drive telegram zalo email" },
+  internalemail: { view: "internal-email", icon: "audit", keywords: "mail email noi bo imap otp webmail email.vnpt.vn" },
   mobilegateway: { view: "mobile-gateway", icon: "database", keywords: "mobile gateway sms otp android onebss" },
   maytram: { view: "workstation", icon: "database", keywords: "may tram workstation onebss sql export excel redis queue backup drive scheduler" },
   phanquyennguoidung: { view: "permissions", icon: "shield", keywords: "phan quyen nguoi dung chuc nang" },
@@ -602,6 +626,10 @@ function viewLoaderForNav(nextView, dashboardPageId) {
   if (nextView === "reports") return () => loadDynamicReports();
   if (nextView === "onebss-mining") return () => loadOneBssMining();
   if (nextView === "report-links") return () => loadReportLinks();
+  if (nextView === "internal-email") return async () => {
+    await ensureInternalEmailScriptLoaded();
+    return loadInternalEmail();
+  };
   if (nextView === "mobile-gateway") return async () => {
     await ensureMobileGatewayFocusedScriptLoaded();
     return loadMobileGateway();
@@ -4924,7 +4952,7 @@ function renderConnectionEditor(connection) {
       <label>Mã<code class="compact-code">${escapeHtml(connection.code)}</code></label>
       <label>Loại
         <select class="form-control inline-admin-input" data-inline-connection-field="connection_type">
-          ${["internal_api", "supabase", "ftp", "drive", "telegram", "zalo"].map((type) => `<option value="${type}" ${connection.connection_type === type ? "selected" : ""}>${type}</option>`).join("")}
+          ${["internal_api", "supabase", "ftp", "drive", "telegram", "zalo", "internal_email"].map((type) => `<option value="${type}" ${connection.connection_type === type ? "selected" : ""}>${type}</option>`).join("")}
         </select>
       </label>
       <label class="checkbox-label inline-checkbox"><input type="checkbox" data-inline-connection-active ${connection.is_active ? "checked" : ""} /> Đang dùng</label>

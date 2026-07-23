@@ -12,6 +12,7 @@ from app.application.zalo_auto_message_service import send_zalo_auto_message
 from app.application.database_service import DatabaseService
 from app.data_access.internal_api_client import InternalApiClient
 from app.application.telegram_notifier import TelegramNotifier
+from app.modules.internal_email.service import sync_internal_email_once
 from app.settings import Settings
 
 
@@ -383,3 +384,59 @@ class DataMiningScheduler:
 
 
 data_mining_scheduler = DataMiningScheduler()
+
+
+class InternalEmailSyncScheduler:
+    """Poll internal IMAP mailbox and feed email OTP into the existing OTP store."""
+
+    def __init__(self) -> None:
+        self.repository: Any | None = None
+        self.settings: Settings | None = None
+        self.thread: threading.Thread | None = None
+        self.stop_event = threading.Event()
+        self.schema_warning_logged = False
+        self.sync_warning_logged = False
+
+    def configure(self, repository: Any, settings: Settings) -> None:
+        self.repository = repository
+        self.settings = settings
+
+    def start(self) -> None:
+        if not self.repository or not self.settings:
+            raise RuntimeError("InternalEmailSyncScheduler chua duoc configure.")
+        if self.thread and self.thread.is_alive():
+            return
+        self.stop_event.clear()
+        self.thread = threading.Thread(target=self._run_loop, name="internal-email-sync-scheduler", daemon=True)
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=5)
+
+    def _run_loop(self) -> None:
+        while not self.stop_event.is_set():
+            try:
+                self.sync_once()
+            except Exception:
+                logger.exception("Internal email sync scheduler failed")
+            interval = int(getattr(self.settings, "internal_email_sync_interval_seconds", 30) or 30)
+            self.stop_event.wait(max(15, interval))
+
+    def sync_once(self) -> dict[str, Any]:
+        assert self.repository is not None
+        assert self.settings is not None
+        result = sync_internal_email_once(self.repository, self.settings)
+        if not result.get("ok") and result.get("details", {}).get("error"):
+            error_text = str(result.get("details", {}).get("error") or "")
+            if "internal_email_messages" in error_text and not self.schema_warning_logged:
+                logger.warning("Bang internal_email_messages chua ton tai. Hay chay sql/supabase_internal_email.sql tren Supabase.")
+                self.schema_warning_logged = True
+            elif not self.sync_warning_logged:
+                logger.warning("Internal email sync failed: %s", result.get("message"))
+                self.sync_warning_logged = True
+        return result
+
+
+internal_email_sync_scheduler = InternalEmailSyncScheduler()

@@ -28,6 +28,7 @@ from app.data_access.app_repository import (
     hash_password,
     normalize_feature_code,
 )
+from app.modules.internal_email.migrations import INTERNAL_EMAIL_FEATURE_ROWS
 from app.modules.mobile_gateway.migrations import MOBILE_GATEWAY_FEATURE_ROWS
 
 
@@ -66,6 +67,10 @@ ONEBSS_WORKER_COLUMNS = {
 
 FEATURE_ROWS.append({"code": "quantrisql", "name": "Quản trị SQL", "parent_code": "quantriketnoi", "sort_order": 23})
 FEATURE_ROWS.append({"code": "quantridulieuonebss", "name": "Quản trị dữ liệu OneBSS", "parent_code": "quantriketnoi", "sort_order": 24})
+FEATURE_ROWS.extend(
+    {"code": code, "name": name, "parent_code": parent_code, "sort_order": sort_order}
+    for code, name, parent_code, sort_order in INTERNAL_EMAIL_FEATURE_ROWS
+)
 FEATURE_ROWS.extend(
     {"code": code, "name": name, "parent_code": parent_code, "sort_order": sort_order}
     for code, name, parent_code, sort_order in MOBILE_GATEWAY_FEATURE_ROWS

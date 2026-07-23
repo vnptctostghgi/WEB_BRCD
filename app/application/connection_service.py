@@ -7,6 +7,7 @@ from app.application.google_drive_service import test_google_drive_connection
 from app.application.telegram_notifier import TelegramNotifier
 from app.application.zalo_bot import ZaloBotClient
 from app.data_access.internal_api_client import InternalApiClient
+from app.modules.internal_email.service import test_internal_email_connection
 from app.settings import Settings
 
 
@@ -93,6 +94,37 @@ class ConnectionService:
                 and self.settings.zalo_webhook_secret.get_secret_value()
             ),
         )
+        existing_email = self.repository.get_system_connection_by_code("internal_email") or {}
+        existing_email_config = existing_email.get("config") if isinstance(existing_email.get("config"), dict) else {}
+        email_username = existing_email_config.get("username") or self.settings.internal_email_username
+        email_config = {
+            "host": existing_email_config.get("host") or self.settings.internal_email_host,
+            "port": existing_email_config.get("port") or self.settings.internal_email_port,
+            "use_ssl": existing_email_config.get("use_ssl", True),
+            "username": email_username,
+            "password_env": existing_email_config.get("password_env") or "INTERNAL_EMAIL_PASSWORD",
+            "mailbox": existing_email_config.get("mailbox") or self.settings.internal_email_mailbox,
+            "lookback_minutes": existing_email_config.get("lookback_minutes") or self.settings.internal_email_lookback_minutes,
+            "max_messages": existing_email_config.get("max_messages") or self.settings.internal_email_max_messages,
+            "timeout_seconds": existing_email_config.get("timeout_seconds") or self.settings.internal_email_timeout_seconds,
+            "secret_ref": "INTERNAL_EMAIL_PASSWORD",
+            **existing_email_config,
+        }
+        self.repository.upsert_system_connection(
+            code="internal_email",
+            name=str(existing_email.get("name") or "Email noi bo VNPT"),
+            connection_type="internal_email",
+            description="Dong bo hop thu noi bo qua IMAP de phat hien OTP tu email.vnpt.vn.",
+            config=email_config,
+            is_active=bool(
+                existing_email.get("is_active")
+                or (
+                    self.settings.internal_email_sync_enabled
+                    and email_username
+                    and self.settings.internal_email_password.get_secret_value()
+                )
+            ),
+        )
 
     def test_connection(self, code: str) -> dict[str, Any]:
         connection = self.repository.get_system_connection_by_code(code)
@@ -114,6 +146,9 @@ class ConnectionService:
 
         if connection["connection_type"] == "drive":
             return self._with_connection(test_google_drive_connection(self.settings, self.repository), connection)
+
+        if connection["connection_type"] == "internal_email":
+            return self._with_connection(test_internal_email_connection(self.settings, self.repository, connection), connection)
 
         return self._with_connection(
             {

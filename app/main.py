@@ -10,9 +10,16 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.application.connection_service import ConnectionService
-from app.application.task_scheduler import dashboard_chart_cache_scheduler, data_mining_scheduler, work_task_scheduler, zalo_auto_message_scheduler
+from app.application.task_scheduler import (
+    dashboard_chart_cache_scheduler,
+    data_mining_scheduler,
+    internal_email_sync_scheduler,
+    work_task_scheduler,
+    zalo_auto_message_scheduler,
+)
 from app.application.telegram_notifier import TelegramNotifier
 from app.data_access.repository_factory import build_repository
+from app.modules.internal_email.router import admin_router as internal_email_admin_router
 from app.modules.mobile_gateway.router import admin_router as mobile_gateway_admin_router
 from app.modules.mobile_gateway.router import router as mobile_gateway_router
 from app.presentation.routes import router as presentation_router
@@ -53,9 +60,12 @@ async def lifespan(_: FastAPI):
     zalo_auto_message_scheduler.start()
     data_mining_scheduler.configure(repository, settings)
     data_mining_scheduler.start()
+    internal_email_sync_scheduler.configure(repository, settings)
+    internal_email_sync_scheduler.start()
     try:
         yield
     finally:
+        internal_email_sync_scheduler.stop()
         data_mining_scheduler.stop()
         zalo_auto_message_scheduler.stop()
         dashboard_chart_cache_scheduler.stop()
@@ -83,6 +93,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 app.mount("/static", StaticFiles(directory="app/presentation/static"), name="static")
 app.include_router(mobile_gateway_router)
 app.include_router(mobile_gateway_admin_router)
+app.include_router(internal_email_admin_router)
 app.include_router(presentation_router)
 
 

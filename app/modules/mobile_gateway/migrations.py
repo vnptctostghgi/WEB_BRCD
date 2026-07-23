@@ -4,7 +4,7 @@ import sqlite3
 
 
 MOBILE_GATEWAY_FEATURE_ROWS = [
-    ("mobilegateway", "Mobile Gateway", "quantriweb", 29),
+    ("mobilegateway", "Mobile Gateway", "quantriweb", 30),
     ("mobile_gateway.view", "Xem Mobile Gateway", "mobilegateway", 291),
     ("mobile_gateway.manage", "Quan tri Mobile Gateway", "mobilegateway", 292),
     ("mobile_gateway.devices.view", "Xem thiet bi Mobile", "mobilegateway", 293),

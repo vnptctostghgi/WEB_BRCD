@@ -125,7 +125,7 @@ class OtpConfigurationPayload(BaseModel):
     service_code: str
     service_name: str
     enabled: bool = True
-    source_type: Literal["sms", "notification", "both"] = "sms"
+    source_type: Literal["sms", "notification", "email", "both"] = "sms"
     sender_pattern: str = ""
     sender_match_type: Literal["contains", "equals", "regex"] = "contains"
     package_pattern: str = ""

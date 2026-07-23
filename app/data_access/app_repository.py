@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from app.modules.internal_email.migrations import INTERNAL_EMAIL_FEATURE_ROWS, ensure_internal_email_sqlite_schema
 from app.modules.mobile_gateway.migrations import MOBILE_GATEWAY_FEATURE_ROWS, ensure_mobile_gateway_sqlite_schema
 
 
@@ -39,6 +40,7 @@ FEATURE_ROWS = [
     ("nhatkyhoatdong", "Nhật ký hoạt động", "quantriweb", 90),
     ("quantrisql", "Quản trị SQL", "quantriketnoi", 23),
     ("quantridulieuonebss", "Quản trị dữ liệu OneBSS", "quantriketnoi", 24),
+    *INTERNAL_EMAIL_FEATURE_ROWS,
     *MOBILE_GATEWAY_FEATURE_ROWS,
 ]
 
@@ -794,6 +796,7 @@ class AppRepository:
                 ),
             )
             ensure_mobile_gateway_sqlite_schema(connection)
+            ensure_internal_email_sqlite_schema(connection)
 
     def _migrate_feature_codes(self, connection: sqlite3.Connection) -> None:
         rows = connection.execute(

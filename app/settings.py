@@ -81,6 +81,16 @@ class Settings(BaseSettings):
     mobile_gateway_pairing_ttl_seconds: int = 0
     mobile_gateway_hmac_max_clock_skew_seconds: int = 300
     mobile_gateway_online_threshold_seconds: int = 180
+    internal_email_sync_enabled: bool = False
+    internal_email_host: str = "email.vnpt.vn"
+    internal_email_port: int = 993
+    internal_email_username: str = ""
+    internal_email_password: SecretStr = Field(default=SecretStr(""))
+    internal_email_mailbox: str = "INBOX"
+    internal_email_timeout_seconds: int = 20
+    internal_email_sync_interval_seconds: int = 30
+    internal_email_lookback_minutes: int = 30
+    internal_email_max_messages: int = 40
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
 

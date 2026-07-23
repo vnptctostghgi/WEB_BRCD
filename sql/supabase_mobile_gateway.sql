@@ -279,7 +279,7 @@ create index if not exists otp_latest_values_filter_idx on public.otp_latest_val
 
 insert into public.features (code, name, parent_code, sort_order)
 values
-  ('mobilegateway', 'Mobile Gateway', 'quantriweb', 29),
+  ('mobilegateway', 'Mobile Gateway', 'quantriweb', 30),
   ('mobile_gateway.view', 'Xem Mobile Gateway', 'mobilegateway', 291),
   ('mobile_gateway.manage', 'Quan tri Mobile Gateway', 'mobilegateway', 292),
   ('mobile_gateway.devices.view', 'Xem thiet bi Mobile', 'mobilegateway', 293),

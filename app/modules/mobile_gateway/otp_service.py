@@ -131,6 +131,52 @@ class OtpService:
             return {"filter_id": otp_filter.get("filter_id"), "code": code}
         return None
 
+    def record_latest_from_email(self, email_message: dict[str, Any]) -> dict[str, Any] | None:
+        body = "\n".join(
+            str(email_message.get(key) or "")
+            for key in ("subject", "body")
+            if str(email_message.get(key) or "").strip()
+        )
+        if not body:
+            return None
+        sender = str(email_message.get("sender") or email_message.get("sender_email") or "")
+        source_id = str(email_message.get("id") or email_message.get("uid") or email_message.get("message_id") or "")
+        received_at = str(email_message.get("received_at") or "")
+        filters = self.repository.list_otp_filters(enabled_only=True)
+        if not filters:
+            self.repository.ensure_defaults()
+            filters = self.repository.list_otp_filters(enabled_only=True)
+        for otp_filter in filters:
+            if not self._sender_allowed(otp_filter, sender):
+                continue
+            code = self._extract_code_for_filter(body, otp_filter)
+            if not code:
+                continue
+            request_id = ""
+            service_code = str(otp_filter.get("service_code") or otp_filter.get("filter_id") or "").strip().lower()
+            for request in self.repository.waiting_otp_requests(service_code=service_code):
+                if not self._source_time_allowed(request, received_at):
+                    continue
+                if self.repository.match_otp_request(str(request["request_id"]), "email", source_id, code):
+                    request_id = str(request["request_id"])
+                    break
+            self.repository.record_otp_latest(
+                otp_filter=otp_filter,
+                sender=sender,
+                code=code,
+                received_at=received_at,
+                source_type="email",
+                source_id=source_id,
+                request_id=request_id,
+            )
+            return {
+                "filter_id": otp_filter.get("filter_id"),
+                "service_code": service_code,
+                "code": code,
+                "request_id": request_id,
+            }
+        return None
+
     def match_latest_for_request(self, request: dict[str, Any] | str) -> dict[str, Any] | None:
         if isinstance(request, str):
             request = self.repository.get_otp_request(request) or {}

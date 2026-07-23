@@ -64,6 +64,7 @@ def test_admin_can_login_and_open_dashboard() -> None:
         assert "/static/tailwind-built.css?v=1" in response.text
         assert "cdn.tailwindcss.com" not in response.text
         assert "dashboard-tab-fiber" not in response.text
+        assert 'data-feature-code="internalemail"' in response.text
         assert "Truy vấn SQL" in response.text
         assert "Báo cáo mới" in response.text
         assert "Quản trị người dùng" in response.text
@@ -75,6 +76,15 @@ def test_feature_path_opens_current_app_shell() -> None:
         response = client.get("/quantrimenu")
         assert response.status_code == 200
         assert 'data-feature-code="quantrimenu"' in response.text
+
+        email_response = client.get("/internalemail")
+        assert email_response.status_code == 200
+        assert 'id="view-internal-email"' in email_response.text
+        assert 'data-internal-email-tab="messages"' in email_response.text
+        assert 'data-internal-email-tab="email"' in email_response.text
+        assert 'data-internal-email-panel="messages"' in email_response.text
+        assert 'data-internal-email-panel="email"' in email_response.text
+        assert 'data-mobile-tab="email"' not in email_response.text
 
 
 def test_admin_can_open_workstation_overview_and_download_setup_package() -> None:
@@ -180,6 +190,8 @@ def test_admin_navigation_payload_combines_features_and_layouts() -> None:
         assert response.status_code == 200
         payload = response.json()
         assert any(feature["code"] == "quantrimenu" for feature in payload["features"])
+        assert any(feature["code"] == "internalemail" for feature in payload["features"])
+        assert any(feature["code"] == "internal_email.view" for feature in payload["features"])
         assert any(layout["page_id"] == "DASHBOARD_KINH_DOANH" for layout in payload["dashboard_layouts"])
 
 
@@ -2083,6 +2095,65 @@ def test_onebss_mobile_gateway_request_uses_latest_otp_received_before_request()
         consumed = repository.get_otp_request(request["request_id"])
         assert consumed is not None
         assert consumed["status"] == "consumed"
+
+
+def test_internal_email_parser_masks_otp_preview() -> None:
+    from app.modules.internal_email.service import parse_email_message
+
+    raw_message = (
+        b"From: VNPT <noreply@vnpt.vn>\r\n"
+        b"Subject: Ma OTP dang nhap\r\n"
+        b"Date: Tue, 14 Jul 2026 07:00:00 +0700\r\n"
+        b"Message-ID: <otp-test@example.vn>\r\n"
+        b"\r\n"
+        b"Ma OTP cua ban la 123456. Khong chia se ma nay.\r\n"
+    )
+
+    parsed = parse_email_message(raw_message, "42")
+
+    assert parsed["metadata"]["uid"] == "42"
+    assert parsed["metadata"]["sender_email"] == "noreply@vnpt.vn"
+    assert "123456" in parsed["search_text"]
+    assert "123456" not in parsed["metadata"]["body_masked"]
+    assert "******" in parsed["metadata"]["body_masked"]
+
+
+def test_internal_email_status_and_email_otp_can_match_request() -> None:
+    from app.modules.mobile_gateway.otp_service import OtpService
+    from app.modules.mobile_gateway.repository import MobileGatewayRepository
+
+    with TestClient(app) as client:
+        login(client)
+        status_response = client.get("/api/admin/internal-email/status")
+        assert status_response.status_code == 200
+        status_payload = status_response.json()
+        assert status_payload["ok"] is True
+        assert status_payload["details"]["host"] == "email.vnpt.vn"
+        assert status_payload["details"]["mailbox"] == "INBOX"
+
+        messages_response = client.get("/api/admin/internal-email/messages?limit=200")
+        assert messages_response.status_code == 200
+        assert messages_response.json()["ok"] is True
+
+        repository = MobileGatewayRepository(routes.build_app_repository(), get_settings())
+        repository.ensure_defaults()
+        service = OtpService(repository)
+        request = service.create_request("onebss", job_id="email-otp-test")
+        latest = service.record_latest_from_email(
+            {
+                "id": "email-otp-test-message",
+                "sender": "VNPT",
+                "sender_email": "noreply@vnpt.vn",
+                "subject": "Ma OTP dang nhap OneBSS",
+                "body": "Ma OTP dang nhap OneBSS cua Quy khach la 135790.",
+                "received_at": repository.now(),
+            }
+        )
+
+        assert latest is not None
+        assert latest["code"] == "135790"
+        assert latest["request_id"] == request["request_id"]
+        assert service.consume_code(request["request_id"]) == "135790"
 
 
 def test_onebss_mobile_gateway_resolver_auto_submits_otp(monkeypatch) -> None:
