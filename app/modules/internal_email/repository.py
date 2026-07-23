@@ -38,6 +38,8 @@ class InternalEmailRepository:
     def _decode_message(row: dict[str, Any]) -> dict[str, Any]:
         item = dict(row)
         item["is_otp_candidate"] = bool(item.get("is_otp_candidate"))
+        if "otp_code" not in item:
+            item["otp_code"] = ""
         return item
 
     def get_message_by_uid(self, account_key: str, mailbox: str, uid: str) -> dict[str, Any] | None:
@@ -78,6 +80,7 @@ class InternalEmailRepository:
             "received_at": str(payload.get("received_at") or now),
             "synced_at": str(payload.get("synced_at") or now),
             "is_otp_candidate": bool(payload.get("is_otp_candidate")),
+            "otp_code": str(payload.get("otp_code") or ""),
             "otp_code_masked": str(payload.get("otp_code_masked") or ""),
             "otp_service_code": str(payload.get("otp_service_code") or ""),
             "otp_request_id": str(payload.get("otp_request_id") or ""),
@@ -91,9 +94,9 @@ class InternalEmailRepository:
                     """
                     INSERT INTO internal_email_messages
                     (account_key, mailbox, uid, message_id, sender, sender_email, subject, body_masked,
-                     received_at, synced_at, is_otp_candidate, otp_code_masked, otp_service_code,
+                     received_at, synced_at, is_otp_candidate, otp_code, otp_code_masked, otp_service_code,
                      otp_request_id, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(account_key, mailbox, uid) DO UPDATE SET
                       message_id=excluded.message_id,
                       sender=excluded.sender,
@@ -103,6 +106,7 @@ class InternalEmailRepository:
                       received_at=excluded.received_at,
                       synced_at=excluded.synced_at,
                       is_otp_candidate=excluded.is_otp_candidate,
+                      otp_code=excluded.otp_code,
                       otp_code_masked=excluded.otp_code_masked,
                       otp_service_code=excluded.otp_service_code,
                       otp_request_id=excluded.otp_request_id,
@@ -120,6 +124,7 @@ class InternalEmailRepository:
                         sqlite_row["received_at"],
                         sqlite_row["synced_at"],
                         sqlite_row["is_otp_candidate"],
+                        sqlite_row["otp_code"],
                         sqlite_row["otp_code_masked"],
                         sqlite_row["otp_service_code"],
                         sqlite_row["otp_request_id"],
@@ -146,11 +151,19 @@ class InternalEmailRepository:
             created = False
         return self._decode_message(saved), created
 
-    def mark_message_otp(self, message_id: str | int, otp_service_code: str, otp_code_masked: str, otp_request_id: str = "") -> None:
+    def mark_message_otp(
+        self,
+        message_id: str | int,
+        otp_service_code: str,
+        otp_code: str,
+        otp_code_masked: str = "",
+        otp_request_id: str = "",
+    ) -> None:
         now = self.now()
         payload = {
             "is_otp_candidate": True,
             "otp_service_code": otp_service_code,
+            "otp_code": otp_code,
             "otp_code_masked": otp_code_masked,
             "otp_request_id": otp_request_id,
             "updated_at": now,
@@ -160,10 +173,10 @@ class InternalEmailRepository:
                 connection.execute(
                     """
                     UPDATE internal_email_messages
-                    SET is_otp_candidate=1, otp_service_code=?, otp_code_masked=?, otp_request_id=?, updated_at=?
+                    SET is_otp_candidate=1, otp_service_code=?, otp_code=?, otp_code_masked=?, otp_request_id=?, updated_at=?
                     WHERE id=?
                     """,
-                    (otp_service_code, otp_code_masked, otp_request_id, now, message_id),
+                    (otp_service_code, otp_code, otp_code_masked, otp_request_id, now, message_id),
                 )
             return
         self._patch("internal_email_messages", {"id": f"eq.{message_id}"}, payload)

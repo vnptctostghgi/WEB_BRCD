@@ -35,6 +35,7 @@ create table if not exists public.internal_email_messages (
   received_at timestamptz not null,
   synced_at timestamptz not null default now(),
   is_otp_candidate boolean not null default false,
+  otp_code text not null default '',
   otp_code_masked text not null default '',
   otp_service_code text not null default '',
   otp_request_id text not null default '',
@@ -42,6 +43,9 @@ create table if not exists public.internal_email_messages (
   updated_at timestamptz not null default now(),
   unique (account_key, mailbox, uid)
 );
+
+alter table public.internal_email_messages
+add column if not exists otp_code text not null default '';
 
 create index if not exists internal_email_messages_received_idx
 on public.internal_email_messages (received_at desc, id desc);

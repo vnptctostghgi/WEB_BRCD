@@ -323,6 +323,7 @@ class InternalEmailSyncService:
         self.email_repository.mark_message_otp(
             message_id,
             str(result.get("filter_id") or result.get("service_code") or ""),
+            code,
             security.code_mask(code),
             request_id,
         )

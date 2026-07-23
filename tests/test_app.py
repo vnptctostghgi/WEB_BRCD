@@ -2182,6 +2182,38 @@ def test_internal_email_parser_masks_otp_preview() -> None:
     assert "******" in parsed["metadata"]["body_masked"]
 
 
+def test_internal_email_messages_return_full_otp_for_copy() -> None:
+    from app.modules.internal_email.repository import InternalEmailRepository
+
+    with TestClient(app) as client:
+        login(client)
+        repository = InternalEmailRepository(routes.build_app_repository())
+        uid = f"copy-otp-test-{uuid.uuid4().hex}"
+        saved, created = repository.save_message(
+            {
+                "account_key": "internal_email",
+                "mailbox": "INBOX",
+                "uid": uid,
+                "message_id": "<copy-otp-test@example.vn>",
+                "sender": "VNPT",
+                "sender_email": "noreply@vnpt.vn",
+                "subject": "Ma OTP dang nhap",
+                "body_masked": "Ma OTP cua ban la ******.",
+                "received_at": repository.now(),
+                "synced_at": repository.now(),
+            }
+        )
+        assert created is True
+        repository.mark_message_otp(saved["id"], "onebss", "246810", "******")
+
+        response = client.get("/api/admin/internal-email/messages?limit=50&otp_only=true")
+        assert response.status_code == 200
+        message = next(item for item in response.json()["messages"] if item["uid"] == uid)
+        assert message["otp_code"] == "246810"
+        assert message["otp_code_masked"] == "******"
+        assert "246810" not in message["body_masked"]
+
+
 def test_internal_email_status_and_email_otp_can_match_request() -> None:
     from app.modules.mobile_gateway.otp_service import OtpService
     from app.modules.mobile_gateway.repository import MobileGatewayRepository

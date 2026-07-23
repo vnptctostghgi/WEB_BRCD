@@ -48,6 +48,14 @@ function bindInternalEmailEvents() {
   bind("#internal-email-sync", "click", syncInternalEmail);
   bind("#internal-email-test", "click", testInternalEmail);
   bind("#internal-email-otp-only", "change", () => loadInternalEmailMessages({ force: true }));
+  bind("#internal-email-messages-table", "click", (event) => {
+    const button = event.target.closest("[data-internal-email-copy-otp]");
+    if (button) copyInternalEmailOtpFromButton(button);
+  });
+  bind("#internal-email-messages-table", "dblclick", (event) => {
+    const code = event.target.closest("[data-internal-email-otp-code]");
+    if (code) selectElementText(code);
+  });
   root?.querySelectorAll("[data-internal-email-tab]").forEach((button) => {
     if (button.dataset.boundInternalEmailTab) return;
     button.dataset.boundInternalEmailTab = "true";
@@ -65,6 +73,27 @@ function bindInternalEmailEvents() {
       }
     });
   });
+}
+
+async function copyInternalEmailOtpFromButton(button) {
+  const code = button?.dataset.internalEmailCopyOtp || "";
+  if (!code || code === "null") return;
+  try {
+    await copyTextToClipboard(code);
+    showToast(`Đã sao chép OTP ${code}.`);
+  } catch (error) {
+    showToast(error.message || "Không sao chép được OTP.", "error");
+  }
+}
+
+function renderInternalEmailOtpCopyCell(code) {
+  const value = String(code || "").trim();
+  const canCopy = value && value !== "null" && !value.includes("*");
+  return `
+    <div class="mobile-otp-copy-cell internal-email-otp-copy-cell">
+      <code class="mobile-otp-code" data-internal-email-otp-code tabindex="0">${escapeHtml(value || "null")}</code>
+      <button class="table-action mobile-otp-copy-button" data-internal-email-copy-otp="${escapeHtml(value)}" type="button" ${canCopy ? "" : "disabled"}>Copy</button>
+    </div>`;
 }
 
 async function loadInternalEmail({ force = false } = {}) {
@@ -119,8 +148,8 @@ function renderInternalEmailMessages(messages = []) {
     return;
   }
   table.innerHTML = messages.map((message) => {
-    const otp = message.otp_code_masked || (message.is_otp_candidate ? "Đã nhận OTP" : "");
-    const status = message.is_otp_candidate ? `<span class="status viewer">${escapeHtml(otp || "OTP")}</span>` : `<span class="status pending">-</span>`;
+    const otp = message.otp_code || message.otp_code_masked || "";
+    const status = message.is_otp_candidate ? renderInternalEmailOtpCopyCell(otp || "") : `<span class="status pending">-</span>`;
     const sender = message.sender || message.sender_email || "";
     const subject = message.subject || "";
     const preview = message.body_masked || "";

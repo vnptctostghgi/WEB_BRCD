@@ -26,6 +26,7 @@ def ensure_internal_email_sqlite_schema(connection: sqlite3.Connection) -> None:
             received_at TEXT NOT NULL,
             synced_at TEXT NOT NULL,
             is_otp_candidate INTEGER NOT NULL DEFAULT 0,
+            otp_code TEXT NOT NULL DEFAULT '',
             otp_code_masked TEXT NOT NULL DEFAULT '',
             otp_service_code TEXT NOT NULL DEFAULT '',
             otp_request_id TEXT NOT NULL DEFAULT '',
@@ -41,3 +42,6 @@ def ensure_internal_email_sqlite_schema(connection: sqlite3.Connection) -> None:
         ON internal_email_messages (is_otp_candidate, received_at DESC);
         """
     )
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(internal_email_messages)").fetchall()}
+    if "otp_code" not in columns:
+        connection.execute("ALTER TABLE internal_email_messages ADD COLUMN otp_code TEXT NOT NULL DEFAULT ''")
