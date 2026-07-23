@@ -11,7 +11,11 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="preload" href="/api/navigation" as="fetch" crossorigin="use-credentials" />
+    {% if shell_only %}
+    <link rel="preload" href="/static/shell.js?v=1" as="script" />
+    {% else %}
     <link rel="preload" href="/static/app.js?v=169" as="script" />
+    {% endif %}
     <link rel="stylesheet" href="/static/tailwind-built.css?v=1" />
     <link rel="stylesheet" href="/static/styles.css?v=118" />
   </head>
@@ -746,6 +750,7 @@
 
     <dialog id="password-dialog"><form class="dialog-form" id="password-form"><div class="dialog-heading"><div><p class="eyebrow">Bảo mật</p><h2>Đổi mật khẩu</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mật khẩu hiện tại<input class="form-control" type="password" name="current_password" required /></label><label>Mật khẩu mới<input class="form-control" type="password" name="new_password" minlength="10" required /><small>Tối thiểu 10 ký tự.</small></label><div class="result hidden" role="alert"></div><button class="btn-primary" type="submit">Lưu mật khẩu mới</button></form></dialog>
 
+    {% if not shell_only %}
     {% if user.role == "admin" %}
     <dialog id="website-dialog"><form class="dialog-form" id="website-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Danh mục</p><h2>Website</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<input class="form-control" name="name" required /></label><label>Địa chỉ website<input class="form-control" name="url" type="url" placeholder="https://..." required /></label><label class="checkbox-label"><input type="checkbox" name="requires_otp" /> Website yêu cầu OTP</label><label class="checkbox-label"><input type="checkbox" name="is_active" checked /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu danh mục</button></form></dialog>
     <dialog id="create-user-dialog"><form class="dialog-form" id="create-user-form"><div class="dialog-heading"><div><p class="eyebrow">Tài khoản mới</p><h2>Tạo người dùng</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên đăng nhập<input class="form-control" name="username" minlength="3" required /></label><label>Họ và tên<input class="form-control" name="full_name" required /></label><label>Vai trò<select class="form-control" name="role"><option value="viewer">Người xem</option><option value="admin">Quản trị viên</option></select></label><label>Mật khẩu khởi tạo<input class="form-control" type="password" name="password" minlength="10" required /></label><div class="result hidden" role="alert"></div><button class="btn-primary" type="submit">Tạo tài khoản</button></form></dialog>
@@ -776,7 +781,12 @@
     {% if user.role == "admin" or "themvasuataikhoan" in user.permissions %}
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
+    {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+    {% if shell_only %}
+    <script defer src="/static/shell.js?v=1"></script>
+    {% else %}
     <script defer src="/static/app.js?v=169"></script>
+    {% endif %}
   </body>
 </html>

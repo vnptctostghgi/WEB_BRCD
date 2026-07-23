@@ -4015,10 +4015,14 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         home = client.get("/")
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
+        assert "/static/shell.js?v=1" in home.text
+        assert "/static/app.js?v=169" not in home.text
         assert "dashboard-designed-section" not in home.text
+        assert "create-user-dialog" not in home.text
 
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
+        assert "/static/app.js?v=169" in dashboard.text
         assert "view-dashboard-builder" not in home.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" in dashboard.text

@@ -79,6 +79,9 @@ router = APIRouter()
 templates = Jinja2Templates(directory=Path("app/presentation/templates"))
 logger = logging.getLogger(__name__)
 FAILED_LOGIN_COUNTS: dict[str, int] = {}
+NAVIGATION_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+NAVIGATION_CACHE_LOCK = threading.Lock()
+NAVIGATION_CACHE_TTL_SECONDS = 60
 MAX_USER_IMPORT_BYTES = 2 * 1024 * 1024
 DYNAMIC_REPORT_EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 DYNAMIC_REPORT_EXPORT_JOBS_LOCK = threading.Lock()
@@ -1607,6 +1610,46 @@ def visible_dashboard_layouts_for_user(layouts: list[dict], user: dict) -> list[
     return visible_layouts
 
 
+def clear_navigation_cache() -> None:
+    with NAVIGATION_CACHE_LOCK:
+        NAVIGATION_CACHE.clear()
+
+
+def navigation_cache_key(user: dict) -> str:
+    permissions = sorted({str(code) for code in user.get("permissions", []) if str(code)})
+    return json.dumps(
+        {
+            "id": user.get("id"),
+            "role": user.get("role"),
+            "permissions": permissions,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def cached_navigation_response(user: dict) -> dict:
+    cache_key = navigation_cache_key(user)
+    now = time.time()
+    with NAVIGATION_CACHE_LOCK:
+        cached = NAVIGATION_CACHE.get(cache_key)
+        if cached and now - cached[0] <= NAVIGATION_CACHE_TTL_SECONDS:
+            return cached[1]
+    repository = build_app_repository()
+    features = repository.list_features()
+    try:
+        layouts = repository.list_dashboard_layouts()
+    except RuntimeError:
+        layouts = []
+    response = {
+        "features": visible_features_for_user(features, user),
+        "dashboard_layouts": visible_dashboard_layouts_for_user(layouts, user),
+    }
+    with NAVIGATION_CACHE_LOCK:
+        NAVIGATION_CACHE[cache_key] = (now, response)
+    return response
+
+
 def user_can_view_dashboard_page(user: dict, page_id: str, features: list[dict]) -> bool:
     if user.get("role") == "admin":
         return True
@@ -3065,16 +3108,7 @@ def list_dashboard_layout_pages(request: Request) -> dict:
 @router.get("/api/navigation")
 def navigation(request: Request) -> dict:
     user = current_user(request)
-    repository = build_app_repository()
-    features = repository.list_features()
-    try:
-        layouts = repository.list_dashboard_layouts()
-    except RuntimeError:
-        layouts = []
-    return {
-        "features": visible_features_for_user(features, user),
-        "dashboard_layouts": visible_dashboard_layouts_for_user(layouts, user),
-    }
+    return cached_navigation_response(user)
 
 
 @router.get("/api/admin/dashboard-layouts/{page_id}")
@@ -3109,6 +3143,7 @@ def save_dashboard_layout(request: Request, payload: DashboardLayoutPayload) -> 
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     repository.add_audit_log(actor["username"], "dashboard_layout_saved", f"Lưu layout dashboard {page_id}")
+    clear_navigation_cache()
     refreshed_features = repository.list_features()
     feature_code, saved_parent_code = feature_parent_code_for_page(refreshed_features, page_id)
     layout["parent_code"] = saved_parent_code
@@ -3124,6 +3159,7 @@ def delete_dashboard_layout(request: Request, page_id: str) -> dict:
     except RuntimeError as error:
         raise_dashboard_layout_schema_error(error)
     build_app_repository().add_audit_log(actor["username"], "dashboard_layout_deleted", f"Xóa layout dashboard {safe_page_id}")
+    clear_navigation_cache()
     return {"ok": True}
 
 
@@ -3151,6 +3187,7 @@ def purge_unsaved_dashboard_layout_page(request: Request, feature_code: str) -> 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chỉ xóa hẳn được mục Dashboard đang ở trạng thái Chưa lưu.")
     repository.delete_feature(code)
     repository.add_audit_log(actor["username"], "dashboard_layout_page_purged", f"Xóa hẳn mục dashboard chưa lưu {code}")
+    clear_navigation_cache()
     return {"ok": True}
 
 
@@ -5325,6 +5362,7 @@ def create_menu_feature(request: Request, payload: CreateMenuPayload) -> dict:
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     repository.add_audit_log(actor["username"], "feature_menu_created", f"Create menu {feature.get('code')}")
+    clear_navigation_cache()
     return {"ok": True, "feature": feature}
 
 
@@ -5340,6 +5378,7 @@ def save_feature_layout(request: Request, payload: FeatureLayoutPayload) -> dict
         except ValueError as error:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     repository.add_audit_log(actor["username"], "feature_layout_saved", f"Cap nhat cau truc menu {len(payload.features)} chuc nang")
+    clear_navigation_cache()
     return {"ok": True}
 
 
@@ -5388,6 +5427,7 @@ def update_permissions(request: Request, user_id: int, payload: PermissionPayloa
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Danh sách quyền không hợp lệ.")
     build_app_repository().set_user_permissions(user_id, payload.feature_codes)
     build_app_repository().add_audit_log(actor["username"], "permissions_updated", f"Cập nhật quyền người dùng #{user_id}")
+    clear_navigation_cache()
     return {"ok": True}
 
 
@@ -5401,6 +5441,7 @@ def update_bulk_permissions(request: Request, payload: BulkPermissionPayload) ->
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Danh sách quyền không hợp lệ.")
     build_app_repository().set_bulk_user_permissions(payload.user_ids, payload.feature_codes)
     build_app_repository().add_audit_log(actor["username"], "bulk_permissions_updated", f"Cap quyen cho {len(payload.user_ids)} user")
+    clear_navigation_cache()
     return {"ok": True}
 
 
