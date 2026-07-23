@@ -1188,6 +1188,70 @@ def test_google_drive_oauth_start_and_protected_config(monkeypatch) -> None:
     get_settings.cache_clear()
 
 
+def test_internal_email_connection_password_is_configurable_and_protected() -> None:
+    with TestClient(app) as client:
+        login(client)
+        repository = routes.build_app_repository()
+
+        saved = client.put(
+            "/api/admin/connections/internal_email",
+            json={
+                "name": "Email nội bộ VNPT",
+                "connection_type": "internal_email",
+                "description": "Đồng bộ hộp thư nội bộ qua IMAP.",
+                "config": {
+                    "host": "email.vnpt.vn",
+                    "port": 993,
+                    "use_ssl": True,
+                    "username": "otp.user@vnpt.vn",
+                    "password": "Mail@Test123!",
+                    "mailbox": "INBOX",
+                    "lookback_minutes": 20,
+                    "max_messages": 25,
+                    "timeout_seconds": 15,
+                    "sync_interval_seconds": 45,
+                },
+                "is_active": True,
+            },
+        )
+        assert saved.status_code == 200
+        stored = repository.get_system_connection_by_code("internal_email")
+        assert stored["config"]["password"] == "Mail@Test123!"
+        assert stored["config"]["sync_interval_seconds"] == 45
+
+        connections = client.get("/api/admin/connections")
+        assert connections.status_code == 200
+        email = next(item for item in connections.json()["connections"] if item["code"] == "internal_email")
+        assert email["config"]["username"] == "otp.user@vnpt.vn"
+        assert "password" not in email["config"]
+        assert "password" in email["protected_config_keys"]
+
+        updated = client.put(
+            "/api/admin/connections/internal_email",
+            json={
+                "name": "Email nội bộ VNPT",
+                "connection_type": "internal_email",
+                "description": "Đồng bộ hộp thư nội bộ qua IMAP.",
+                "config": {
+                    "host": "email.vnpt.vn",
+                    "port": 993,
+                    "use_ssl": True,
+                    "username": "otp.user@vnpt.vn",
+                    "mailbox": "INBOX",
+                    "lookback_minutes": 30,
+                    "max_messages": 40,
+                    "timeout_seconds": 20,
+                    "sync_interval_seconds": 60,
+                },
+                "is_active": True,
+            },
+        )
+        assert updated.status_code == 200
+        stored_after_update = repository.get_system_connection_by_code("internal_email")
+        assert stored_after_update["config"]["password"] == "Mail@Test123!"
+        assert stored_after_update["config"]["sync_interval_seconds"] == 60
+
+
 def test_data_mining_dynamic_date_parameters() -> None:
     from app.application.onebss_data_mining_service import LOCAL_TIMEZONE, resolve_dynamic_parameters
 

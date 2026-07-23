@@ -55,6 +55,7 @@ class InternalEmailConfig:
     password: str
     mailbox: str
     timeout_seconds: int
+    sync_interval_seconds: int
     lookback_minutes: int
     max_messages: int
 
@@ -69,6 +70,7 @@ class InternalEmailConfig:
             "username_configured": bool(self.username),
             "password_configured": bool(self.password),
             "timeout_seconds": self.timeout_seconds,
+            "sync_interval_seconds": self.sync_interval_seconds,
             "lookback_minutes": self.lookback_minutes,
             "max_messages": self.max_messages,
         }
@@ -126,6 +128,7 @@ def resolve_internal_email_config(settings: Settings, connection: dict[str, Any]
         password=password,
         mailbox=mailbox or DEFAULT_MAILBOX,
         timeout_seconds=_int_value(config.get("timeout_seconds") or getattr(settings, "internal_email_timeout_seconds", 20), 20, 3, 120),
+        sync_interval_seconds=_int_value(config.get("sync_interval_seconds") or getattr(settings, "internal_email_sync_interval_seconds", 30), 30, 15, 3600),
         lookback_minutes=_int_value(config.get("lookback_minutes") or getattr(settings, "internal_email_lookback_minutes", 30), 30, 1, 1440),
         max_messages=_int_value(config.get("max_messages") or getattr(settings, "internal_email_max_messages", 40), 40, 1, 200),
     )

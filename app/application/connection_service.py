@@ -107,6 +107,7 @@ class ConnectionService:
             "lookback_minutes": existing_email_config.get("lookback_minutes") or self.settings.internal_email_lookback_minutes,
             "max_messages": existing_email_config.get("max_messages") or self.settings.internal_email_max_messages,
             "timeout_seconds": existing_email_config.get("timeout_seconds") or self.settings.internal_email_timeout_seconds,
+            "sync_interval_seconds": existing_email_config.get("sync_interval_seconds") or self.settings.internal_email_sync_interval_seconds,
             "secret_ref": "INTERNAL_EMAIL_PASSWORD",
             **existing_email_config,
         }

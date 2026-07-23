@@ -12,7 +12,7 @@ from app.application.zalo_auto_message_service import send_zalo_auto_message
 from app.application.database_service import DatabaseService
 from app.data_access.internal_api_client import InternalApiClient
 from app.application.telegram_notifier import TelegramNotifier
-from app.modules.internal_email.service import sync_internal_email_once
+from app.modules.internal_email.service import resolve_internal_email_config, sync_internal_email_once
 from app.settings import Settings
 
 
@@ -421,8 +421,18 @@ class InternalEmailSyncScheduler:
                 self.sync_once()
             except Exception:
                 logger.exception("Internal email sync scheduler failed")
-            interval = int(getattr(self.settings, "internal_email_sync_interval_seconds", 30) or 30)
+            interval = self._sync_interval_seconds()
             self.stop_event.wait(max(15, interval))
+
+    def _sync_interval_seconds(self) -> int:
+        assert self.repository is not None
+        assert self.settings is not None
+        try:
+            getter = getattr(self.repository, "get_system_connection_by_code", None)
+            connection = getter("internal_email") if getter else None
+            return resolve_internal_email_config(self.settings, connection).sync_interval_seconds
+        except Exception:
+            return int(getattr(self.settings, "internal_email_sync_interval_seconds", 30) or 30)
 
     def sync_once(self) -> dict[str, Any]:
         assert self.repository is not None

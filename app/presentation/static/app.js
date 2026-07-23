@@ -4903,6 +4903,10 @@ function renderConnectionsTable() {
   document.querySelectorAll("[data-inline-connection-active]").forEach((field) => {
     field.addEventListener("change", () => markConnectionDirty(field.closest("[data-connection-row]")));
   });
+  document.querySelectorAll("[data-internal-email-config]").forEach((field) => {
+    field.addEventListener("input", () => markConnectionDirty(field.closest("[data-connection-row]")));
+    field.addEventListener("change", () => markConnectionDirty(field.closest("[data-connection-row]")));
+  });
   document.querySelectorAll("[data-save-connection-inline]").forEach((button) => {
     button.addEventListener("click", () => saveInlineConnection(button.dataset.saveConnectionInline, button));
   });
@@ -4937,6 +4941,55 @@ function refreshConnectionPicker() {
   if (current && filteredConnections.some((connection) => connection.code === current)) picker.value = current;
 }
 
+function connectionNumberValue(value, fallback) {
+  const number = Number.parseInt(value, 10);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function renderInternalEmailConnectionPanel(connection) {
+  const config = connection.config || {};
+  const protectedKeys = connection.protected_config_keys || [];
+  const hasPassword = protectedKeys.includes("password");
+  const useSsl = config.use_ssl !== false;
+  return `
+      <div class="connection-type-panel internal-email-config-panel">
+        <div class="section-heading compact"><div><p class="eyebrow">Email nội bộ IMAP</p><h4>Cấu hình hộp thư</h4></div></div>
+        <div class="connection-form-grid">
+          <label>Máy chủ<input class="form-control inline-admin-input" data-internal-email-config="host" value="${escapeHtml(config.host || "email.vnpt.vn")}" /></label>
+          <label>Cổng<input class="form-control inline-admin-input" data-internal-email-config="port" type="number" min="1" max="65535" value="${escapeHtml(config.port || 993)}" /></label>
+          <label>Tài khoản email<input class="form-control inline-admin-input" data-internal-email-config="username" value="${escapeHtml(config.username || "")}" autocomplete="off" placeholder="ten.email@vnpt.vn" /></label>
+          <label>Mật khẩu email<input class="form-control inline-admin-input" data-internal-email-config="password" type="password" autocomplete="new-password" placeholder="${hasPassword ? "Đã lưu, nhập để đổi" : "Nhập mật khẩu email"}" /></label>
+          <label>Hộp thư<input class="form-control inline-admin-input" data-internal-email-config="mailbox" value="${escapeHtml(config.mailbox || "INBOX")}" /></label>
+          <label>Mã tài khoản<input class="form-control inline-admin-input" data-internal-email-config="account_key" value="${escapeHtml(config.account_key || "internal_email")}" /></label>
+          <label>Số thư mỗi lần<input class="form-control inline-admin-input" data-internal-email-config="max_messages" type="number" min="1" max="200" value="${escapeHtml(config.max_messages || 40)}" /></label>
+          <label>Timeout giây<input class="form-control inline-admin-input" data-internal-email-config="timeout_seconds" type="number" min="3" max="120" value="${escapeHtml(config.timeout_seconds || 20)}" /></label>
+          <label>Quét lại phút<input class="form-control inline-admin-input" data-internal-email-config="lookback_minutes" type="number" min="1" max="1440" value="${escapeHtml(config.lookback_minutes || 30)}" /></label>
+          <label>Chu kỳ giây<input class="form-control inline-admin-input" data-internal-email-config="sync_interval_seconds" type="number" min="15" max="3600" value="${escapeHtml(config.sync_interval_seconds || 30)}" /></label>
+        </div>
+        <label class="checkbox-label inline-checkbox"><input type="checkbox" data-internal-email-config="use_ssl" ${useSsl ? "checked" : ""} /> SSL/TLS</label>
+        ${hasPassword ? `<small class="cell-note">Mật khẩu đã lưu đang được bảo vệ. Nhập mật khẩu mới nếu cần thay đổi.</small>` : ""}
+      </div>`;
+}
+
+function readInternalEmailConnectionConfig(row, baseConfig = {}) {
+  const config = { ...baseConfig };
+  const read = (key) => row.querySelector(`[data-internal-email-config="${key}"]`);
+  const textValue = (key, fallback = "") => (read(key)?.value || fallback).trim();
+  config.host = textValue("host", "email.vnpt.vn");
+  config.port = connectionNumberValue(textValue("port"), 993);
+  config.use_ssl = Boolean(read("use_ssl")?.checked);
+  config.username = textValue("username");
+  config.mailbox = textValue("mailbox", "INBOX");
+  config.account_key = textValue("account_key", "internal_email");
+  config.max_messages = connectionNumberValue(textValue("max_messages"), 40);
+  config.timeout_seconds = connectionNumberValue(textValue("timeout_seconds"), 20);
+  config.lookback_minutes = connectionNumberValue(textValue("lookback_minutes"), 30);
+  config.sync_interval_seconds = connectionNumberValue(textValue("sync_interval_seconds"), 30);
+  const password = read("password")?.value || "";
+  if (password) config.password = password;
+  return config;
+}
+
 function renderConnectionEditor(connection) {
   const configText = JSON.stringify(connection.config || {}, null, 2);
   const configKeys = Object.keys(connection.config || {});
@@ -4959,7 +5012,10 @@ function renderConnectionEditor(connection) {
       <label>Danh sách biến<div class="connection-variable-list">${variables.length ? variables.map((item) => `<span class="status viewer">${escapeHtml(item)}</span>`).join(" ") : "Không có"}</div></label>
       ${renderDriveOauthPanel(connection)}
       <label>Mô tả<textarea class="form-control inline-admin-note connection-description" data-inline-connection-field="description" rows="3" placeholder="Mô tả">${escapeHtml(connection.description || "")}</textarea></label>
-      <label>Bảng lệnh / Cấu hình<textarea class="form-control inline-admin-code connection-editor-code" data-inline-connection-field="config_json" rows="14">${escapeHtml(configText)}</textarea></label>
+      ${connection.connection_type === "internal_email" ? renderInternalEmailConnectionPanel(connection) : ""}
+      ${connection.connection_type === "internal_email"
+        ? `<input type="hidden" data-inline-connection-field="config_json" value="${escapeHtml(configText)}" />`
+        : `<label>Bảng lệnh / Cấu hình<textarea class="form-control inline-admin-code connection-editor-code" data-inline-connection-field="config_json" rows="14">${escapeHtml(configText)}</textarea></label>`}
       <div class="cell-note" id="connection-result-${escapeHtml(connection.code)}"></div>
     </div>`;
 }
@@ -5000,11 +5056,15 @@ async function saveInlineConnection(code, button) {
     showToast("Cấu hình JSON chưa đúng định dạng.", "error");
     return;
   }
+  const connectionType = row.querySelector('[data-inline-connection-field="connection_type"]')?.value || "internal_api";
+  if (connectionType === "internal_email") {
+    config = readInternalEmailConnectionConfig(row, config);
+  }
   setButtonLoading(button, true);
   try {
     await api(`/api/admin/connections/${encodeURIComponent(code)}`, { method: "PUT", body: JSON.stringify({
       name: row.querySelector('[data-inline-connection-field="name"]')?.value.trim() || code,
-      connection_type: row.querySelector('[data-inline-connection-field="connection_type"]')?.value || "internal_api",
+      connection_type: connectionType,
       description: row.querySelector('[data-inline-connection-field="description"]')?.value || "",
       config,
       is_active: Boolean(row.querySelector("[data-inline-connection-active]")?.checked),

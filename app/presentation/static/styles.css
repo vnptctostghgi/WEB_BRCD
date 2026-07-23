@@ -3548,6 +3548,25 @@ legend {
   align-items: center;
 }
 
+.connection-type-panel {
+  display: grid;
+  gap: .85rem;
+  border: 1px solid rgba(14, 165, 233, .24);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, .04);
+  padding: .85rem;
+}
+
+.connection-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: .8rem;
+}
+
+.connection-form-grid label {
+  min-width: 0;
+}
+
 .drive-oauth-panel {
   display: flex;
   align-items: center;
