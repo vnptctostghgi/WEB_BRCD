@@ -2970,6 +2970,22 @@ td {
   white-space: nowrap;
 }
 
+.public-messages-table {
+  min-width: 62rem;
+}
+
+.public-message-content {
+  max-width: 34rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.public-sender-panel {
+  border-top: 1px solid rgba(148, 163, 184, .32);
+  margin-bottom: 1rem;
+  padding-top: 1rem;
+}
+
 @media (max-width: 1100px) {
   .mobile-otp-layout,
   .mobile-otp-form-inline {

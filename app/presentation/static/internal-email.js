@@ -1,6 +1,7 @@
 // Internal email admin UI. Kept separate from Mobile Gateway on purpose.
 const INTERNAL_EMAIL_TABLE_LIMIT = 20;
 const INTERNAL_EMAIL_TABS = ["messages", "email"];
+let internalEmailPublicRules = [];
 
 function getInternalEmailRoot() {
   return $("#view-internal-email");
@@ -47,7 +48,14 @@ function bindInternalEmailEvents() {
   bind("#internal-email-refresh", "click", () => loadInternalEmail({ force: true }));
   bind("#internal-email-sync", "click", syncInternalEmail);
   bind("#internal-email-test", "click", testInternalEmail);
+  bind("#internal-email-public-save", "click", saveInternalEmailPublicRule);
   bind("#internal-email-otp-only", "change", () => loadInternalEmailMessages({ force: true }));
+  bind("#internal-email-public-rules-table", "click", async (event) => {
+    const deleteButton = event.target.closest("[data-internal-email-public-delete]");
+    const toggleButton = event.target.closest("[data-internal-email-public-toggle]");
+    if (deleteButton) await deleteInternalEmailPublicRule(deleteButton.dataset.internalEmailPublicDelete);
+    if (toggleButton) await toggleInternalEmailPublicRule(toggleButton.dataset.internalEmailPublicToggle);
+  });
   bind("#internal-email-messages-table", "click", (event) => {
     const button = event.target.closest("[data-internal-email-copy-otp]");
     if (button) copyInternalEmailOtpFromButton(button);
@@ -64,7 +72,7 @@ function bindInternalEmailEvents() {
       activateInternalEmailTab(tabName);
       try {
         if (tabName === "email") {
-          await loadInternalEmailStatus({ force: true });
+          await Promise.all([loadInternalEmailStatus({ force: true }), loadInternalEmailPublicRules()]);
         } else {
           await loadInternalEmailMessages({ force: true });
         }
@@ -102,6 +110,7 @@ async function loadInternalEmail({ force = false } = {}) {
   await Promise.all([
     loadInternalEmailStatus({ force }),
     loadInternalEmailMessages({ force }),
+    loadInternalEmailPublicRules(),
   ]);
 }
 
@@ -161,6 +170,80 @@ function renderInternalEmailMessages(messages = []) {
       <td>${escapeHtml(preview)}</td>
     </tr>`;
   }).join("");
+}
+
+function renderInternalEmailPublicRules(rules = []) {
+  const table = $("#internal-email-public-rules-table");
+  if (!table) return;
+  if (!rules.length) {
+    table.innerHTML = emptyRow(4, "Ch\u01b0a c\u00f3 ng\u01b0\u1eddi g\u1eedi public");
+    return;
+  }
+  table.innerHTML = rules.map((rule) => `<tr>
+    <td><strong>${escapeHtml(rule.sender_pattern || "")}</strong></td>
+    <td>${escapeHtml(rule.label || "")}</td>
+    <td><span class="status ${rule.is_active ? "viewer" : "inactive"}">${rule.is_active ? "\u0110ang public" : "\u0110ang t\u1eaft"}</span></td>
+    <td class="table-action-cell"><div class="action-group">
+      <button class="table-action" data-internal-email-public-toggle="${escapeHtml(rule.id)}" type="button">${rule.is_active ? "T\u1eaft" : "B\u1eadt"}</button>
+      <button class="table-action danger" data-internal-email-public-delete="${escapeHtml(rule.id)}" type="button">X\u00f3a</button>
+    </div></td>
+  </tr>`).join("");
+}
+
+async function loadInternalEmailPublicRules() {
+  const table = $("#internal-email-public-rules-table");
+  if (!table) return;
+  try {
+    internalEmailPublicRules = await getPublicMessageRules("email");
+    renderInternalEmailPublicRules(internalEmailPublicRules);
+  } catch (error) {
+    table.innerHTML = emptyRow(4, "Kh\u00f4ng t\u1ea3i \u0111\u01b0\u1ee3c c\u1ea5u h\u00ecnh public", error.message);
+  }
+}
+
+async function saveInternalEmailPublicRule() {
+  const form = $("#internal-email-public-form");
+  if (!form) return;
+  const sender = String(form.elements.namedItem("sender_pattern")?.value || "").trim();
+  const label = String(form.elements.namedItem("label")?.value || "").trim();
+  const isActive = Boolean(form.elements.namedItem("is_active")?.checked);
+  if (!sender) return showToast("Nh\u1eadp ng\u01b0\u1eddi g\u1eedi mail c\u1ea7n public.", "error");
+  try {
+    await savePublicMessageRule({ source_type: "email", sender_pattern: sender, label, is_active: isActive });
+    form.reset();
+    form.elements.namedItem("is_active").checked = true;
+    showToast("\u0110\u00e3 l\u01b0u c\u1ea5u h\u00ecnh public mail.");
+    await loadInternalEmailPublicRules();
+  } catch (error) {
+    showToast(error.message || "Kh\u00f4ng l\u01b0u \u0111\u01b0\u1ee3c c\u1ea5u h\u00ecnh public mail.", "error");
+  }
+}
+
+async function toggleInternalEmailPublicRule(ruleId) {
+  const rule = internalEmailPublicRules.find((item) => String(item.id) === String(ruleId));
+  if (!rule) return;
+  try {
+    await savePublicMessageRule({
+      source_type: "email",
+      sender_pattern: rule.sender_pattern || "",
+      label: rule.label || "",
+      is_active: !rule.is_active,
+    });
+    await loadInternalEmailPublicRules();
+  } catch (error) {
+    showToast(error.message || "Kh\u00f4ng c\u1eadp nh\u1eadt \u0111\u01b0\u1ee3c c\u1ea5u h\u00ecnh public mail.", "error");
+  }
+}
+
+async function deleteInternalEmailPublicRule(ruleId) {
+  if (!ruleId) return;
+  try {
+    await deletePublicMessageRule(ruleId);
+    showToast("\u0110\u00e3 x\u00f3a c\u1ea5u h\u00ecnh public mail.");
+    await loadInternalEmailPublicRules();
+  } catch (error) {
+    showToast(error.message || "Kh\u00f4ng x\u00f3a \u0111\u01b0\u1ee3c c\u1ea5u h\u00ecnh public mail.", "error");
+  }
 }
 
 async function syncInternalEmail() {

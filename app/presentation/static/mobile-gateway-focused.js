@@ -1,5 +1,6 @@
 // Focused Mobile Gateway UI for SMS + OTP. Loaded after app.js on purpose.
 const MOBILE_GATEWAY_TABLE_PAGE_SIZE = window.TABLE_PAGE_SIZE || 20;
+let mobilePublicSmsRules = [];
 
 function mobileFormatTime(value) {
   if (!value) return "-";
@@ -71,6 +72,15 @@ function normalizeMobileGatewayUi() {
           <label>Từ ngày<input class="form-control" id="mobile-sms-date-from" type="date" /></label>
           <label>Đến ngày<input class="form-control" id="mobile-sms-date-to" type="date" /></label>
           <label>SIM<input class="form-control" id="mobile-sms-sim-filter" type="number" /></label>
+        </div>
+        <div class="public-sender-panel mt-4">
+          <div class="section-heading compact"><div><p class="eyebrow">Public</p><h2>Public SMS theo ng&#432;&#7901;i g&#7917;i</h2></div><button class="btn-primary" id="mobile-public-sms-save" type="button">L&#432;u</button></div>
+          <form id="mobile-public-sms-form" class="admin-inline-toolbar">
+            <label>Ng&#432;&#7901;i g&#7917;i<input class="form-control" name="sender_pattern" placeholder="VD: VNPT" required /></label>
+            <label>T&#234;n hi&#7875;n th&#7883;<input class="form-control" name="label" placeholder="VD: OTP OneBSS" /></label>
+            <label class="checkbox-label"><input type="checkbox" name="is_active" checked /> &#272;ang public</label>
+          </form>
+          <div class="table-scroll mt-4"><table class="compact-admin-table inline-admin-table"><thead><tr><th>Ng&#432;&#7901;i g&#7917;i</th><th>T&#234;n hi&#7875;n th&#7883;</th><th>Tr&#7841;ng th&#225;i</th><th>Thao t&#225;c</th></tr></thead><tbody id="mobile-public-sms-rules-table"></tbody></table></div>
         </div>
         <div class="table-scroll"><table><thead><tr><th>Người gửi</th><th>Thời gian nhận</th><th>Nội dung tin nhắn</th><th>Thiết bị</th><th>SIM</th></tr></thead><tbody id="mobile-sms-table"></tbody></table></div>
         <div class="mt-4 flex items-center justify-between gap-3"><span id="mobile-sms-page-info">Trang 1</span><div class="action-group"><button class="btn-secondary" id="mobile-sms-prev" type="button">Trang trước</button><button class="btn-secondary" id="mobile-sms-next" type="button">Trang sau</button></div></div>
@@ -163,6 +173,7 @@ function activateMobileGatewayTab(tabName) {
     loadMobilePairingCodes().catch((error) => showToast(error.message, "error"));
   } else if (safeTab === "sms") {
     loadMobileGatewaySms().catch((error) => showToast(error.message, "error"));
+    loadMobilePublicSmsRules().catch((error) => showToast(error.message, "error"));
   } else if (safeTab === "send") {
     loadMobileSendCommands().catch((error) => showToast(error.message, "error"));
   } else if (safeTab === "otp") {
@@ -204,6 +215,13 @@ function bindMobileGatewayFocusedEvents() {
     window.mobileGatewayKnownSmsReady = false;
     loadMobileGatewaySms({ force: true });
   });
+  bind("#mobile-public-sms-save", "click", saveMobilePublicSmsRule);
+  bind("#mobile-public-sms-rules-table", "click", async (event) => {
+    const deleteButton = event.target.closest("[data-mobile-public-sms-delete]");
+    const toggleButton = event.target.closest("[data-mobile-public-sms-toggle]");
+    if (deleteButton) await deleteMobilePublicSmsRule(deleteButton.dataset.mobilePublicSmsDelete);
+    if (toggleButton) await toggleMobilePublicSmsRule(toggleButton.dataset.mobilePublicSmsToggle);
+  });
   bind("#mobile-save-otp-filter", "click", saveMobileOtpFilter);
   bind("#mobile-send-sms-form", "submit", (event) => {
     event.preventDefault();
@@ -229,6 +247,7 @@ async function loadMobileGateway({ force = false } = {}) {
       loadMobileGatewayDevices(),
       loadMobilePairingCodes(),
       loadMobileGatewaySms({ force: true }),
+      loadMobilePublicSmsRules(),
       loadMobileOtpData(),
       loadMobileSendCommands(),
     ]);
@@ -424,6 +443,80 @@ async function loadMobilePairingCodes() {
     renderMobilePairingCountdown(`Đã kết nối: ${mobileDeviceLabel(active.used_by_device_id)} lúc ${mobileFormatTime(active.used_at)}`);
     stopMobilePairingTimers();
     mobileGatewayActivePairingId = null;
+  }
+}
+
+function renderMobilePublicSmsRules(rules = []) {
+  const table = $("#mobile-public-sms-rules-table");
+  if (!table) return;
+  if (!rules.length) {
+    table.innerHTML = emptyRow(4, "Ch\u01b0a c\u00f3 ng\u01b0\u1eddi g\u1eedi SMS public");
+    return;
+  }
+  table.innerHTML = rules.map((rule) => `<tr>
+    <td><strong>${escapeHtml(rule.sender_pattern || "")}</strong></td>
+    <td>${escapeHtml(rule.label || "")}</td>
+    <td><span class="status ${rule.is_active ? "viewer" : "inactive"}">${rule.is_active ? "\u0110ang public" : "\u0110ang t\u1eaft"}</span></td>
+    <td class="table-action-cell"><div class="action-group">
+      <button class="table-action" data-mobile-public-sms-toggle="${escapeHtml(rule.id)}" type="button">${rule.is_active ? "T\u1eaft" : "B\u1eadt"}</button>
+      <button class="table-action danger" data-mobile-public-sms-delete="${escapeHtml(rule.id)}" type="button">X\u00f3a</button>
+    </div></td>
+  </tr>`).join("");
+}
+
+async function loadMobilePublicSmsRules() {
+  const table = $("#mobile-public-sms-rules-table");
+  if (!table) return;
+  try {
+    mobilePublicSmsRules = await getPublicMessageRules("sms");
+    renderMobilePublicSmsRules(mobilePublicSmsRules);
+  } catch (error) {
+    table.innerHTML = emptyRow(4, "Kh\u00f4ng t\u1ea3i \u0111\u01b0\u1ee3c c\u1ea5u h\u00ecnh public SMS", error.message);
+  }
+}
+
+async function saveMobilePublicSmsRule() {
+  const form = $("#mobile-public-sms-form");
+  if (!form) return;
+  const sender = String(form.elements.namedItem("sender_pattern")?.value || "").trim();
+  const label = String(form.elements.namedItem("label")?.value || "").trim();
+  const isActive = Boolean(form.elements.namedItem("is_active")?.checked);
+  if (!sender) return showToast("Nh\u1eadp ng\u01b0\u1eddi g\u1eedi SMS c\u1ea7n public.", "error");
+  try {
+    await savePublicMessageRule({ source_type: "sms", sender_pattern: sender, label, is_active: isActive });
+    form.reset();
+    form.elements.namedItem("is_active").checked = true;
+    showToast("\u0110\u00e3 l\u01b0u c\u1ea5u h\u00ecnh public SMS.");
+    await loadMobilePublicSmsRules();
+  } catch (error) {
+    showToast(error.message || "Kh\u00f4ng l\u01b0u \u0111\u01b0\u1ee3c c\u1ea5u h\u00ecnh public SMS.", "error");
+  }
+}
+
+async function toggleMobilePublicSmsRule(ruleId) {
+  const rule = mobilePublicSmsRules.find((item) => String(item.id) === String(ruleId));
+  if (!rule) return;
+  try {
+    await savePublicMessageRule({
+      source_type: "sms",
+      sender_pattern: rule.sender_pattern || "",
+      label: rule.label || "",
+      is_active: !rule.is_active,
+    });
+    await loadMobilePublicSmsRules();
+  } catch (error) {
+    showToast(error.message || "Kh\u00f4ng c\u1eadp nh\u1eadt \u0111\u01b0\u1ee3c c\u1ea5u h\u00ecnh public SMS.", "error");
+  }
+}
+
+async function deleteMobilePublicSmsRule(ruleId) {
+  if (!ruleId) return;
+  try {
+    await deletePublicMessageRule(ruleId);
+    showToast("\u0110\u00e3 x\u00f3a c\u1ea5u h\u00ecnh public SMS.");
+    await loadMobilePublicSmsRules();
+  } catch (error) {
+    showToast(error.message || "Kh\u00f4ng x\u00f3a \u0111\u01b0\u1ee3c c\u1ea5u h\u00ecnh public SMS.", "error");
   }
 }
 

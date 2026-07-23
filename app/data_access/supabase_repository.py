@@ -30,6 +30,7 @@ from app.data_access.app_repository import (
 )
 from app.modules.internal_email.migrations import INTERNAL_EMAIL_FEATURE_ROWS
 from app.modules.mobile_gateway.migrations import MOBILE_GATEWAY_FEATURE_ROWS
+from app.modules.public_messages.migrations import PUBLIC_MESSAGES_FEATURE_ROWS
 
 
 FEATURE_ROWS = [
@@ -74,6 +75,10 @@ FEATURE_ROWS.extend(
 FEATURE_ROWS.extend(
     {"code": code, "name": name, "parent_code": parent_code, "sort_order": sort_order}
     for code, name, parent_code, sort_order in MOBILE_GATEWAY_FEATURE_ROWS
+)
+FEATURE_ROWS.extend(
+    {"code": code, "name": name, "parent_code": parent_code, "sort_order": sort_order}
+    for code, name, parent_code, sort_order in PUBLIC_MESSAGES_FEATURE_ROWS
 )
 OBSOLETE_FEATURE_CODES = (
     *LEGACY_REMOVED_FEATURE_CODES,

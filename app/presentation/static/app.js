@@ -20,6 +20,8 @@ let dataMiningSchedules = [];
 let dataMiningRuns = [];
 let reportLinks = [];
 let reportLinkDrafts = [];
+let publicMessages = [];
+let publicMessagesRefreshTimer = null;
 let oneBssReports = [];
 let oneBssReportDrafts = [];
 let oneBssReportRuns = [];
@@ -210,7 +212,7 @@ function ensureMobileGatewayFocusedScriptLoaded() {
   if (mobileGatewayFocusedScriptPromise) return mobileGatewayFocusedScriptPromise;
   mobileGatewayFocusedScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/mobile-gateway-focused.js?v=16";
+    script.src = "/static/mobile-gateway-focused.js?v=17";
     script.defer = true;
     script.dataset.mobileGatewayFocused = "true";
     script.addEventListener("load", () => {
@@ -232,7 +234,7 @@ function ensureInternalEmailScriptLoaded() {
   if (internalEmailScriptPromise) return internalEmailScriptPromise;
   internalEmailScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/internal-email.js?v=4";
+    script.src = "/static/internal-email.js?v=5";
     script.defer = true;
     script.dataset.internalEmail = "true";
     script.addEventListener("load", () => {
@@ -366,6 +368,7 @@ const navFeatureConfig = {
   thietkelayoutbaocao: { view: "dashboard-builder", icon: "chart", keywords: "dashboard builder thiet ke layout bao cao tab bieu do" },
   daodulieuonebss: { view: "onebss-mining", icon: "database", keywords: "dao du lieu onebss bao cao excel" },
   linkbaocao: { view: "report-links", icon: "download", keywords: "link bao cao google drive sheet doc slides pdf copy tai xuong" },
+  publicmessages: { view: "public-messages", icon: "audit", keywords: "noi dung public sms email otp copy" },
 };
 
 const navGroupOnlyFeatureCodes = new Set(["dashboard", "baocaomoi"]);
@@ -514,9 +517,9 @@ async function copyMobileOtpFromButton(button) {
   if (!code || code === "null") return;
   try {
     await copyTextToClipboard(code);
-    showToast(`Da sao chep OTP ${code}.`);
+    showToast(`\u0110\u00e3 sao ch\u00e9p OTP ${code}.`);
   } catch (error) {
-    showToast(error.message || "Khong sao chep duoc OTP.", "error");
+    showToast(error.message || "Kh\u00f4ng sao ch\u00e9p \u0111\u01b0\u1ee3c OTP.", "error");
   }
 }
 
@@ -626,6 +629,7 @@ function viewLoaderForNav(nextView, dashboardPageId) {
   if (nextView === "reports") return () => loadDynamicReports();
   if (nextView === "onebss-mining") return () => loadOneBssMining();
   if (nextView === "report-links") return () => loadReportLinks();
+  if (nextView === "public-messages") return () => loadPublicMessages({ force: true });
   if (nextView === "internal-email") return async () => {
     await ensureInternalEmailScriptLoaded();
     return loadInternalEmail();
@@ -1409,6 +1413,15 @@ if (role === "admin") {
   $("#add-inline-report-link")?.addEventListener("click", addInlineReportLink);
   $("#report-link-admin-search")?.addEventListener("input", renderReportLinkAdminEditor);
   $("#report-link-picker")?.addEventListener("change", renderReportLinkAdminEditor);
+  $("#public-messages-refresh")?.addEventListener("click", () => loadPublicMessages({ force: true }));
+  $("#public-messages-table")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-public-message-copy-otp]");
+    if (button) copyPublicMessageOtpFromButton(button);
+  });
+  $("#public-messages-table")?.addEventListener("dblclick", (event) => {
+    const code = event.target.closest("[data-public-message-otp-code]");
+    if (code) selectElementText(code);
+  });
   $("#onebss-run-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     oneBssPendingSessionId = "";
@@ -4465,6 +4478,105 @@ async function deleteWorkTask(taskId) {
     await loadWorkTasks({ force: true });
   } catch (error) {
     showMessage($("#work-tasks-message"), error.message, "error");
+  }
+}
+
+function publicMessagesFormatTime(value) {
+  if (!value) return "-";
+  try {
+    return new Date(value).toLocaleString("vi-VN");
+  } catch {
+    return "-";
+  }
+}
+
+async function copyPublicMessageOtpFromButton(button) {
+  const code = button?.dataset.publicMessageCopyOtp || "";
+  if (!code || code === "null") return;
+  try {
+    await copyTextToClipboard(code);
+    showToast(`\u0110\u00e3 sao ch\u00e9p OTP ${code}.`);
+  } catch (error) {
+    showToast(error.message || "Kh\u00f4ng sao ch\u00e9p \u0111\u01b0\u1ee3c OTP.", "error");
+  }
+}
+
+function renderPublicMessageOtpCell(code) {
+  const value = String(code || "").trim();
+  const canCopy = value && value !== "null" && !/^\*+$/.test(value);
+  return `
+    <div class="mobile-otp-copy-cell public-message-otp-copy-cell">
+      <code class="mobile-otp-code" data-public-message-otp-code tabindex="0">${escapeHtml(value || "null")}</code>
+      <button class="table-action mobile-otp-copy-button" data-public-message-copy-otp="${escapeHtml(value)}" type="button" ${canCopy ? "" : "disabled"}>Copy</button>
+    </div>`;
+}
+
+function renderPublicMessages(items = []) {
+  const table = $("#public-messages-table");
+  if (!table) return;
+  if (!items.length) {
+    table.innerHTML = emptyRow(6, "Ch\u01b0a c\u00f3 n\u1ed9i dung public", "H\u00e3y c\u1ea5u h\u00ecnh ng\u01b0\u1eddi g\u1eedi trong Mail n\u1ed9i b\u1ed9 ho\u1eb7c Mobile Gateway.");
+    return;
+  }
+  table.innerHTML = items.map((item) => `<tr>
+    <td>${escapeHtml(publicMessagesFormatTime(item.received_at))}</td>
+    <td>${escapeHtml(item.sender || "")}</td>
+    <td><span class="status ${item.source_type === "sms" ? "pending" : "viewer"}">${escapeHtml(item.type_label || item.source_type || "")}</span></td>
+    <td>${escapeHtml(item.title || "")}</td>
+    <td>${renderPublicMessageOtpCell(item.otp || "")}</td>
+    <td class="public-message-content" title="${escapeHtml(item.content || "")}">${escapeHtml(item.content || "")}</td>
+  </tr>`).join("");
+}
+
+function startPublicMessagesAutoRefresh() {
+  if (publicMessagesRefreshTimer) return;
+  publicMessagesRefreshTimer = setInterval(() => {
+    if (!$("#view-public-messages")?.classList.contains("active")) return;
+    loadPublicMessages({ silent: true }).catch((error) => console.warn("Public message refresh failed", error));
+  }, 5000);
+}
+
+async function loadPublicMessages({ force = false, silent = false } = {}) {
+  const table = $("#public-messages-table");
+  const status = $("#public-messages-status");
+  const message = $("#public-messages-message");
+  if (force && table && !silent) setTableLoading("#public-messages-table", 6, "\u0110ang t\u1ea3i n\u1ed9i dung public...");
+  try {
+    const data = await api("/api/admin/public-messages/feed?limit=100");
+    publicMessages = data.items || [];
+    renderPublicMessages(publicMessages);
+    if (status) {
+      status.className = "status viewer";
+      status.textContent = `C\u1eadp nh\u1eadt ${new Date().toLocaleTimeString("vi-VN")}`;
+    }
+    if (message && !silent) message.className = "result hidden mb-4";
+    startPublicMessagesAutoRefresh();
+  } catch (error) {
+    if (status) {
+      status.className = "status inactive";
+      status.textContent = "L\u1ed7i t\u1ea3i d\u1eef li\u1ec7u";
+    }
+    if (!silent) showMessage(message, error.message || "Kh\u00f4ng t\u1ea3i \u0111\u01b0\u1ee3c n\u1ed9i dung public.", "error");
+  }
+}
+
+async function getPublicMessageRules(sourceType) {
+  const data = await api(`/api/admin/public-messages/rules?source_type=${encodeURIComponent(sourceType || "")}`);
+  return data.rules || [];
+}
+
+async function savePublicMessageRule(payload) {
+  const data = await api("/api/admin/public-messages/rules", { method: "POST", body: JSON.stringify(payload) });
+  if ($("#view-public-messages")?.classList.contains("active")) {
+    loadPublicMessages({ silent: true }).catch((error) => console.warn("Public message refresh failed", error));
+  }
+  return data.rule;
+}
+
+async function deletePublicMessageRule(ruleId) {
+  await api(`/api/admin/public-messages/rules/${encodeURIComponent(ruleId)}`, { method: "DELETE" });
+  if ($("#view-public-messages")?.classList.contains("active")) {
+    loadPublicMessages({ silent: true }).catch((error) => console.warn("Public message refresh failed", error));
   }
 }
 

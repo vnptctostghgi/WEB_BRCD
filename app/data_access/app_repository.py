@@ -14,6 +14,7 @@ from typing import Any
 
 from app.modules.internal_email.migrations import INTERNAL_EMAIL_FEATURE_ROWS, ensure_internal_email_sqlite_schema
 from app.modules.mobile_gateway.migrations import MOBILE_GATEWAY_FEATURE_ROWS, ensure_mobile_gateway_sqlite_schema
+from app.modules.public_messages.migrations import PUBLIC_MESSAGES_FEATURE_ROWS, ensure_public_messages_sqlite_schema
 
 
 FEATURE_ROWS = [
@@ -33,6 +34,7 @@ FEATURE_ROWS = [
     ("thietkelayoutbaocao", "Thiết kế Layout báo cáo", "baocaomoi", 36),
     ("daodulieuonebss", "Đào dữ liệu OneBSS", "baocaomoi", 37),
     ("linkbaocao", "Link báo cáo", "baocaomoi", 38),
+    *PUBLIC_MESSAGES_FEATURE_ROWS,
     ("taikhoanweb", "Tài khoản web", "quantriweb", 40),
     ("xemdanhsachtaikhoan", "Xem danh sách tài khoản", "taikhoanweb", 41),
     ("themvasuataikhoan", "Thêm và sửa tài khoản", "taikhoanweb", 42),
@@ -797,6 +799,7 @@ class AppRepository:
             )
             ensure_mobile_gateway_sqlite_schema(connection)
             ensure_internal_email_sqlite_schema(connection)
+            ensure_public_messages_sqlite_schema(connection)
 
     def _migrate_feature_codes(self, connection: sqlite3.Connection) -> None:
         rows = connection.execute(

@@ -22,6 +22,7 @@ from app.data_access.repository_factory import build_repository
 from app.modules.internal_email.router import admin_router as internal_email_admin_router
 from app.modules.mobile_gateway.router import admin_router as mobile_gateway_admin_router
 from app.modules.mobile_gateway.router import router as mobile_gateway_router
+from app.modules.public_messages.router import admin_router as public_messages_admin_router
 from app.presentation.routes import router as presentation_router
 from app.settings import get_settings
 
@@ -94,6 +95,7 @@ app.mount("/static", StaticFiles(directory="app/presentation/static"), name="sta
 app.include_router(mobile_gateway_router)
 app.include_router(mobile_gateway_admin_router)
 app.include_router(internal_email_admin_router)
+app.include_router(public_messages_admin_router)
 app.include_router(presentation_router)
 
 

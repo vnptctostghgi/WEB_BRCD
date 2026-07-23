@@ -11,9 +11,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="preload" href="/api/navigation" as="fetch" crossorigin="use-credentials" />
-    <link rel="preload" href="/static/app.js?v=166" as="script" />
+    <link rel="preload" href="/static/app.js?v=167" as="script" />
     <link rel="stylesheet" href="/static/tailwind-built.css?v=1" />
-    <link rel="stylesheet" href="/static/styles.css?v=117" />
+    <link rel="stylesheet" href="/static/styles.css?v=118" />
   </head>
   <body class="app-booting min-h-screen bg-sky-50 text-slate-900 antialiased" data-role="{{ user.role }}" data-must-change="{{ user.must_change_password }}" data-billing-blocked="{{ user.billing_access_blocked }}" data-can-manage-vault="{{ user.role == 'admin' or 'themvasuataikhoan' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'xemmatkhaudaluu' in user.permissions }}">
     <svg class="icon-sprite" aria-hidden="true">
@@ -85,6 +85,7 @@
               <summary data-feature-code="baocaomoi"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-chart"></use></svg><strong>Báo cáo mới</strong></summary>
               <button class="nav-item child" data-feature-code="thietkelayoutbaocao" data-view="dashboard-builder" data-title="Thiết kế Layout báo cáo" data-keywords="dashboard builder thiet ke layout bao cao tab bieu do"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Thiết kế Layout báo cáo</span></button>
               <button class="nav-item child" data-feature-code="daodulieuonebss" data-view="onebss-mining" data-title="Đào dữ liệu OneBSS" data-keywords="dao du lieu onebss bao cao excel"><svg class="nav-svg"><use href="#icon-database"></use></svg><span>Đào dữ liệu OneBSS</span></button>
+              <button class="nav-item child" data-feature-code="publicmessages" data-view="public-messages" data-title="N&#7897;i dung public" data-keywords="noi dung public sms email otp copy"><svg class="nav-svg"><use href="#icon-audit"></use></svg><span>N&#7897;i dung public</span></button>
             </details>
             {% endif %}
           </div>
@@ -494,6 +495,26 @@
           <section class="data-card mt-4"><h2>Kiểm tra vận hành</h2><div class="mt-4 grid gap-3 md:grid-cols-2"><p class="check-item">Mật khẩu được băm, không lưu dạng rõ.</p><p class="check-item">Cookie phiên không đọc được bằng JavaScript.</p><p class="check-item">DB cơ quan chỉ được truy cập qua API nội bộ.</p><p class="check-item">Route quản trị yêu cầu vai trò admin.</p></div></section>
         </section>
 
+        <section class="app-view" id="view-public-messages">
+          <div class="page-header">
+            <div><p class="eyebrow">B&#225;o c&#225;o m&#7899;i</p><h1>N&#7897;i dung public</h1><p class="subtitle">Email v&#224; SMS t&#7915; ng&#432;&#7901;i g&#7917;i &#273;&#227; cho ph&#233;p.</p></div>
+            <div class="action-group"><button class="btn-secondary" id="public-messages-refresh" type="button">L&#224;m m&#7899;i</button></div>
+          </div>
+          <div id="public-messages-message" class="result hidden mb-4"></div>
+          <section class="data-card">
+            <div class="section-heading compact">
+              <div><p class="eyebrow">Public</p><h2>Tin m&#7899;i nh&#7845;t</h2></div>
+              <span class="status pending" id="public-messages-status">Ch&#432;a t&#7843;i</span>
+            </div>
+            <div class="table-scroll">
+              <table class="compact-admin-table inline-admin-table public-messages-table">
+                <thead><tr><th>Th&#7901;i gian</th><th>Ng&#432;&#7901;i g&#7917;i</th><th>Lo&#7841;i</th><th>Ti&#234;u &#273;&#7873;</th><th>OTP</th><th>N&#7897;i dung</th></tr></thead>
+                <tbody id="public-messages-table"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
         <section class="app-view" id="view-workstation">
           <div class="page-header">
             <div><p class="eyebrow">Quản trị vận hành</p><h1>Máy trạm</h1><p class="subtitle">Theo dõi worker, hàng đợi và các cấu hình bắt buộc để máy trạm xử lý việc nền cho web.</p></div>
@@ -692,6 +713,23 @@
               </div>
               <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4" id="internal-email-status-cards"></section>
             </section>
+            <section class="data-card mt-4">
+              <div class="section-heading compact">
+                <div><p class="eyebrow">Public</p><h2>Public mail theo ng&#432;&#7901;i g&#7917;i</h2></div>
+                <button class="btn-primary" id="internal-email-public-save" type="button">L&#432;u</button>
+              </div>
+              <form id="internal-email-public-form" class="admin-inline-toolbar">
+                <label>Ng&#432;&#7901;i g&#7917;i<input class="form-control" name="sender_pattern" placeholder="VD: noreply@vnpt.vn" required /></label>
+                <label>T&#234;n hi&#7875;n th&#7883;<input class="form-control" name="label" placeholder="VD: OTP OneBSS" /></label>
+                <label class="checkbox-label"><input type="checkbox" name="is_active" checked /> &#272;ang public</label>
+              </form>
+              <div class="table-scroll mt-4">
+                <table class="compact-admin-table inline-admin-table">
+                  <thead><tr><th>Ng&#432;&#7901;i g&#7917;i</th><th>T&#234;n hi&#7875;n th&#7883;</th><th>Tr&#7841;ng th&#225;i</th><th>Thao t&#225;c</th></tr></thead>
+                  <tbody id="internal-email-public-rules-table"></tbody>
+                </table>
+              </div>
+            </section>
           </section>
         </section>
 
@@ -739,6 +777,6 @@
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-    <script defer src="/static/app.js?v=166"></script>
+    <script defer src="/static/app.js?v=167"></script>
   </body>
 </html>

@@ -65,6 +65,7 @@ def test_admin_can_login_and_open_dashboard() -> None:
         assert "cdn.tailwindcss.com" not in response.text
         assert "dashboard-tab-fiber" not in response.text
         assert 'data-feature-code="internalemail"' in response.text
+        assert 'data-feature-code="publicmessages"' in response.text
         assert "Truy vấn SQL" in response.text
         assert "Báo cáo mới" in response.text
         assert "Quản trị người dùng" in response.text
@@ -85,6 +86,10 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert 'data-internal-email-panel="messages"' in email_response.text
         assert 'data-internal-email-panel="email"' in email_response.text
         assert 'data-mobile-tab="email"' not in email_response.text
+
+        public_response = client.get("/publicmessages")
+        assert public_response.status_code == 200
+        assert 'id="view-public-messages"' in public_response.text
 
 
 def test_admin_can_open_workstation_overview_and_download_setup_package() -> None:
@@ -192,6 +197,8 @@ def test_admin_navigation_payload_combines_features_and_layouts() -> None:
         assert any(feature["code"] == "quantrimenu" for feature in payload["features"])
         assert any(feature["code"] == "internalemail" for feature in payload["features"])
         assert any(feature["code"] == "internal_email.view" for feature in payload["features"])
+        assert any(feature["code"] == "publicmessages" for feature in payload["features"])
+        assert any(feature["code"] == "public_messages.view" for feature in payload["features"])
         assert any(layout["page_id"] == "DASHBOARD_KINH_DOANH" for layout in payload["dashboard_layouts"])
 
 
@@ -2212,6 +2219,79 @@ def test_internal_email_messages_return_full_otp_for_copy() -> None:
         assert message["otp_code"] == "246810"
         assert message["otp_code_masked"] == "******"
         assert "246810" not in message["body_masked"]
+
+
+def test_public_messages_feed_uses_allowed_email_and_sms_senders() -> None:
+    from app.modules.internal_email.repository import InternalEmailRepository
+    from app.modules.mobile_gateway.repository import MobileGatewayRepository
+    from app.modules.mobile_gateway.schemas import SmsMessageIn
+
+    with TestClient(app) as client:
+        login(client)
+        base_repository = routes.build_app_repository()
+        email_repository = InternalEmailRepository(base_repository)
+        mobile_repository = MobileGatewayRepository(base_repository, get_settings())
+        unique = uuid.uuid4().hex
+        email_sender = f"public-{unique}@example.vn"
+        sms_sender = f"PUBLIC{unique[:8].upper()}"
+
+        saved_email, _ = email_repository.save_message(
+            {
+                "account_key": "internal_email",
+                "mailbox": "INBOX",
+                "uid": f"public-email-{unique}",
+                "message_id": f"<public-{unique}@example.vn>",
+                "sender": "Public Mail",
+                "sender_email": email_sender,
+                "subject": "Ma OTP public",
+                "body_masked": "Ma OTP email la ******.",
+                "received_at": email_repository.now(),
+                "synced_at": email_repository.now(),
+            }
+        )
+        email_repository.mark_message_otp(saved_email["id"], "public", "112233", "******")
+        inserted_sms, skipped = mobile_repository.save_sms_messages(
+            "public-feed-device",
+            [
+                SmsMessageIn(
+                    external_id=f"public-sms-{unique}",
+                    sender=sms_sender,
+                    body="Ma OTP SMS public cua ban la 445566.",
+                    received_at=mobile_repository.now(),
+                )
+            ],
+        )
+        assert skipped == 0
+        assert inserted_sms
+
+        before_rules = client.get("/api/admin/public-messages/feed?limit=100")
+        assert before_rules.status_code == 200
+        assert all(item["id"] not in {f"email:{saved_email['id']}", f"sms:{inserted_sms[0]['id']}"} for item in before_rules.json()["items"])
+
+        email_rule = client.post(
+            "/api/admin/public-messages/rules",
+            json={"source_type": "email", "sender_pattern": email_sender, "label": "Email public", "is_active": True},
+        )
+        sms_rule = client.post(
+            "/api/admin/public-messages/rules",
+            json={"source_type": "sms", "sender_pattern": sms_sender, "label": "SMS public", "is_active": True},
+        )
+        assert email_rule.status_code == 200
+        assert sms_rule.status_code == 200
+
+        response = client.get("/api/admin/public-messages/feed?limit=100")
+        assert response.status_code == 200
+        items = response.json()["items"]
+        email_item = next(item for item in items if item["id"] == f"email:{saved_email['id']}")
+        sms_item = next(item for item in items if item["id"] == f"sms:{inserted_sms[0]['id']}")
+
+        assert email_item["type_label"] == "Mail nội bộ"
+        assert email_item["title"] == "Ma OTP public"
+        assert email_item["otp"] == "112233"
+        assert sms_item["type_label"] == "SMS"
+        assert sms_item["title"] == ""
+        assert sms_item["otp"] == "445566"
+        assert "445566" in sms_item["content"]
 
 
 def test_internal_email_status_and_email_otp_can_match_request() -> None:
