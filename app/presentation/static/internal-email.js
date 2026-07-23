@@ -157,11 +157,11 @@ function renderInternalEmailMessages(messages = []) {
     return;
   }
   table.innerHTML = messages.map((message) => {
-    const otp = message.otp_code || message.otp_code_masked || "";
+    const otp = message.otp_code || "";
     const status = message.is_otp_candidate ? renderInternalEmailOtpCopyCell(otp || "") : `<span class="status pending">-</span>`;
     const sender = message.sender || message.sender_email || "";
     const subject = message.subject || "";
-    const preview = message.body_masked || "";
+    const preview = message.body_preview || message.body_masked || "";
     return `<tr>
       <td>${escapeHtml(internalEmailFormatTime(message.received_at))}</td>
       <td>${escapeHtml(sender)}</td>

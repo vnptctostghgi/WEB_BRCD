@@ -2185,6 +2185,8 @@ def test_internal_email_parser_masks_otp_preview() -> None:
     assert parsed["metadata"]["uid"] == "42"
     assert parsed["metadata"]["sender_email"] == "noreply@vnpt.vn"
     assert "123456" in parsed["search_text"]
+    assert parsed["metadata"]["is_otp_candidate"] is True
+    assert parsed["metadata"]["otp_code"] == "123456"
     assert "123456" not in parsed["metadata"]["body_masked"]
     assert "******" in parsed["metadata"]["body_masked"]
 
@@ -2219,6 +2221,7 @@ def test_internal_email_messages_return_full_otp_for_copy() -> None:
         assert message["otp_code"] == "246810"
         assert message["otp_code_masked"] == "******"
         assert "246810" not in message["body_masked"]
+        assert "246810" in message["body_preview"]
 
 
 def test_public_messages_feed_uses_allowed_email_and_sms_senders() -> None:
@@ -2288,6 +2291,7 @@ def test_public_messages_feed_uses_allowed_email_and_sms_senders() -> None:
         assert email_item["type_label"] == "Mail nội bộ"
         assert email_item["title"] == "Ma OTP public"
         assert email_item["otp"] == "112233"
+        assert "112233" in email_item["content"]
         assert sms_item["type_label"] == "SMS"
         assert sms_item["title"] == ""
         assert sms_item["otp"] == "445566"

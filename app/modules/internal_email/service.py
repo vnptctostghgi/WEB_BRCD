@@ -339,6 +339,7 @@ def parse_email_message(raw_message: bytes, uid: str) -> dict[str, Any]:
     body = _message_body_text(message)
     received_at = _message_datetime(message.get("Date"))
     search_text = "\n".join(part for part in (subject, sender, sender_email, body) if part)
+    otp_code = security.extract_otp(search_text, security.OTP_DIGIT_PATTERN.pattern)
     return {
         "metadata": {
             "uid": uid,
@@ -349,7 +350,9 @@ def parse_email_message(raw_message: bytes, uid: str) -> dict[str, Any]:
             "body_masked": _safe_preview(security.mask_otp_text(body)),
             "received_at": received_at,
             "synced_at": datetime.now(UTC).isoformat(timespec="seconds"),
-            "is_otp_candidate": False,
+            "is_otp_candidate": bool(otp_code),
+            "otp_code": otp_code,
+            "otp_code_masked": "*" * len(otp_code) if otp_code else "",
         },
         "search_text": search_text,
     }

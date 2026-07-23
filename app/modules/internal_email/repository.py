@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import UTC, datetime
 from typing import Any
@@ -35,11 +36,26 @@ class InternalEmailRepository:
         self.base._upsert(table, payload, conflict)
 
     @staticmethod
+    def _body_preview(body_masked: str, otp_code: str) -> str:
+        preview = str(body_masked or "")
+        code = str(otp_code or "").strip()
+        if not preview or not code or "*" not in preview:
+            return preview
+        exact_mask = "*" * len(code)
+        if exact_mask in preview:
+            return preview.replace(exact_mask, code, 1)
+        return re.sub(r"\*{4,12}", code, preview, count=1)
+
+    @staticmethod
     def _decode_message(row: dict[str, Any]) -> dict[str, Any]:
         item = dict(row)
         item["is_otp_candidate"] = bool(item.get("is_otp_candidate"))
         if "otp_code" not in item:
             item["otp_code"] = ""
+        item["body_preview"] = InternalEmailRepository._body_preview(
+            str(item.get("body_masked") or ""),
+            str(item.get("otp_code") or ""),
+        )
         return item
 
     def get_message_by_uid(self, account_key: str, mailbox: str, uid: str) -> dict[str, Any] | None:

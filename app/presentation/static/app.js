@@ -234,7 +234,7 @@ function ensureInternalEmailScriptLoaded() {
   if (internalEmailScriptPromise) return internalEmailScriptPromise;
   internalEmailScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/internal-email.js?v=5";
+    script.src = "/static/internal-email.js?v=6";
     script.defer = true;
     script.dataset.internalEmail = "true";
     script.addEventListener("load", () => {
@@ -1413,15 +1413,6 @@ if (role === "admin") {
   $("#add-inline-report-link")?.addEventListener("click", addInlineReportLink);
   $("#report-link-admin-search")?.addEventListener("input", renderReportLinkAdminEditor);
   $("#report-link-picker")?.addEventListener("change", renderReportLinkAdminEditor);
-  $("#public-messages-refresh")?.addEventListener("click", () => loadPublicMessages({ force: true }));
-  $("#public-messages-table")?.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-public-message-copy-otp]");
-    if (button) copyPublicMessageOtpFromButton(button);
-  });
-  $("#public-messages-table")?.addEventListener("dblclick", (event) => {
-    const code = event.target.closest("[data-public-message-otp-code]");
-    if (code) selectElementText(code);
-  });
   $("#onebss-run-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     oneBssPendingSessionId = "";
@@ -4528,6 +4519,26 @@ function renderPublicMessages(items = []) {
   </tr>`).join("");
 }
 
+function bindPublicMessagesEvents() {
+  const refresh = $("#public-messages-refresh");
+  if (refresh && !refresh.dataset.boundPublicMessagesRefresh) {
+    refresh.dataset.boundPublicMessagesRefresh = "true";
+    refresh.addEventListener("click", () => loadPublicMessages({ force: true }));
+  }
+  const table = $("#public-messages-table");
+  if (table && !table.dataset.boundPublicMessagesCopy) {
+    table.dataset.boundPublicMessagesCopy = "true";
+    table.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-public-message-copy-otp]");
+      if (button) copyPublicMessageOtpFromButton(button);
+    });
+    table.addEventListener("dblclick", (event) => {
+      const code = event.target.closest("[data-public-message-otp-code]");
+      if (code) selectElementText(code);
+    });
+  }
+}
+
 function startPublicMessagesAutoRefresh() {
   if (publicMessagesRefreshTimer) return;
   publicMessagesRefreshTimer = setInterval(() => {
@@ -4537,6 +4548,7 @@ function startPublicMessagesAutoRefresh() {
 }
 
 async function loadPublicMessages({ force = false, silent = false } = {}) {
+  bindPublicMessagesEvents();
   const table = $("#public-messages-table");
   const status = $("#public-messages-status");
   const message = $("#public-messages-message");

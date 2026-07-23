@@ -172,7 +172,7 @@ class PublicMessagesRepository:
             rule = next((candidate for candidate in rules if self._matches_rule(candidate, sender, sender_email)), None)
             if not rule:
                 continue
-            otp = str(message.get("otp_code") or message.get("otp_code_masked") or "")
+            otp = str(message.get("otp_code") or "")
             items.append(
                 {
                     "id": f"email:{message.get('id')}",
@@ -184,7 +184,7 @@ class PublicMessagesRepository:
                     "type_label": "Mail n\u1ed9i b\u1ed9",
                     "title": message.get("subject") or "",
                     "otp": otp,
-                    "content": message.get("body_masked") or "",
+                    "content": message.get("body_preview") or message.get("body_masked") or "",
                 }
             )
         return items
