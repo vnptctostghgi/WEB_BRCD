@@ -12,7 +12,6 @@ let features = [];
 let regions = [];
 let connections = [];
 let systemRoles = [];
-let workTasks = [];
 let zaloAutoMessages = [];
 let zaloMessageLogs = [];
 let dataMiningSchedules = [];
@@ -174,6 +173,7 @@ let navigationPreloadPromise = null;
 let mobileGatewayFocusedScriptPromise = null;
 let internalEmailScriptPromise = null;
 let workstationScriptPromise = null;
+let workTasksScriptPromise = null;
 const dataCacheTimestamps = new Map();
 const dashboardViewerLayoutCache = new Map();
 const dashboardBuilderLayoutCache = new Map();
@@ -271,6 +271,29 @@ function ensureWorkstationScriptLoaded() {
     if (!existingScript) document.body.appendChild(script);
   });
   return workstationScriptPromise;
+}
+
+function ensureWorkTasksScriptLoaded() {
+  if (window.VNPTWorkTasks?.loadWorkTasks) return Promise.resolve();
+  const existingScript = document.querySelector("script[data-work-tasks='true']");
+  if (existingScript?.dataset.loaded === "true") return Promise.resolve();
+  if (workTasksScriptPromise) return workTasksScriptPromise;
+  workTasksScriptPromise = new Promise((resolve, reject) => {
+    const script = existingScript || document.createElement("script");
+    script.src = "/static/work-tasks.js?v=1";
+    script.defer = true;
+    script.dataset.workTasks = "true";
+    script.addEventListener("load", () => {
+      script.dataset.loaded = "true";
+      resolve();
+    }, { once: true });
+    script.addEventListener("error", () => {
+      workTasksScriptPromise = null;
+      reject(new Error("Không tải được module Quản lý công việc."));
+    }, { once: true });
+    if (!existingScript) document.body.appendChild(script);
+  });
+  return workTasksScriptPromise;
 }
 
 function getViewTransitionHeight(...views) {
@@ -606,7 +629,9 @@ window.VNPTApp = {
   loadingRow,
   markDataFresh,
   repairDataEncoding,
+  setTableLoading,
   showMessage,
+  showToast,
 };
 
 function syncSidebarExpandedState(open) {
@@ -678,7 +703,10 @@ function viewLoaderForNav(nextView, dashboardPageId) {
   };
   if (nextView === "dashboard-builder") return () => loadDashboardBuilder();
   if (nextView === "menu-admin") return () => loadMenuLayout();
-  if (nextView === "work-tasks") return () => loadWorkTasks();
+  if (nextView === "work-tasks") return async () => {
+    await ensureWorkTasksScriptLoaded();
+    return loadWorkTasks();
+  };
   if (nextView === "permissions") return () => loadPermissionManager();
   if (nextView === "data-permissions") return () => loadDataPermissionManager();
   if (nextView === "catalogs") return () => loadCatalogs();
@@ -719,7 +747,7 @@ $("#nav-tree")?.addEventListener("click", async (event) => {
   await activateNavItem(item, { closeSidebar: true });
 });
 
-document.querySelectorAll("[data-open-dialog]").forEach((button) => button.addEventListener("click", () => {
+document.querySelectorAll("[data-open-dialog]").forEach((button) => button.addEventListener("click", async () => {
   if (button.dataset.openDialog === "credential-dialog") {
     openCredential("").catch((error) => showToast(error.message, "error"));
     return;
@@ -737,7 +765,12 @@ document.querySelectorAll("[data-open-dialog]").forEach((button) => button.addEv
     return;
   }
   if (button.dataset.openDialog === "work-task-dialog") {
-    openWorkTask("");
+    try {
+      await ensureWorkTasksScriptLoaded();
+      openWorkTask("");
+    } catch (error) {
+      showToast(error.message, "error");
+    }
     return;
   }
   if (button.dataset.openDialog === "sql-report-dialog") {
@@ -1436,8 +1469,6 @@ if (role === "admin") {
   $("#website-form")?.addEventListener("submit", saveWebsite);
   $("#region-form")?.addEventListener("submit", saveRegion);
   $("#role-form")?.addEventListener("submit", saveRole);
-  $("#work-task-form")?.addEventListener("submit", saveWorkTask);
-  $("#save-work-task-button")?.addEventListener("click", () => $("#work-task-form")?.requestSubmit());
   $("#connection-form")?.addEventListener("submit", saveConnection);
   $("#sql-report-form")?.addEventListener("submit", saveSqlReport);
   $("#add-inline-sql-report")?.addEventListener("click", addInlineSqlReport);
@@ -4401,188 +4432,16 @@ async function deleteRegion(code) {
   }
 }
 
-async function loadWorkTasks({ force = false } = {}) {
-  if (!force && isDataFresh("workTasks")) {
-    renderWorkTasks();
-    return;
-  }
-  if (workTasks.length && !force) {
-    renderWorkTasks();
-  }
-  if (!workTasks.length || force) setTableLoading("#work-tasks-table", 9, "Đang tải lịch công việc...");
-  workTasks = (await api("/api/admin/work-tasks")).tasks;
-  markDataFresh("workTasks");
-  renderWorkTasks();
-}
-
-function renderWorkTasks() {
-  const table = $("#work-tasks-table");
-  if (!table) return;
-  table.innerHTML = workTasks.length ? workTasks.map((task) => `
-    <tr>
-      <td class="table-action-cell">
-        <div class="action-group">
-          <button class="table-action" data-edit-work-task="${escapeHtml(task.task_id)}">Sửa</button>
-          <button class="table-action" data-complete-work-task="${escapeHtml(task.task_id)}">Hoàn thành</button>
-          <button class="table-action danger" data-delete-work-task="${escapeHtml(task.task_id)}">Xóa</button>
-        </div>
-      </td>
-      <td><strong>${escapeHtml(task.task_id)}</strong></td>
-      <td>${escapeHtml(task.ten_cong_viec)}${task.last_notified_at ? `<small class="cell-note">Đã nhắc: ${escapeHtml(new Date(task.last_notified_at).toLocaleString("vi-VN"))}</small>` : ""}</td>
-      <td><span class="status viewer">${escapeHtml(task.type)}</span></td>
-      <td><strong>${escapeHtml(task.time)}</strong></td>
-      <td>${escapeHtml(task.weekday || "-")}</td>
-      <td>${escapeHtml(task.once_date || "-")}</td>
-      <td>${escapeHtml(task.group || "-")}</td>
-      <td><span class="status ${task.check ? "active" : "inactive"}">${task.check ? "Đã xong" : "Đang chờ"}</span></td>
-    </tr>
-  `).join("") : emptyRow(9, "Chưa có lịch công việc", "Hãy thêm công việc để hệ thống nhắc qua Telegram đúng giờ.");
-  document.querySelectorAll("[data-edit-work-task]").forEach((button) => button.addEventListener("click", () => openWorkTask(button.dataset.editWorkTask)));
-  document.querySelectorAll("[data-complete-work-task]").forEach((button) => button.addEventListener("click", () => completeWorkTask(button.dataset.completeWorkTask)));
-  document.querySelectorAll("[data-delete-work-task]").forEach((button) => button.addEventListener("click", () => deleteWorkTask(button.dataset.deleteWorkTask)));
+async function loadWorkTasks(options = {}) {
+  await ensureWorkTasksScriptLoaded();
+  if (!window.VNPTWorkTasks?.loadWorkTasks) throw new Error("Module Quan ly cong viec chua san sang.");
+  return window.VNPTWorkTasks.loadWorkTasks(options);
 }
 
 function openWorkTask(taskId = "") {
-  const task = workTasks.find((item) => item.task_id === taskId);
-  const form = $("#work-task-form");
-  form.elements.namedItem("task_id").value = task?.task_id || "";
-  form.elements.namedItem("task_id").readOnly = true;
-  form.elements.namedItem("ten_cong_viec").value = task?.ten_cong_viec || "";
-  form.elements.namedItem("type").value = task?.type || "Daily";
-  form.elements.namedItem("time").value = task?.time || "07:00";
-  form.elements.namedItem("weekday").value = task?.weekday || "";
-  form.elements.namedItem("once_date").value = task?.once_date || "";
-  form.elements.namedItem("group").value = task?.group || "ME";
-  form.elements.namedItem("check").checked = task ? Boolean(task.check) : false;
-  form.querySelector(".result").className = "result hidden";
-  $("#work-task-dialog").showModal();
-}
-
-async function saveWorkTask(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const data = Object.fromEntries(new FormData(form));
-  try {
-    await api("/api/admin/work-tasks", { method: "POST", body: JSON.stringify({
-      task_id: data.task_id,
-      ten_cong_viec: data.ten_cong_viec,
-      type: data.type,
-      time: data.time,
-      weekday: data.weekday || "",
-      once_date: data.once_date || "",
-      group: data.group || "",
-      check: form.check.checked,
-    })});
-    form.reset();
-    form.elements.namedItem("task_id").readOnly = true;
-    form.elements.namedItem("type").value = "Daily";
-    form.elements.namedItem("time").value = "07:00";
-    form.elements.namedItem("group").value = "ME";
-    $("#work-task-dialog").close();
-    showMessage($("#work-tasks-message"), "Đã lưu công việc.");
-    showToast("Đã lưu lịch công việc.");
-    await loadWorkTasks({ force: true });
-  } catch (error) {
-    showMessage(form.querySelector(".result"), error.message, "error");
-    showToast(error.message, "error");
-  }
-}
-
-async function completeWorkTask(taskId) {
-  if (!confirm(`Xác nhận đã hoàn thành ${taskId}? Lịch này sẽ được tắt và ẩn khỏi danh sách.`)) return;
-  try {
-    const result = await api(`/api/admin/work-tasks/${encodeURIComponent(taskId)}/complete`, { method: "POST" });
-    showMessage($("#work-tasks-message"), result.message || "Đã hoàn thành công việc.");
-    await loadWorkTasks({ force: true });
-  } catch (error) {
-    showMessage($("#work-tasks-message"), error.message, "error");
-  }
-}
-
-async function deleteWorkTask(taskId) {
-  if (!confirm(`Xóa lịch công việc ${taskId}?`)) return;
-  try {
-    await api(`/api/admin/work-tasks/${encodeURIComponent(taskId)}`, { method: "DELETE" });
-    showMessage($("#work-tasks-message"), `Đã xóa lịch ${taskId}.`);
-    await loadWorkTasks({ force: true });
-  } catch (error) {
-    showMessage($("#work-tasks-message"), error.message, "error");
-  }
-}
-
-function publicMessagesFormatTime(value) {
-  if (!value) return "-";
-  try {
-    return new Date(value).toLocaleString("vi-VN");
-  } catch {
-    return "-";
-  }
-}
-
-async function copyPublicMessageOtpFromButton(button) {
-  const code = button?.dataset.publicMessageCopyOtp || "";
-  if (!code || code === "null") return;
-  try {
-    await copyTextToClipboard(code);
-    showToast(`\u0110\u00e3 sao ch\u00e9p OTP ${code}.`);
-  } catch (error) {
-    showToast(error.message || "Kh\u00f4ng sao ch\u00e9p \u0111\u01b0\u1ee3c OTP.", "error");
-  }
-}
-
-function renderPublicMessageOtpCell(code) {
-  const value = String(code || "").trim();
-  const canCopy = value && value !== "null" && !/^\*+$/.test(value);
-  return `
-    <div class="mobile-otp-copy-cell public-message-otp-copy-cell">
-      <code class="mobile-otp-code" data-public-message-otp-code tabindex="0">${escapeHtml(value || "null")}</code>
-      <button class="table-action mobile-otp-copy-button" data-public-message-copy-otp="${escapeHtml(value)}" type="button" ${canCopy ? "" : "disabled"}>Copy</button>
-    </div>`;
-}
-
-function renderPublicMessages(items = []) {
-  const table = $("#public-messages-table");
-  if (!table) return;
-  if (!items.length) {
-    table.innerHTML = emptyRow(6, "Ch\u01b0a c\u00f3 n\u1ed9i dung public", "H\u00e3y c\u1ea5u h\u00ecnh ng\u01b0\u1eddi g\u1eedi trong Mail n\u1ed9i b\u1ed9 ho\u1eb7c Mobile Gateway.");
-    return;
-  }
-  table.innerHTML = items.map((item) => `<tr>
-    <td>${escapeHtml(publicMessagesFormatTime(item.received_at))}</td>
-    <td>${escapeHtml(item.sender || "")}</td>
-    <td><span class="status ${item.source_type === "sms" ? "pending" : "viewer"}">${escapeHtml(item.type_label || item.source_type || "")}</span></td>
-    <td>${escapeHtml(item.title || "")}</td>
-    <td>${renderPublicMessageOtpCell(item.otp || "")}</td>
-    <td class="public-message-content" title="${escapeHtml(item.content || "")}">${escapeHtml(item.content || "")}</td>
-  </tr>`).join("");
-}
-
-function bindPublicMessagesEvents() {
-  const refresh = $("#public-messages-refresh");
-  if (refresh && !refresh.dataset.boundPublicMessagesRefresh) {
-    refresh.dataset.boundPublicMessagesRefresh = "true";
-    refresh.addEventListener("click", () => loadPublicMessages({ force: true }));
-  }
-  const table = $("#public-messages-table");
-  if (table && !table.dataset.boundPublicMessagesCopy) {
-    table.dataset.boundPublicMessagesCopy = "true";
-    table.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-public-message-copy-otp]");
-      if (button) copyPublicMessageOtpFromButton(button);
-    });
-    table.addEventListener("dblclick", (event) => {
-      const code = event.target.closest("[data-public-message-otp-code]");
-      if (code) selectElementText(code);
-    });
-  }
-}
-
-function startPublicMessagesAutoRefresh() {
-  if (publicMessagesRefreshTimer) return;
-  publicMessagesRefreshTimer = setInterval(() => {
-    if (!$("#view-public-messages")?.classList.contains("active")) return;
-    loadPublicMessages({ silent: true }).catch((error) => console.warn("Public message refresh failed", error));
-  }, 5000);
+  ensureWorkTasksScriptLoaded()
+    .then(() => window.VNPTWorkTasks?.openWorkTask?.(taskId))
+    .catch((error) => showToast(error.message, "error"));
 }
 
 async function loadPublicMessages({ force = false, silent = false } = {}) {

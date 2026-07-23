@@ -4016,13 +4016,13 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
         assert "/static/shell.js?v=2" in home.text
-        assert "/static/app.js?v=171" not in home.text
+        assert "/static/app.js?v=172" not in home.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
-        assert "/static/app.js?v=171" in dashboard.text
+        assert "/static/app.js?v=172" in dashboard.text
         assert "view-dashboard-builder" not in home.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" in dashboard.text
@@ -4040,9 +4040,16 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=171" in workstation.text
+        assert "/static/app.js?v=172" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
+
+        work_tasks = client.get("/quanlycongviec")
+        assert work_tasks.status_code == 200
+        assert "view-work-tasks" in work_tasks.text
+        assert "/static/app.js?v=172" in work_tasks.text
+        assert "/static/work-tasks.js" not in work_tasks.text
+        assert work_tasks.text.count('class="app-view') == 1
 
         client.post("/api/auth/logout")
         login(client, "viewer_builder", "Viewer@Builder123")
