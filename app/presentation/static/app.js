@@ -232,7 +232,7 @@ function ensureInternalEmailScriptLoaded() {
   if (internalEmailScriptPromise) return internalEmailScriptPromise;
   internalEmailScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/internal-email.js?v=2";
+    script.src = "/static/internal-email.js?v=3";
     script.defer = true;
     script.dataset.internalEmail = "true";
     script.addEventListener("load", () => {
@@ -241,7 +241,7 @@ function ensureInternalEmailScriptLoaded() {
     }, { once: true });
     script.addEventListener("error", () => {
       internalEmailScriptPromise = null;
-      reject(new Error("Khong tai duoc module Mail noi bo."));
+      reject(new Error("Không tải được module Mail nội bộ."));
     }, { once: true });
     if (!existingScript) document.body.appendChild(script);
   });

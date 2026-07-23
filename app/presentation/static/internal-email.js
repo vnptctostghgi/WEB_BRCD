@@ -61,7 +61,7 @@ function bindInternalEmailEvents() {
           await loadInternalEmailMessages({ force: true });
         }
       } catch (error) {
-        showMessage($("#internal-email-message"), error.message || "Khong tai duoc du lieu Mail noi bo.", "error");
+        showMessage($("#internal-email-message"), error.message || "Không tải được dữ liệu Mail nội bộ.", "error");
       }
     });
   });
@@ -79,7 +79,7 @@ async function loadInternalEmail({ force = false } = {}) {
 async function loadInternalEmailStatus({ force = false } = {}) {
   const target = $("#internal-email-status-cards");
   if (force && target) {
-    target.innerHTML = `<article class="metric-card"><span>IMAP</span><strong>Dang tai...</strong></article>`;
+    target.innerHTML = `<article class="metric-card"><span>IMAP</span><strong>Đang tải...</strong></article>`;
   }
   const data = await api("/api/admin/internal-email/status");
   window.internalEmailStatus = data;
@@ -90,21 +90,21 @@ function renderInternalEmailStatus(data = {}) {
   const target = $("#internal-email-status-cards");
   if (!target) return;
   const details = data.details || {};
-  const statusText = data.ok ? (details.enabled ? "Dang bat" : "Chua bat") : "Can cau hinh";
+  const statusText = data.ok ? (details.enabled ? "Đang bật" : "Chưa bật") : "Cần cấu hình";
   const statusClass = data.ok && details.enabled ? "viewer" : (data.ok ? "pending" : "inactive");
-  const configuredText = `${details.username_configured ? "user OK" : "thieu user"} / ${details.password_configured ? "pass OK" : "thieu pass"}`;
+  const configuredText = `${details.username_configured ? "user OK" : "thiếu user"} / ${details.password_configured ? "pass OK" : "thiếu pass"}`;
   const host = `${details.host || "email.vnpt.vn"}:${details.port || 993}`;
-  const latest = details.latest_message_at ? internalEmailFormatTime(details.latest_message_at) : "Chua co";
+  const latest = details.latest_message_at ? internalEmailFormatTime(details.latest_message_at) : "Chưa có";
   target.innerHTML = `
-    <article class="metric-card"><span>Trang thai</span><strong><span class="status ${statusClass}">${escapeHtml(statusText)}</span></strong></article>
-    <article class="metric-card"><span>May chu</span><strong>${escapeHtml(host)}</strong><small>${escapeHtml(details.mailbox || "INBOX")}</small></article>
-    <article class="metric-card"><span>Tai khoan</span><strong>${escapeHtml(configuredText)}</strong><small>${escapeHtml(details.account_key || "internal_email")}</small></article>
-    <article class="metric-card"><span>Email moi nhat</span><strong>${escapeHtml(latest)}</strong><small>${escapeHtml(data.message || "")}</small></article>`;
+    <article class="metric-card"><span>Trạng thái</span><strong><span class="status ${statusClass}">${escapeHtml(statusText)}</span></strong></article>
+    <article class="metric-card"><span>Máy chủ</span><strong>${escapeHtml(host)}</strong><small>${escapeHtml(details.mailbox || "INBOX")}</small></article>
+    <article class="metric-card"><span>Tài khoản</span><strong>${escapeHtml(configuredText)}</strong><small>${escapeHtml(details.account_key || "internal_email")}</small></article>
+    <article class="metric-card"><span>Email mới nhất</span><strong>${escapeHtml(latest)}</strong><small>${escapeHtml(data.message || "")}</small></article>`;
 }
 
 async function loadInternalEmailMessages({ force = false } = {}) {
   const table = $("#internal-email-messages-table");
-  if (force && table) setTableLoading("#internal-email-messages-table", 5, "Dang tai email...");
+  if (force && table) setTableLoading("#internal-email-messages-table", 5, "Đang tải email...");
   const otpOnly = $("#internal-email-otp-only")?.checked ?? true;
   const data = await api(`/api/admin/internal-email/messages?limit=${INTERNAL_EMAIL_TABLE_LIMIT}&otp_only=${otpOnly ? "true" : "false"}`);
   window.internalEmailMessages = data.messages || [];
@@ -115,11 +115,11 @@ function renderInternalEmailMessages(messages = []) {
   const table = $("#internal-email-messages-table");
   if (!table) return;
   if (!messages.length) {
-    table.innerHTML = emptyRow(5, "Chua co email OTP", "Dong bo IMAP hoac bo loc OTP chua tim thay thu phu hop.");
+    table.innerHTML = emptyRow(5, "Chưa có email OTP", "Đồng bộ IMAP hoặc bộ lọc OTP chưa tìm thấy thư phù hợp.");
     return;
   }
   table.innerHTML = messages.map((message) => {
-    const otp = message.otp_code_masked || (message.is_otp_candidate ? "Da nhan OTP" : "");
+    const otp = message.otp_code_masked || (message.is_otp_candidate ? "Đã nhận OTP" : "");
     const status = message.is_otp_candidate ? `<span class="status viewer">${escapeHtml(otp || "OTP")}</span>` : `<span class="status pending">-</span>`;
     const sender = message.sender || message.sender_email || "";
     const subject = message.subject || "";
@@ -141,14 +141,14 @@ async function syncInternalEmail() {
   try {
     const result = await api("/api/admin/internal-email/sync", { method: "POST" });
     const details = result.details || {};
-    showMessage(message, `Da dong bo email sang Tin nhan: luu ${details.saved || 0}, OTP ${details.otp_records || 0}.`);
+    showMessage(message, `Đã đồng bộ email sang Tin nhắn: lưu ${details.saved || 0}, OTP ${details.otp_records || 0}.`);
     await Promise.all([
       loadInternalEmailStatus({ force: true }),
       loadInternalEmailMessages({ force: true }),
     ]);
     activateInternalEmailTab("messages");
   } catch (error) {
-    showMessage(message, error.message || "Khong dong bo duoc email noi bo.", "error");
+    showMessage(message, error.message || "Không đồng bộ được email nội bộ.", "error");
   } finally {
     if (button) setButtonLoading(button, false);
   }
@@ -160,10 +160,10 @@ async function testInternalEmail() {
   if (button) setButtonLoading(button, true);
   try {
     const result = await api("/api/admin/internal-email/test", { method: "POST" });
-    showMessage(message, result.message || (result.ok ? "Ket noi IMAP san sang." : "Ket noi IMAP chua san sang."), result.ok ? "success" : "error");
+    showMessage(message, result.message || (result.ok ? "Kết nối IMAP sẵn sàng." : "Kết nối IMAP chưa sẵn sàng."), result.ok ? "success" : "error");
     renderInternalEmailStatus(result);
   } catch (error) {
-    showMessage(message, error.message || "Khong kiem tra duoc IMAP.", "error");
+    showMessage(message, error.message || "Không kiểm tra được IMAP.", "error");
   } finally {
     if (button) setButtonLoading(button, false);
   }

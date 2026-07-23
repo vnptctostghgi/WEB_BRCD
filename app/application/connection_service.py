@@ -110,11 +110,17 @@ class ConnectionService:
             "secret_ref": "INTERNAL_EMAIL_PASSWORD",
             **existing_email_config,
         }
+        email_name = str(existing_email.get("name") or "").strip()
+        if not email_name or email_name == "Email noi bo VNPT":
+            email_name = "Email nội bộ VNPT"
+        email_description = str(existing_email.get("description") or "").strip()
+        if not email_description or email_description == "Dong bo hop thu noi bo qua IMAP de phat hien OTP tu email.vnpt.vn.":
+            email_description = "Đồng bộ hộp thư nội bộ qua IMAP để phát hiện OTP từ email.vnpt.vn."
         self.repository.upsert_system_connection(
             code="internal_email",
-            name=str(existing_email.get("name") or "Email noi bo VNPT"),
+            name=email_name,
             connection_type="internal_email",
-            description="Dong bo hop thu noi bo qua IMAP de phat hien OTP tu email.vnpt.vn.",
+            description=email_description,
             config=email_config,
             is_active=bool(
                 existing_email.get("is_active")

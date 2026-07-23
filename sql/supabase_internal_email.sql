@@ -3,9 +3,9 @@
 
 insert into public.features (code, name, parent_code, sort_order)
 values
-  ('internalemail', 'Mail noi bo', 'quantriweb', 29),
-  ('internal_email.view', 'Xem Mail noi bo', 'internalemail', 281),
-  ('internal_email.manage', 'Quan tri Mail noi bo', 'internalemail', 282)
+  ('internalemail', 'Mail nội bộ', 'quantriweb', 29),
+  ('internal_email.view', 'Xem Mail nội bộ', 'internalemail', 281),
+  ('internal_email.manage', 'Quản trị Mail nội bộ', 'internalemail', 282)
 on conflict (code) do update
 set name = excluded.name,
     parent_code = excluded.parent_code,

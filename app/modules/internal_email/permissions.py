@@ -6,8 +6,8 @@ from app.presentation.routes import current_user
 INTERNAL_EMAIL_FEATURE_CODE = "internalemail"
 
 PERMISSIONS = {
-    "internal_email.view": "Xem Mail noi bo",
-    "internal_email.manage": "Quan tri Mail noi bo",
+    "internal_email.view": "Xem Mail nội bộ",
+    "internal_email.manage": "Quản trị Mail nội bộ",
 }
 
 
@@ -19,7 +19,7 @@ def require_internal_email_permission(request: Request, permission: str) -> dict
     if permission not in granted and "internal_email.manage" not in granted:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Ban chua duoc cap quyen Mail noi bo.",
+            detail="Bạn chưa được cấp quyền Mail nội bộ.",
         )
     return user
 
