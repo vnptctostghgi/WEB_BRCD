@@ -787,7 +787,7 @@ function viewLoaderForNav(nextView, dashboardPageId) {
 }
 
 async function activateNavItem(item, options = {}) {
-  const { updateUrl = true, replaceUrl = false, closeSidebar = false } = options;
+  const { updateUrl = true, replaceUrl = false, closeSidebar = false, collapseTree = false } = options;
   const loadToken = ++activeViewLoadToken;
   const nextView = item.dataset.view || "";
   const dashboardPageId = item.dataset.dashboardPageId || "";
@@ -804,8 +804,10 @@ async function activateNavItem(item, options = {}) {
   document.body.classList.remove("app-booting");
   const moduleTitle = $("#module-title");
   if (moduleTitle) moduleTitle.textContent = item.dataset.title || item.textContent.trim();
-  if (closeSidebar) {
+  if (closeSidebar || collapseTree) {
     collapseNavigationTree();
+  }
+  if (closeSidebar) {
     syncSidebarExpandedState(false);
   }
   if (updateUrl) updateFeatureUrl(item.dataset.featureCode, { replace: replaceUrl });
@@ -2205,7 +2207,7 @@ async function syncNavigationFromFeatures() {
     if (html.trim()) tree.innerHTML = html;
     const activeItem = routeCode ? preferredNavItem(routeCode || activeCode) : null;
     if (activeItem) {
-      await activateNavItem(activeItem, { updateUrl: false, replaceUrl: true });
+      await activateNavItem(activeItem, { updateUrl: false, replaceUrl: true, collapseTree: true });
     } else {
       enterIdleShell();
     }
@@ -2226,7 +2228,7 @@ async function activateNavForCurrentPath() {
   const item = preferredNavItem(routeCode);
   if (!item) return false;
   openNavParents(item);
-  await activateNavItem(item, { updateUrl: false });
+  await activateNavItem(item, { updateUrl: false, collapseTree: true });
   return true;
 }
 
@@ -4478,7 +4480,7 @@ function startPublicMessagesAutoRefresh() {
   publicMessagesRefreshTimer = setInterval(() => {
     if (!$("#view-public-messages")?.classList.contains("active")) return;
     loadPublicMessages({ silent: true }).catch((error) => console.warn("Public message refresh failed", error));
-  }, 5000);
+  }, 3000);
 }
 
 async function loadPublicMessages({ force = false, silent = false } = {}) {
@@ -4488,7 +4490,8 @@ async function loadPublicMessages({ force = false, silent = false } = {}) {
   const message = $("#public-messages-message");
   if (force && table && !silent) setTableLoading("#public-messages-table", 6, "\u0110ang t\u1ea3i n\u1ed9i dung public...");
   try {
-    const data = await api(`/api/admin/public-messages/feed?limit=${TABLE_PAGE_SIZE}`);
+    startPublicMessagesAutoRefresh();
+    const data = await api(`/api/admin/public-messages/feed?limit=${TABLE_PAGE_SIZE}&_=${Date.now()}`);
     publicMessages = data.items || [];
     renderPublicMessages(publicMessages);
     if (status) {
@@ -4496,7 +4499,6 @@ async function loadPublicMessages({ force = false, silent = false } = {}) {
       status.textContent = `C\u1eadp nh\u1eadt ${new Date().toLocaleTimeString("vi-VN")}`;
     }
     if (message && !silent) message.className = "result hidden mb-4";
-    startPublicMessagesAutoRefresh();
   } catch (error) {
     if (status) {
       status.className = "status inactive";

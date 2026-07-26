@@ -86,6 +86,12 @@ if (localStorage.getItem("sidebarExpanded") === "true" && window.matchMedia("(mi
   syncSidebarExpandedState(true);
 }
 
+function collapseNavigationTree() {
+  document.querySelectorAll("#nav-tree .nav-group").forEach((group) => {
+    group.open = false;
+  });
+}
+
 function filterNavigation(keyword) {
   const query = String(keyword || "").trim().toLowerCase();
   let visibleItems = 0;
@@ -260,6 +266,7 @@ $("#nav-tree")?.addEventListener("click", (event) => {
   const item = event.target.closest(".nav-item[data-feature-code]");
   if (!item || !$("#nav-tree")?.contains(item)) return;
   event.preventDefault();
+  collapseNavigationTree();
   syncSidebarExpandedState(false);
   window.location.href = featurePathFromCode(item.dataset.featureCode);
 });
@@ -363,7 +370,7 @@ function warmFeatureBundle() {
   const link = document.createElement("link");
   link.rel = "preload";
   link.as = "script";
-  link.href = "/static/app.js?v=170";
+  link.href = "/static/app.js?v=178";
   link.dataset.featureBundleWarm = "true";
   document.head.appendChild(link);
 }
