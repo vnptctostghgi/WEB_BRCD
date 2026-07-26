@@ -10,9 +10,7 @@ if (rememberedUsername) {
 }
 
 function safeNextPath() {
-  const next = new URLSearchParams(window.location.search).get("next") || "/";
-  if (!next.startsWith("/") || next.startsWith("//")) return "/";
-  return next;
+  return "/";
 }
 
 function showMessage(text, type = "error") {

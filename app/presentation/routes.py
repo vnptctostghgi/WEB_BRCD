@@ -2349,9 +2349,7 @@ def workstation_setup_package_bytes() -> bytes:
 def login_page(request: Request) -> Response:
     next_path = request.query_params.get("next") or "/"
     if request.session.get("user"):
-        if not next_path.startswith("/") or next_path.startswith("//"):
-            next_path = "/"
-        return RedirectResponse(next_path, status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     return templates.TemplateResponse(
         request=request,
         name="login.html",

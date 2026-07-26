@@ -16,7 +16,8 @@ def require_public_messages_permission(request: Request, permission: str) -> dic
     if user.get("role") == "admin":
         return user
     granted = set(user.get("permissions") or [])
-    if permission not in granted and "public_messages.manage" not in granted:
+    has_parent_view = permission == "public_messages.view" and PUBLIC_MESSAGES_FEATURE_CODE in granted
+    if not has_parent_view and permission not in granted and "public_messages.manage" not in granted:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="B\u1ea1n ch\u01b0a \u0111\u01b0\u1ee3c c\u1ea5p quy\u1ec1n n\u1ed9i dung public.",
@@ -28,4 +29,8 @@ def has_public_messages_permission(user: dict, permission: str) -> bool:
     if user.get("role") == "admin":
         return True
     granted = set(user.get("permissions") or [])
-    return permission in granted or "public_messages.manage" in granted
+    return (
+        permission in granted
+        or "public_messages.manage" in granted
+        or (permission == "public_messages.view" and PUBLIC_MESSAGES_FEATURE_CODE in granted)
+    )

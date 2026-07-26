@@ -54,6 +54,19 @@ def test_login_uses_optimized_static_assets() -> None:
         assert "cdn.tailwindcss.com" not in response.text
         assert "/static/login-hero-900.webp" in response.text
         assert "/static/images/system-logo-96.webp" in response.text
+        assert "/static/login.js?v=10" in response.text
+        login_js = client.get("/static/login.js?v=10")
+        assert login_js.status_code == 200
+        assert "function safeNextPath" in login_js.text
+        assert 'return "/";' in login_js.text
+
+
+def test_authenticated_login_page_returns_empty_shell() -> None:
+    with TestClient(app) as client:
+        login(client)
+        response = client.get("/login?next=/publicmessages", follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"] == "/"
 
 
 def test_admin_can_login_and_open_dashboard() -> None:
@@ -2409,6 +2422,35 @@ def test_public_messages_feed_uses_allowed_email_and_sms_senders() -> None:
         assert sms_item["title"] == ""
         assert sms_item["otp"] == "445566"
         assert "445566" in sms_item["content"]
+
+
+def test_public_messages_parent_permission_can_view_feed() -> None:
+    with TestClient(app) as client:
+        login(client)
+        created = client.post(
+            "/api/admin/users",
+            json={
+                "username": "viewer_public_parent",
+                "full_name": "Viewer Public Parent",
+                "password": "Viewer@Public123",
+                "role": "viewer",
+            },
+        )
+        assert created.status_code == 200
+        viewer_id = created.json()["user"]["id"]
+        assert client.put(
+            f"/api/admin/users/{viewer_id}/permissions",
+            json={"feature_codes": ["publicmessages"]},
+        ).status_code == 200
+
+        client.post("/api/auth/logout")
+        login(client, "viewer_public_parent", "Viewer@Public123")
+        page = client.get("/publicmessages")
+        assert page.status_code == 200
+        assert 'id="view-public-messages"' in page.text
+        feed = client.get("/api/admin/public-messages/feed?limit=20")
+        assert feed.status_code == 200
+        assert feed.json()["ok"] is True
 
 
 def test_internal_email_status_and_email_otp_can_match_request() -> None:
