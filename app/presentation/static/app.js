@@ -1474,11 +1474,7 @@ async function openEditUser(id) {
   if (!features.length) features = (await api("/api/admin/features")).features;
   const granted = new Set((await api(`/api/admin/users/${id}/permissions`)).feature_codes);
   const orderedFeatures = permissionFeatureList();
-  $("#permission-tree").innerHTML = orderedFeatures.map((feature) => `
-    <label class="permission-item ${feature.parent_code ? "child" : "parent"}">
-      <input type="checkbox" value="${escapeHtml(feature.code)}" ${granted.has(feature.code) ? "checked" : ""} />
-      <span>${escapeHtml(feature.name)}</span>
-    </label>`).join("");
+  $("#permission-tree").innerHTML = orderedFeatures.map((feature) => renderPermissionFeatureItem(feature, granted)).join("");
   bindPermissionCascade("#permission-tree");
   $("#edit-user-dialog").showModal();
 }
@@ -1505,7 +1501,7 @@ if (role === "admin") {
       await api(`/api/admin/users/${data.id}`, { method: "PUT", body: JSON.stringify({ full_name: data.full_name, role: data.role, is_active: form.is_active.checked }) });
       await api(`/api/admin/users/${data.id}/billing`, { method: "PUT", body: JSON.stringify({ billing_enabled: form.billing_enabled.checked, plan_code: data.billing_plan_code || "monthly", expires_at: data.billing_expires_at || "" }) });
       if (data.password) await api(`/api/admin/users/${data.id}/reset-password`, { method: "POST", body: JSON.stringify({ password: data.password }) });
-      const feature_codes = [...$("#permission-tree").querySelectorAll("input:checked")].map((input) => input.value);
+      const feature_codes = selectedValues("#permission-tree");
       await api(`/api/admin/users/${data.id}/permissions`, { method: "PUT", body: JSON.stringify({ feature_codes }) });
       $("#edit-user-dialog").close();
       await loadUsers({ force: true });
@@ -1590,7 +1586,7 @@ async function importUserFile(event) {
 }
 
 function selectedValues(containerSelector) {
-  return [...document.querySelectorAll(`${containerSelector} input:checked`)].map((input) => input.value);
+  return [...new Set([...document.querySelectorAll(`${containerSelector} input:checked`)].map((input) => input.value))];
 }
 
 function selectedNumbers(containerSelector) {
@@ -1818,11 +1814,7 @@ async function loadPermissionManager() {
   }
   renderUserSelection("#permission-users");
   const orderedFeatures = permissionFeatureList();
-  $("#permission-features").innerHTML = orderedFeatures.map((feature) => `
-    <label class="permission-item ${feature.parent_code ? "child" : "parent"}">
-      <input type="checkbox" value="${escapeHtml(feature.code)}" />
-      <span>${escapeHtml(feature.name)}</span>
-    </label>`).join("");
+  $("#permission-features").innerHTML = orderedFeatures.map((feature) => renderPermissionFeatureItem(feature)).join("");
   bindPermissionCascade("#permission-features");
 }
 
@@ -2008,8 +2000,18 @@ function flattenFeatureTree(nodes, level = 0, rows = []) {
   return rows;
 }
 
+function featureByCode(code) {
+  return features.find((feature) => String(feature.code) === String(code));
+}
+
+function isTechnicalPermissionFeature(feature) {
+  return Boolean(feature?.parent_code && String(feature.code || "").includes("."));
+}
+
 function permissionFeatureList() {
-  return flattenFeatureTree(buildFeatureTree(features)).map((row) => row.feature);
+  return flattenFeatureTree(buildFeatureTree(features))
+    .map((row) => row.feature)
+    .filter((feature) => !isTechnicalPermissionFeature(feature));
 }
 
 function descendantFeatureCodes(sourceFeatures, parentCode) {
@@ -2029,6 +2031,28 @@ function descendantFeatureCodes(sourceFeatures, parentCode) {
   };
   visit(parentCode);
   return result;
+}
+
+function hiddenPermissionDescendantCodes(feature) {
+  return descendantFeatureCodes(features, feature.code).filter((code) => isTechnicalPermissionFeature(featureByCode(code)));
+}
+
+function featureIsGranted(feature, granted) {
+  if (!granted) return false;
+  if (granted.has(feature.code)) return true;
+  return hiddenPermissionDescendantCodes(feature).some((code) => granted.has(code));
+}
+
+function renderPermissionFeatureItem(feature, granted = null) {
+  const hiddenCodes = hiddenPermissionDescendantCodes(feature);
+  const visibleChecked = featureIsGranted(feature, granted) ? "checked" : "";
+  const hiddenInputs = hiddenCodes.map((code) => `
+      <input class="permission-derived hidden" type="checkbox" value="${escapeHtml(code)}" ${granted?.has(code) ? "checked" : ""} />`).join("");
+  return `
+    <label class="permission-item ${feature.parent_code ? "child" : "parent"}">
+      <input type="checkbox" value="${escapeHtml(feature.code)}" ${visibleChecked} />
+      <span>${escapeHtml(feature.name)}</span>${hiddenInputs}
+    </label>`;
 }
 
 function bindPermissionCascade(containerSelector) {
@@ -2338,7 +2362,7 @@ function descendantCodesForFeature(code) {
 }
 
 function menuLayoutDisplayFeatures() {
-  return dedupeFeaturesForDisplay(menuLayoutState);
+  return dedupeFeaturesForDisplay(menuLayoutState).filter((feature) => !isTechnicalPermissionFeature(feature));
 }
 
 function renderParentOptions(feature) {

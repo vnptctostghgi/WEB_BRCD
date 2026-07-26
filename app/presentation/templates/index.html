@@ -12,9 +12,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="preload" href="/api/navigation" as="fetch" crossorigin="use-credentials" />
     {% if shell_only %}
-    <link rel="preload" href="/static/shell.js?v=4" as="script" />
+    <link rel="preload" href="/static/shell.js?v=5" as="script" />
     {% else %}
-    <link rel="preload" href="/static/app.js?v=179" as="script" />
+    <link rel="preload" href="/static/app.js?v=180" as="script" />
     {% endif %}
     <link rel="stylesheet" href="/static/tailwind-built.css?v=1" />
     <link rel="stylesheet" href="/static/styles.css?v=119" />
@@ -840,9 +840,9 @@
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
     {% if shell_only %}
-    <script defer src="/static/shell.js?v=4"></script>
+    <script defer src="/static/shell.js?v=5"></script>
     {% else %}
-    <script defer src="/static/app.js?v=179"></script>
+    <script defer src="/static/app.js?v=180"></script>
     {% endif %}
   </body>
 </html>
