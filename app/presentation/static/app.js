@@ -4399,6 +4399,81 @@ function openWorkTask(taskId = "") {
     .catch((error) => showToast(error.message, "error"));
 }
 
+function publicMessagesFormatTime(value) {
+  if (!value) return "-";
+  try {
+    return new Date(value).toLocaleString("vi-VN");
+  } catch {
+    return "-";
+  }
+}
+
+async function copyPublicMessageOtpFromButton(button) {
+  const code = button?.dataset.publicMessageCopyOtp || "";
+  if (!code || code === "null") return;
+  try {
+    await copyTextToClipboard(code);
+    showToast(`\u0110\u00e3 sao ch\u00e9p OTP ${code}.`);
+  } catch (error) {
+    showToast(error.message || "Kh\u00f4ng sao ch\u00e9p \u0111\u01b0\u1ee3c OTP.", "error");
+  }
+}
+
+function renderPublicMessageOtpCell(code) {
+  const value = String(code || "").trim();
+  const canCopy = value && value !== "null" && !/^\*+$/.test(value);
+  return `
+    <div class="mobile-otp-copy-cell public-message-otp-copy-cell">
+      <code class="mobile-otp-code" data-public-message-otp-code tabindex="0">${escapeHtml(value || "null")}</code>
+      <button class="table-action mobile-otp-copy-button" data-public-message-copy-otp="${escapeHtml(value)}" type="button" ${canCopy ? "" : "disabled"}>Copy</button>
+    </div>`;
+}
+
+function renderPublicMessages(items = []) {
+  const table = $("#public-messages-table");
+  if (!table) return;
+  if (!items.length) {
+    table.innerHTML = emptyRow(6, "Ch\u01b0a c\u00f3 n\u1ed9i dung public", "H\u00e3y c\u1ea5u h\u00ecnh ng\u01b0\u1eddi g\u1eedi trong Mail n\u1ed9i b\u1ed9 ho\u1eb7c Mobile Gateway.");
+    return;
+  }
+  table.innerHTML = items.map((item) => `<tr>
+    <td>${escapeHtml(publicMessagesFormatTime(item.received_at))}</td>
+    <td>${escapeHtml(item.sender || "")}</td>
+    <td><span class="status ${item.source_type === "sms" ? "pending" : "viewer"}">${escapeHtml(item.type_label || item.source_type || "")}</span></td>
+    <td>${escapeHtml(item.title || "")}</td>
+    <td>${renderPublicMessageOtpCell(item.otp || "")}</td>
+    <td class="public-message-content" title="${escapeHtml(item.content || "")}">${escapeHtml(item.content || "")}</td>
+  </tr>`).join("");
+}
+
+function bindPublicMessagesEvents() {
+  const refresh = $("#public-messages-refresh");
+  if (refresh && !refresh.dataset.boundPublicMessagesRefresh) {
+    refresh.dataset.boundPublicMessagesRefresh = "true";
+    refresh.addEventListener("click", () => loadPublicMessages({ force: true }));
+  }
+  const table = $("#public-messages-table");
+  if (table && !table.dataset.boundPublicMessagesCopy) {
+    table.dataset.boundPublicMessagesCopy = "true";
+    table.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-public-message-copy-otp]");
+      if (button) copyPublicMessageOtpFromButton(button);
+    });
+    table.addEventListener("dblclick", (event) => {
+      const code = event.target.closest("[data-public-message-otp-code]");
+      if (code) selectElementText(code);
+    });
+  }
+}
+
+function startPublicMessagesAutoRefresh() {
+  if (publicMessagesRefreshTimer) return;
+  publicMessagesRefreshTimer = setInterval(() => {
+    if (!$("#view-public-messages")?.classList.contains("active")) return;
+    loadPublicMessages({ silent: true }).catch((error) => console.warn("Public message refresh failed", error));
+  }, 5000);
+}
+
 async function loadPublicMessages({ force = false, silent = false } = {}) {
   bindPublicMessagesEvents();
   const table = $("#public-messages-table");
