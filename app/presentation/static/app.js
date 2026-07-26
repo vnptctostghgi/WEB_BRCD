@@ -2266,7 +2266,7 @@ async function syncNavigationFromFeatures() {
     if (html.trim()) tree.innerHTML = html;
     const activeItem = routeCode ? preferredNavItem(routeCode || activeCode) : null;
     if (activeItem) {
-      await activateNavItem(activeItem, { updateUrl: false, replaceUrl: true, collapseTree: true });
+      await activateNavItem(activeItem, { updateUrl: false, replaceUrl: true, closeSidebar: true, collapseTree: true });
     } else {
       enterIdleShell();
     }
@@ -2287,7 +2287,7 @@ async function activateNavForCurrentPath() {
   const item = preferredNavItem(routeCode);
   if (!item) return false;
   openNavParents(item);
-  await activateNavItem(item, { updateUrl: false, collapseTree: true });
+  await activateNavItem(item, { updateUrl: false, closeSidebar: true, collapseTree: true });
   return true;
 }
 
