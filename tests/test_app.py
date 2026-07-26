@@ -285,6 +285,11 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
         assert "quantriweb" not in feature_codes
         assert [layout["page_id"] for layout in payload["dashboard_layouts"]] == ["DASHBOARD_VIEWER_CHILD"]
 
+        page = client.get(f"/{feature_code}")
+        assert page.status_code == 200
+        assert "/static/app.js?v=181" in page.text
+        assert "dashboard-designed-section" in page.text
+
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
         assert detail.status_code == 200
         assert detail.json()["feature_code"] == feature_code
@@ -4133,13 +4138,19 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
+        navigation = client.get("/api/navigation")
+        assert navigation.status_code == 200
+        assert "dashboard" not in {feature["code"] for feature in navigation.json()["features"]}
+        blocked_dashboard = client.get("/dashboard", follow_redirects=False)
+        assert blocked_dashboard.status_code == 303
+        assert blocked_dashboard.headers["location"] == "/"
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
-        assert "/static/app.js?v=181" in dashboard.text
-        assert "view-dashboard-builder" not in home.text
+        assert "app-shell-placeholder" in dashboard.text
+        assert "/static/shell.js?v=6" in dashboard.text
+        assert "/static/app.js?v=181" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
-        assert "dashboard-designed-section" in dashboard.text
-        assert dashboard.text.count('class="app-view') == 1
+        assert "dashboard-designed-section" not in dashboard.text
 
         client.post("/api/auth/logout")
         login(client)

@@ -2036,6 +2036,15 @@ def require_feature(request: Request, feature_code: str) -> dict:
     return user
 
 
+def user_can_open_feature_path(user: dict, feature_path: str) -> bool:
+    normalized = normalize_feature_code(feature_path)
+    if not normalized or user.get("role") == "admin" or normalized in PUBLIC_FEATURE_CODES:
+        return True
+    permissions = {str(code) for code in user.get("permissions", []) if str(code)}
+    normalized_permissions = {normalize_feature_code(code) for code in permissions}
+    return normalized in permissions or normalized in normalized_permissions
+
+
 def normalize_google_sheet_public_url(raw_url: str) -> str:
     parsed = urlparse(str(raw_url or "").strip())
     if parsed.scheme != "https" or parsed.netloc != "docs.google.com" or not parsed.path.startswith("/spreadsheets/"):
@@ -2396,6 +2405,8 @@ def render_index_page(request: Request, feature_path: str) -> Response:
         next_path = "/" + feature_path.strip("/") if feature_path else "/"
         next_query = f"?next={quote(next_path, safe='/')}" if next_path != "/" else ""
         return RedirectResponse(f"/login{next_query}", status_code=status.HTTP_303_SEE_OTHER)
+    if feature_path.strip("/") and not user_can_open_feature_path(user, feature_path):
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     shell_only = not feature_path.strip("/")
     initial_view = "" if shell_only else initial_view_for_feature_path(feature_path)
 
