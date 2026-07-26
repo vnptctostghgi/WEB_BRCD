@@ -6526,6 +6526,61 @@ body.view-loading::before {
   }
 }
 
+/* Wider, non-overlapping navigation and permission trees. */
+@media (min-width: 1024px) {
+  .app-shell {
+    grid-template-columns: minmax(22.5rem, 24.5rem) minmax(0, 1fr) !important;
+  }
+
+  .app-shell:has(.sidebar.menu-open) {
+    grid-template-columns: minmax(28rem, 30rem) minmax(0, 1fr) !important;
+  }
+
+  .sidebar-bottom {
+    position: relative;
+    z-index: 24;
+  }
+
+  .sidebar .sidebar-quick-actions .dropdown-wrap {
+    position: static;
+  }
+
+  .sidebar .top-dropdown {
+    position: absolute !important;
+    inset: auto auto calc(100% + .75rem) 0 !important;
+    width: 100% !important;
+    max-width: 100%;
+  }
+}
+
+@media (min-width: 1536px) {
+  .app-shell {
+    grid-template-columns: minmax(23.5rem, 26rem) minmax(0, 1fr) !important;
+  }
+
+  .app-shell:has(.sidebar.menu-open) {
+    grid-template-columns: minmax(30rem, 33rem) minmax(0, 1fr) !important;
+  }
+}
+
+@media (min-width: 1280px) {
+  #view-permissions .catalog-grid {
+    grid-template-columns: minmax(20rem, .8fr) minmax(36rem, 1.45fr);
+  }
+}
+
+#view-permissions .permission-tree,
+#edit-user-dialog .permission-tree {
+  max-height: min(58vh, 620px);
+}
+
+#view-permissions #permission-features .permission-item span,
+#edit-user-dialog #permission-tree .permission-item span {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .workstation-admin-panel {
   display: grid;
   gap: .75rem;

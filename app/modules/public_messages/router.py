@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
 from app.data_access.repository_factory import build_repository
@@ -36,8 +36,9 @@ def _limit(value: int | str | None = None, default: int = ADMIN_PUBLIC_MESSAGE_L
 
 
 @admin_router.get("/feed")
-def admin_public_message_feed(request: Request, limit: int = ADMIN_PUBLIC_MESSAGE_LIMIT) -> dict:
+def admin_public_message_feed(request: Request, response: Response, limit: int = ADMIN_PUBLIC_MESSAGE_LIMIT) -> dict:
     require_public_messages_permission(request, "public_messages.view")
+    response.headers["Cache-Control"] = "no-store"
     try:
         items = _repository().list_public_messages(limit=_limit(limit))
     except RuntimeError as error:

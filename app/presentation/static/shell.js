@@ -124,8 +124,39 @@ function featureSortValue(feature) {
   return Number(feature.sort_order ?? 0);
 }
 
+function normalizedFeatureDisplayName(feature) {
+  return String(feature?.name || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function featureDisplayDedupeKey(feature) {
+  const parent = String(feature?.parent_code || "");
+  const name = normalizedFeatureDisplayName(feature) || String(feature?.code || "");
+  return `${parent}|${name}`;
+}
+
+function dedupeFeaturesForDisplay(sourceFeatures) {
+  const seenCodes = new Set();
+  const seenLabels = new Set();
+  const result = [];
+  (sourceFeatures || []).forEach((feature) => {
+    const code = String(feature?.code || "");
+    if (!code || seenCodes.has(code)) return;
+    const labelKey = featureDisplayDedupeKey(feature);
+    if (seenLabels.has(labelKey)) return;
+    seenCodes.add(code);
+    seenLabels.add(labelKey);
+    result.push(feature);
+  });
+  return result;
+}
+
 function buildFeatureTree(sourceFeatures) {
-  const nodes = new Map(sourceFeatures.map((feature) => [feature.code, { feature, children: [] }]));
+  const nodes = new Map(dedupeFeaturesForDisplay(sourceFeatures).map((feature) => [feature.code, { feature, children: [] }]));
   const roots = [];
   nodes.forEach((node) => {
     const parent = node.feature.parent_code ? nodes.get(node.feature.parent_code) : null;
@@ -370,7 +401,7 @@ function warmFeatureBundle() {
   const link = document.createElement("link");
   link.rel = "preload";
   link.as = "script";
-  link.href = "/static/app.js?v=178";
+  link.href = "/static/app.js?v=179";
   link.dataset.featureBundleWarm = "true";
   document.head.appendChild(link);
 }

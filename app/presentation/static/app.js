@@ -1473,7 +1473,7 @@ async function openEditUser(id) {
   updateEditBillingSummary();
   if (!features.length) features = (await api("/api/admin/features")).features;
   const granted = new Set((await api(`/api/admin/users/${id}/permissions`)).feature_codes);
-  const orderedFeatures = flattenFeatureTree(buildFeatureTree(features)).map((row) => row.feature);
+  const orderedFeatures = permissionFeatureList();
   $("#permission-tree").innerHTML = orderedFeatures.map((feature) => `
     <label class="permission-item ${feature.parent_code ? "child" : "parent"}">
       <input type="checkbox" value="${escapeHtml(feature.code)}" ${granted.has(feature.code) ? "checked" : ""} />
@@ -1817,7 +1817,7 @@ async function loadPermissionManager() {
     markDataFresh("features");
   }
   renderUserSelection("#permission-users");
-  const orderedFeatures = flattenFeatureTree(buildFeatureTree(features)).map((row) => row.feature);
+  const orderedFeatures = permissionFeatureList();
   $("#permission-features").innerHTML = orderedFeatures.map((feature) => `
     <label class="permission-item ${feature.parent_code ? "child" : "parent"}">
       <input type="checkbox" value="${escapeHtml(feature.code)}" />
@@ -1949,8 +1949,39 @@ function sortFeaturesForTree(items) {
   ));
 }
 
+function normalizedFeatureDisplayName(feature) {
+  return repairTextEncoding(feature?.name || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function featureDisplayDedupeKey(feature) {
+  const parent = String(feature?.parent_code || "");
+  const name = normalizedFeatureDisplayName(feature) || String(feature?.code || "");
+  return `${parent}|${name}`;
+}
+
+function dedupeFeaturesForDisplay(sourceFeatures) {
+  const seenCodes = new Set();
+  const seenLabels = new Set();
+  const result = [];
+  (sourceFeatures || []).forEach((feature) => {
+    const code = String(feature?.code || "");
+    if (!code || seenCodes.has(code)) return;
+    const labelKey = featureDisplayDedupeKey(feature);
+    if (seenLabels.has(labelKey)) return;
+    seenCodes.add(code);
+    seenLabels.add(labelKey);
+    result.push(feature);
+  });
+  return result;
+}
+
 function buildFeatureTree(sourceFeatures) {
-  const nodes = new Map(sourceFeatures.map((feature) => [feature.code, { feature, children: [] }]));
+  const nodes = new Map(dedupeFeaturesForDisplay(sourceFeatures).map((feature) => [feature.code, { feature, children: [] }]));
   const roots = [];
   nodes.forEach((node) => {
     const parent = node.feature.parent_code ? nodes.get(node.feature.parent_code) : null;
@@ -1975,6 +2006,10 @@ function flattenFeatureTree(nodes, level = 0, rows = []) {
     flattenFeatureTree(node.children, level + 1, rows);
   });
   return rows;
+}
+
+function permissionFeatureList() {
+  return flattenFeatureTree(buildFeatureTree(features)).map((row) => row.feature);
 }
 
 function descendantFeatureCodes(sourceFeatures, parentCode) {
@@ -2302,10 +2337,14 @@ function descendantCodesForFeature(code) {
   return descendants;
 }
 
+function menuLayoutDisplayFeatures() {
+  return dedupeFeaturesForDisplay(menuLayoutState);
+}
+
 function renderParentOptions(feature) {
   const descendants = descendantCodesForFeature(feature.code);
   return [`<option value="">Không thuộc nhóm</option>`]
-    .concat(sortFeaturesForTree(menuLayoutState).filter((item) => item.code !== feature.code).map((item) => {
+    .concat(sortFeaturesForTree(menuLayoutDisplayFeatures()).filter((item) => item.code !== feature.code).map((item) => {
       const selected = (feature.parent_code || "") === item.code ? " selected" : "";
       const disabled = descendants.has(item.code) ? " disabled" : "";
       return `<option value="${escapeHtml(item.code)}"${selected}${disabled}>${escapeHtml(item.name)} (${escapeHtml(item.code)})</option>`;
@@ -2316,12 +2355,13 @@ function renderParentOptions(feature) {
 function renderMenuLayout() {
   const table = $("#menu-layout-table");
   if (!table) return;
-  const rows = flattenFeatureTree(buildFeatureTree(menuLayoutState));
+  const displayFeatures = menuLayoutDisplayFeatures();
+  const rows = flattenFeatureTree(buildFeatureTree(displayFeatures));
   renderMenuLayoutPager(rows.length);
   const start = (menuLayoutPage - 1) * TABLE_PAGE_SIZE;
   const visibleRows = rows.slice(start, start + TABLE_PAGE_SIZE);
   table.innerHTML = visibleRows.length ? visibleRows.map(({ feature, level }) => {
-    const siblings = sortFeaturesForTree(menuLayoutState.filter((item) => (item.parent_code || null) === (feature.parent_code || null)));
+    const siblings = sortFeaturesForTree(displayFeatures.filter((item) => (item.parent_code || null) === (feature.parent_code || null)));
     const siblingIndex = siblings.findIndex((item) => item.code === feature.code);
     return `
       <tr data-feature-row="${escapeHtml(feature.code)}">
