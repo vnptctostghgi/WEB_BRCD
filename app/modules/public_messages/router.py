@@ -12,7 +12,7 @@ from app.settings import get_settings
 
 
 admin_router = APIRouter(prefix="/api/admin/public-messages", tags=["admin-public-messages"])
-ADMIN_PUBLIC_MESSAGE_LIMIT = 80
+ADMIN_PUBLIC_MESSAGE_LIMIT = 20
 
 
 class PublicSenderRulePayload(BaseModel):
@@ -32,7 +32,7 @@ def _limit(value: int | str | None = None, default: int = ADMIN_PUBLIC_MESSAGE_L
         raw = int(value if value is not None else default)
     except (TypeError, ValueError):
         raw = default
-    return min(max(raw, 1), 200)
+    return min(max(raw, 1), ADMIN_PUBLIC_MESSAGE_LIMIT)
 
 
 @admin_router.get("/feed")

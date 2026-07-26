@@ -714,6 +714,12 @@ document.querySelectorAll(".nav-group").forEach((group) => {
   group.open = false;
 });
 
+function collapseNavigationTree() {
+  document.querySelectorAll("#nav-tree .nav-group").forEach((group) => {
+    group.open = false;
+  });
+}
+
 function featurePathFromCode(code) {
   const normalized = String(code || "").trim().replace(/^\/+|\/+$/g, "");
   return normalized ? `/${encodeURIComponent(normalized)}` : "/";
@@ -798,7 +804,8 @@ async function activateNavItem(item, options = {}) {
   document.body.classList.remove("app-booting");
   const moduleTitle = $("#module-title");
   if (moduleTitle) moduleTitle.textContent = item.dataset.title || item.textContent.trim();
-  if (closeSidebar && $("#sidebar")?.classList.contains("menu-open")) {
+  if (closeSidebar) {
+    collapseNavigationTree();
     syncSidebarExpandedState(false);
   }
   if (updateUrl) updateFeatureUrl(item.dataset.featureCode, { replace: replaceUrl });
@@ -4481,7 +4488,7 @@ async function loadPublicMessages({ force = false, silent = false } = {}) {
   const message = $("#public-messages-message");
   if (force && table && !silent) setTableLoading("#public-messages-table", 6, "\u0110ang t\u1ea3i n\u1ed9i dung public...");
   try {
-    const data = await api("/api/admin/public-messages/feed?limit=100");
+    const data = await api(`/api/admin/public-messages/feed?limit=${TABLE_PAGE_SIZE}`);
     publicMessages = data.items || [];
     renderPublicMessages(publicMessages);
     if (status) {

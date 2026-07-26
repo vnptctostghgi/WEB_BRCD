@@ -91,12 +91,15 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=176" in public_response.text
-        public_js = client.get("/static/app.js?v=176")
+        assert "/static/app.js?v=177" in public_response.text
+        public_js = client.get("/static/app.js?v=177")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
         assert "function startPublicMessagesAutoRefresh" in public_js.text
+        assert "function collapseNavigationTree" in public_js.text
+        assert "/api/admin/public-messages/feed?limit=100" not in public_js.text
+        assert "/api/admin/public-messages/feed?limit=${TABLE_PAGE_SIZE}" in public_js.text
 
 
 def test_admin_can_open_workstation_overview_and_download_setup_package() -> None:
@@ -2378,6 +2381,7 @@ def test_public_messages_feed_uses_allowed_email_and_sms_senders() -> None:
         response = client.get("/api/admin/public-messages/feed?limit=100")
         assert response.status_code == 200
         items = response.json()["items"]
+        assert len(items) <= 20
         email_item = next(item for item in items if item["id"] == f"email:{saved_email['id']}")
         sms_item = next(item for item in items if item["id"] == f"sms:{inserted_sms[0]['id']}")
 
@@ -4109,13 +4113,13 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
         assert "/static/shell.js?v=2" in home.text
-        assert "/static/app.js?v=176" not in home.text
+        assert "/static/app.js?v=177" not in home.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
-        assert "/static/app.js?v=176" in dashboard.text
+        assert "/static/app.js?v=177" in dashboard.text
         assert "view-dashboard-builder" not in home.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" in dashboard.text
@@ -4128,42 +4132,42 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "view-reports" in reports.text
         assert "view-mobile-gateway" not in reports.text
         assert "sql-report-dialog" not in reports.text
-        assert "/static/app.js?v=176" in reports.text
+        assert "/static/app.js?v=177" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=176" in workstation.text
+        assert "/static/app.js?v=177" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=176" in work_tasks.text
+        assert "/static/app.js?v=177" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=176" in report_links.text
+        assert "/static/app.js?v=177" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=176" in system.text
+        assert "/static/app.js?v=177" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=176" in onebss_mining.text
+        assert "/static/app.js?v=177" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 
