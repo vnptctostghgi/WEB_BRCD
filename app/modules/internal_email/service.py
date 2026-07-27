@@ -201,7 +201,7 @@ class InternalEmailSyncService:
         finally:
             _logout_quietly(client)
 
-    def sync_once(self) -> dict[str, Any]:
+    def sync_once(self, refresh_existing: bool = False) -> dict[str, Any]:
         if not self.config.enabled:
             return {"ok": True, "message": "Internal email sync is inactive.", "details": self.config.public_details()}
         missing = self._missing_config_fields()
@@ -212,7 +212,7 @@ class InternalEmailSyncService:
                 "details": {**self.config.public_details(), "missing": missing},
             }
         client = None
-        fetched = saved = skipped = otp_records = otp_matches = 0
+        fetched = saved = refreshed = skipped = otp_records = otp_matches = 0
         try:
             self.mobile_repository.ensure_defaults()
             client = self._connect()
@@ -221,7 +221,8 @@ class InternalEmailSyncService:
                 raise InternalEmailConfigurationError(f"Cannot open mailbox {self.config.mailbox}: {_safe_imap_data(select_data)}")
             otp_rules = list_internal_email_otp_rules(self.base_repository)
             for uid in self._recent_uids(client):
-                if self.email_repository.get_message_by_uid(self.config.account_key, self.config.mailbox, uid):
+                existing_message = self.email_repository.get_message_by_uid(self.config.account_key, self.config.mailbox, uid)
+                if existing_message and not refresh_existing:
                     skipped += 1
                     continue
                 raw_message = self._fetch_message(client, uid)
@@ -238,24 +239,26 @@ class InternalEmailSyncService:
                         **parsed["metadata"],
                     }
                 )
-                if not created:
-                    skipped += 1
-                    continue
-                saved += 1
+                if created:
+                    saved += 1
+                else:
+                    refreshed += 1
                 otp_result = self._process_otp(saved_message, parsed["search_text"])
                 if otp_result:
                     otp_records += int(otp_result.get("recorded") or 0)
                     otp_matches += int(otp_result.get("matched") or 0)
             return {
                 "ok": True,
-                "message": f"Internal email sync finished: saved={saved}, otp={otp_records}.",
+                "message": f"Internal email sync finished: saved={saved}, refreshed={refreshed}, otp={otp_records}.",
                 "details": {
                     **self.config.public_details(),
                     "fetched": fetched,
                     "saved": saved,
+                    "refreshed": refreshed,
                     "skipped": skipped,
                     "otp_records": otp_records,
                     "otp_matches": otp_matches,
+                    "refresh_existing": bool(refresh_existing),
                 },
             }
         except (OSError, TimeoutError, imaplib.IMAP4.error, RuntimeError, InternalEmailConfigurationError) as error:
@@ -380,6 +383,10 @@ def internal_email_status(repository: Any, settings: Settings) -> dict[str, Any]
 
 def sync_internal_email_once(repository: Any, settings: Settings) -> dict[str, Any]:
     return InternalEmailSyncService(repository, settings).sync_once()
+
+
+def refresh_existing_internal_email_messages(repository: Any, settings: Settings) -> dict[str, Any]:
+    return InternalEmailSyncService(repository, settings).sync_once(refresh_existing=True)
 
 
 def list_internal_email_messages(repository: Any, limit: int = 20, otp_only: bool = False) -> list[dict[str, Any]]:

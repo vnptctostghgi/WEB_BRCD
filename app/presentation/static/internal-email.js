@@ -48,6 +48,7 @@ function bindInternalEmailEvents() {
   };
   bind("#internal-email-refresh", "click", () => loadInternalEmail({ force: true }));
   bind("#internal-email-sync", "click", syncInternalEmail);
+  bind("#internal-email-refresh-existing", "click", refreshExistingInternalEmail);
   bind("#internal-email-test", "click", testInternalEmail);
   bind("#internal-email-otp-rule-save", "click", saveInternalEmailOtpRule);
   bind("#internal-email-public-save", "click", saveInternalEmailPublicRule);
@@ -398,6 +399,29 @@ async function syncInternalEmail() {
     activateInternalEmailTab("messages");
   } catch (error) {
     showMessage(message, error.message || "Không đồng bộ được email nội bộ.", "error");
+  } finally {
+    if (button) setButtonLoading(button, false);
+  }
+}
+
+async function refreshExistingInternalEmail() {
+  const button = $("#internal-email-refresh-existing");
+  const message = $("#internal-email-message");
+  if (button) setButtonLoading(button, true);
+  try {
+    const result = await api("/api/admin/internal-email/refresh-existing", { method: "POST" });
+    const details = result.details || {};
+    showMessage(
+      message,
+      `Da cap nhat mail da luu: doc ${details.fetched || 0}, moi ${details.saved || 0}, cap nhat ${details.refreshed || 0}, OTP ${details.otp_records || 0}.`,
+    );
+    await Promise.all([
+      loadInternalEmailStatus({ force: true }),
+      loadInternalEmailMessages({ force: true }),
+    ]);
+    activateInternalEmailTab("messages");
+  } catch (error) {
+    showMessage(message, error.message || "Khong cap nhat duoc mail da luu.", "error");
   } finally {
     if (button) setButtonLoading(button, false);
   }

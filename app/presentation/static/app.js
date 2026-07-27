@@ -213,7 +213,7 @@ function ensureInternalEmailScriptLoaded() {
   if (internalEmailScriptPromise) return internalEmailScriptPromise;
   internalEmailScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/internal-email.js?v=7";
+    script.src = "/static/internal-email.js?v=8";
     script.defer = true;
     script.dataset.internalEmail = "true";
     script.addEventListener("load", () => {

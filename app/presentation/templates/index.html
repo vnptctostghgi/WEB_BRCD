@@ -12,9 +12,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="preload" href="/api/navigation" as="fetch" crossorigin="use-credentials" />
     {% if shell_only %}
-    <link rel="preload" href="/static/shell.js?v=9" as="script" />
+    <link rel="preload" href="/static/shell.js?v=10" as="script" />
     {% else %}
-    <link rel="preload" href="/static/app.js?v=184" as="script" />
+    <link rel="preload" href="/static/app.js?v=185" as="script" />
     {% endif %}
     <link rel="stylesheet" href="/static/tailwind-built.css?v=1" />
     <link rel="stylesheet" href="/static/styles.css?v=121" />
@@ -767,6 +767,7 @@
                 <div class="action-group">
                   <button class="btn-secondary" id="internal-email-refresh" type="button">L&#224;m m&#7899;i</button>
                   <button class="btn-secondary" id="internal-email-test" type="button">Ki&#7875;m tra</button>
+                  <button class="btn-secondary" id="internal-email-refresh-existing" type="button">C&#7853;p nh&#7853;t mail &#273;&#227; l&#432;u</button>
                   <button class="btn-primary" id="internal-email-sync" type="button">&#272;&#7891;ng b&#7897;</button>
                 </div>
               </div>
@@ -883,9 +884,9 @@
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
     {% if shell_only %}
-    <script defer src="/static/shell.js?v=9"></script>
+    <script defer src="/static/shell.js?v=10"></script>
     {% else %}
-    <script defer src="/static/app.js?v=184"></script>
+    <script defer src="/static/app.js?v=185"></script>
     {% endif %}
   </body>
 </html>

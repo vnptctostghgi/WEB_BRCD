@@ -11,6 +11,7 @@ from app.modules.internal_email.service import (
     internal_email_status,
     list_internal_email_messages,
     list_internal_email_otp_rules,
+    refresh_existing_internal_email_messages,
     save_internal_email_otp_rule,
     sync_internal_email_once,
     test_internal_email_connection,
@@ -73,6 +74,21 @@ def admin_internal_email_sync(request: Request) -> dict:
         pass
     if not result.get("ok"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.get("message") or "Internal email sync failed.")
+    return result
+
+
+@admin_router.post("/refresh-existing")
+def admin_internal_email_refresh_existing(request: Request) -> dict:
+    actor = require_internal_email_permission(request, "internal_email.manage")
+    settings = get_settings()
+    repository = build_repository(settings)
+    result = refresh_existing_internal_email_messages(repository, settings)
+    try:
+        repository.add_audit_log(actor["username"], "internal_email_existing_refreshed", f"Refresh existing internal email: {result.get('ok')}")
+    except Exception:
+        pass
+    if not result.get("ok"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.get("message") or "Internal email refresh failed.")
     return result
 
 
