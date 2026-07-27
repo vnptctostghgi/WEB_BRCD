@@ -12,9 +12,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="preload" href="/api/navigation" as="fetch" crossorigin="use-credentials" />
     {% if shell_only %}
-    <link rel="preload" href="/static/shell.js?v=8" as="script" />
+    <link rel="preload" href="/static/shell.js?v=9" as="script" />
     {% else %}
-    <link rel="preload" href="/static/app.js?v=183" as="script" />
+    <link rel="preload" href="/static/app.js?v=184" as="script" />
     {% endif %}
     <link rel="stylesheet" href="/static/tailwind-built.css?v=1" />
     <link rel="stylesheet" href="/static/styles.css?v=121" />
@@ -774,6 +774,31 @@
             </section>
             <section class="data-card mt-4">
               <div class="section-heading compact">
+                <div><p class="eyebrow">OTP</p><h2>C&#7845;u h&#236;nh c&#7855;t OTP email</h2></div>
+                <button class="btn-primary" id="internal-email-otp-rule-save" type="button">L&#432;u rule</button>
+              </div>
+              <form id="internal-email-otp-rule-form" class="admin-inline-toolbar">
+                <input type="hidden" name="id" />
+                <label>Ng&#432;&#7901;i g&#7917;i<input class="form-control" name="sender_pattern" placeholder="VD: VNPT HKD ho&#7863;c noreply@vnpt.vn" required /></label>
+                <label>T&#234;n rule<input class="form-control" name="label" placeholder="VD: OTP &#273;&#7893;i email" /></label>
+                <label>Ki&#7875;u kh&#7899;p<select class="form-control" name="sender_match_type"><option value="contains">Ch&#7913;a</option><option value="exact">Ch&#237;nh x&#225;c</option><option value="regex">Regex</option></select></label>
+                <label>H&#432;&#7899;ng c&#7855;t<select class="form-control" name="direction"><option value="left_to_right">T&#7915; &#273;&#7847;u &#273;&#7871;n cu&#7889;i</option><option value="right_to_left">T&#7915; cu&#7889;i v&#7873; &#273;&#7847;u</option></select></label>
+                <label>V&#7883; tr&#237; th&#7913;<input class="form-control" name="occurrence_index" type="number" min="1" max="200" value="1" /></label>
+                <label>B&#7855;t &#273;&#7847;u<input class="form-control" name="start_position" type="number" min="1" max="500" value="1" /></label>
+                <label>S&#7889; k&#253; t&#7921;<input class="form-control" name="otp_length" type="number" min="1" max="12" value="6" /></label>
+                <label>Regex t&#249;y ch&#7885;n<input class="form-control" name="regex" placeholder="VD: m&#227;.*?(\\d{6})" /></label>
+                <label>&#431;u ti&#234;n<input class="form-control" name="priority" type="number" min="0" max="10000" value="100" /></label>
+                <label class="checkbox-label"><input type="checkbox" name="enabled" checked /> &#272;ang b&#7853;t</label>
+              </form>
+              <div class="table-scroll mt-4">
+                <table class="compact-admin-table inline-admin-table">
+                  <thead><tr><th>Ng&#432;&#7901;i g&#7917;i</th><th>Rule</th><th>C&#225;ch c&#7855;t</th><th>Tr&#7841;ng th&#225;i</th><th>Thao t&#225;c</th></tr></thead>
+                  <tbody id="internal-email-otp-rules-table"></tbody>
+                </table>
+              </div>
+            </section>
+            <section class="data-card mt-4">
+              <div class="section-heading compact">
                 <div><p class="eyebrow">Public</p><h2>Public mail theo ng&#432;&#7901;i g&#7917;i</h2></div>
                 <button class="btn-primary" id="internal-email-public-save" type="button">L&#432;u</button>
               </div>
@@ -858,9 +883,9 @@
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
     {% if shell_only %}
-    <script defer src="/static/shell.js?v=8"></script>
+    <script defer src="/static/shell.js?v=9"></script>
     {% else %}
-    <script defer src="/static/app.js?v=183"></script>
+    <script defer src="/static/app.js?v=184"></script>
     {% endif %}
   </body>
 </html>

@@ -99,14 +99,16 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert 'data-internal-email-tab="email"' in email_response.text
         assert 'data-internal-email-panel="messages"' in email_response.text
         assert 'data-internal-email-panel="email"' in email_response.text
+        assert 'id="internal-email-otp-rule-form"' in email_response.text
+        assert 'id="internal-email-otp-rules-table"' in email_response.text
         assert 'data-mobile-tab="email"' not in email_response.text
 
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=183" in public_response.text
+        assert "/static/app.js?v=184" in public_response.text
         assert "/static/styles.css?v=121" in public_response.text
-        public_js = client.get("/static/app.js?v=183")
+        public_js = client.get("/static/app.js?v=184")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -315,7 +317,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=183" in page.text
+        assert "/static/app.js?v=184" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -2221,7 +2223,7 @@ def test_onebss_mobile_gateway_request_uses_latest_otp_received_before_request()
         assert consumed["status"] == "consumed"
 
 
-def test_internal_email_parser_masks_otp_preview() -> None:
+def test_internal_email_parser_keeps_full_body_and_otp() -> None:
     from app.modules.internal_email.service import parse_email_message
 
     raw_message = (
@@ -2240,8 +2242,109 @@ def test_internal_email_parser_masks_otp_preview() -> None:
     assert "123456" in parsed["search_text"]
     assert parsed["metadata"]["is_otp_candidate"] is True
     assert parsed["metadata"]["otp_code"] == "123456"
-    assert "123456" not in parsed["metadata"]["body_masked"]
-    assert "******" in parsed["metadata"]["body_masked"]
+    assert "123456" in parsed["metadata"]["body_masked"]
+
+
+def test_internal_email_parser_ignores_digits_inside_email_addresses() -> None:
+    from app.modules.internal_email.service import parse_email_message
+
+    raw_message = (
+        b"From: VNPT HKD <noreply@vnpt.vn>\r\n"
+        b"Subject: Ma OTP thay doi email\r\n"
+        b"Date: Mon, 27 Jul 2026 08:23:39 +0700\r\n"
+        b"Message-ID: <otp-email-change@example.vn>\r\n"
+        b"\r\n"
+        b"Xin chao, chung toi da nhan duoc yeu cau doi email tu dangminhtri1234@gmail.com "
+        b"sang gialinh210797@gmail.com. Nhap ma doi email sau day 654321 Tran trong cam on.\r\n"
+    )
+
+    parsed = parse_email_message(raw_message, "43")
+
+    assert parsed["metadata"]["otp_code"] == "654321"
+    assert parsed["metadata"]["otp_code"] != "210797"
+
+
+def test_internal_email_parser_does_not_treat_plain_year_as_otp() -> None:
+    from app.modules.internal_email.service import parse_email_message
+
+    raw_message = (
+        b"From: Tender <notice@example.vn>\r\n"
+        b"Subject: Thong tin goi thau moi 25/07/2026\r\n"
+        b"Date: Mon, 27 Jul 2026 08:23:39 +0700\r\n"
+        b"Message-ID: <plain-year@example.vn>\r\n"
+        b"\r\n"
+        b"Day la thong tin cua cac goi thau nam 2026, chi de tham khao noi bo.\r\n"
+    )
+
+    parsed = parse_email_message(raw_message, "45")
+
+    assert parsed["metadata"]["is_otp_candidate"] is False
+    assert parsed["metadata"]["otp_code"] == ""
+
+
+def test_internal_email_parser_uses_configured_otp_rule() -> None:
+    from app.modules.internal_email.service import parse_email_message
+
+    raw_message = (
+        b"From: VNPT HKD <noreply@vnpt.vn>\r\n"
+        b"Subject: Ma OTP thay doi email\r\n"
+        b"Date: Mon, 27 Jul 2026 08:23:39 +0700\r\n"
+        b"Message-ID: <otp-rule@example.vn>\r\n"
+        b"\r\n"
+        b"Ma tham chieu 111111. Dia chi moi la gialinh210797@gmail.com. Ma OTP 654321.\r\n"
+    )
+
+    parsed = parse_email_message(
+        raw_message,
+        "44",
+        otp_rules=[
+            {
+                "sender_pattern": "VNPT HKD",
+                "sender_match_type": "contains",
+                "direction": "right_to_left",
+                "occurrence_index": 1,
+                "start_position": 1,
+                "otp_length": 6,
+                "enabled": True,
+            }
+        ],
+    )
+
+    assert parsed["metadata"]["otp_code"] == "654321"
+
+
+def test_internal_email_otp_rule_api_saves_lists_and_deletes() -> None:
+    with TestClient(app) as client:
+        login(client)
+        sender = f"VNPT HKD {uuid.uuid4().hex[:8]}"
+        payload = {
+            "sender_pattern": sender,
+            "sender_match_type": "contains",
+            "label": "OTP doi email",
+            "direction": "right_to_left",
+            "occurrence_index": 1,
+            "start_position": 1,
+            "otp_length": 6,
+            "regex": "",
+            "priority": 12,
+            "enabled": True,
+        }
+
+        save_response = client.post("/api/admin/internal-email/otp-rules", json=payload)
+        assert save_response.status_code == 200
+        rule = save_response.json()["rule"]
+        assert rule["sender_pattern"] == sender
+        assert rule["direction"] == "right_to_left"
+        assert rule["otp_length"] == 6
+
+        list_response = client.get("/api/admin/internal-email/otp-rules")
+        assert list_response.status_code == 200
+        assert any(item["id"] == rule["id"] for item in list_response.json()["rules"])
+
+        delete_response = client.delete(f"/api/admin/internal-email/otp-rules/{rule['id']}")
+        assert delete_response.status_code == 200
+        after_delete = client.get("/api/admin/internal-email/otp-rules")
+        assert all(item["id"] != rule["id"] for item in after_delete.json()["rules"])
 
 
 def test_internal_email_migration_upgrades_legacy_otp_columns(tmp_path) -> None:
@@ -4185,15 +4288,15 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         home = client.get("/")
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
-        assert "/static/shell.js?v=8" in home.text
-        assert "/static/app.js?v=183" not in home.text
-        shell_js = client.get("/static/shell.js?v=8")
+        assert "/static/shell.js?v=9" in home.text
+        assert "/static/app.js?v=184" not in home.text
+        shell_js = client.get("/static/shell.js?v=9")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
         assert "function dedupeFeaturesForDisplay" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=183" in shell_js.text
+        assert "/static/app.js?v=184" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -4206,8 +4309,8 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
-        assert "/static/shell.js?v=8" in dashboard.text
-        assert "/static/app.js?v=183" not in dashboard.text
+        assert "/static/shell.js?v=9" in dashboard.text
+        assert "/static/app.js?v=184" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -4218,42 +4321,42 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "view-reports" in reports.text
         assert "view-mobile-gateway" not in reports.text
         assert "sql-report-dialog" not in reports.text
-        assert "/static/app.js?v=183" in reports.text
+        assert "/static/app.js?v=184" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=183" in workstation.text
+        assert "/static/app.js?v=184" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=183" in work_tasks.text
+        assert "/static/app.js?v=184" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=183" in report_links.text
+        assert "/static/app.js?v=184" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=183" in system.text
+        assert "/static/app.js?v=184" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=183" in onebss_mining.text
+        assert "/static/app.js?v=184" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 

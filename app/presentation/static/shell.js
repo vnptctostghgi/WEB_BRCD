@@ -415,7 +415,7 @@ function warmFeatureBundle() {
   const link = document.createElement("link");
   link.rel = "preload";
   link.as = "script";
-  link.href = "/static/app.js?v=183";
+  link.href = "/static/app.js?v=184";
   link.dataset.featureBundleWarm = "true";
   document.head.appendChild(link);
 }

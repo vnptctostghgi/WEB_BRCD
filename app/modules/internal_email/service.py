@@ -3,6 +3,7 @@ from __future__ import annotations
 import imaplib
 import os
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email import message_from_bytes
@@ -24,6 +25,8 @@ DEFAULT_CONNECTION_CODE = "internal_email"
 DEFAULT_MAILBOX = "INBOX"
 DEFAULT_HOST = "email.vnpt.vn"
 DEFAULT_PORT = 993
+DEFAULT_OTP_RULES_KEY = "otp_rules"
+EMAIL_ADDRESS_PATTERN = re.compile(r"\b[\w.!#$%&'*+/=?^`{|}~-]+@[\w.-]+\.[A-Za-z]{2,}\b")
 
 
 class InternalEmailConfigurationError(RuntimeError):
@@ -216,6 +219,7 @@ class InternalEmailSyncService:
             select_status, select_data = client.select(self.config.mailbox, readonly=True)
             if select_status != "OK":
                 raise InternalEmailConfigurationError(f"Cannot open mailbox {self.config.mailbox}: {_safe_imap_data(select_data)}")
+            otp_rules = list_internal_email_otp_rules(self.base_repository)
             for uid in self._recent_uids(client):
                 if self.email_repository.get_message_by_uid(self.config.account_key, self.config.mailbox, uid):
                     skipped += 1
@@ -225,7 +229,7 @@ class InternalEmailSyncService:
                     skipped += 1
                     continue
                 fetched += 1
-                parsed = parse_email_message(raw_message, uid)
+                parsed = parse_email_message(raw_message, uid, otp_rules=otp_rules)
                 saved_message, created = self.email_repository.save_message(
                     {
                         "account_key": self.config.account_key,
@@ -306,19 +310,21 @@ class InternalEmailSyncService:
         sender = str(message.get("sender") or message.get("sender_email") or "")
         received_at = str(message.get("received_at") or "")
         message_id = str(message.get("id") or message.get("uid") or "")
+        known_code = str(message.get("otp_code") or "").strip()
+        body_for_record = f"{known_code}\n{search_text}" if known_code else search_text
         result = self.otp_service.record_latest_from_email(
             {
                 "id": message_id,
                 "sender": sender,
                 "sender_email": message.get("sender_email") or "",
                 "subject": message.get("subject") or "",
-                "body": search_text,
+                "body": body_for_record,
                 "received_at": received_at,
             }
         )
         if not result:
             return None
-        code = str(result.get("code") or "")
+        code = known_code or str(result.get("code") or "")
         request_id = str(result.get("request_id") or "")
         self.email_repository.mark_message_otp(
             message_id,
@@ -330,7 +336,7 @@ class InternalEmailSyncService:
         return {"recorded": 1, "matched": 1 if request_id else 0}
 
 
-def parse_email_message(raw_message: bytes, uid: str) -> dict[str, Any]:
+def parse_email_message(raw_message: bytes, uid: str, otp_rules: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     message = message_from_bytes(raw_message, policy=default)
     subject = _header_text(message.get("Subject", ""))
     sender_header = _header_text(message.get("From", ""))
@@ -339,7 +345,13 @@ def parse_email_message(raw_message: bytes, uid: str) -> dict[str, Any]:
     body = _message_body_text(message)
     received_at = _message_datetime(message.get("Date"))
     search_text = "\n".join(part for part in (subject, sender, sender_email, body) if part)
-    otp_code = security.extract_otp(search_text, security.OTP_DIGIT_PATTERN.pattern)
+    otp_code = extract_internal_email_otp(
+        subject=subject,
+        body=body,
+        sender=sender,
+        sender_email=sender_email,
+        otp_rules=otp_rules or [],
+    )
     return {
         "metadata": {
             "uid": uid,
@@ -347,7 +359,7 @@ def parse_email_message(raw_message: bytes, uid: str) -> dict[str, Any]:
             "sender": sender,
             "sender_email": sender_email,
             "subject": subject,
-            "body_masked": _safe_preview(security.mask_otp_text(body)),
+            "body_masked": _safe_preview(body),
             "received_at": received_at,
             "synced_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "is_otp_candidate": bool(otp_code),
@@ -372,6 +384,221 @@ def sync_internal_email_once(repository: Any, settings: Settings) -> dict[str, A
 
 def list_internal_email_messages(repository: Any, limit: int = 20, otp_only: bool = False) -> list[dict[str, Any]]:
     return InternalEmailRepository(repository).list_messages(limit=limit, otp_only=otp_only)
+
+
+def list_internal_email_otp_rules(repository: Any) -> list[dict[str, Any]]:
+    connection = _internal_email_connection(repository)
+    config = _connection_config(connection)
+    raw_rules = config.get(DEFAULT_OTP_RULES_KEY)
+    if not isinstance(raw_rules, list):
+        return []
+    return [_normalize_otp_rule(rule) for rule in raw_rules if isinstance(rule, dict)]
+
+
+def save_internal_email_otp_rule(repository: Any, payload: dict[str, Any], actor: str = "") -> dict[str, Any]:
+    rule = _normalize_otp_rule(payload)
+    if not rule["sender_pattern"]:
+        raise ValueError("sender_pattern is required")
+    now = datetime.now(UTC).isoformat(timespec="seconds")
+    incoming_id = rule.get("id")
+    if not rule.get("id"):
+        rule["id"] = uuid.uuid4().hex
+        rule["created_at"] = now
+    rule["updated_at"] = now
+    if actor and not rule.get("created_by"):
+        rule["created_by"] = actor
+    connection = _internal_email_connection(repository) or {}
+    config = dict(_connection_config(connection))
+    rules = list_internal_email_otp_rules(repository)
+    replaced = False
+    for index, existing in enumerate(rules):
+        same_id = rule["id"] and str(existing.get("id") or "") == rule["id"]
+        same_sender = (
+            not incoming_id
+            and str(existing.get("sender_pattern") or "").strip().lower() == rule["sender_pattern"].lower()
+        )
+        if same_id or same_sender:
+            rules[index] = {**existing, **rule, "created_at": existing.get("created_at") or rule.get("created_at") or now}
+            replaced = True
+            rule = rules[index]
+            break
+    if not replaced:
+        rules.append(rule)
+    config[DEFAULT_OTP_RULES_KEY] = sorted(rules, key=lambda item: (int(item.get("priority") or 100), str(item.get("sender_pattern") or "")))
+    _save_internal_email_connection(repository, connection, config)
+    return rule
+
+
+def delete_internal_email_otp_rule(repository: Any, rule_id: str) -> None:
+    safe_id = str(rule_id or "").strip()
+    if not safe_id:
+        return
+    connection = _internal_email_connection(repository) or {}
+    config = dict(_connection_config(connection))
+    rules = [rule for rule in list_internal_email_otp_rules(repository) if str(rule.get("id") or "") != safe_id]
+    config[DEFAULT_OTP_RULES_KEY] = rules
+    _save_internal_email_connection(repository, connection, config)
+
+
+def extract_internal_email_otp(
+    *,
+    subject: str = "",
+    body: str = "",
+    sender: str = "",
+    sender_email: str = "",
+    otp_rules: list[dict[str, Any]] | None = None,
+) -> str:
+    search_text = "\n".join(part for part in (subject, body) if str(part or "").strip())
+    for rule in sorted((otp_rules or []), key=lambda item: int(item.get("priority") or 100)):
+        if not rule.get("enabled", True):
+            continue
+        if not _sender_matches_rule(rule, sender, sender_email):
+            continue
+        code = _extract_otp_with_rule(search_text, rule)
+        if code:
+            return code
+    clean_body = _strip_email_noise(body)
+    clean_subject = _strip_email_noise(subject)
+    if not _looks_like_otp_text(f"{clean_subject}\n{clean_body}"):
+        return ""
+    return (
+        security.extract_otp(clean_body, security.OTP_DIGIT_PATTERN.pattern)
+        or security.extract_otp(clean_subject, security.OTP_DIGIT_PATTERN.pattern)
+        or ""
+    )
+
+
+def _extract_otp_with_rule(text: str, rule: dict[str, Any]) -> str:
+    search_text = str(text or "")
+    regex = str(rule.get("regex") or rule.get("otp_regex") or "").strip()
+    if regex:
+        try:
+            match = re.search(regex, search_text, re.IGNORECASE | re.MULTILINE)
+        except re.error:
+            match = None
+        if match:
+            raw = match.group(1) if match.groups() else match.group(0)
+            code = re.sub(r"\D+", "", raw)
+            if code:
+                return code[:12]
+    matches = [match.group(0) for match in re.finditer(r"\d+", search_text)]
+    if str(rule.get("direction") or "left_to_right") in {"right_to_left", "rtl", "end"}:
+        matches.reverse()
+    if not matches:
+        return ""
+    occurrence = _bounded_int(rule.get("occurrence_index"), 1, 1, 200)
+    if occurrence > len(matches):
+        return ""
+    candidate = matches[occurrence - 1]
+    start = _bounded_int(rule.get("start_position"), 1, 1, max(len(candidate), 1))
+    length = _bounded_int(rule.get("otp_length"), 6, 1, 12)
+    if str(rule.get("direction") or "left_to_right") in {"right_to_left", "rtl", "end"}:
+        end_index = max(len(candidate) - start + 1, 0)
+        start_index = max(end_index - length, 0)
+        code = candidate[start_index:end_index]
+    else:
+        start_index = start - 1
+        code = candidate[start_index : start_index + length]
+    return code if code.isdigit() and len(code) == length else ""
+
+
+def _sender_matches_rule(rule: dict[str, Any], sender: str, sender_email: str) -> bool:
+    pattern = str(rule.get("sender_pattern") or "").strip()
+    if not pattern:
+        return True
+    raw_sender = " ".join(part for part in (sender, sender_email) if str(part or "").strip())
+    normalized_sender = security.normalize_sender(raw_sender)
+    normalized_pattern = security.normalize_sender(pattern)
+    match_type = str(rule.get("sender_match_type") or "contains")
+    if match_type in {"exact", "equals"}:
+        return normalized_sender == normalized_pattern or security.normalize_sender(sender_email) == normalized_pattern
+    if match_type == "regex":
+        try:
+            return bool(re.search(pattern, raw_sender, re.IGNORECASE))
+        except re.error:
+            return False
+    return normalized_pattern in normalized_sender
+
+
+def _normalize_otp_rule(rule: dict[str, Any]) -> dict[str, Any]:
+    direction = str(rule.get("direction") or "left_to_right").strip().lower()
+    if direction in {"rtl", "right", "end", "right_to_left"}:
+        direction = "right_to_left"
+    else:
+        direction = "left_to_right"
+    match_type = str(rule.get("sender_match_type") or "contains").strip().lower()
+    if match_type == "equals":
+        match_type = "exact"
+    if match_type not in {"contains", "exact", "regex"}:
+        match_type = "contains"
+    return {
+        "id": str(rule.get("id") or "").strip(),
+        "sender_pattern": str(rule.get("sender_pattern") or "").strip(),
+        "sender_match_type": match_type,
+        "label": str(rule.get("label") or "").strip(),
+        "direction": direction,
+        "occurrence_index": _bounded_int(rule.get("occurrence_index"), 1, 1, 200),
+        "start_position": _bounded_int(rule.get("start_position"), 1, 1, 500),
+        "otp_length": _bounded_int(rule.get("otp_length"), 6, 1, 12),
+        "regex": str(rule.get("regex") or rule.get("otp_regex") or "").strip(),
+        "priority": _bounded_int(rule.get("priority"), 100, 0, 10_000),
+        "enabled": _bool_value(rule.get("enabled"), True),
+        "created_by": str(rule.get("created_by") or "").strip(),
+        "created_at": str(rule.get("created_at") or "").strip(),
+        "updated_at": str(rule.get("updated_at") or "").strip(),
+    }
+
+
+def _strip_email_noise(text: str) -> str:
+    return EMAIL_ADDRESS_PATTERN.sub(" ", str(text or ""))
+
+
+def _looks_like_otp_text(text: str) -> bool:
+    normalized = str(text or "").lower()
+    return any(
+        keyword in normalized
+        for keyword in (
+            "otp",
+            " ma ",
+            " mã ",
+            "code",
+            "xac thuc",
+            "xác thực",
+            "verification",
+            "verify",
+            "token",
+            "pin",
+        )
+    )
+
+
+def _bounded_int(value: Any, default_value: int, minimum: int, maximum: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default_value
+    return min(max(number, minimum), maximum)
+
+
+def _internal_email_connection(repository: Any) -> dict[str, Any] | None:
+    getter = getattr(repository, "get_system_connection_by_code", None)
+    if not getter:
+        return None
+    return getter(DEFAULT_CONNECTION_CODE)
+
+
+def _save_internal_email_connection(repository: Any, connection: dict[str, Any] | None, config: dict[str, Any]) -> None:
+    upsert = getattr(repository, "upsert_system_connection", None)
+    if not upsert:
+        raise RuntimeError("Repository does not support system connection updates.")
+    upsert(
+        DEFAULT_CONNECTION_CODE,
+        str((connection or {}).get("name") or "Email nội bộ VNPT"),
+        "internal_email",
+        str((connection or {}).get("description") or "Đồng bộ hộp thư nội bộ qua IMAP để phát hiện OTP."),
+        config,
+        bool((connection or {}).get("is_active")),
+    )
 
 
 def _message_body_text(message: Message | EmailMessage) -> str:

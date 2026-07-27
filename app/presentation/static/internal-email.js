@@ -2,6 +2,7 @@
 const INTERNAL_EMAIL_TABLE_LIMIT = 20;
 const INTERNAL_EMAIL_TABS = ["messages", "email"];
 let internalEmailPublicRules = [];
+let internalEmailOtpRules = [];
 
 function getInternalEmailRoot() {
   return $("#view-internal-email");
@@ -48,8 +49,17 @@ function bindInternalEmailEvents() {
   bind("#internal-email-refresh", "click", () => loadInternalEmail({ force: true }));
   bind("#internal-email-sync", "click", syncInternalEmail);
   bind("#internal-email-test", "click", testInternalEmail);
+  bind("#internal-email-otp-rule-save", "click", saveInternalEmailOtpRule);
   bind("#internal-email-public-save", "click", saveInternalEmailPublicRule);
   bind("#internal-email-otp-only", "change", () => loadInternalEmailMessages({ force: true }));
+  bind("#internal-email-otp-rules-table", "click", async (event) => {
+    const editButton = event.target.closest("[data-internal-email-otp-edit]");
+    const deleteButton = event.target.closest("[data-internal-email-otp-delete]");
+    const toggleButton = event.target.closest("[data-internal-email-otp-toggle]");
+    if (editButton) fillInternalEmailOtpRuleForm(editButton.dataset.internalEmailOtpEdit);
+    if (deleteButton) await deleteInternalEmailOtpRule(deleteButton.dataset.internalEmailOtpDelete);
+    if (toggleButton) await toggleInternalEmailOtpRule(toggleButton.dataset.internalEmailOtpToggle);
+  });
   bind("#internal-email-public-rules-table", "click", async (event) => {
     const deleteButton = event.target.closest("[data-internal-email-public-delete]");
     const toggleButton = event.target.closest("[data-internal-email-public-toggle]");
@@ -72,7 +82,7 @@ function bindInternalEmailEvents() {
       activateInternalEmailTab(tabName);
       try {
         if (tabName === "email") {
-          await Promise.all([loadInternalEmailStatus({ force: true }), loadInternalEmailPublicRules()]);
+          await Promise.all([loadInternalEmailStatus({ force: true }), loadInternalEmailOtpRules(), loadInternalEmailPublicRules()]);
         } else {
           await loadInternalEmailMessages({ force: true });
         }
@@ -110,6 +120,7 @@ async function loadInternalEmail({ force = false } = {}) {
   await Promise.all([
     loadInternalEmailStatus({ force }),
     loadInternalEmailMessages({ force }),
+    loadInternalEmailOtpRules(),
     loadInternalEmailPublicRules(),
   ]);
 }
@@ -170,6 +181,132 @@ function renderInternalEmailMessages(messages = []) {
       <td>${escapeHtml(preview)}</td>
     </tr>`;
   }).join("");
+}
+
+function internalEmailDirectionLabel(value) {
+  return value === "right_to_left" ? "Cuoi ve dau" : "Dau den cuoi";
+}
+
+function internalEmailRuleCutLabel(rule) {
+  if (rule.regex) return `Regex: ${rule.regex}`;
+  return `${internalEmailDirectionLabel(rule.direction)} | lan ${rule.occurrence_index || 1} | tu ${rule.start_position || 1} | ${rule.otp_length || 6} ky tu`;
+}
+
+function renderInternalEmailOtpRules(rules = []) {
+  const table = $("#internal-email-otp-rules-table");
+  if (!table) return;
+  if (!rules.length) {
+    table.innerHTML = emptyRow(5, "Chua co rule cat OTP", "Neu khong co rule, he thong se tu tim OTP trong noi dung email va bo qua dia chi email.");
+    return;
+  }
+  table.innerHTML = rules.map((rule) => `<tr>
+    <td><strong>${escapeHtml(rule.sender_pattern || "")}</strong><small>${escapeHtml(rule.sender_match_type || "contains")}</small></td>
+    <td>${escapeHtml(rule.label || rule.id || "")}<small>Uu tien ${escapeHtml(rule.priority ?? 100)}</small></td>
+    <td>${escapeHtml(internalEmailRuleCutLabel(rule))}</td>
+    <td><span class="status ${rule.enabled ? "viewer" : "inactive"}">${rule.enabled ? "Dang bat" : "Dang tat"}</span></td>
+    <td class="table-action-cell"><div class="action-group">
+      <button class="table-action" data-internal-email-otp-edit="${escapeHtml(rule.id)}" type="button">Sua</button>
+      <button class="table-action" data-internal-email-otp-toggle="${escapeHtml(rule.id)}" type="button">${rule.enabled ? "Tat" : "Bat"}</button>
+      <button class="table-action danger" data-internal-email-otp-delete="${escapeHtml(rule.id)}" type="button">Xoa</button>
+    </div></td>
+  </tr>`).join("");
+}
+
+async function loadInternalEmailOtpRules() {
+  const table = $("#internal-email-otp-rules-table");
+  if (!table) return;
+  try {
+    const data = await api("/api/admin/internal-email/otp-rules");
+    internalEmailOtpRules = data.rules || [];
+    renderInternalEmailOtpRules(internalEmailOtpRules);
+  } catch (error) {
+    table.innerHTML = emptyRow(5, "Khong tai duoc rule cat OTP", error.message);
+  }
+}
+
+function readInternalEmailOtpRuleForm() {
+  const form = $("#internal-email-otp-rule-form");
+  if (!form) return null;
+  const value = (name) => form.elements.namedItem(name)?.value;
+  return {
+    id: String(value("id") || "").trim(),
+    sender_pattern: String(value("sender_pattern") || "").trim(),
+    sender_match_type: String(value("sender_match_type") || "contains"),
+    label: String(value("label") || "").trim(),
+    direction: String(value("direction") || "left_to_right"),
+    occurrence_index: Number(value("occurrence_index") || 1),
+    start_position: Number(value("start_position") || 1),
+    otp_length: Number(value("otp_length") || 6),
+    regex: String(value("regex") || "").trim(),
+    priority: Number(value("priority") || 100),
+    enabled: Boolean(form.elements.namedItem("enabled")?.checked),
+  };
+}
+
+function resetInternalEmailOtpRuleForm() {
+  const form = $("#internal-email-otp-rule-form");
+  if (!form) return;
+  form.reset();
+  form.elements.namedItem("id").value = "";
+  form.elements.namedItem("occurrence_index").value = "1";
+  form.elements.namedItem("start_position").value = "1";
+  form.elements.namedItem("otp_length").value = "6";
+  form.elements.namedItem("priority").value = "100";
+  form.elements.namedItem("enabled").checked = true;
+}
+
+function fillInternalEmailOtpRuleForm(ruleId) {
+  const form = $("#internal-email-otp-rule-form");
+  const rule = internalEmailOtpRules.find((item) => String(item.id) === String(ruleId));
+  if (!form || !rule) return;
+  ["id", "sender_pattern", "sender_match_type", "label", "direction", "occurrence_index", "start_position", "otp_length", "regex", "priority"].forEach((name) => {
+    const field = form.elements.namedItem(name);
+    if (field) field.value = rule[name] ?? "";
+  });
+  form.elements.namedItem("enabled").checked = Boolean(rule.enabled);
+  form.querySelector('[name="sender_pattern"]')?.focus();
+}
+
+async function saveInternalEmailOtpRule() {
+  const payload = readInternalEmailOtpRuleForm();
+  if (!payload) return;
+  if (!payload.sender_pattern) return showToast("Nhap nguoi gui can cat OTP.", "error");
+  try {
+    await api("/api/admin/internal-email/otp-rules", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    resetInternalEmailOtpRuleForm();
+    showToast("Da luu rule cat OTP email.");
+    await loadInternalEmailOtpRules();
+  } catch (error) {
+    showToast(error.message || "Khong luu duoc rule cat OTP email.", "error");
+  }
+}
+
+async function toggleInternalEmailOtpRule(ruleId) {
+  const rule = internalEmailOtpRules.find((item) => String(item.id) === String(ruleId));
+  if (!rule) return;
+  try {
+    await api("/api/admin/internal-email/otp-rules", {
+      method: "POST",
+      body: JSON.stringify({ ...rule, enabled: !rule.enabled }),
+    });
+    await loadInternalEmailOtpRules();
+  } catch (error) {
+    showToast(error.message || "Khong cap nhat duoc rule cat OTP.", "error");
+  }
+}
+
+async function deleteInternalEmailOtpRule(ruleId) {
+  if (!ruleId) return;
+  try {
+    await api(`/api/admin/internal-email/otp-rules/${encodeURIComponent(ruleId)}`, { method: "DELETE" });
+    showToast("Da xoa rule cat OTP email.");
+    await loadInternalEmailOtpRules();
+  } catch (error) {
+    showToast(error.message || "Khong xoa duoc rule cat OTP email.", "error");
+  }
 }
 
 function renderInternalEmailPublicRules(rules = []) {
