@@ -3291,6 +3291,48 @@ legend {
   padding-right: .25rem;
 }
 
+.permission-node {
+  display: grid;
+  gap: .3rem;
+}
+
+.permission-children {
+  display: grid;
+  gap: .3rem;
+}
+
+.permission-item {
+  margin-left: calc(var(--permission-level, 0) * 1.15rem);
+}
+
+.permission-item.parent {
+  background: #f8fbff;
+  border-color: #c9ddf3;
+}
+
+.permission-item.child {
+  background: #fff;
+}
+
+.permission-item span {
+  display: grid;
+  min-width: 0;
+  gap: .12rem;
+}
+
+.permission-item strong {
+  color: #172033;
+  font-size: .92rem;
+  line-height: 1.2;
+}
+
+.permission-item small {
+  color: #64748b;
+  font-size: .72rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
 .selection-list {
   display: grid;
   max-height: 460px;

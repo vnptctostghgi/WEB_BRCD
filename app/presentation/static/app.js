@@ -54,6 +54,7 @@ let draggedDashboardRowId = "";
 const dashboardChartInstances = new Map();
 let pendingDashboardCharts = [];
 let pendingDashboardSheets = [];
+let permissionSelectionLoadToken = 0;
 const dashboardLayoutDefinitions = {
   "1_column": { total: 1, spans: [1], label: "1 cột" },
   "2_columns": { total: 2, spans: [1, 1], label: "2 cột" },
@@ -1487,9 +1488,7 @@ async function openEditUser(id) {
   updateEditBillingSummary();
   if (!features.length) features = (await api("/api/admin/features")).features;
   const granted = new Set((await api(`/api/admin/users/${id}/permissions`)).feature_codes);
-  const orderedFeatures = permissionFeatureList();
-  $("#permission-tree").innerHTML = orderedFeatures.map((feature) => renderPermissionFeatureItem(feature, granted)).join("");
-  bindPermissionCascade("#permission-tree");
+  renderPermissionTree("#permission-tree", granted);
   $("#edit-user-dialog").showModal();
 }
 
@@ -1567,6 +1566,18 @@ if (role === "admin") {
   $("#user-import-file")?.addEventListener("change", importUserFile);
   $("#save-bulk-permissions")?.addEventListener("click", saveBulkPermissions);
   $("#save-data-permissions")?.addEventListener("click", saveDataPermissions);
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-permission-select]");
+    if (!button) return;
+    event.preventDefault();
+    setAllPermissionChecks(button.dataset.permissionTarget || "#permission-features", button.dataset.permissionSelect === "all");
+  });
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-user-select]");
+    if (!button) return;
+    event.preventDefault();
+    setAllUserSelection(button.dataset.userTarget || "#permission-users", button.dataset.userSelect === "all");
+  });
 }
 
 $("#dashboard-viewer-page")?.addEventListener("change", (event) => {
@@ -1827,16 +1838,17 @@ async function loadPermissionManager() {
     markDataFresh("features");
   }
   renderUserSelection("#permission-users");
-  const orderedFeatures = permissionFeatureList();
-  $("#permission-features").innerHTML = orderedFeatures.map((feature) => renderPermissionFeatureItem(feature)).join("");
-  bindPermissionCascade("#permission-features");
+  renderPermissionTree("#permission-features");
+  bindPermissionUserSelection();
+  updatePermissionSelectionStatus("Chon 1 nguoi dung de xem quyen da luu. Chon nhieu nguoi dung de cap hang loat.");
 }
 
 async function saveBulkPermissions() {
   const user_ids = selectedNumbers("#permission-users");
   const feature_codes = selectedValues("#permission-features");
   await api("/api/admin/permissions/bulk", { method: "PUT", body: JSON.stringify({ user_ids, feature_codes }) });
-  alert("Đã lưu phân quyền người dùng.");
+  updatePermissionSelectionStatus(`Da luu ${feature_codes.length} quyen cho ${user_ids.length} nguoi dung.`);
+  showToast("Da luu phan quyen nguoi dung.");
 }
 
 async function loadDataPermissionManager() {
@@ -2022,12 +2034,6 @@ function isTechnicalPermissionFeature(feature) {
   return Boolean(feature?.parent_code && String(feature.code || "").includes("."));
 }
 
-function permissionFeatureList() {
-  return flattenFeatureTree(buildFeatureTree(features))
-    .map((row) => row.feature)
-    .filter((feature) => !isTechnicalPermissionFeature(feature));
-}
-
 function descendantFeatureCodes(sourceFeatures, parentCode) {
   const childrenByParent = new Map();
   (sourceFeatures || []).forEach((feature) => {
@@ -2047,6 +2053,14 @@ function descendantFeatureCodes(sourceFeatures, parentCode) {
   return result;
 }
 
+function permissionDisplayFeatures() {
+  return dedupeFeaturesForDisplay(features).filter((feature) => !isTechnicalPermissionFeature(feature));
+}
+
+function permissionFeatureTree() {
+  return buildFeatureTree(permissionDisplayFeatures());
+}
+
 function hiddenPermissionDescendantCodes(feature) {
   return descendantFeatureCodes(features, feature.code).filter((code) => isTechnicalPermissionFeature(featureByCode(code)));
 }
@@ -2057,29 +2071,110 @@ function featureIsGranted(feature, granted) {
   return hiddenPermissionDescendantCodes(feature).some((code) => granted.has(code));
 }
 
-function renderPermissionFeatureItem(feature, granted = null) {
+function renderPermissionFeatureNode(node, granted = null, level = 0) {
+  const feature = node.feature;
   const hiddenCodes = hiddenPermissionDescendantCodes(feature);
   const visibleChecked = featureIsGranted(feature, granted) ? "checked" : "";
   const hiddenInputs = hiddenCodes.map((code) => `
       <input class="permission-derived hidden" type="checkbox" value="${escapeHtml(code)}" ${granted?.has(code) ? "checked" : ""} />`).join("");
+  const children = node.children.map((child) => renderPermissionFeatureNode(child, granted, level + 1)).join("");
   return `
-    <label class="permission-item ${feature.parent_code ? "child" : "parent"}">
+    <div class="permission-node" data-permission-code="${escapeHtml(feature.code)}">
+    <label class="permission-item ${children ? "parent" : "child"}" style="--permission-level:${level}">
       <input type="checkbox" value="${escapeHtml(feature.code)}" ${visibleChecked} />
-      <span>${escapeHtml(feature.name)}</span>${hiddenInputs}
-    </label>`;
+      <span><strong>${escapeHtml(feature.name)}</strong><small>${escapeHtml(feature.code)}</small></span>${hiddenInputs}
+    </label>
+    ${children ? `<div class="permission-children">${children}</div>` : ""}
+    </div>`;
+}
+
+function renderPermissionTree(containerSelector, granted = null) {
+  const container = $(containerSelector);
+  if (!container) return;
+  const nodes = permissionFeatureTree();
+  container.innerHTML = nodes.length
+    ? nodes.map((node) => renderPermissionFeatureNode(node, granted)).join("")
+    : `<div class="empty-state"><div><strong>Chua co chuc nang</strong><p>Danh muc chuc nang chua co du lieu.</p></div></div>`;
+  bindPermissionCascade(containerSelector);
+}
+
+function permissionInputsByValue(container, value) {
+  return [...container.querySelectorAll("input[type='checkbox']")].filter((input) => input.value === value);
+}
+
+function setPermissionCodeChecked(container, code, checked) {
+  permissionInputsByValue(container, code).forEach((input) => {
+    input.checked = checked;
+    input.indeterminate = false;
+  });
 }
 
 function bindPermissionCascade(containerSelector) {
   const container = $(containerSelector);
   if (!container) return;
-  container.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
+  container.querySelectorAll(".permission-item > input[type='checkbox']").forEach((checkbox) => {
     checkbox.addEventListener("change", () => {
       descendantFeatureCodes(features, checkbox.value).forEach((code) => {
-        const child = [...container.querySelectorAll("input[type='checkbox']")].find((input) => input.value === code);
-        if (child) child.checked = checkbox.checked;
+        setPermissionCodeChecked(container, code, checkbox.checked);
       });
     });
   });
+}
+
+function setAllPermissionChecks(containerSelector, checked) {
+  const container = $(containerSelector);
+  if (!container) return;
+  container.querySelectorAll("input[type='checkbox']").forEach((input) => {
+    input.checked = checked;
+    input.indeterminate = false;
+  });
+  updatePermissionSelectionStatus(checked ? "Da chon tat ca chuc nang." : "Da bo chon tat ca chuc nang.");
+}
+
+function setAllUserSelection(containerSelector, checked) {
+  const container = $(containerSelector);
+  if (!container) return;
+  container.querySelectorAll("input[type='checkbox']").forEach((input) => {
+    input.checked = checked;
+  });
+  if (containerSelector === "#permission-users") {
+    syncPermissionTreeForSelectedUsers();
+  }
+}
+
+function updatePermissionSelectionStatus(message) {
+  const status = $("#permission-selection-status");
+  if (status) status.textContent = repairTextEncoding(message || "");
+}
+
+function bindPermissionUserSelection() {
+  const container = $("#permission-users");
+  if (!container || container.dataset.permissionBound === "true") return;
+  container.dataset.permissionBound = "true";
+  container.addEventListener("change", syncPermissionTreeForSelectedUsers);
+}
+
+async function syncPermissionTreeForSelectedUsers() {
+  const selectedUserIds = selectedNumbers("#permission-users");
+  const token = ++permissionSelectionLoadToken;
+  if (selectedUserIds.length !== 1) {
+    renderPermissionTree("#permission-features");
+    updatePermissionSelectionStatus(selectedUserIds.length ? "Dang chon nhieu nguoi dung. Hay chon quyen muon cap hang loat." : "Chon 1 nguoi dung de xem quyen da luu.");
+    return;
+  }
+  updatePermissionSelectionStatus("Dang tai quyen da luu...");
+  try {
+    const payload = await api(`/api/admin/users/${selectedUserIds[0]}/permissions`);
+    if (token !== permissionSelectionLoadToken) return;
+    const granted = new Set(payload.feature_codes || []);
+    renderPermissionTree("#permission-features", granted);
+    const selectedUser = users.find((user) => Number(user.id) === Number(selectedUserIds[0]));
+    updatePermissionSelectionStatus(`Dang hien thi ${granted.size} quyen da luu cua ${selectedUser?.username || selectedUserIds[0]}.`);
+  } catch (error) {
+    if (token !== permissionSelectionLoadToken) return;
+    renderPermissionTree("#permission-features");
+    updatePermissionSelectionStatus(error.message || "Khong tai duoc quyen da luu.");
+  }
 }
 
 const dashboardParentExcludedFeatureCodes = new Set(["dashboard", "quanlycongviec", "truyvansql", "reports", "new_reports"]);
