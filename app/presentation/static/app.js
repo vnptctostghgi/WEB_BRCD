@@ -957,10 +957,24 @@ document.addEventListener("click", (event) => {
 $("#credential-form")?.addEventListener("submit", saveCredential);
 $("#credential-website")?.addEventListener("change", updateCredentialWebsiteInfo);
 
-document.querySelectorAll("[data-logout]").forEach((button) => button.addEventListener("click", async () => {
-  await api("/api/auth/logout", { method: "POST" });
-  window.location.href = "/login";
-}));
+async function logoutFromClient(button) {
+  if (button) button.disabled = true;
+  try {
+    await api("/api/auth/logout", { method: "POST" });
+  } catch (error) {
+    console.warn("Logout request failed, redirecting to login.", error);
+  } finally {
+    window.location.replace("/login");
+  }
+}
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-logout]");
+  if (!button) return;
+  event.preventDefault();
+  event.stopPropagation();
+  await logoutFromClient(button);
+});
 
 async function loadNotifications() {
   const list = $("#notification-list");

@@ -364,10 +364,24 @@ document.querySelectorAll("[data-close-dialog]").forEach((button) => {
   button.addEventListener("click", () => button.closest("dialog")?.close());
 });
 
-document.querySelectorAll("[data-logout]").forEach((button) => button.addEventListener("click", async () => {
-  await api("/api/auth/logout", { method: "POST" });
-  window.location.href = "/login";
-}));
+async function logoutFromClient(button) {
+  if (button) button.disabled = true;
+  try {
+    await api("/api/auth/logout", { method: "POST" });
+  } catch (error) {
+    console.warn("Logout request failed, redirecting to login.", error);
+  } finally {
+    window.location.replace("/login");
+  }
+}
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-logout]");
+  if (!button) return;
+  event.preventDefault();
+  event.stopPropagation();
+  await logoutFromClient(button);
+});
 
 $("#password-form")?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -401,7 +415,7 @@ function warmFeatureBundle() {
   const link = document.createElement("link");
   link.rel = "preload";
   link.as = "script";
-  link.href = "/static/app.js?v=181";
+  link.href = "/static/app.js?v=182";
   link.dataset.featureBundleWarm = "true";
   document.head.appendChild(link);
 }
