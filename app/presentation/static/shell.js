@@ -33,6 +33,31 @@ const navGroupIcons = {
 
 let dashboardFeatureCodes = new Set();
 let dashboardPageIdByFeatureCode = new Map();
+const NAVIGATION_CLIENT_CACHE_TTL_MS = 60 * 1000;
+const NAVIGATION_CLIENT_CACHE_VERSION = "2026-07-28-1";
+
+function navigationClientCacheKey() {
+  return `vnptcto:navigation:${NAVIGATION_CLIENT_CACHE_VERSION}:${document.body.dataset.navCacheKey || document.body.dataset.role || "guest"}`;
+}
+
+function readCachedNavigation() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(navigationClientCacheKey()) || "null");
+    if (!cached?.timestamp || Date.now() - cached.timestamp > NAVIGATION_CLIENT_CACHE_TTL_MS) return null;
+    if (!Array.isArray(cached.data?.features)) return null;
+    return cached.data;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedNavigation(data) {
+  try {
+    localStorage.setItem(navigationClientCacheKey(), JSON.stringify({ timestamp: Date.now(), data }));
+  } catch {
+    // Best effort only; navigation still loads from the API.
+  }
+}
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -275,7 +300,11 @@ function renderNavigationNode(node, level = 0) {
 
 async function syncNavigationFromFeatures() {
   try {
-    const navigationData = await api("/api/navigation");
+    let navigationData = readCachedNavigation();
+    if (!navigationData) {
+      navigationData = await api("/api/navigation");
+      writeCachedNavigation(navigationData);
+    }
     applyDashboardLayoutList(navigationData.dashboard_layouts || []);
     const tree = $("#nav-tree");
     if (!tree) return;
@@ -415,7 +444,7 @@ function warmFeatureBundle() {
   const link = document.createElement("link");
   link.rel = "preload";
   link.as = "script";
-  link.href = "/static/app.js?v=185";
+  link.href = "/static/app.js?v=186";
   link.dataset.featureBundleWarm = "true";
   document.head.appendChild(link);
 }

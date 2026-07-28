@@ -157,6 +157,8 @@ const dataCacheTimestamps = new Map();
 const dashboardViewerLayoutCache = new Map();
 const dashboardBuilderLayoutCache = new Map();
 const DATA_CACHE_TTL_MS = 2 * 60 * 1000;
+const NAVIGATION_CLIENT_CACHE_TTL_MS = 60 * 1000;
+const NAVIGATION_CLIENT_CACHE_VERSION = "2026-07-28-1";
 const TABLE_PAGE_SIZE = 20;
 const TABLE_SHORT_PAGE_SIZE = 10;
 const TABLE_HISTORY_LIMIT = 20;
@@ -553,9 +555,40 @@ async function api(url, options = {}) {
   return body;
 }
 
+function navigationClientCacheKey() {
+  return `vnptcto:navigation:${NAVIGATION_CLIENT_CACHE_VERSION}:${document.body.dataset.navCacheKey || document.body.dataset.role || "guest"}`;
+}
+
+function readCachedNavigation() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(navigationClientCacheKey()) || "null");
+    if (!cached?.timestamp || Date.now() - cached.timestamp > NAVIGATION_CLIENT_CACHE_TTL_MS) return null;
+    if (!Array.isArray(cached.data?.features)) return null;
+    return repairDataEncoding(cached.data);
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedNavigation(data) {
+  try {
+    localStorage.setItem(navigationClientCacheKey(), JSON.stringify({ timestamp: Date.now(), data }));
+  } catch {
+    // Best effort only; navigation still loads from the API.
+  }
+}
+
+async function fetchNavigation() {
+  const cached = readCachedNavigation();
+  if (cached) return cached;
+  const data = await api("/api/navigation");
+  writeCachedNavigation(data);
+  return data;
+}
+
 function preloadNavigation() {
   if (!navigationPreloadPromise && document.body.dataset.role) {
-    navigationPreloadPromise = api("/api/navigation").catch((error) => ({ __navigation_error: error }));
+    navigationPreloadPromise = fetchNavigation().catch((error) => ({ __navigation_error: error }));
   }
   return navigationPreloadPromise;
 }
@@ -563,7 +596,7 @@ function preloadNavigation() {
 function consumeNavigationPreload() {
   const promise = navigationPreloadPromise;
   navigationPreloadPromise = null;
-  return promise || api("/api/navigation");
+  return promise || fetchNavigation();
 }
 
 preloadNavigation();

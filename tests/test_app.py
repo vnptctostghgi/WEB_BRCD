@@ -107,9 +107,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=185" in public_response.text
+        assert "/static/app.js?v=186" in public_response.text
         assert "/static/styles.css?v=121" in public_response.text
-        public_js = client.get("/static/app.js?v=185")
+        assert "fonts.googleapis.com" not in public_response.text
+        assert 'href="/api/navigation"' not in public_response.text
+        public_js = client.get("/static/app.js?v=186")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -117,6 +119,8 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert "function collapseNavigationTree" in public_js.text
         assert "function dedupeFeaturesForDisplay" in public_js.text
         assert "/static/internal-email.js?v=8" in public_js.text
+        assert "function readCachedNavigation" in public_js.text
+        assert "function fetchNavigation" in public_js.text
         assert "function permissionDisplayFeatures" in public_js.text
         assert "function isTechnicalPermissionFeature" in public_js.text
         assert "function renderPermissionTree" in public_js.text
@@ -319,7 +323,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=185" in page.text
+        assert "/static/app.js?v=186" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -4311,15 +4315,16 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         home = client.get("/")
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
-        assert "/static/shell.js?v=10" in home.text
-        assert "/static/app.js?v=185" not in home.text
-        shell_js = client.get("/static/shell.js?v=10")
+        assert "/static/shell.js?v=11" in home.text
+        assert "/static/app.js?v=186" not in home.text
+        shell_js = client.get("/static/shell.js?v=11")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
         assert "function dedupeFeaturesForDisplay" in shell_js.text
+        assert "function readCachedNavigation" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=185" in shell_js.text
+        assert "/static/app.js?v=186" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -4332,8 +4337,8 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
-        assert "/static/shell.js?v=10" in dashboard.text
-        assert "/static/app.js?v=185" not in dashboard.text
+        assert "/static/shell.js?v=11" in dashboard.text
+        assert "/static/app.js?v=186" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -4344,42 +4349,42 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "view-reports" in reports.text
         assert "view-mobile-gateway" not in reports.text
         assert "sql-report-dialog" not in reports.text
-        assert "/static/app.js?v=185" in reports.text
+        assert "/static/app.js?v=186" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=185" in workstation.text
+        assert "/static/app.js?v=186" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=185" in work_tasks.text
+        assert "/static/app.js?v=186" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=185" in report_links.text
+        assert "/static/app.js?v=186" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=185" in system.text
+        assert "/static/app.js?v=186" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=185" in onebss_mining.text
+        assert "/static/app.js?v=186" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 
