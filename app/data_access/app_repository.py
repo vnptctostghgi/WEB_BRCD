@@ -33,7 +33,8 @@ FEATURE_ROWS = [
     ("baocaomoi", "Báo cáo mới", None, 35),
     ("thietkelayoutbaocao", "Thiết kế Layout báo cáo", "baocaomoi", 36),
     ("daodulieuonebss", "Đào dữ liệu OneBSS", "baocaomoi", 37),
-    ("linkbaocao", "Link báo cáo", "baocaomoi", 38),
+    ("daodulieuftp", "Đào dữ liệu FTP", "baocaomoi", 38),
+    ("linkbaocao", "Link báo cáo", "baocaomoi", 39),
     *PUBLIC_MESSAGES_FEATURE_ROWS,
     ("taikhoanweb", "Tài khoản web", "quantriweb", 40),
     ("xemdanhsachtaikhoan", "Xem danh sách tài khoản", "taikhoanweb", 41),
@@ -394,6 +395,18 @@ class AppRepository:
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS ftp_reports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ma_bao_cao TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    ten_bao_cao TEXT NOT NULL,
+                    folder_path TEXT NOT NULL,
+                    file_name_template TEXT NOT NULL,
+                    connection_code TEXT NOT NULL DEFAULT 'ftp_storage',
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS report_links (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ma_bao_cao TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -435,6 +448,31 @@ class AppRepository:
 
                 CREATE INDEX IF NOT EXISTS onebss_report_runs_report_idx
                 ON onebss_report_runs (ma_bao_cao, started_at DESC);
+
+                CREATE TABLE IF NOT EXISTS ftp_report_runs (
+                    run_id TEXT PRIMARY KEY,
+                    ma_bao_cao TEXT NOT NULL,
+                    ten_bao_cao TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    message TEXT NOT NULL DEFAULT '',
+                    folder_path TEXT NOT NULL DEFAULT '',
+                    file_name_template TEXT NOT NULL DEFAULT '',
+                    resolved_file_name TEXT NOT NULL DEFAULT '',
+                    file_name TEXT NOT NULL DEFAULT '',
+                    file_path TEXT NOT NULL DEFAULT '',
+                    storage_link TEXT NOT NULL DEFAULT '',
+                    storage_status TEXT NOT NULL DEFAULT '',
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT NOT NULL DEFAULT '',
+                    duration_ms INTEGER NOT NULL DEFAULT 0,
+                    created_by TEXT NOT NULL DEFAULT '',
+                    worker_id TEXT NOT NULL DEFAULT '',
+                    claimed_at TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT ''
+                );
+
+                CREATE INDEX IF NOT EXISTS ftp_report_runs_report_idx
+                ON ftp_report_runs (ma_bao_cao, started_at DESC);
 
                 CREATE TABLE IF NOT EXISTS dashboard_layouts (
                     page_id TEXT PRIMARY KEY,
@@ -1691,6 +1729,194 @@ class AppRepository:
         with self.connect() as connection:
             connection.execute("DELETE FROM onebss_reports WHERE id=?", (report_id,))
 
+    def list_ftp_reports(self, active_only: bool = False) -> list[dict[str, Any]]:
+        query = "SELECT * FROM ftp_reports"
+        if active_only:
+            query += " WHERE is_active = 1"
+        query += " ORDER BY ten_bao_cao"
+        with self.connect() as connection:
+            rows = connection.execute(query).fetchall()
+            return [self._decode_ftp_report(dict(row)) for row in rows]
+
+    def get_ftp_report_by_id(self, report_id: int) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM ftp_reports WHERE id=?", (report_id,)).fetchone()
+            return self._decode_ftp_report(dict(row)) if row else None
+
+    def get_ftp_report_by_code(self, ma_bao_cao: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM ftp_reports WHERE ma_bao_cao=?", (ma_bao_cao,)).fetchone()
+            return self._decode_ftp_report(dict(row)) if row else None
+
+    def generate_ftp_report_code(self) -> str:
+        with self.connect() as connection:
+            rows = connection.execute("SELECT ma_bao_cao FROM ftp_reports WHERE ma_bao_cao LIKE 'FTP%'").fetchall()
+        numbers = []
+        for row in rows:
+            match = re.search(r"(\d+)$", str(row["ma_bao_cao"] or ""))
+            if match:
+                numbers.append(int(match.group(1)))
+        return f"FTP{(max(numbers) if numbers else 0) + 1:04d}"
+
+    def save_ftp_report(
+        self,
+        report_id: int | None,
+        ma_bao_cao: str,
+        ten_bao_cao: str,
+        folder_path: str,
+        file_name_template: str,
+        connection_code: str = "ftp_storage",
+        is_active: bool = True,
+    ) -> int:
+        now = self._now()
+        with self.connect() as connection:
+            if report_id:
+                connection.execute(
+                    """
+                    UPDATE ftp_reports
+                    SET ma_bao_cao=?, ten_bao_cao=?, folder_path=?, file_name_template=?,
+                        connection_code=?, is_active=?, updated_at=?
+                    WHERE id=?
+                    """,
+                    (ma_bao_cao, ten_bao_cao, folder_path, file_name_template, connection_code, int(is_active), now, report_id),
+                )
+                return int(report_id)
+            cursor = connection.execute(
+                """
+                INSERT INTO ftp_reports
+                (ma_bao_cao, ten_bao_cao, folder_path, file_name_template, connection_code, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (ma_bao_cao, ten_bao_cao, folder_path, file_name_template, connection_code, int(is_active), now, now),
+            )
+            return int(cursor.lastrowid)
+
+    def delete_ftp_report(self, report_id: int) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM ftp_reports WHERE id=?", (report_id,))
+
+    def save_ftp_report_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = self._now()
+        run_id = str(payload.get("run_id") or f"FTPRUN{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}{secrets.token_hex(3).upper()}")
+        row = {
+            "run_id": run_id,
+            "ma_bao_cao": str(payload.get("ma_bao_cao") or ""),
+            "ten_bao_cao": str(payload.get("ten_bao_cao") or ""),
+            "status": str(payload.get("status") or "failed"),
+            "message": str(payload.get("message") or ""),
+            "folder_path": str(payload.get("folder_path") or ""),
+            "file_name_template": str(payload.get("file_name_template") or ""),
+            "resolved_file_name": str(payload.get("resolved_file_name") or ""),
+            "file_name": str(payload.get("file_name") or ""),
+            "file_path": str(payload.get("file_path") or ""),
+            "storage_link": str(payload.get("storage_link") or ""),
+            "storage_status": str(payload.get("storage_status") or ""),
+            "started_at": str(payload.get("started_at") or now),
+            "finished_at": str(payload.get("finished_at") or now),
+            "duration_ms": int(payload.get("duration_ms") or 0),
+            "created_by": str(payload.get("created_by") or ""),
+            "worker_id": str(payload.get("worker_id") or ""),
+            "claimed_at": str(payload.get("claimed_at") or ""),
+            "updated_at": str(payload.get("updated_at") or now),
+        }
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO ftp_report_runs
+                (run_id, ma_bao_cao, ten_bao_cao, status, message, folder_path, file_name_template,
+                 resolved_file_name, file_name, file_path, storage_link, storage_status, started_at,
+                 finished_at, duration_ms, created_by, worker_id, claimed_at, updated_at)
+                VALUES (:run_id, :ma_bao_cao, :ten_bao_cao, :status, :message, :folder_path, :file_name_template,
+                        :resolved_file_name, :file_name, :file_path, :storage_link, :storage_status, :started_at,
+                        :finished_at, :duration_ms, :created_by, :worker_id, :claimed_at, :updated_at)
+                """,
+                row,
+            )
+        return self._decode_ftp_report_run(row)
+
+    def get_ftp_report_run(self, run_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM ftp_report_runs WHERE run_id=?", (run_id,)).fetchone()
+            return self._decode_ftp_report_run(dict(row)) if row else None
+
+    def claim_next_ftp_report_run(self, worker_id: str) -> dict[str, Any] | None:
+        now = self._now()
+        worker = str(worker_id or "").strip()[:120]
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM ftp_report_runs
+                WHERE status='queued'
+                ORDER BY started_at ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            if not row:
+                return None
+            run_id = dict(row)["run_id"]
+            connection.execute(
+                """
+                UPDATE ftp_report_runs
+                SET status='running', message=?, worker_id=?, claimed_at=?, updated_at=?
+                WHERE run_id=? AND status='queued'
+                """,
+                ("May tram da nhan task FTP va dang tai file.", worker, now, now, run_id),
+            )
+            updated = connection.execute("SELECT * FROM ftp_report_runs WHERE run_id=?", (run_id,)).fetchone()
+            return self._decode_ftp_report_run(dict(updated)) if updated else None
+
+    def update_ftp_report_run(self, run_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+        allowed = {
+            "status",
+            "message",
+            "folder_path",
+            "file_name_template",
+            "resolved_file_name",
+            "file_name",
+            "file_path",
+            "storage_link",
+            "storage_status",
+            "finished_at",
+            "duration_ms",
+            "worker_id",
+            "claimed_at",
+            "updated_at",
+        }
+        now = self._now()
+        values = {key: value for key, value in updates.items() if key in allowed}
+        values["updated_at"] = values.get("updated_at") or now
+        if not values:
+            return self.get_ftp_report_run(run_id)
+        assignments = ", ".join(f"{key}=:{key}" for key in values.keys())
+        values["run_id"] = run_id
+        with self.connect() as connection:
+            connection.execute(f"UPDATE ftp_report_runs SET {assignments} WHERE run_id=:run_id", values)
+            row = connection.execute("SELECT * FROM ftp_report_runs WHERE run_id=?", (run_id,)).fetchone()
+            return self._decode_ftp_report_run(dict(row)) if row else None
+
+    def list_ftp_report_runs(self, ma_bao_cao: str = "", limit: int = 50) -> list[dict[str, Any]]:
+        safe_limit = min(max(int(limit or 50), 1), 200)
+        with self.connect() as connection:
+            if ma_bao_cao:
+                rows = connection.execute(
+                    "SELECT * FROM ftp_report_runs WHERE ma_bao_cao=? ORDER BY started_at DESC LIMIT ?",
+                    (ma_bao_cao, safe_limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM ftp_report_runs ORDER BY started_at DESC LIMIT ?",
+                    (safe_limit,),
+                ).fetchall()
+            return [self._decode_ftp_report_run(dict(row)) for row in rows]
+
+    def clear_ftp_report_runs(self, ma_bao_cao: str = "") -> int:
+        with self.connect() as connection:
+            if ma_bao_cao:
+                cursor = connection.execute("DELETE FROM ftp_report_runs WHERE ma_bao_cao=?", (ma_bao_cao,))
+            else:
+                cursor = connection.execute("DELETE FROM ftp_report_runs")
+            return int(cursor.rowcount or 0)
+
     def save_onebss_report_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         now = self._now()
         run_id = str(payload.get("run_id") or f"OBRUN{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}{secrets.token_hex(3).upper()}")
@@ -2527,6 +2753,46 @@ class AppRepository:
             "storage_link": row.get("storage_link") or "",
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
+        }
+
+    @staticmethod
+    def _decode_ftp_report(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": row.get("id"),
+            "ma_bao_cao": row.get("ma_bao_cao") or "",
+            "ten_bao_cao": row.get("ten_bao_cao") or "",
+            "folder_path": row.get("folder_path") or "",
+            "file_name_template": row.get("file_name_template") or "",
+            "connection_code": row.get("connection_code") or "ftp_storage",
+            "is_active": bool(row.get("is_active")),
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        }
+
+    @staticmethod
+    def _decode_ftp_report_run(row: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(row, dict):
+            row = dict(row)
+        return {
+            "run_id": row.get("run_id"),
+            "ma_bao_cao": row.get("ma_bao_cao") or "",
+            "ten_bao_cao": row.get("ten_bao_cao") or "",
+            "status": row.get("status") or "",
+            "message": row.get("message") or "",
+            "folder_path": row.get("folder_path") or "",
+            "file_name_template": row.get("file_name_template") or "",
+            "resolved_file_name": row.get("resolved_file_name") or "",
+            "file_name": row.get("file_name") or "",
+            "file_path": row.get("file_path") or "",
+            "storage_link": row.get("storage_link") or "",
+            "storage_status": row.get("storage_status") or "",
+            "started_at": row.get("started_at") or "",
+            "finished_at": row.get("finished_at") or "",
+            "duration_ms": int(row.get("duration_ms") or 0),
+            "created_by": row.get("created_by") or "",
+            "worker_id": row.get("worker_id") or "",
+            "claimed_at": row.get("claimed_at") or "",
+            "updated_at": row.get("updated_at") or "",
         }
 
     @staticmethod

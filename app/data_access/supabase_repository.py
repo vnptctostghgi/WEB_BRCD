@@ -49,7 +49,8 @@ FEATURE_ROWS = [
     {"code": "baocaomoi", "name": "Báo cáo mới", "parent_code": None, "sort_order": 35},
     {"code": "thietkelayoutbaocao", "name": "Thiết kế Layout báo cáo", "parent_code": "baocaomoi", "sort_order": 36},
     {"code": "daodulieuonebss", "name": "Đào dữ liệu OneBSS", "parent_code": "baocaomoi", "sort_order": 37},
-    {"code": "linkbaocao", "name": "Link báo cáo", "parent_code": "baocaomoi", "sort_order": 38},
+    {"code": "daodulieuftp", "name": "Đào dữ liệu FTP", "parent_code": "baocaomoi", "sort_order": 38},
+    {"code": "linkbaocao", "name": "Link báo cáo", "parent_code": "baocaomoi", "sort_order": 39},
     {"code": "taikhoanweb", "name": "Tài khoản web", "parent_code": "quantriweb", "sort_order": 40},
     {"code": "xemdanhsachtaikhoan", "name": "Xem danh sách tài khoản", "parent_code": "taikhoanweb", "sort_order": 41},
     {"code": "themvasuataikhoan", "name": "Thêm và sửa tài khoản", "parent_code": "taikhoanweb", "sort_order": 42},
@@ -966,6 +967,146 @@ class SupabaseRepository:
     def delete_onebss_report(self, report_id: int) -> None:
         self._delete("onebss_reports", {"id": f"eq.{report_id}"})
 
+    def list_ftp_reports(self, active_only: bool = False) -> list[dict[str, Any]]:
+        params = {"order": "ten_bao_cao.asc"}
+        if active_only:
+            params["is_active"] = "eq.true"
+        rows = self._get("ftp_reports", params)
+        return [self._decode_ftp_report(row) for row in rows]
+
+    def get_ftp_report_by_id(self, report_id: int) -> dict[str, Any] | None:
+        rows = self._get("ftp_reports", {"id": f"eq.{report_id}", "limit": "1"})
+        return self._decode_ftp_report(rows[0]) if rows else None
+
+    def get_ftp_report_by_code(self, ma_bao_cao: str) -> dict[str, Any] | None:
+        rows = self._get("ftp_reports", {"ma_bao_cao": f"eq.{ma_bao_cao}", "limit": "1"})
+        return self._decode_ftp_report(rows[0]) if rows else None
+
+    def generate_ftp_report_code(self) -> str:
+        rows = self._get("ftp_reports", {"select": "ma_bao_cao", "ma_bao_cao": "like.FTP%", "order": "ma_bao_cao.desc"})
+        numbers = []
+        for row in rows:
+            match = re.search(r"(\d+)$", str(row.get("ma_bao_cao") or ""))
+            if match:
+                numbers.append(int(match.group(1)))
+        return f"FTP{(max(numbers) if numbers else 0) + 1:04d}"
+
+    def save_ftp_report(
+        self,
+        report_id: int | None,
+        ma_bao_cao: str,
+        ten_bao_cao: str,
+        folder_path: str,
+        file_name_template: str,
+        connection_code: str = "ftp_storage",
+        is_active: bool = True,
+    ) -> int:
+        payload = {
+            "ma_bao_cao": ma_bao_cao,
+            "ten_bao_cao": ten_bao_cao,
+            "folder_path": folder_path,
+            "file_name_template": file_name_template,
+            "connection_code": connection_code,
+            "is_active": is_active,
+            "updated_at": self._now(),
+        }
+        if report_id:
+            self._patch("ftp_reports", {"id": f"eq.{report_id}"}, payload)
+            return int(report_id)
+        payload["created_at"] = self._now()
+        return int(self._insert("ftp_reports", payload)["id"])
+
+    def delete_ftp_report(self, report_id: int) -> None:
+        self._delete("ftp_reports", {"id": f"eq.{report_id}"})
+
+    def save_ftp_report_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        run_id = str(payload.get("run_id") or f"FTPRUN{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}{secrets.token_hex(3).upper()}")
+        row = {
+            "run_id": run_id,
+            "ma_bao_cao": str(payload.get("ma_bao_cao") or ""),
+            "ten_bao_cao": str(payload.get("ten_bao_cao") or ""),
+            "status": str(payload.get("status") or "failed"),
+            "message": str(payload.get("message") or ""),
+            "folder_path": str(payload.get("folder_path") or ""),
+            "file_name_template": str(payload.get("file_name_template") or ""),
+            "resolved_file_name": str(payload.get("resolved_file_name") or ""),
+            "file_name": str(payload.get("file_name") or ""),
+            "file_path": str(payload.get("file_path") or ""),
+            "storage_link": str(payload.get("storage_link") or ""),
+            "storage_status": str(payload.get("storage_status") or ""),
+            "started_at": str(payload.get("started_at") or self._now()),
+            "finished_at": str(payload.get("finished_at") or self._now()),
+            "duration_ms": int(payload.get("duration_ms") or 0),
+            "created_by": str(payload.get("created_by") or ""),
+            "worker_id": str(payload.get("worker_id") or ""),
+            "claimed_at": str(payload.get("claimed_at") or ""),
+            "updated_at": str(payload.get("updated_at") or self._now()),
+        }
+        self._insert("ftp_report_runs", row)
+        return self._decode_ftp_report_run(row)
+
+    def get_ftp_report_run(self, run_id: str) -> dict[str, Any] | None:
+        rows = self._get("ftp_report_runs", {"run_id": f"eq.{run_id}", "limit": "1"})
+        return self._decode_ftp_report_run(rows[0]) if rows else None
+
+    def claim_next_ftp_report_run(self, worker_id: str) -> dict[str, Any] | None:
+        rows = self._get("ftp_report_runs", {"status": "eq.queued", "order": "started_at.asc", "limit": "1"})
+        if not rows:
+            return None
+        run_id = str(rows[0].get("run_id") or "")
+        now = self._now()
+        self._patch(
+            "ftp_report_runs",
+            {"run_id": f"eq.{run_id}", "status": "eq.queued"},
+            {
+                "status": "running",
+                "message": "May tram da nhan task FTP va dang tai file.",
+                "worker_id": str(worker_id or "")[:120],
+                "claimed_at": now,
+                "updated_at": now,
+            },
+        )
+        return self.get_ftp_report_run(run_id)
+
+    def update_ftp_report_run(self, run_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+        allowed = {
+            "status",
+            "message",
+            "folder_path",
+            "file_name_template",
+            "resolved_file_name",
+            "file_name",
+            "file_path",
+            "storage_link",
+            "storage_status",
+            "finished_at",
+            "duration_ms",
+            "worker_id",
+            "claimed_at",
+            "updated_at",
+        }
+        payload = {key: value for key, value in updates.items() if key in allowed}
+        payload["updated_at"] = str(payload.get("updated_at") or self._now())
+        if payload:
+            self._patch("ftp_report_runs", {"run_id": f"eq.{run_id}"}, payload)
+        return self.get_ftp_report_run(run_id)
+
+    def list_ftp_report_runs(self, ma_bao_cao: str = "", limit: int = 50) -> list[dict[str, Any]]:
+        params = {"order": "started_at.desc", "limit": str(min(max(int(limit or 50), 1), 200))}
+        if ma_bao_cao:
+            params["ma_bao_cao"] = f"eq.{ma_bao_cao}"
+        rows = self._get("ftp_report_runs", params)
+        return [self._decode_ftp_report_run(row) for row in rows]
+
+    def clear_ftp_report_runs(self, ma_bao_cao: str = "") -> int:
+        if ma_bao_cao:
+            existing = self._get("ftp_report_runs", {"select": "run_id", "ma_bao_cao": f"eq.{ma_bao_cao}"})
+            self._delete("ftp_report_runs", {"ma_bao_cao": f"eq.{ma_bao_cao}"})
+        else:
+            existing = self._get("ftp_report_runs", {"select": "run_id"})
+            self._delete("ftp_report_runs", {"run_id": "not.is.null"})
+        return len(existing)
+
     def save_onebss_report_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         run_id = str(payload.get("run_id") or f"OBRUN{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}{secrets.token_hex(3).upper()}")
         row = {
@@ -1576,6 +1717,44 @@ class SupabaseRepository:
             "storage_link": row.get("storage_link") or "",
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
+        }
+
+    @staticmethod
+    def _decode_ftp_report(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": row.get("id"),
+            "ma_bao_cao": row.get("ma_bao_cao") or "",
+            "ten_bao_cao": row.get("ten_bao_cao") or "",
+            "folder_path": row.get("folder_path") or "",
+            "file_name_template": row.get("file_name_template") or "",
+            "connection_code": row.get("connection_code") or "ftp_storage",
+            "is_active": bool(row.get("is_active")),
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        }
+
+    @staticmethod
+    def _decode_ftp_report_run(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "run_id": row.get("run_id"),
+            "ma_bao_cao": row.get("ma_bao_cao") or "",
+            "ten_bao_cao": row.get("ten_bao_cao") or "",
+            "status": row.get("status") or "",
+            "message": row.get("message") or "",
+            "folder_path": row.get("folder_path") or "",
+            "file_name_template": row.get("file_name_template") or "",
+            "resolved_file_name": row.get("resolved_file_name") or "",
+            "file_name": row.get("file_name") or "",
+            "file_path": row.get("file_path") or "",
+            "storage_link": row.get("storage_link") or "",
+            "storage_status": row.get("storage_status") or "",
+            "started_at": row.get("started_at") or "",
+            "finished_at": row.get("finished_at") or "",
+            "duration_ms": int(row.get("duration_ms") or 0),
+            "created_by": row.get("created_by") or "",
+            "worker_id": row.get("worker_id") or "",
+            "claimed_at": row.get("claimed_at") or "",
+            "updated_at": row.get("updated_at") or "",
         }
 
     @staticmethod

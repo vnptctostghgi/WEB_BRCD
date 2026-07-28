@@ -8,9 +8,9 @@
     <link rel="icon" type="image/png" href="/static/images/system-logo.png" />
     <link rel="apple-touch-icon" href="/static/images/system-logo.png" />
     {% if shell_only %}
-    <link rel="preload" href="/static/shell.js?v=11" as="script" />
+    <link rel="preload" href="/static/shell.js?v=12" as="script" />
     {% else %}
-    <link rel="preload" href="/static/app.js?v=187" as="script" />
+    <link rel="preload" href="/static/app.js?v=188" as="script" />
     {% endif %}
     <link rel="stylesheet" href="/static/tailwind-built.css?v=1" />
     <link rel="stylesheet" href="/static/styles.css?v=121" />
@@ -85,6 +85,7 @@
               <summary data-feature-code="baocaomoi"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-chart"></use></svg><strong>Báo cáo mới</strong></summary>
               <button class="nav-item child" data-feature-code="thietkelayoutbaocao" data-view="dashboard-builder" data-title="Thiết kế Layout báo cáo" data-keywords="dashboard builder thiet ke layout bao cao tab bieu do"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Thiết kế Layout báo cáo</span></button>
               <button class="nav-item child" data-feature-code="daodulieuonebss" data-view="onebss-mining" data-title="Đào dữ liệu OneBSS" data-keywords="dao du lieu onebss bao cao excel"><svg class="nav-svg"><use href="#icon-database"></use></svg><span>Đào dữ liệu OneBSS</span></button>
+              <button class="nav-item child" data-feature-code="daodulieuftp" data-view="ftp-mining" data-title="Đào dữ liệu FTP" data-keywords="dao du lieu ftp bao cao file may tram"><svg class="nav-svg"><use href="#icon-download"></use></svg><span>Đào dữ liệu FTP</span></button>
               <button class="nav-item child" data-feature-code="publicmessages" data-view="public-messages" data-title="N&#7897;i dung public" data-keywords="noi dung public sms email otp copy"><svg class="nav-svg"><use href="#icon-audit"></use></svg><span>N&#7897;i dung public</span></button>
             </details>
             {% endif %}
@@ -436,6 +437,34 @@
         </section>
         {% endif %}
 
+        {% if render_view("ftp-mining") %}
+        <section class="app-view" id="view-ftp-mining">
+          <div class="page-header"><div><p class="eyebrow">Đào dữ liệu FTP</p><h1>Đào dữ liệu FTP</h1><p class="subtitle">Lấy file báo cáo FTP qua máy trạm nội bộ.</p></div></div>
+          <section class="data-card onebss-mining-panel">
+            <form id="ftp-run-form" class="onebss-run-form">
+              <label>Loại báo cáo<select class="form-control" id="ftp-run-report-select" name="ma_bao_cao"></select></label>
+              <label>Link thư mục<input class="form-control" id="ftp-run-folder-path" name="folder_path" placeholder="/duong/dan/thu_muc hoặc ftp://10.159.23.100/..." /></label>
+              <label>Tên file<input class="form-control" id="ftp-run-file-template" name="file_name_template" placeholder="bao_cao_{yyyymmdd}.xlsx hoặc *.xls" /></label>
+              <div class="onebss-run-actions">
+                <button class="btn-secondary" id="refresh-ftp-runs" type="button">Làm mới</button>
+                <button class="btn-primary" id="run-ftp-report" type="submit"><span class="button-label">Lấy báo cáo</span><span class="spinner"></span></button>
+              </div>
+            </form>
+            <div id="ftp-run-message" class="result hidden mt-3"></div>
+            <div class="onebss-history-header">
+              <div><h2>Lịch sử lấy FTP</h2><p id="ftp-run-history-summary">Chưa có dữ liệu</p></div>
+              <button class="table-action danger" id="clear-ftp-run-history" type="button">Dọn lịch sử</button>
+            </div>
+            <div class="table-scroll onebss-run-table-wrap">
+              <table class="compact-admin-table inline-admin-table onebss-run-table">
+                <thead><tr><th>Thời gian</th><th>Báo cáo</th><th>Trạng thái</th><th>File dữ liệu</th><th>Thông báo</th></tr></thead>
+                <tbody id="ftp-run-history"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+        {% endif %}
+
         {% if render_view("reports-old") %}
         <section class="app-view hidden" id="view-reports-old">
           <div class="page-header"><div><p class="eyebrow">Truy vấn SQL</p><h1>Truy vấn SQL</h1><p class="subtitle">Khu vực này sẽ hiển thị biểu đồ và báo cáo BRCĐ theo yêu cầu tiếp theo.</p></div></div>
@@ -482,6 +511,18 @@
             </div>
             <div id="onebss-reports-message" class="result hidden mb-4"></div>
             <div id="onebss-report-editor" class="sql-report-editor"></div>
+          </section>
+          <section class="data-card mt-4">
+            <div class="section-heading">
+              <div><p class="eyebrow">Quản trị dữ liệu FTP</p><h2>Danh sách báo cáo FTP</h2><p>Lưu link thư mục và mẫu tên file cho module đào dữ liệu FTP.</p></div>
+              <button class="btn-primary" id="add-inline-ftp-report" type="button">Thêm báo cáo FTP</button>
+            </div>
+            <div class="admin-inline-toolbar">
+              <label>Tìm báo cáo FTP<input class="form-control" id="ftp-report-search" placeholder="Nhập tên, mã, thư mục hoặc tên file..." /></label>
+              <label>Chọn báo cáo FTP<select class="form-control" id="ftp-report-picker"><option value="">Thêm báo cáo mới / chưa chọn báo cáo</option></select></label>
+            </div>
+            <div id="ftp-reports-message" class="result hidden mb-4"></div>
+            <div id="ftp-report-editor" class="sql-report-editor"></div>
           </section>
           <section class="data-card mt-4">
             <div class="section-heading">
@@ -880,9 +921,9 @@
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
     {% if shell_only %}
-    <script defer src="/static/shell.js?v=11"></script>
+    <script defer src="/static/shell.js?v=12"></script>
     {% else %}
-    <script defer src="/static/app.js?v=187"></script>
+    <script defer src="/static/app.js?v=188"></script>
     {% endif %}
   </body>
 </html>

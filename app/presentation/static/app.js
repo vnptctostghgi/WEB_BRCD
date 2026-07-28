@@ -154,13 +154,14 @@ let workstationScriptPromise = null;
 let workTasksScriptPromise = null;
 let reportLinksScriptPromise = null;
 let dataMiningScriptPromise = null;
+let ftpMiningScriptPromise = null;
 let reportsRuntimeScriptPromise = null;
 const dataCacheTimestamps = new Map();
 const dashboardViewerLayoutCache = new Map();
 const dashboardBuilderLayoutCache = new Map();
 const DATA_CACHE_TTL_MS = 2 * 60 * 1000;
 const NAVIGATION_CLIENT_CACHE_TTL_MS = 60 * 1000;
-const NAVIGATION_CLIENT_CACHE_VERSION = "2026-07-28-1";
+const NAVIGATION_CLIENT_CACHE_VERSION = "2026-07-28-2";
 const TABLE_PAGE_SIZE = 20;
 const PUBLIC_MESSAGES_LIMIT = 10;
 const TABLE_SHORT_PAGE_SIZE = 10;
@@ -326,6 +327,29 @@ function ensureDataMiningScriptLoaded() {
   return dataMiningScriptPromise;
 }
 
+function ensureFtpMiningScriptLoaded() {
+  if (window.VNPTFtpMining?.loadFtpMining) return Promise.resolve();
+  const existingScript = document.querySelector("script[data-ftp-mining='true']");
+  if (existingScript?.dataset.loaded === "true") return Promise.resolve();
+  if (ftpMiningScriptPromise) return ftpMiningScriptPromise;
+  ftpMiningScriptPromise = new Promise((resolve, reject) => {
+    const script = existingScript || document.createElement("script");
+    script.src = "/static/ftp-mining.js?v=2";
+    script.defer = true;
+    script.dataset.ftpMining = "true";
+    script.addEventListener("load", () => {
+      script.dataset.loaded = "true";
+      resolve();
+    }, { once: true });
+    script.addEventListener("error", () => {
+      ftpMiningScriptPromise = null;
+      reject(new Error("Khong tai duoc module Dao du lieu FTP."));
+    }, { once: true });
+    if (!existingScript) document.body.appendChild(script);
+  });
+  return ftpMiningScriptPromise;
+}
+
 function ensureReportsRuntimeScriptLoaded() {
   if (window.VNPTReportsRuntime?.loadDynamicReports) return Promise.resolve();
   const existingScript = document.querySelector("script[data-reports-runtime='true']");
@@ -466,6 +490,7 @@ const navFeatureConfig = {
   truyvansql: { view: "reports", icon: "chart", keywords: "truy van sql bao cao thong ke bieu do" },
   thietkelayoutbaocao: { view: "dashboard-builder", icon: "chart", keywords: "dashboard builder thiet ke layout bao cao tab bieu do" },
   daodulieuonebss: { view: "onebss-mining", icon: "database", keywords: "dao du lieu onebss bao cao excel" },
+  daodulieuftp: { view: "ftp-mining", icon: "download", keywords: "dao du lieu ftp bao cao file may tram" },
   linkbaocao: { view: "report-links", icon: "download", keywords: "link bao cao google drive sheet doc slides pdf copy tai xuong" },
   publicmessages: { view: "public-messages", icon: "audit", keywords: "noi dung public sms email otp copy" },
 };
@@ -796,6 +821,10 @@ function viewLoaderForNav(nextView, dashboardPageId) {
   if (nextView === "onebss-mining") return async () => {
     await ensureReportsRuntimeScriptLoaded();
     return loadOneBssMining();
+  };
+  if (nextView === "ftp-mining") return async () => {
+    await ensureFtpMiningScriptLoaded();
+    return loadFtpMining();
   };
   if (nextView === "report-links") return async () => {
     await ensureReportLinksScriptLoaded();
@@ -4830,6 +4859,7 @@ function warmSystemSecondarySections({ force = false } = {}) {
     loadZaloAutoMessages({ force }),
     loadZaloMessageLogs({ force }),
     loadDataMining({ force }),
+    loadFtpReports({ force }),
     loadSqlReports({ force }),
     loadOneBssReports({ force }),
     loadReportLinks({ force }),
@@ -4840,6 +4870,18 @@ async function loadWorkstation(options = {}) {
   await ensureWorkstationScriptLoaded();
   if (!window.VNPTWorkstation?.loadWorkstation) throw new Error("Module May tram chua san sang.");
   return window.VNPTWorkstation.loadWorkstation(options);
+}
+
+async function loadFtpReports(options = {}) {
+  await ensureFtpMiningScriptLoaded();
+  if (!window.VNPTFtpMining?.loadFtpReports) throw new Error("Module FTP chua san sang.");
+  return window.VNPTFtpMining.loadFtpReports(options);
+}
+
+async function loadFtpMining(options = {}) {
+  await ensureFtpMiningScriptLoaded();
+  if (!window.VNPTFtpMining?.loadFtpMining) throw new Error("Module FTP chua san sang.");
+  return window.VNPTFtpMining.loadFtpMining(options);
 }
 
 async function loadConnections({ force = false } = {}) {
@@ -4876,6 +4918,10 @@ function renderConnectionsTable() {
     field.addEventListener("change", () => markConnectionDirty(field.closest("[data-connection-row]")));
   });
   document.querySelectorAll("[data-internal-email-config]").forEach((field) => {
+    field.addEventListener("input", () => markConnectionDirty(field.closest("[data-connection-row]")));
+    field.addEventListener("change", () => markConnectionDirty(field.closest("[data-connection-row]")));
+  });
+  document.querySelectorAll("[data-ftp-config]").forEach((field) => {
     field.addEventListener("input", () => markConnectionDirty(field.closest("[data-connection-row]")));
     field.addEventListener("change", () => markConnectionDirty(field.closest("[data-connection-row]")));
   });
@@ -4962,6 +5008,40 @@ function readInternalEmailConnectionConfig(row, baseConfig = {}) {
   return config;
 }
 
+function renderFtpConnectionPanel(connection) {
+  const config = connection.config || {};
+  const protectedKeys = connection.protected_config_keys || [];
+  const hasPassword = protectedKeys.includes("password");
+  return `
+      <div class="connection-type-panel ftp-config-panel">
+        <div class="section-heading compact"><div><p class="eyebrow">FTP noi bo</p><h4>Cau hinh may chu FTP</h4></div></div>
+        <div class="connection-form-grid">
+          <label>FTP host<input class="form-control inline-admin-input" data-ftp-config="host" value="${escapeHtml(config.host || "10.159.23.100")}" autocomplete="off" /></label>
+          <label>Cong<input class="form-control inline-admin-input" data-ftp-config="port" type="number" min="1" max="65535" value="${escapeHtml(config.port || 21)}" /></label>
+          <label>Tai khoan<input class="form-control inline-admin-input" data-ftp-config="username" value="${escapeHtml(config.username || "thangph.cto")}" autocomplete="off" /></label>
+          <label>Mat khau<input class="form-control inline-admin-input" data-ftp-config="password" type="password" autocomplete="new-password" placeholder="${hasPassword ? "Da luu, nhap de doi" : "Nhap mat khau FTP"}" /></label>
+          <label>Timeout giay<input class="form-control inline-admin-input" data-ftp-config="timeout_seconds" type="number" min="5" max="600" value="${escapeHtml(config.timeout_seconds || 60)}" /></label>
+        </div>
+        <label class="checkbox-label inline-checkbox"><input type="checkbox" data-ftp-config="passive" ${config.passive === false ? "" : "checked"} /> Passive mode</label>
+        ${hasPassword ? `<small class="cell-note">Mat khau FTP da luu va duoc an tren trinh duyet. Nhap mat khau moi neu can thay doi.</small>` : ""}
+      </div>`;
+}
+
+function readFtpConnectionConfig(row, baseConfig = {}) {
+  const config = { ...baseConfig };
+  const read = (key) => row.querySelector(`[data-ftp-config="${key}"]`);
+  const textValue = (key, fallback = "") => (read(key)?.value || fallback).trim();
+  config.host = textValue("host", "10.159.23.100");
+  config.port = connectionNumberValue(textValue("port"), 21);
+  config.username = textValue("username", "thangph.cto");
+  config.passive = Boolean(read("passive")?.checked);
+  config.timeout_seconds = connectionNumberValue(textValue("timeout_seconds"), 60);
+  config.secret_ref = config.secret_ref || "FTP_PASSWORD";
+  const password = read("password")?.value || "";
+  if (password) config.password = password;
+  return config;
+}
+
 function renderConnectionEditor(connection) {
   const configText = JSON.stringify(connection.config || {}, null, 2);
   const configKeys = Object.keys(connection.config || {});
@@ -4985,7 +5065,8 @@ function renderConnectionEditor(connection) {
       ${renderDriveOauthPanel(connection)}
       <label>Mô tả<textarea class="form-control inline-admin-note connection-description" data-inline-connection-field="description" rows="3" placeholder="Mô tả">${escapeHtml(connection.description || "")}</textarea></label>
       ${connection.connection_type === "internal_email" ? renderInternalEmailConnectionPanel(connection) : ""}
-      ${connection.connection_type === "internal_email"
+      ${connection.connection_type === "ftp" ? renderFtpConnectionPanel(connection) : ""}
+      ${connection.connection_type === "internal_email" || connection.connection_type === "ftp"
         ? `<input type="hidden" data-inline-connection-field="config_json" value="${escapeHtml(configText)}" />`
         : `<label>Bảng lệnh / Cấu hình<textarea class="form-control inline-admin-code connection-editor-code" data-inline-connection-field="config_json" rows="14">${escapeHtml(configText)}</textarea></label>`}
       <div class="cell-note" id="connection-result-${escapeHtml(connection.code)}"></div>
@@ -5031,6 +5112,9 @@ async function saveInlineConnection(code, button) {
   const connectionType = row.querySelector('[data-inline-connection-field="connection_type"]')?.value || "internal_api";
   if (connectionType === "internal_email") {
     config = readInternalEmailConnectionConfig(row, config);
+  }
+  if (connectionType === "ftp") {
+    config = readFtpConnectionConfig(row, config);
   }
   setButtonLoading(button, true);
   try {

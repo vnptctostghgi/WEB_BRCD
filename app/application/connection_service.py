@@ -47,13 +47,23 @@ class ConnectionService:
             },
             is_active=self.settings.app_database_backend == "supabase",
         )
+        existing_ftp = self.repository.get_system_connection_by_code("ftp_storage") or {}
+        existing_ftp_config = existing_ftp.get("config") if isinstance(existing_ftp.get("config"), dict) else {}
+        ftp_config = dict(existing_ftp_config)
+        ftp_config["host"] = ftp_config.get("host") or "10.159.23.100"
+        ftp_config["port"] = ftp_config.get("port") or 21
+        ftp_config["username"] = ftp_config.get("username") or "thangph.cto"
+        ftp_config["password"] = ftp_config.get("password") or "$Phthang125125"
+        ftp_config["passive"] = ftp_config.get("passive", True)
+        ftp_config["timeout_seconds"] = ftp_config.get("timeout_seconds") or 60
+        ftp_config["secret_ref"] = ftp_config.get("secret_ref") or "FTP_PASSWORD"
         self.repository.upsert_system_connection(
             code="ftp_storage",
-            name="FTP",
+            name=str(existing_ftp.get("name") or "FTP"),
             connection_type="ftp",
-            description="Kết nối FTP phục vụ trao đổi file. Chưa cấu hình thông tin máy chủ.",
-            config={"host": "", "port": 21, "secret_ref": "FTP_PASSWORD"},
-            is_active=False,
+            description=str(existing_ftp.get("description") or "Kết nối FTP nội bộ để máy trạm lấy file báo cáo."),
+            config=ftp_config,
+            is_active=bool(existing_ftp.get("is_active")) if existing_ftp else bool(ftp_config.get("host") and ftp_config.get("username") and ftp_config.get("password")),
         )
         existing_drive = self.repository.get_system_connection_by_code("drive_storage") or {}
         existing_drive_config = existing_drive.get("config") if isinstance(existing_drive.get("config"), dict) else {}
@@ -150,6 +160,27 @@ class ConnectionService:
 
         if connection["connection_type"] == "zalo":
             return self._with_connection(ZaloBotClient(self.settings).test(), connection)
+
+        if connection["connection_type"] == "ftp":
+            config = connection.get("config") if isinstance(connection.get("config"), dict) else {}
+            missing = [key for key in ("host", "username", "password") if not str(config.get(key) or "").strip()]
+            return self._with_connection(
+                {
+                    "ok": not missing,
+                    "message": (
+                        "Da cau hinh FTP. Ket noi that se duoc may tram noi bo kiem tra khi lay bao cao."
+                        if not missing
+                        else f"FTP thieu cau hinh: {', '.join(missing)}."
+                    ),
+                    "details": {
+                        "host": config.get("host") or "",
+                        "port": config.get("port") or 21,
+                        "username_configured": bool(str(config.get("username") or "").strip()),
+                        "password_configured": bool(str(config.get("password") or "").strip()),
+                    },
+                },
+                connection,
+            )
 
         if connection["connection_type"] == "drive":
             return self._with_connection(test_google_drive_connection(self.settings, self.repository), connection)

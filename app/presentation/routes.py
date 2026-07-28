@@ -113,6 +113,8 @@ ONEBSS_REPORT_JOB_TTL_SECONDS = 24 * 60 * 60
 ONEBSS_REPORT_JOB_DIR = Path(tempfile.gettempdir()) / "vnptcto_onebss_report_jobs"
 ONEBSS_REPORT_ACTIVE_STATUSES = {"queued", "running", "otp_required", "otp_invalid", "manual_otp_required"}
 ONEBSS_REPORT_FINAL_STATUSES = {"success", "failed", "cancelled", "storage_failed", "google_drive_not_configured", "google_drive_upload_failed"}
+FTP_REPORT_ACTIVE_STATUSES = {"queued", "running"}
+FTP_REPORT_FINAL_STATUSES = {"success", "failed", "cancelled"}
 DATA_MINING_RUN_SEMAPHORE = threading.Semaphore(1)
 EXCEL_MAX_ROWS_PER_SHEET = 1_048_576
 ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
@@ -146,6 +148,12 @@ WORKSTATION_ROLE_PLAN = [
         "code": "onebss_worker",
         "title": "Worker đào dữ liệu OneBSS",
         "description": "Nhận hàng đợi từ web, chạy OneBSS bằng Playwright, nhận OTP qua Mobile Gateway và trả file kết quả.",
+        "status": "ready",
+    },
+    {
+        "code": "ftp_report_worker",
+        "title": "Worker dao du lieu FTP",
+        "description": "Nhan task FTP tu web, vao mang noi bo tren may tram, tim file theo cau hinh va gui file ket qua ve web.",
         "status": "ready",
     },
     {
@@ -505,6 +513,48 @@ class OneBssWorkerResultPayload(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
+class FtpReportPayload(BaseModel):
+    id: int | None = None
+    ma_bao_cao: str = ""
+    ten_bao_cao: str
+    folder_path: str
+    file_name_template: str
+    connection_code: str = "ftp_storage"
+    is_active: bool = True
+
+
+class RunFtpReportPayload(BaseModel):
+    ma_bao_cao: str
+    folder_path: str = ""
+    file_name_template: str = ""
+    job_id: str = ""
+
+
+class FtpWorkerClaimPayload(BaseModel):
+    worker_id: str = "onebss-workstation"
+
+
+class FtpWorkerStatusPayload(BaseModel):
+    status: str
+    message: str = ""
+    worker_id: str = ""
+    resolved_file_name: str = ""
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class FtpWorkerResultPayload(BaseModel):
+    ok: bool = True
+    status: str = ""
+    message: str = ""
+    resolved_file_name: str = ""
+    file_name: str = ""
+    file_path: str = ""
+    storage_link: str = ""
+    storage_status: str = ""
+    duration_ms: int = 0
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
 class WorkstationHeartbeatPayload(BaseModel):
     worker_id: str = "onebss-workstation"
     status: str = "idle"
@@ -747,6 +797,15 @@ def raise_data_mining_schema_error(error: RuntimeError) -> None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Supabase chua co bang data_mining_schedules/data_mining_runs. Hay chay lai file sql/supabase_upgrade_admin_modules.sql.",
+        ) from error
+    raise error
+
+
+def raise_ftp_report_schema_error(error: RuntimeError) -> None:
+    if "ftp_reports" in str(error) or "ftp_report_runs" in str(error):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Supabase chua co bang ftp_reports/ftp_report_runs. Hay chay lai file sql/supabase_upgrade_admin_modules.sql.",
         ) from error
     raise error
 
@@ -2207,16 +2266,19 @@ def workstation_runs_overview(runs: list[dict[str, Any]]) -> dict[str, Any]:
                 "last_task_id": run.get("run_id") or "",
                 "last_task_message": run.get("message") or "",
                 "last_task_report": run.get("ten_bao_cao") or run.get("ma_bao_cao") or "",
+                "last_task_type": run.get("task_type") or "onebss",
             }
-        if status_value in ONEBSS_REPORT_ACTIVE_STATUSES:
+        if status_value in ONEBSS_REPORT_ACTIVE_STATUSES or status_value in FTP_REPORT_ACTIVE_STATUSES:
             workers.setdefault(worker_id, {"worker_id": worker_id, "last_seen_at_dt": seen_at})
             workers[worker_id]["active_task_count"] = int(workers[worker_id].get("active_task_count") or 0) + 1
     latest_runs = []
     for run in runs[:10]:
+        task_type = str(run.get("task_type") or "onebss").strip().lower()
+        prefix = "FTP: " if task_type == "ftp" else ""
         latest_runs.append(
             {
                 "run_id": run.get("run_id") or "",
-                "report": run.get("ten_bao_cao") or run.get("ma_bao_cao") or "",
+                "report": f"{prefix}{run.get('ten_bao_cao') or run.get('ma_bao_cao') or ''}",
                 "status": run.get("status") or "",
                 "message": run.get("message") or "",
                 "worker_id": run.get("worker_id") or "",
@@ -2226,9 +2288,9 @@ def workstation_runs_overview(runs: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "status_counts": status_counts,
         "queued": status_counts.get("queued", 0),
-        "active": sum(status_counts.get(status_value, 0) for status_value in ONEBSS_REPORT_ACTIVE_STATUSES),
+        "active": sum(status_counts.get(status_value, 0) for status_value in ONEBSS_REPORT_ACTIVE_STATUSES | FTP_REPORT_ACTIVE_STATUSES),
         "waiting_otp": sum(status_counts.get(status_value, 0) for status_value in {"otp_required", "otp_invalid", "manual_otp_required"}),
-        "final": sum(status_counts.get(status_value, 0) for status_value in ONEBSS_REPORT_FINAL_STATUSES),
+        "final": sum(status_counts.get(status_value, 0) for status_value in ONEBSS_REPORT_FINAL_STATUSES | FTP_REPORT_FINAL_STATUSES),
         "workers": workers,
         "latest_runs": latest_runs,
     }
@@ -2271,13 +2333,14 @@ def workstation_workers_response(runs: list[dict[str, Any]]) -> list[dict[str, A
             "details": heartbeat.get("details") if isinstance(heartbeat.get("details"), dict) else {},
         }
     for worker_id, worker in run_overview["workers"].items():
+        fallback_roles = ["ftp_report_worker"] if str(worker.get("last_task_type") or "").lower() == "ftp" else ["onebss_worker"]
         item = by_worker.setdefault(
             worker_id,
             {
                 "worker_id": worker_id,
                 "status": "unknown",
                 "runtime_status": "unknown",
-                "roles": ["onebss_worker"],
+                "roles": fallback_roles,
                 "version": "",
                 "message": "",
                 "last_seen_at": "",
@@ -2383,6 +2446,7 @@ ROUTE_VIEW_BY_FEATURE_CODE = {
     "truyvansql": "reports",
     "thietkelayoutbaocao": "dashboard-builder",
     "daodulieuonebss": "onebss-mining",
+    "daodulieuftp": "ftp-mining",
     "linkbaocao": "report-links",
     "publicmessages": "public-messages",
     "dashboard": "dashboard",
@@ -2757,11 +2821,17 @@ def workstation_overview(request: Request) -> dict:
     admin_user(request)
     repository = build_app_repository()
     runs: list[dict[str, Any]] = []
-    run_error = ""
+    run_errors: list[str] = []
     try:
-        runs = repository.list_onebss_report_runs(limit=100)
+        runs.extend({**run, "task_type": "onebss"} for run in repository.list_onebss_report_runs(limit=100))
     except RuntimeError as error:
-        run_error = str(error)
+        run_errors.append(str(error))
+    try:
+        runs.extend({**run, "task_type": "ftp"} for run in repository.list_ftp_report_runs(limit=100))
+    except RuntimeError as error:
+        run_errors.append(str(error))
+    runs.sort(key=lambda run: workstation_run_last_seen(run) or datetime.min.replace(tzinfo=UTC), reverse=True)
+    runs = runs[:100]
     run_overview = workstation_runs_overview(runs)
     return {
         "ok": True,
@@ -2780,7 +2850,7 @@ def workstation_overview(request: Request) -> dict:
             "final": run_overview["final"],
             "status_counts": run_overview["status_counts"],
             "latest_runs": run_overview["latest_runs"],
-            "error": run_error,
+            "error": " | ".join(run_errors),
         },
         "workers": workstation_workers_response(runs),
         "config": workstation_public_config(request),
@@ -3155,6 +3225,65 @@ def delete_admin_onebss_report(request: Request, report_id: int) -> dict:
         raise_onebss_report_schema_error(error)
     repository.add_audit_log(actor["username"], "onebss_report_deleted", f"Xoa cau hinh OneBSS {report_id}")
     clear_config_cache("onebss_report_configs")
+    return {"ok": True}
+
+
+@router.get("/api/admin/ftp-reports")
+def list_admin_ftp_reports(request: Request) -> dict:
+    admin_user(request)
+    try:
+        return {"reports": build_app_repository().list_ftp_reports()}
+    except RuntimeError as error:
+        raise_ftp_report_schema_error(error)
+
+
+@router.post("/api/admin/ftp-reports")
+def save_admin_ftp_report(request: Request, payload: FtpReportPayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    ten_bao_cao = payload.ten_bao_cao.strip()
+    folder_path = payload.folder_path.strip()
+    file_name_template = payload.file_name_template.strip()
+    if not ten_bao_cao:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ten bao cao FTP khong duoc de trong.")
+    if not folder_path:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Link thu muc FTP khong duoc de trong.")
+    if not file_name_template:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ten file FTP khong duoc de trong.")
+    ma_bao_cao = payload.ma_bao_cao.strip().upper() or repository.generate_ftp_report_code()
+    connection_code = payload.connection_code.strip() or "ftp_storage"
+    try:
+        report_id = repository.save_ftp_report(
+            payload.id,
+            ma_bao_cao,
+            ten_bao_cao,
+            folder_path,
+            file_name_template,
+            connection_code,
+            payload.is_active,
+        )
+    except sqlite3.IntegrityError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ma bao cao FTP da ton tai.") from error
+    except RuntimeError as error:
+        raise_ftp_report_schema_error(error)
+    try:
+        repository.add_audit_log(actor["username"], "ftp_report_saved", f"Luu cau hinh FTP {ma_bao_cao}")
+    except Exception:
+        logger.exception("Cannot write FTP report saved audit log")
+    clear_config_cache("ftp_report_configs")
+    return {"ok": True, "id": report_id, "ma_bao_cao": ma_bao_cao}
+
+
+@router.delete("/api/admin/ftp-reports/{report_id}")
+def delete_admin_ftp_report(request: Request, report_id: int) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    try:
+        repository.delete_ftp_report(report_id)
+    except RuntimeError as error:
+        raise_ftp_report_schema_error(error)
+    repository.add_audit_log(actor["username"], "ftp_report_deleted", f"Xoa cau hinh FTP {report_id}")
+    clear_config_cache("ftp_report_configs")
     return {"ok": True}
 
 
@@ -4291,6 +4420,98 @@ def export_loaded_dynamic_report(request: Request, payload: ExportLoadedReportPa
     )
 
 
+def _ftp_report_download_url(run: dict[str, Any]) -> str:
+    file_path = str(run.get("file_path") or "").strip()
+    run_id = str(run.get("run_id") or "").strip()
+    if not file_path or not run_id or not Path(file_path).exists():
+        return ""
+    return f"/api/ftp-reports/runs/{quote(run_id)}/download"
+
+
+def _ftp_report_file_url(run: dict[str, Any]) -> str:
+    storage_link = str(run.get("storage_link") or "").strip()
+    if storage_link.startswith(("http://", "https://")):
+        return storage_link
+    return _ftp_report_download_url(run)
+
+
+def _decorate_ftp_report_run(run: dict[str, Any]) -> dict[str, Any]:
+    decorated = dict(run)
+    status_value = str(decorated.get("status") or "").lower()
+    decorated["can_poll"] = status_value in FTP_REPORT_ACTIVE_STATUSES
+    decorated["can_cancel"] = status_value in FTP_REPORT_ACTIVE_STATUSES
+    file_url = _ftp_report_file_url(decorated)
+    if file_url:
+        decorated["file_url"] = file_url
+    download_url = _ftp_report_download_url(decorated)
+    if download_url:
+        decorated["download_url"] = download_url
+    return decorated
+
+
+def _ftp_report_run_cancelled(run: dict[str, Any]) -> bool:
+    return str(run.get("status") or "").lower() == "cancelled"
+
+
+def _ftp_worker_cancelled_response(run: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "cancelled": True,
+        "status": "cancelled",
+        "message": run.get("message") or "Task FTP da bi huy.",
+        "run": _decorate_ftp_report_run(run),
+    }
+
+
+def _ftp_worker_result_file_updates(run: dict[str, Any], payload: FtpWorkerResultPayload) -> dict[str, Any]:
+    payload_file_path = str(payload.file_path or "").strip()
+    current_file_path = str(run.get("file_path") or "").strip()
+    payload_is_server_file = bool(payload_file_path and Path(payload_file_path).exists())
+    current_is_server_file = bool(current_file_path and Path(current_file_path).exists())
+    keep_current_file = current_is_server_file and not payload_is_server_file
+    return {
+        "resolved_file_name": payload.resolved_file_name or run.get("resolved_file_name") or "",
+        "file_name": (run.get("file_name") if keep_current_file else payload.file_name) or run.get("file_name") or "",
+        "file_path": (run.get("file_path") if keep_current_file else payload.file_path) or run.get("file_path") or "",
+        "storage_link": (run.get("storage_link") if keep_current_file else payload.storage_link) or run.get("storage_link") or "",
+        "storage_status": (run.get("storage_status") if keep_current_file else payload.storage_status) or run.get("storage_status") or "",
+    }
+
+
+def _ftp_report_job_response(job_id: str, run: dict[str, Any]) -> dict[str, Any]:
+    status_value = str(run.get("status") or "queued").lower()
+    response = {
+        "ok": status_value not in {"failed", "cancelled"},
+        "job_id": job_id,
+        "run_id": run.get("run_id") or job_id,
+        "status": status_value,
+        "message": run.get("message") or "",
+        "ma_bao_cao": run.get("ma_bao_cao") or "",
+        "ten_bao_cao": run.get("ten_bao_cao") or "",
+        "folder_path": run.get("folder_path") or "",
+        "file_name_template": run.get("file_name_template") or "",
+        "resolved_file_name": run.get("resolved_file_name") or "",
+        "file_name": run.get("file_name") or "",
+        "file_path": run.get("file_path") or "",
+        "storage_link": run.get("storage_link") or "",
+        "storage_status": run.get("storage_status") or "",
+        "started_at": run.get("started_at") or "",
+        "finished_at": run.get("finished_at") or "",
+        "created_by": run.get("created_by") or "",
+        "worker_id": run.get("worker_id") or "",
+        "can_poll": status_value in FTP_REPORT_ACTIVE_STATUSES,
+        "can_cancel": status_value in FTP_REPORT_ACTIVE_STATUSES,
+    }
+    download_url = _ftp_report_download_url(response)
+    if download_url:
+        response["download_url"] = download_url
+    file_url = _ftp_report_file_url(response)
+    if file_url:
+        response["file_url"] = file_url
+    response["run"] = _decorate_ftp_report_run(run)
+    return response
+
+
 def _onebss_report_job_path(job_id: str) -> Path:
     safe_id = re.sub(r"[^A-Za-z0-9_-]+", "", str(job_id or ""))
     return ONEBSS_REPORT_JOB_DIR / f"{safe_id or 'unknown'}.json"
@@ -4567,6 +4788,306 @@ def _save_onebss_job_result(
         "duration_ms": int(result.get("duration_ms") or 0),
         "created_by": created_by,
     })
+
+
+@router.get("/api/ftp-reports/configs")
+def list_ftp_report_configs(request: Request) -> dict:
+    admin_user(request)
+    try:
+        reports = build_app_repository().list_ftp_reports(active_only=True)
+    except RuntimeError as error:
+        raise_ftp_report_schema_error(error)
+    return {"reports": reports}
+
+
+@router.get("/api/ftp-reports/runs")
+def list_ftp_report_runs(request: Request, ma_bao_cao: str = "", limit: int = 50) -> dict:
+    admin_user(request)
+    report_code = ma_bao_cao.strip().upper()
+    try:
+        runs = [
+            _decorate_ftp_report_run(run)
+            for run in build_app_repository().list_ftp_report_runs(ma_bao_cao=report_code, limit=limit)
+        ]
+    except RuntimeError as error:
+        raise_ftp_report_schema_error(error)
+    return {"runs": runs}
+
+
+@router.delete("/api/ftp-reports/runs")
+@router.post("/api/ftp-reports/runs/clear")
+def clear_ftp_report_runs(request: Request, ma_bao_cao: str = "") -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    report_code = ma_bao_cao.strip().upper()
+    try:
+        deleted = repository.clear_ftp_report_runs(ma_bao_cao=report_code)
+    except RuntimeError as error:
+        raise_ftp_report_schema_error(error)
+    scope = report_code or "all"
+    repository.add_audit_log(actor["username"], "ftp_report_runs_cleared", f"Xoa lich su chay FTP: {scope} ({deleted})")
+    return {"ok": True, "deleted": deleted}
+
+
+@router.post("/api/ftp-reports/runs/{run_id}/cancel")
+@router.delete("/api/ftp-reports/runs/{run_id}/cancel")
+def cancel_ftp_report_run(request: Request, run_id: str) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    try:
+        run = repository.get_ftp_report_run(run_id.strip())
+    except RuntimeError as error:
+        raise_ftp_report_schema_error(error)
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task FTP.")
+    status_value = str(run.get("status") or "").lower()
+    if status_value not in FTP_REPORT_ACTIVE_STATUSES:
+        response = _ftp_report_job_response(run_id, run)
+        response["run"] = _decorate_ftp_report_run(run)
+        return response
+    updated = repository.update_ftp_report_run(
+        run_id.strip(),
+        {
+            "status": "cancelled",
+            "message": "Da huy task FTP theo yeu cau.",
+            "finished_at": datetime.now().isoformat(timespec="seconds"),
+        },
+    ) or run
+    try:
+        repository.add_audit_log(actor["username"], "ftp_report_run_cancelled", f"Huy task FTP {run_id}")
+    except Exception:
+        logger.exception("Cannot write FTP run cancel audit log")
+    response = _ftp_report_job_response(run_id, updated)
+    response["run"] = _decorate_ftp_report_run(updated)
+    return response
+
+
+@router.get("/api/ftp-reports/jobs/{job_id}")
+def get_ftp_report_job(request: Request, job_id: str) -> dict:
+    admin_user(request)
+    try:
+        run = build_app_repository().get_ftp_report_run(job_id.strip())
+    except RuntimeError as error:
+        raise_ftp_report_schema_error(error)
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay job FTP.")
+    return _ftp_report_job_response(job_id, run)
+
+
+@router.get("/api/ftp-reports/runs/{run_id}/download")
+def download_ftp_report_run(request: Request, run_id: str) -> Response:
+    admin_user(request)
+    try:
+        run = build_app_repository().get_ftp_report_run(run_id.strip())
+    except RuntimeError as error:
+        raise_ftp_report_schema_error(error)
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay lan lay du lieu FTP.")
+    file_path = Path(str(run.get("file_path") or ""))
+    if not file_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File ket qua FTP khong con ton tai tren may chu.")
+    return FileResponse(file_path, media_type="application/octet-stream", filename=str(run.get("file_name") or file_path.name))
+
+
+@router.post("/api/ftp-reports/run")
+def run_ftp_report(request: Request, payload: RunFtpReportPayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    ma_bao_cao = payload.ma_bao_cao.strip().upper()
+    try:
+        report = repository.get_ftp_report_by_code(ma_bao_cao)
+    except RuntimeError as error:
+        raise_ftp_report_schema_error(error)
+    if not report:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay cau hinh bao cao FTP.")
+    if not report.get("is_active"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bao cao FTP nay dang tam tat.")
+    folder_path = payload.folder_path.strip() or str(report.get("folder_path") or "").strip()
+    file_name_template = payload.file_name_template.strip() or str(report.get("file_name_template") or "").strip()
+    if not folder_path or not file_name_template:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chua du link thu muc hoac ten file FTP.")
+    job_id = re.sub(r"[^A-Za-z0-9_-]+", "", payload.job_id.strip()) or uuid.uuid4().hex
+    try:
+        existing_run = repository.get_ftp_report_run(job_id)
+    except RuntimeError as error:
+        raise_ftp_report_schema_error(error)
+    if existing_run and str(existing_run.get("status") or "").lower() in FTP_REPORT_ACTIVE_STATUSES:
+        return _ftp_report_job_response(job_id, existing_run)
+    started_at = datetime.now().isoformat(timespec="seconds")
+    try:
+        run = repository.save_ftp_report_run({
+            "run_id": job_id,
+            "ma_bao_cao": report.get("ma_bao_cao") or ma_bao_cao,
+            "ten_bao_cao": report.get("ten_bao_cao") or ma_bao_cao,
+            "status": "queued",
+            "message": "Da dua yeu cau lay bao cao FTP vao hang doi may tram.",
+            "folder_path": folder_path,
+            "file_name_template": file_name_template,
+            "started_at": started_at,
+            "finished_at": "",
+            "created_by": actor["username"],
+        })
+    except RuntimeError as error:
+        raise_ftp_report_schema_error(error)
+    try:
+        repository.add_audit_log(actor["username"], "ftp_report_job_queued", f"Dua bao cao FTP {ma_bao_cao} vao hang doi: {job_id}")
+    except Exception:
+        logger.exception("Cannot write FTP report queued audit log")
+    return _ftp_report_job_response(job_id, run)
+
+
+@router.post("/api/ftp-worker/tasks/claim")
+def claim_ftp_worker_task(request: Request, payload: FtpWorkerClaimPayload) -> dict:
+    onebss_worker_token(request)
+    repository = build_app_repository()
+    try:
+        run = repository.claim_next_ftp_report_run(payload.worker_id)
+    except RuntimeError as error:
+        raise_ftp_report_schema_error(error)
+    if not run:
+        return {"ok": True, "task": None, "message": "Khong co task FTP dang cho."}
+    report = repository.get_ftp_report_by_code(str(run.get("ma_bao_cao") or ""))
+    if not report:
+        repository.update_ftp_report_run(
+            str(run.get("run_id") or ""),
+            {
+                "status": "failed",
+                "message": "Khong tim thay cau hinh bao cao FTP cho task.",
+                "finished_at": datetime.now().isoformat(timespec="seconds"),
+            },
+        )
+        return {"ok": False, "task": None, "message": "Khong tim thay cau hinh bao cao FTP."}
+    connection_code = str(report.get("connection_code") or "ftp_storage").strip() or "ftp_storage"
+    connection = repository.get_system_connection_by_code(connection_code)
+    config = connection.get("config") if connection and isinstance(connection.get("config"), dict) else {}
+    missing = [key for key in ("host", "username", "password") if not str(config.get(key) or "").strip()]
+    if not connection or not connection.get("is_active") or missing:
+        repository.update_ftp_report_run(
+            str(run.get("run_id") or ""),
+            {
+                "status": "failed",
+                "message": "Ket noi FTP chua san sang tren Quản trị kết nối.",
+                "finished_at": datetime.now().isoformat(timespec="seconds"),
+            },
+        )
+        return {"ok": False, "task": None, "message": "Ket noi FTP chua san sang."}
+    return {
+        "ok": True,
+        "task": {
+            "run_id": run.get("run_id"),
+            "job_id": run.get("run_id"),
+            "ma_bao_cao": run.get("ma_bao_cao"),
+            "ten_bao_cao": run.get("ten_bao_cao"),
+            "folder_path": run.get("folder_path") or report.get("folder_path") or "",
+            "file_name_template": run.get("file_name_template") or report.get("file_name_template") or "",
+            "report": report,
+            "connection": {
+                "code": connection_code,
+                "name": connection.get("name") or connection_code,
+                "config": config,
+            },
+            "created_by": run.get("created_by") or "",
+            "started_at": run.get("started_at") or "",
+        },
+    }
+
+
+@router.post("/api/ftp-worker/tasks/{run_id}/status")
+def update_ftp_worker_task_status(request: Request, run_id: str, payload: FtpWorkerStatusPayload) -> dict:
+    onebss_worker_token(request)
+    repository = build_app_repository()
+    run = repository.get_ftp_report_run(run_id.strip())
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task FTP.")
+    if _ftp_report_run_cancelled(run):
+        return _ftp_worker_cancelled_response(run)
+    updated = repository.update_ftp_report_run(
+        run_id.strip(),
+        {
+            "status": payload.status.strip().lower() or "running",
+            "message": payload.message or "May tram dang xu ly task FTP.",
+            "worker_id": payload.worker_id or run.get("worker_id") or "",
+            "resolved_file_name": payload.resolved_file_name or run.get("resolved_file_name") or "",
+        },
+    )
+    return {"ok": True, "run": _decorate_ftp_report_run(updated or run)}
+
+
+@router.post("/api/ftp-worker/tasks/{run_id}/file")
+async def upload_ftp_worker_task_file(request: Request, run_id: str, file: UploadFile = File(...)) -> dict:
+    onebss_worker_token(request)
+    repository = build_app_repository()
+    run = repository.get_ftp_report_run(run_id.strip())
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task FTP.")
+    if _ftp_report_run_cancelled(run):
+        return _ftp_worker_cancelled_response(run)
+
+    original_name = Path(str(file.filename or "ftp_result")).name
+    safe_name = safe_filename_part(original_name, "ftp_result")
+    stored_name = safe_filename_part(f"{run_id.strip()}_{safe_name}", f"{run_id.strip()}_ftp_result")
+    target_dir = Path(str(getattr(get_settings(), "data_mining_download_dir", "data/data_mining_downloads") or "data/data_mining_downloads")) / "ftp"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_file = (target_dir / stored_name).resolve()
+    with target_file.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    if target_file.stat().st_size <= 0:
+        target_file.unlink(missing_ok=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File ket qua FTP rong.")
+
+    updated = repository.update_ftp_report_run(
+        run_id.strip(),
+        {
+            "file_name": safe_name,
+            "file_path": str(target_file),
+            "storage_status": "uploaded_worker_file",
+            "message": "Da nhan file ket qua FTP tu may tram.",
+        },
+    )
+    return {
+        "ok": True,
+        "file": {
+            "file_name": safe_name,
+            "file_path": str(target_file),
+            "storage_link": "",
+            "storage_status": "uploaded_worker_file",
+            "message": "Da nhan file ket qua FTP tu may tram.",
+        },
+        "run": _decorate_ftp_report_run(updated or run),
+    }
+
+
+@router.post("/api/ftp-worker/tasks/{run_id}/result")
+def finish_ftp_worker_task(request: Request, run_id: str, payload: FtpWorkerResultPayload) -> dict:
+    onebss_worker_token(request)
+    repository = build_app_repository()
+    run = repository.get_ftp_report_run(run_id.strip())
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task FTP.")
+    if _ftp_report_run_cancelled(run):
+        return _ftp_worker_cancelled_response(run)
+    finished_at = datetime.now().isoformat(timespec="seconds")
+    status_value = payload.status.strip().lower() or ("success" if payload.ok else "failed")
+    file_updates = _ftp_worker_result_file_updates(run, payload)
+    updated = repository.update_ftp_report_run(
+        run_id.strip(),
+        {
+            "status": status_value,
+            "message": payload.message or ("Da lay bao cao FTP tren may tram." if payload.ok else "May tram khong lay duoc bao cao FTP."),
+            **file_updates,
+            "duration_ms": payload.duration_ms,
+            "finished_at": finished_at,
+        },
+    )
+    try:
+        repository.add_audit_log(
+            run.get("created_by") or "ftp-worker",
+            "ftp_worker_task_finished",
+            f"May tram tra ket qua task FTP {run_id}: {status_value}",
+        )
+    except Exception:
+        logger.exception("Cannot write FTP worker result audit log")
+    return {"ok": payload.ok, "run": _decorate_ftp_report_run(updated or run)}
 
 
 def _run_onebss_report_job(

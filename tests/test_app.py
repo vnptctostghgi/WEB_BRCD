@@ -1,4 +1,4 @@
-import os
+﻿import os
 import json
 import sqlite3
 import threading
@@ -107,11 +107,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=187" in public_response.text
+        assert "/static/app.js?v=188" in public_response.text
         assert "/static/styles.css?v=121" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
-        public_js = client.get("/static/app.js?v=187")
+        public_js = client.get("/static/app.js?v=188")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -327,7 +327,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=187" in page.text
+        assert "/static/app.js?v=188" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -692,8 +692,15 @@ def test_system_connections_include_zalo_bot() -> None:
         login(client)
         response = client.get("/api/admin/connections")
         assert response.status_code == 200
-        codes = {connection["code"] for connection in response.json()["connections"]}
+        connections = response.json()["connections"]
+        codes = {connection["code"] for connection in connections}
         assert "zalo_bot" in codes
+        ftp = next(connection for connection in connections if connection["code"] == "ftp_storage")
+        assert ftp["connection_type"] == "ftp"
+        assert ftp["config"]["host"] == "10.159.23.100"
+        assert ftp["config"]["username"] == "thangph.cto"
+        assert "password" not in ftp["config"]
+        assert "password" in ftp["protected_config_keys"]
 
 
 def test_admin_can_manage_report_links_and_active_links_are_public() -> None:
@@ -847,6 +854,38 @@ def test_seed_current_connections_preserves_internal_api_admin_config(tmp_path) 
     stored = repository.get_system_connection_by_code("internal_fastapi_api")
     assert stored["config"]["url"] == "https://current-internal-api.example/api/du-lieu-web"
     assert stored["config"]["mock_mode"] is False
+
+
+def test_seed_current_connections_preserves_ftp_admin_config(tmp_path) -> None:
+    repository = routes.AppRepository(str(tmp_path / "app.db"))
+    repository.initialize("admin", "Admin@Brcd2026!")
+    repository.upsert_system_connection(
+        "ftp_storage",
+        "FTP rieng",
+        "ftp",
+        "Custom FTP",
+        {
+            "host": "10.1.1.10",
+            "port": 2121,
+            "username": "custom-user",
+            "password": "custom-password",
+            "passive": False,
+            "timeout_seconds": 90,
+            "secret_ref": "FTP_PASSWORD",
+        },
+        True,
+    )
+
+    routes.ConnectionService(repository, Settings()).seed_current_connections()
+
+    stored = repository.get_system_connection_by_code("ftp_storage")
+    assert stored["name"] == "FTP rieng"
+    assert stored["config"]["host"] == "10.1.1.10"
+    assert stored["config"]["port"] == 2121
+    assert stored["config"]["username"] == "custom-user"
+    assert stored["config"]["password"] == "custom-password"
+    assert stored["config"]["passive"] is False
+    assert stored["config"]["timeout_seconds"] == 90
 
 
 def test_admin_can_manage_zalo_auto_messages_and_captures(monkeypatch) -> None:
@@ -2035,6 +2074,118 @@ def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
         post_clear = client.post(f"/api/onebss-reports/runs/clear?ma_bao_cao={code}")
         assert post_clear.status_code == 200
         assert post_clear.json()["deleted"] == 0
+
+
+def test_admin_can_manage_and_run_ftp_report() -> None:
+    with TestClient(app) as client:
+        login(client)
+        ftp_connection = client.put(
+            "/api/admin/connections/ftp_storage",
+            json={
+                "name": "FTP nội bộ",
+                "connection_type": "ftp",
+                "description": "Ket noi FTP noi bo",
+                "config": {
+                    "host": "10.159.23.100",
+                    "port": 21,
+                    "username": "thangph.cto",
+                    "password": "$Phthang125125",
+                    "passive": True,
+                    "timeout_seconds": 60,
+                    "secret_ref": "FTP_PASSWORD",
+                },
+                "is_active": True,
+            },
+        )
+        assert ftp_connection.status_code == 200
+        connections = client.get("/api/admin/connections").json()["connections"]
+        ftp_public = next(item for item in connections if item["code"] == "ftp_storage")
+        assert ftp_public["config"]["host"] == "10.159.23.100"
+        assert ftp_public["config"]["username"] == "thangph.cto"
+        assert "password" not in ftp_public["config"]
+        assert "password" in ftp_public["protected_config_keys"]
+
+        payload = {
+            "ten_bao_cao": "FTP doanh thu",
+            "folder_path": "/bao_cao/doanh_thu",
+            "file_name_template": "doanh_thu_{yyyymmdd}.xlsx",
+            "connection_code": "ftp_storage",
+            "is_active": True,
+        }
+        created = client.post("/api/admin/ftp-reports", json=payload)
+        assert created.status_code == 200
+        code = created.json()["ma_bao_cao"]
+        assert code.startswith("FTP")
+
+        configs = client.get("/api/ftp-reports/configs")
+        assert configs.status_code == 200
+        report = next(item for item in configs.json()["reports"] if item["ma_bao_cao"] == code)
+        assert report["folder_path"] == payload["folder_path"]
+        assert report["file_name_template"] == payload["file_name_template"]
+
+        run = client.post(
+            "/api/ftp-reports/run",
+            json={
+                "ma_bao_cao": code,
+                "folder_path": "/bao_cao/override",
+                "file_name_template": "override_{ddmmyyyy}.xlsx",
+            },
+        )
+        assert run.status_code == 200
+        assert run.json()["status"] == "queued"
+        job_id = run.json()["job_id"]
+
+        headers = {"Authorization": "Bearer test-worker-token"}
+        claim = client.post("/api/ftp-worker/tasks/claim", json={"worker_id": "ws-ftp"}, headers=headers)
+        assert claim.status_code == 200
+        task = claim.json()["task"]
+        assert task["run_id"] == job_id
+        assert task["folder_path"] == "/bao_cao/override"
+        assert task["file_name_template"] == "override_{ddmmyyyy}.xlsx"
+        assert task["connection"]["config"]["password"] == "$Phthang125125"
+
+        progress = client.post(
+            f"/api/ftp-worker/tasks/{job_id}/status",
+            json={"status": "running", "message": "Dang tai FTP", "worker_id": "ws-ftp", "resolved_file_name": "override_28072026.xlsx"},
+            headers=headers,
+        )
+        assert progress.status_code == 200
+        assert progress.json()["run"]["resolved_file_name"] == "override_28072026.xlsx"
+
+        uploaded = client.post(
+            f"/api/ftp-worker/tasks/{job_id}/file",
+            files={"file": ("override_28072026.xlsx", BytesIO(b"ftp-data"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            headers=headers,
+        )
+        assert uploaded.status_code == 200
+        assert uploaded.json()["run"]["download_url"].endswith(f"/api/ftp-reports/runs/{job_id}/download")
+
+        finished = client.post(
+            f"/api/ftp-worker/tasks/{job_id}/result",
+            json={
+                "ok": True,
+                "status": "success",
+                "message": "Da tai file FTP.",
+                "file_name": "override_28072026.xlsx",
+                "resolved_file_name": "override_28072026.xlsx",
+                "duration_ms": 456,
+            },
+            headers=headers,
+        )
+        assert finished.status_code == 200
+        assert finished.json()["run"]["status"] == "success"
+        assert finished.json()["run"]["storage_status"] == "uploaded_worker_file"
+
+        runs = client.get(f"/api/ftp-reports/runs?ma_bao_cao={code}").json()["runs"]
+        assert len(runs) == 1
+        assert runs[0]["download_url"].endswith(f"/api/ftp-reports/runs/{job_id}/download")
+        download = client.get(runs[0]["download_url"])
+        assert download.status_code == 200
+        assert download.content == b"ftp-data"
+
+        cleared = client.delete(f"/api/ftp-reports/runs?ma_bao_cao={code}")
+        assert cleared.status_code == 200
+        assert cleared.json()["deleted"] == 1
 
 
 def test_save_onebss_report_ignores_audit_log_failure(monkeypatch) -> None:
@@ -3385,6 +3536,29 @@ def test_onebss_workstation_worker_updates_existing_status_message(monkeypatch) 
     assert "Da di den bao cao OneBSS." in messages
 
 
+def test_ftp_workstation_worker_renders_date_file_template() -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    now = datetime(2026, 7, 8, 9, 5)
+    assert worker.render_ftp_file_template("bao_cao_{yyyymmdd}.xlsx", now) == "bao_cao_20260708.xlsx"
+    assert worker.render_ftp_file_template("bao_cao_{ddmmyyyy}.xlsx", now) == "bao_cao_08072026.xlsx"
+    assert worker.render_ftp_file_template("bao_cao_{{yesterday}}.xlsx", now) == "bao_cao_20260707.xlsx"
+
+    config, folder_path, file_template = worker.parse_ftp_task({
+        "folder_path": "ftp://ftp-user:ftp-pass@10.159.23.100:2121/reports/doanh_thu_{ddmmyyyy}.xlsx",
+        "file_name_template": "",
+        "connection": {"config": {"passive": False, "timeout_seconds": 90}},
+    })
+    assert config["host"] == "10.159.23.100"
+    assert config["port"] == 2121
+    assert config["username"] == "ftp-user"
+    assert config["password"] == "ftp-pass"
+    assert config["passive"] is False
+    assert config["timeout_seconds"] == 90
+    assert folder_path == "/reports"
+    assert file_template == "doanh_thu_{ddmmyyyy}.xlsx"
+
+
 def test_onebss_workstation_worker_retries_transient_web_errors(monkeypatch) -> None:
     import httpx
     from scripts import onebss_workstation_worker as worker
@@ -3630,6 +3804,30 @@ def test_supabase_onebss_run_uses_parameters_json_column(monkeypatch) -> None:
     assert run["parameters"] == {"P_TUNGAY": "01/07/2026"}
 
 
+def test_supabase_ftp_report_run_uses_ftp_table(monkeypatch) -> None:
+    captured = {}
+    repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
+
+    def fake_insert(table, payload):
+        captured["table"] = table
+        captured["payload"] = payload
+        return payload
+
+    monkeypatch.setattr(repository, "_insert", fake_insert)
+    run = repository.save_ftp_report_run({
+        "run_id": "FTP-RUN-001",
+        "ma_bao_cao": "FTP0001",
+        "ten_bao_cao": "FTP test",
+        "status": "queued",
+        "folder_path": "/reports",
+        "file_name_template": "test_{yyyymmdd}.xlsx",
+    })
+    assert captured["table"] == "ftp_report_runs"
+    assert captured["payload"]["run_id"] == "FTP-RUN-001"
+    assert captured["payload"]["folder_path"] == "/reports"
+    assert run["file_name_template"] == "test_{yyyymmdd}.xlsx"
+
+
 def test_supabase_onebss_report_save_falls_back_without_otp_service_code(monkeypatch) -> None:
     repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
     payloads = []
@@ -3683,6 +3881,30 @@ def test_supabase_clear_onebss_report_runs_uses_run_id(monkeypatch) -> None:
     assert repository.clear_onebss_report_runs() == 2
     assert calls[0] == ("get", "onebss_report_runs", {"select": "run_id"})
     assert calls[1] == ("delete", "onebss_report_runs", {"run_id": "not.is.null"})
+
+
+def test_supabase_clear_ftp_report_runs_uses_run_id(monkeypatch) -> None:
+    repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
+    calls = []
+
+    def fake_get(table, params):
+        calls.append(("get", table, params))
+        return [{"run_id": "FTP1"}, {"run_id": "FTP2"}]
+
+    def fake_delete(table, params):
+        calls.append(("delete", table, params))
+
+    monkeypatch.setattr(repository, "_get", fake_get)
+    monkeypatch.setattr(repository, "_delete", fake_delete)
+
+    assert repository.clear_ftp_report_runs("FTP0001") == 2
+    assert calls[0] == ("get", "ftp_report_runs", {"select": "run_id", "ma_bao_cao": "eq.FTP0001"})
+    assert calls[1] == ("delete", "ftp_report_runs", {"ma_bao_cao": "eq.FTP0001"})
+
+    calls.clear()
+    assert repository.clear_ftp_report_runs() == 2
+    assert calls[0] == ("get", "ftp_report_runs", {"select": "run_id"})
+    assert calls[1] == ("delete", "ftp_report_runs", {"run_id": "not.is.null"})
 
 
 def test_dynamic_report_expands_comma_values_for_in_bind_params() -> None:
@@ -4334,16 +4556,16 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         home = client.get("/")
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
-        assert "/static/shell.js?v=11" in home.text
-        assert "/static/app.js?v=187" not in home.text
-        shell_js = client.get("/static/shell.js?v=11")
+        assert "/static/shell.js?v=12" in home.text
+        assert "/static/app.js?v=188" not in home.text
+        shell_js = client.get("/static/shell.js?v=12")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
         assert "function dedupeFeaturesForDisplay" in shell_js.text
         assert "function readCachedNavigation" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=187" in shell_js.text
+        assert "/static/app.js?v=188" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -4356,8 +4578,8 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
-        assert "/static/shell.js?v=11" in dashboard.text
-        assert "/static/app.js?v=187" not in dashboard.text
+        assert "/static/shell.js?v=12" in dashboard.text
+        assert "/static/app.js?v=188" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -4368,44 +4590,51 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "view-reports" in reports.text
         assert "view-mobile-gateway" not in reports.text
         assert "sql-report-dialog" not in reports.text
-        assert "/static/app.js?v=187" in reports.text
+        assert "/static/app.js?v=188" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=187" in workstation.text
+        assert "/static/app.js?v=188" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=187" in work_tasks.text
+        assert "/static/app.js?v=188" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=187" in report_links.text
+        assert "/static/app.js?v=188" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=187" in system.text
+        assert "/static/app.js?v=188" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=187" in onebss_mining.text
+        assert "/static/app.js?v=188" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
+
+        ftp_mining = client.get("/daodulieuftp")
+        assert ftp_mining.status_code == 200
+        assert "view-ftp-mining" in ftp_mining.text
+        assert "/static/app.js?v=188" in ftp_mining.text
+        assert "/static/ftp-mining.js" not in ftp_mining.text
+        assert ftp_mining.text.count('class="app-view') == 1
 
         client.post("/api/auth/logout")
         login(client, "viewer_builder", "Viewer@Builder123")
