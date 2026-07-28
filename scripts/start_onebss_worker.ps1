@@ -34,6 +34,105 @@ function Pause-BeforeExit {
   }
 }
 
+function Test-PythonLauncher {
+  param(
+    [Parameter(Mandatory = $true)][string]$File,
+    [string[]]$Args = @()
+  )
+  $testArgs = @($Args) + @("-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)")
+  try {
+    & $File @testArgs *> $null
+    return $LASTEXITCODE -eq 0
+  } catch {
+    return $false
+  }
+}
+
+function Python-FileLauncher {
+  param([string]$Path)
+  if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+    return $null
+  }
+  if (Test-PythonLauncher $Path) {
+    return @{ File = $Path; Args = @() }
+  }
+  return $null
+}
+
+function Find-PythonFileCandidate {
+  $pathCandidates = @()
+  try {
+    $pathCandidates += & where.exe python 2>$null | ForEach-Object { ([string]$_).Trim() }
+    $pathCandidates += & where.exe python3 2>$null | ForEach-Object { ([string]$_).Trim() }
+  } catch {
+  }
+  foreach ($candidate in $pathCandidates | Where-Object { $_ } | Select-Object -Unique) {
+    $launcher = Python-FileLauncher $candidate
+    if ($launcher) {
+      return $launcher
+    }
+  }
+  $roots = @(
+    (Join-Path $env:LOCALAPPDATA "Programs\Python"),
+    (Join-Path $env:ProgramFiles "Python312"),
+    (Join-Path ${env:ProgramFiles(x86)} "Python312")
+  )
+  foreach ($root in $roots) {
+    if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path -LiteralPath $root)) {
+      continue
+    }
+    $candidates = @()
+    if (Test-Path -LiteralPath (Join-Path $root "python.exe")) {
+      $candidates += (Join-Path $root "python.exe")
+    }
+    $candidates += Get-ChildItem -Path $root -Filter python.exe -Recurse -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+    foreach ($candidate in $candidates | Select-Object -Unique) {
+      $launcher = Python-FileLauncher $candidate
+      if ($launcher) {
+        return $launcher
+      }
+    }
+  }
+  return $null
+}
+
+function Find-PythonLauncher {
+  $py = Get-Command py -ErrorAction SilentlyContinue
+  if ($py -and (Test-PythonLauncher "py" @("-3"))) {
+    return @{ File = "py"; Args = @("-3") }
+  }
+  $python = Get-Command python -ErrorAction SilentlyContinue
+  if ($python -and (Test-PythonLauncher "python")) {
+    return @{ File = "python"; Args = @() }
+  }
+  $fileCandidate = Find-PythonFileCandidate
+  if ($fileCandidate) {
+    return $fileCandidate
+  }
+  return $null
+}
+
+function Ensure-Python {
+  $launcher = Find-PythonLauncher
+  if ($launcher) {
+    return $launcher
+  }
+  $winget = Get-Command winget -ErrorAction SilentlyContinue
+  if (-not $winget) {
+    throw "Chua tim thay Python va cung khong co winget de tu cai. Hay cai Python 3.12 roi chay lai."
+  }
+  Write-Host "Chua co Python that. Dang tu cai Python 3.12 bang winget..." -ForegroundColor Cyan
+  Invoke-External $winget.Source "install" "-e" "--id" "Python.Python.3.12" "--silent" "--accept-package-agreements" "--accept-source-agreements"
+  $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+  $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+  $env:Path = "$machinePath;$userPath"
+  $launcher = Find-PythonLauncher
+  if (-not $launcher) {
+    throw "Da chay winget nhung van chua thay Python that. Hay tat App execution aliases cho python.exe/python3.exe hoac mo lai PowerShell roi chay lai."
+  }
+  return $launcher
+}
+
 trap {
   Write-Host ""
   Write-Host "May tram OneBSS bi loi:" -ForegroundColor Red
@@ -91,16 +190,9 @@ if ([string]::IsNullOrWhiteSpace($env:ONEBSS_WORKER_POLL_SECONDS)) {
 
 if (-not (Test-Path $VenvPython)) {
   Write-Host "Lan dau chay: dang tao moi truong rieng cho may tram..." -ForegroundColor Cyan
-  $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
-  if ($pyLauncher) {
-    Invoke-External "py" "-3" "-m" "venv" $VenvDir
-  } else {
-    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
-    if (-not $pythonCommand) {
-      throw "Chua tim thay Python. Hay cai Python 3 roi chay lai shortcut."
-    }
-    Invoke-External "python" "-m" "venv" $VenvDir
-  }
+  $launcher = Ensure-Python
+  $venvArgs = @($launcher.Args) + @("-m", "venv", $VenvDir)
+  Invoke-External $launcher.File @venvArgs
 }
 
 if (-not (Test-Path $VenvPython)) {
