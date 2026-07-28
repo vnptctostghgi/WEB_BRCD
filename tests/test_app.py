@@ -172,9 +172,20 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert package.headers["content-type"] == "application/zip"
         with ZipFile(BytesIO(package.content)) as archive:
             names = set(archive.namelist())
+            config_text = archive.read("VNPTCTO_WORKSTATION_SETUP/workstation-install-config.ps1").decode("utf-8")
+            readme_text = archive.read("VNPTCTO_WORKSTATION_SETUP/README_SETUP.txt").decode("utf-8")
+            setup_bat = archive.read("VNPTCTO_WORKSTATION_SETUP/SETUP_VNPTCTO_WORKSTATION.bat").decode("utf-8")
+            setup_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/setup_vnptcto_workstation.ps1").decode("utf-8")
         assert "VNPTCTO_WORKSTATION_SETUP/SETUP_VNPTCTO_WORKSTATION.bat" in names
+        assert "VNPTCTO_WORKSTATION_SETUP/workstation-install-config.ps1" in names
         assert "VNPTCTO_WORKSTATION_SETUP/scripts/setup_vnptcto_workstation.ps1" in names
         assert "VNPTCTO_WORKSTATION_SETUP/scripts/test_vnptcto_workstation.ps1" in names
+        assert "InternalApiToken = 'test-worker-token'" in config_text
+        assert "Khong can go token" in readme_text
+        assert "Read-Host $Prompt" not in setup_script
+        assert "Nhap INTERNAL_API_TOKEN" not in setup_script
+        assert "-NoPause" in setup_bat
+        assert "\npause" not in setup_bat.lower()
 
 
 def test_workstation_heartbeat_uses_worker_token() -> None:

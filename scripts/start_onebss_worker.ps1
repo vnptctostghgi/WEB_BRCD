@@ -72,16 +72,13 @@ foreach ($name in @(
   }
 }
 
+$missingRuntimeConfig = New-Object System.Collections.Generic.List[string]
 if ([string]::IsNullOrWhiteSpace($env:INTERNAL_API_TOKEN)) {
-  Write-Host "Chua co INTERNAL_API_TOKEN. Hay bao Codex cau hinh token worker." -ForegroundColor Red
-  Pause-BeforeExit
-  exit 1
+  $missingRuntimeConfig.Add("INTERNAL_API_TOKEN") | Out-Null
 }
 
 if ([string]::IsNullOrWhiteSpace($env:ONEBSS_USERNAME) -or [string]::IsNullOrWhiteSpace($env:ONEBSS_PASSWORD)) {
-  Write-Host "Chua co tai khoan OneBSS tren may tram. Hay bao Codex lay cau hinh hoac nhap lai." -ForegroundColor Red
-  Pause-BeforeExit
-  exit 1
+  $missingRuntimeConfig.Add("ONEBSS_USERNAME/ONEBSS_PASSWORD") | Out-Null
 }
 
 if ([string]::IsNullOrWhiteSpace($env:ONEBSS_WORKER_ID)) {
@@ -126,9 +123,19 @@ if ($needsSetup) {
 }
 
 if ($SetupOnly) {
+  if ($missingRuntimeConfig.Count -gt 0) {
+    Write-Warning "Cai moi truong xong, nhung worker chua the chay vi thieu: $($missingRuntimeConfig -join ', '). Hay cap nhat cau hinh tren web roi tai lai bo cai."
+  }
   Write-Host "Cai dat may tram da san sang. Chua nhan task bao cao nao." -ForegroundColor Green
   Pause-BeforeExit
   exit 0
+}
+
+if ($missingRuntimeConfig.Count -gt 0) {
+  Write-Host "Chua du cau hinh de chay worker: $($missingRuntimeConfig -join ', ')." -ForegroundColor Red
+  Write-Host "Hay cap nhat cau hinh tren web, tai lai bo cai va chay SETUP_VNPTCTO_WORKSTATION.bat." -ForegroundColor Yellow
+  Pause-BeforeExit
+  exit 1
 }
 
 Write-Host "Dang chay may tram OneBSS. Hay de cua so nay mo." -ForegroundColor Green

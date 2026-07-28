@@ -5,6 +5,7 @@ param(
   [string]$InternalApiToken = "",
   [string]$InternalApiUrl = "https://api.vnptcto.com/api/du-lieu-web",
   [string]$ApiRoot = "C:\VNPTCTO",
+  [string]$ConfigFile = "",
   [switch]$StartNow,
   [switch]$SkipApiMiddleware,
   [switch]$SkipPlaywright,
@@ -22,7 +23,8 @@ function Write-Step {
 
 function Pause-BeforeExit {
   if (-not $NoPause) {
-    Read-Host "Nhan Enter de dong" | Out-Null
+    Write-Host "Cua so se tu dong dong sau 10 giay."
+    Start-Sleep -Seconds 10
   }
 }
 
@@ -43,37 +45,6 @@ function Invoke-External {
   if ($LASTEXITCODE -ne 0) {
     throw "Lenh that bai ($LASTEXITCODE): $FilePath $($Arguments -join ' ')"
   }
-}
-
-function Get-PlainSecret {
-  param([string]$Prompt)
-  $secure = Read-Host $Prompt -AsSecureString
-  $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-  try {
-    return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
-  } finally {
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
-  }
-}
-
-function Ensure-ConfigValue {
-  param(
-    [string]$Name,
-    [string]$CurrentValue,
-    [string]$Prompt,
-    [switch]$Secret
-  )
-  if (-not [string]::IsNullOrWhiteSpace($CurrentValue)) {
-    return $CurrentValue.Trim()
-  }
-  $existing = [Environment]::GetEnvironmentVariable($Name, "User")
-  if (-not [string]::IsNullOrWhiteSpace($existing)) {
-    return $existing.Trim()
-  }
-  if ($Secret) {
-    return Get-PlainSecret $Prompt
-  }
-  return (Read-Host $Prompt).Trim()
 }
 
 function Set-UserEnvironment {
@@ -145,13 +116,91 @@ function Source-Root {
   return $scriptDir
 }
 
+function Import-SetupConfig {
+  param([string]$SourceRoot)
+  $candidate = $ConfigFile
+  if ([string]::IsNullOrWhiteSpace($candidate)) {
+    $candidate = Join-Path $SourceRoot "workstation-install-config.ps1"
+  }
+  if ([string]::IsNullOrWhiteSpace($candidate) -or -not (Test-Path -LiteralPath $candidate)) {
+    return @{}
+  }
+  . $candidate
+  $variable = Get-Variable -Name "VNPTCTO_WORKSTATION_CONFIG" -Scope Local -ErrorAction SilentlyContinue
+  if (-not $variable -or -not ($variable.Value -is [System.Collections.IDictionary])) {
+    Write-Warning "File cau hinh $candidate khong co VNPTCTO_WORKSTATION_CONFIG hop le. Script se dung mac dinh."
+    return @{}
+  }
+  Write-Host "Da nap cau hinh tu $candidate" -ForegroundColor Green
+  return $variable.Value
+}
+
+function Config-Value {
+  param(
+    [System.Collections.IDictionary]$Config,
+    [string]$Name
+  )
+  if ($Config.Contains($Name) -and $null -ne $Config[$Name]) {
+    return [string]$Config[$Name]
+  }
+  return ""
+}
+
+function Resolve-SetupValue {
+  param(
+    [System.Collections.IDictionary]$Config,
+    [string]$Name,
+    [string]$CurrentValue = "",
+    [string]$DefaultValue = "",
+    [string]$EnvName = ""
+  )
+  $current = [string]$CurrentValue
+  $configured = Config-Value $Config $Name
+  if (-not [string]::IsNullOrWhiteSpace($configured) -and ([string]::IsNullOrWhiteSpace($current) -or $current -eq $DefaultValue)) {
+    return $configured.Trim()
+  }
+  if (-not [string]::IsNullOrWhiteSpace($current)) {
+    return $current.Trim()
+  }
+  if (-not [string]::IsNullOrWhiteSpace($EnvName)) {
+    $existing = [Environment]::GetEnvironmentVariable($EnvName, "User")
+    if (-not [string]::IsNullOrWhiteSpace($existing)) {
+      return $existing.Trim()
+    }
+  }
+  return [string]$DefaultValue
+}
+
+function Resolve-SetupBool {
+  param(
+    [System.Collections.IDictionary]$Config,
+    [string]$Name,
+    [bool]$DefaultValue = $false
+  )
+  if (-not $Config.Contains($Name) -or $null -eq $Config[$Name]) {
+    return $DefaultValue
+  }
+  $value = $Config[$Name]
+  if ($value -is [bool]) {
+    return [bool]$value
+  }
+  $text = ([string]$value).Trim().ToLowerInvariant()
+  if ($text -in @("1", "true", "yes", "y", "on")) {
+    return $true
+  }
+  if ($text -in @("0", "false", "no", "n", "off")) {
+    return $false
+  }
+  return $DefaultValue
+}
+
 function Copy-WorkspaceFiles {
   param([string]$SourceRoot, [string]$TargetRoot)
   if (Same-Path $SourceRoot $TargetRoot) {
     return
   }
   New-Item -ItemType Directory -Path $TargetRoot -Force | Out-Null
-  foreach ($item in @("app", "docs", "scripts", "requirements.txt", ".env.example", "README.md", "HUONG_DAN_MAY_TRAM_ONEBSS.md", "SETUP_VNPTCTO_WORKSTATION.bat", "START_ONEBSS_WORKER.bat", "START_ONEBSS_WORKER_BACKGROUND.bat", "INSTALL_ONEBSS_WORKER_AUTOSTART.bat", "UNINSTALL_ONEBSS_WORKER_AUTOSTART.bat")) {
+  foreach ($item in @("app", "docs", "scripts", "requirements.txt", ".env.example", "README.md", "HUONG_DAN_MAY_TRAM_ONEBSS.md", "workstation-install-config.ps1", "SETUP_VNPTCTO_WORKSTATION.bat", "START_ONEBSS_WORKER.bat", "START_ONEBSS_WORKER_BACKGROUND.bat", "INSTALL_ONEBSS_WORKER_AUTOSTART.bat", "UNINSTALL_ONEBSS_WORKER_AUTOSTART.bat")) {
     $source = Join-Path $SourceRoot $item
     if (-not (Test-Path -LiteralPath $source)) {
       continue
@@ -225,8 +274,15 @@ function Ensure-WorkstationEnvFile {
   Set-DotEnvValue $envFile "INTERNAL_API_MOCK_MODE" "false"
   Set-DotEnvValue $envFile "VNPTCTO_BASE_URL" $BaseUrl
   Set-DotEnvValue $envFile "ONEBSS_WORKER_ID" $WorkerId
+  Set-DotEnvValue $envFile "ONEBSS_LOGIN_URL" $onebssLoginUrl
+  Set-DotEnvValue $envFile "ONEBSS_DOWNLOAD_TIMEOUT_SECONDS" $onebssDownloadTimeoutSeconds
   Set-DotEnvValue $envFile "ONEBSS_USERNAME" $env:ONEBSS_USERNAME
   Set-DotEnvValue $envFile "ONEBSS_PASSWORD" $env:ONEBSS_PASSWORD
+  Set-DotEnvValue $envFile "GOOGLE_DRIVE_FOLDER_ID" $googleDriveFolderId
+  Set-DotEnvValue $envFile "GOOGLE_DRIVE_OAUTH_CLIENT_ID" $googleDriveOauthClientId
+  Set-DotEnvValue $envFile "GOOGLE_DRIVE_OAUTH_CLIENT_SECRET" $googleDriveOauthClientSecret
+  Set-DotEnvValue $envFile "GOOGLE_DRIVE_OAUTH_REDIRECT_URI" $googleDriveOauthRedirectUri
+  Set-DotEnvValue $envFile "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64" $googleDriveServiceAccountJsonBase64
   Set-DotEnvValue $envFile "DATA_MINING_DOWNLOAD_DIR" (Join-Path $Root "downloads")
 }
 
@@ -257,7 +313,7 @@ function Ensure-ApiEnvFile {
 
 function Install-ApiMiddleware {
   param([string]$Root)
-  if ($SkipApiMiddleware) {
+  if ($script:SkipApiMiddlewareResolved) {
     return
   }
   Write-Step "Cai API trung gian Oracle/Drive"
@@ -309,16 +365,55 @@ trap {
 }
 
 Assert-Administrator
-$InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
 $sourceRoot = Source-Root
+$setupConfig = Import-SetupConfig $sourceRoot
+
+$InstallRoot = Resolve-SetupValue $setupConfig "InstallRoot" $InstallRoot "D:\Tool_Tram_VNPTCTO.COM" "VNPTCTO_WORKSTATION_ROOT"
+$BaseUrl = Resolve-SetupValue $setupConfig "BaseUrl" $BaseUrl "https://vnptcto.com" "VNPTCTO_BASE_URL"
+$InternalApiUrl = Resolve-SetupValue $setupConfig "InternalApiUrl" $InternalApiUrl "https://api.vnptcto.com/api/du-lieu-web" "INTERNAL_API_URL"
+$ApiRoot = Resolve-SetupValue $setupConfig "ApiRoot" $ApiRoot "C:\VNPTCTO" ""
+$InternalApiToken = Resolve-SetupValue $setupConfig "InternalApiToken" $InternalApiToken "" "INTERNAL_API_TOKEN"
+$WorkerId = Resolve-SetupValue $setupConfig "WorkerId" $WorkerId "" "ONEBSS_WORKER_ID"
+$workerIdPrefix = Resolve-SetupValue $setupConfig "WorkerIdPrefix" "" "may-tram" ""
+$onebssUsername = Resolve-SetupValue $setupConfig "OneBssUsername" "" "" "ONEBSS_USERNAME"
+$onebssPassword = Resolve-SetupValue $setupConfig "OneBssPassword" "" "" "ONEBSS_PASSWORD"
+$onebssLoginUrl = Resolve-SetupValue $setupConfig "OneBssLoginUrl" "" "https://onebss.vnpt.vn/" "ONEBSS_LOGIN_URL"
+$onebssDownloadTimeoutSeconds = Resolve-SetupValue $setupConfig "OneBssDownloadTimeoutSeconds" "" "180" "ONEBSS_DOWNLOAD_TIMEOUT_SECONDS"
+$googleDriveFolderId = Resolve-SetupValue $setupConfig "GoogleDriveFolderId" "" "" "GOOGLE_DRIVE_FOLDER_ID"
+$googleDriveOauthClientId = Resolve-SetupValue $setupConfig "GoogleDriveOauthClientId" "" "" "GOOGLE_DRIVE_OAUTH_CLIENT_ID"
+$googleDriveOauthClientSecret = Resolve-SetupValue $setupConfig "GoogleDriveOauthClientSecret" "" "" "GOOGLE_DRIVE_OAUTH_CLIENT_SECRET"
+$googleDriveOauthRedirectUri = Resolve-SetupValue $setupConfig "GoogleDriveOauthRedirectUri" "" "" "GOOGLE_DRIVE_OAUTH_REDIRECT_URI"
+$googleDriveServiceAccountJsonBase64 = Resolve-SetupValue $setupConfig "GoogleDriveServiceAccountJsonBase64" "" "" "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64"
+
+$script:SkipApiMiddlewareResolved = [bool]$SkipApiMiddleware
+if ($setupConfig.Contains("SkipApiMiddleware")) {
+  $script:SkipApiMiddlewareResolved = Resolve-SetupBool $setupConfig "SkipApiMiddleware" $script:SkipApiMiddlewareResolved
+}
+if ($setupConfig.Contains("InstallApiMiddleware")) {
+  $script:SkipApiMiddlewareResolved = -not (Resolve-SetupBool $setupConfig "InstallApiMiddleware" (-not $script:SkipApiMiddlewareResolved))
+}
+$skipPlaywrightResolved = [bool]$SkipPlaywright
+if ($setupConfig.Contains("SkipPlaywright")) {
+  $skipPlaywrightResolved = Resolve-SetupBool $setupConfig "SkipPlaywright" $skipPlaywrightResolved
+}
+$startNowResolved = [bool]$StartNow
+if ($setupConfig.Contains("StartNow")) {
+  $startNowResolved = Resolve-SetupBool $setupConfig "StartNow" $startNowResolved
+}
+
+$InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
+$ApiRoot = [IO.Path]::GetFullPath($ApiRoot)
 
 Write-Step "Chuan bi cau hinh"
 if ([string]::IsNullOrWhiteSpace($WorkerId)) {
-  $WorkerId = "may-tram-$($env:COMPUTERNAME)".ToLower()
+  $WorkerId = "$workerIdPrefix-$($env:COMPUTERNAME)".ToLower()
 }
-$InternalApiToken = Ensure-ConfigValue "INTERNAL_API_TOKEN" $InternalApiToken "Nhap INTERNAL_API_TOKEN cua web" -Secret
-$onebssUsername = Ensure-ConfigValue "ONEBSS_USERNAME" "" "Nhap tai khoan OneBSS"
-$onebssPassword = Ensure-ConfigValue "ONEBSS_PASSWORD" "" "Nhap mat khau OneBSS" -Secret
+if ([string]::IsNullOrWhiteSpace($InternalApiToken)) {
+  Write-Warning "Goi cai dat chua co INTERNAL_API_TOKEN. May tram se cai xong nhung worker chua the nhan task cho den khi web duoc cau hinh token."
+}
+if ([string]::IsNullOrWhiteSpace($onebssUsername) -or [string]::IsNullOrWhiteSpace($onebssPassword)) {
+  Write-Warning "Goi cai dat chua co tai khoan OneBSS. May tram se cai xong nhung worker OneBSS chua the chay cho den khi web co cau hinh tai khoan."
+}
 
 Write-Step "Tao thu muc may tram"
 foreach ($dir in @($InstallRoot, "$InstallRoot\logs", "$InstallRoot\temp", "$InstallRoot\backups", "$InstallRoot\downloads", "$InstallRoot\exports", "$InstallRoot\data", "$InstallRoot\data\staging", $ApiRoot)) {
@@ -340,6 +435,13 @@ Set-UserEnvironment "ONEBSS_WORKER_POLL_SECONDS" "5"
 Set-UserEnvironment "ONEBSS_WORKER_HEARTBEAT_SECONDS" "60"
 Set-UserEnvironment "ONEBSS_USERNAME" $onebssUsername
 Set-UserEnvironment "ONEBSS_PASSWORD" $onebssPassword
+Set-UserEnvironment "ONEBSS_LOGIN_URL" $onebssLoginUrl
+Set-UserEnvironment "ONEBSS_DOWNLOAD_TIMEOUT_SECONDS" $onebssDownloadTimeoutSeconds
+Set-UserEnvironment "GOOGLE_DRIVE_FOLDER_ID" $googleDriveFolderId
+Set-UserEnvironment "GOOGLE_DRIVE_OAUTH_CLIENT_ID" $googleDriveOauthClientId
+Set-UserEnvironment "GOOGLE_DRIVE_OAUTH_CLIENT_SECRET" $googleDriveOauthClientSecret
+Set-UserEnvironment "GOOGLE_DRIVE_OAUTH_REDIRECT_URI" $googleDriveOauthRedirectUri
+Set-UserEnvironment "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64" $googleDriveServiceAccountJsonBase64
 Set-UserEnvironment "DATA_MINING_DOWNLOAD_DIR" (Join-Path $InstallRoot "downloads")
 
 Write-Step "Tao/cap nhat file .env"
@@ -349,7 +451,7 @@ Write-Step "Cai moi truong Python worker"
 Ensure-Python | Out-Null
 $startWorker = Join-Path $InstallRoot "scripts\start_onebss_worker.ps1"
 $workerSetupArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $startWorker, "-SetupOnly", "-NoPause")
-if ($SkipPlaywright) {
+if ($skipPlaywrightResolved) {
   $workerSetupArgs += "-SkipPlaywright"
 }
 Invoke-External "powershell.exe" @workerSetupArgs
@@ -357,8 +459,11 @@ Invoke-External "powershell.exe" @workerSetupArgs
 Write-Step "Cai Scheduled Task OneBSS worker"
 $installWorkerTask = Join-Path $InstallRoot "scripts\install_onebss_worker_task.ps1"
 $taskArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $installWorkerTask, "-NoPause")
-if ($StartNow) {
+$canStartWorkerNow = -not [string]::IsNullOrWhiteSpace($InternalApiToken) -and -not [string]::IsNullOrWhiteSpace($onebssUsername) -and -not [string]::IsNullOrWhiteSpace($onebssPassword)
+if ($startNowResolved -and $canStartWorkerNow) {
   $taskArgs += "-StartNow"
+} elseif ($startNowResolved) {
+  Write-Warning "Bo qua buoc start worker ngay vi thieu token hoac tai khoan OneBSS. Scheduled Task van da duoc cai de tu chay sau khi cau hinh du."
 }
 Invoke-External "powershell.exe" @taskArgs
 
