@@ -633,12 +633,24 @@ class MobileGatewayRepository:
             row = rows[0] if rows else None
         return self.decode_sms(row, include_body=True) if row else None
 
-    def latest_sms_messages(self, limit: int = 200) -> list[dict[str, Any]]:
+    def latest_sms_messages(self, limit: int = 200, received_after: str = "") -> list[dict[str, Any]]:
         limit = min(max(1, int(limit or 200)), 500)
         if self.is_sqlite:
-            rows = self._sqlite_rows("SELECT * FROM mobile_sms_messages ORDER BY received_at DESC, id DESC LIMIT ?", (limit,))
+            if received_after:
+                rows = self._sqlite_rows(
+                    "SELECT * FROM mobile_sms_messages WHERE received_at>=? ORDER BY received_at DESC, id DESC LIMIT ?",
+                    (received_after, limit),
+                )
+            else:
+                rows = self._sqlite_rows(
+                    "SELECT * FROM mobile_sms_messages ORDER BY received_at DESC, id DESC LIMIT ?",
+                    (limit,),
+                )
         else:
-            rows = self._get("mobile_sms_messages", {"order": "received_at.desc,id.desc", "limit": str(limit)})
+            params = {"order": "received_at.desc,id.desc", "limit": str(limit)}
+            if received_after:
+                params["received_at"] = f"gte.{received_after}"
+            rows = self._get("mobile_sms_messages", params)
         return [self.decode_sms(row, include_body=True) for row in rows]
 
     def mark_sms_matched(self, sms_id: str | int, request_id: str, used: bool = False) -> None:

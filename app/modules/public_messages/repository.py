@@ -163,8 +163,30 @@ class PublicMessagesRepository:
         except ValueError:
             return datetime.min.replace(tzinfo=UTC)
 
-    def _email_messages(self, limit: int, rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        messages = InternalEmailRepository(self.base).list_messages(limit=limit, otp_only=False)
+    @staticmethod
+    def _received_after(value: str) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise ValueError("after must be an ISO datetime") from error
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC).isoformat(timespec="microseconds")
+
+    def _email_messages(
+        self,
+        limit: int,
+        rules: list[dict[str, Any]],
+        received_after: str = "",
+    ) -> list[dict[str, Any]]:
+        messages = InternalEmailRepository(self.base).list_messages(
+            limit=limit,
+            otp_only=False,
+            received_after=received_after,
+        )
         items: list[dict[str, Any]] = []
         for message in messages:
             sender = str(message.get("sender") or "")
@@ -189,8 +211,16 @@ class PublicMessagesRepository:
             )
         return items
 
-    def _sms_messages(self, limit: int, rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        messages = MobileGatewayRepository(self.base, self.settings).latest_sms_messages(limit=limit)
+    def _sms_messages(
+        self,
+        limit: int,
+        rules: list[dict[str, Any]],
+        received_after: str = "",
+    ) -> list[dict[str, Any]]:
+        messages = MobileGatewayRepository(self.base, self.settings).latest_sms_messages(
+            limit=limit,
+            received_after=received_after,
+        )
         items: list[dict[str, Any]] = []
         for sms in messages:
             sender = str(sms.get("sender") or "")
@@ -215,15 +245,17 @@ class PublicMessagesRepository:
             )
         return items
 
-    def list_public_messages(self, limit: int = 80) -> list[dict[str, Any]]:
-        safe_limit = min(max(int(limit or 80), 1), 200)
-        pool_limit = min(max(safe_limit * 5, 100), 500)
-        email_rules = self.active_rules("email")
-        sms_rules = self.active_rules("sms")
+    def list_public_messages(self, limit: int = 10, after: str = "") -> list[dict[str, Any]]:
+        safe_limit = min(max(int(limit or 10), 1), 50)
+        received_after = self._received_after(after)
+        pool_limit = safe_limit if received_after else min(max(safe_limit * 3, 30), 100)
+        active_rules = self.active_rules()
+        email_rules = [rule for rule in active_rules if rule.get("source_type") == "email"]
+        sms_rules = [rule for rule in active_rules if rule.get("source_type") == "sms"]
         items: list[dict[str, Any]] = []
         if email_rules:
-            items.extend(self._email_messages(pool_limit, email_rules))
+            items.extend(self._email_messages(pool_limit, email_rules, received_after))
         if sms_rules:
-            items.extend(self._sms_messages(pool_limit, sms_rules))
+            items.extend(self._sms_messages(pool_limit, sms_rules, received_after))
         items.sort(key=self._sort_key, reverse=True)
         return items[:safe_limit]

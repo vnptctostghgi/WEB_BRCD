@@ -107,11 +107,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=186" in public_response.text
+        assert "/static/app.js?v=187" in public_response.text
         assert "/static/styles.css?v=121" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
-        public_js = client.get("/static/app.js?v=186")
+        public_js = client.get("/static/app.js?v=187")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -131,7 +131,8 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert "async function logoutFromClient" in public_js.text
         assert 'window.location.replace("/login")' in public_js.text
         assert "/api/admin/public-messages/feed?limit=100" not in public_js.text
-        assert "/api/admin/public-messages/feed?limit=${TABLE_PAGE_SIZE}&_=${Date.now()}" in public_js.text
+        assert "const PUBLIC_MESSAGES_LIMIT = 10" in public_js.text
+        assert 'params.set("after", publicMessagesCursor)' in public_js.text
         public_css = client.get("/static/styles.css?v=121")
         assert public_css.status_code == 200
         assert "Compact desktop rail" in public_css.text
@@ -2555,7 +2556,8 @@ def test_public_messages_feed_uses_allowed_email_and_sms_senders() -> None:
         assert response.status_code == 200
         assert response.headers["cache-control"] == "no-store"
         items = response.json()["items"]
-        assert len(items) <= 20
+        assert len(items) <= 10
+        assert response.json()["cursor"] == items[0]["received_at"]
         email_item = next(item for item in items if item["id"] == f"email:{saved_email['id']}")
         sms_item = next(item for item in items if item["id"] == f"sms:{inserted_sms[0]['id']}")
 
@@ -2567,6 +2569,20 @@ def test_public_messages_feed_uses_allowed_email_and_sms_senders() -> None:
         assert sms_item["title"] == ""
         assert sms_item["otp"] == "445566"
         assert "445566" in sms_item["content"]
+
+        delta = client.get(
+            "/api/admin/public-messages/feed",
+            params={"limit": 10, "after": response.json()["cursor"]},
+        )
+        assert delta.status_code == 200
+        assert len(delta.json()["items"]) <= 10
+        assert delta.json()["cursor"]
+
+        invalid_cursor = client.get(
+            "/api/admin/public-messages/feed",
+            params={"after": "not-a-datetime"},
+        )
+        assert invalid_cursor.status_code == 400
 
 
 def test_public_messages_parent_permission_can_view_feed() -> None:

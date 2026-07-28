@@ -234,17 +234,31 @@ class InternalEmailRepository:
             return
         self._patch_message_row({"id": f"eq.{message_id}"}, payload)
 
-    def list_messages(self, limit: int = 20, otp_only: bool = False) -> list[dict[str, Any]]:
+    def list_messages(
+        self,
+        limit: int = 20,
+        otp_only: bool = False,
+        received_after: str = "",
+    ) -> list[dict[str, Any]]:
         safe_limit = min(max(int(limit or 20), 1), 100)
         if self.is_sqlite:
-            where = "WHERE is_otp_candidate=1" if otp_only else ""
+            clauses: list[str] = []
+            params: list[Any] = []
+            if otp_only:
+                clauses.append("is_otp_candidate=1")
+            if received_after:
+                clauses.append("received_at>=?")
+                params.append(received_after)
+            where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
             rows = self._sqlite_rows(
                 f"SELECT * FROM internal_email_messages {where} ORDER BY received_at DESC, id DESC LIMIT ?",
-                (safe_limit,),
+                (*params, safe_limit),
             )
         else:
             params = {"order": "received_at.desc,id.desc", "limit": str(safe_limit)}
             if otp_only:
                 params["is_otp_candidate"] = "eq.true"
+            if received_after:
+                params["received_at"] = f"gte.{received_after}"
             rows = self._get("internal_email_messages", params)
         return [self._decode_message(row) for row in rows]

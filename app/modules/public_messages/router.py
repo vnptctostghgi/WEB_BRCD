@@ -12,7 +12,7 @@ from app.settings import get_settings
 
 
 admin_router = APIRouter(prefix="/api/admin/public-messages", tags=["admin-public-messages"])
-ADMIN_PUBLIC_MESSAGE_LIMIT = 20
+ADMIN_PUBLIC_MESSAGE_LIMIT = 10
 
 
 class PublicSenderRulePayload(BaseModel):
@@ -36,14 +36,22 @@ def _limit(value: int | str | None = None, default: int = ADMIN_PUBLIC_MESSAGE_L
 
 
 @admin_router.get("/feed")
-def admin_public_message_feed(request: Request, response: Response, limit: int = ADMIN_PUBLIC_MESSAGE_LIMIT) -> dict:
+def admin_public_message_feed(
+    request: Request,
+    response: Response,
+    limit: int = ADMIN_PUBLIC_MESSAGE_LIMIT,
+    after: str = "",
+) -> dict:
     require_public_messages_permission(request, "public_messages.view")
     response.headers["Cache-Control"] = "no-store"
     try:
-        items = _repository().list_public_messages(limit=_limit(limit))
+        items = _repository().list_public_messages(limit=_limit(limit), after=after)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     except RuntimeError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Public message schema is missing: {str(error)[:200]}") from error
-    return {"ok": True, "items": items}
+    cursor = str(items[0].get("received_at") or "") if items else str(after or "")
+    return {"ok": True, "items": items, "cursor": cursor}
 
 
 @admin_router.get("/rules")

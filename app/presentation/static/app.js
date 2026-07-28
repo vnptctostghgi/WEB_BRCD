@@ -16,6 +16,8 @@ let zaloAutoMessages = [];
 let zaloMessageLogs = [];
 let publicMessages = [];
 let publicMessagesRefreshTimer = null;
+let publicMessagesCursor = "";
+let publicMessagesLoadPromise = null;
 let oneBssReports = [];
 let oneBssReportDrafts = [];
 let mobileGatewayLoaded = false;
@@ -160,6 +162,7 @@ const DATA_CACHE_TTL_MS = 2 * 60 * 1000;
 const NAVIGATION_CLIENT_CACHE_TTL_MS = 60 * 1000;
 const NAVIGATION_CLIENT_CACHE_VERSION = "2026-07-28-1";
 const TABLE_PAGE_SIZE = 20;
+const PUBLIC_MESSAGES_LIMIT = 10;
 const TABLE_SHORT_PAGE_SIZE = 10;
 const TABLE_HISTORY_LIMIT = 20;
 window.TABLE_PAGE_SIZE = TABLE_PAGE_SIZE;
@@ -4647,11 +4650,12 @@ function renderPublicMessageOtpCell(code) {
 function renderPublicMessages(items = []) {
   const table = $("#public-messages-table");
   if (!table) return;
-  if (!items.length) {
+  const visibleItems = items.slice(0, PUBLIC_MESSAGES_LIMIT);
+  if (!visibleItems.length) {
     table.innerHTML = emptyRow(6, "Ch\u01b0a c\u00f3 n\u1ed9i dung public", "H\u00e3y c\u1ea5u h\u00ecnh ng\u01b0\u1eddi g\u1eedi trong Mail n\u1ed9i b\u1ed9 ho\u1eb7c Mobile Gateway.");
     return;
   }
-  table.innerHTML = items.map((item) => `<tr>
+  table.innerHTML = visibleItems.map((item) => `<tr>
     <td>${escapeHtml(publicMessagesFormatTime(item.received_at))}</td>
     <td>${escapeHtml(item.sender || "")}</td>
     <td><span class="status ${item.source_type === "sms" ? "pending" : "viewer"}">${escapeHtml(item.type_label || item.source_type || "")}</span></td>
@@ -4684,33 +4688,64 @@ function bindPublicMessagesEvents() {
 function startPublicMessagesAutoRefresh() {
   if (publicMessagesRefreshTimer) return;
   publicMessagesRefreshTimer = setInterval(() => {
-    if (!$("#view-public-messages")?.classList.contains("active")) return;
+    if (document.hidden || !$("#view-public-messages")?.classList.contains("active")) return;
     loadPublicMessages({ silent: true }).catch((error) => console.warn("Public message refresh failed", error));
-  }, 3000);
+  }, 2000);
 }
 
 async function loadPublicMessages({ force = false, silent = false } = {}) {
+  if (publicMessagesLoadPromise) return publicMessagesLoadPromise;
   bindPublicMessagesEvents();
   const table = $("#public-messages-table");
   const status = $("#public-messages-status");
   const message = $("#public-messages-message");
   if (force && table && !silent) setTableLoading("#public-messages-table", 6, "\u0110ang t\u1ea3i n\u1ed9i dung public...");
-  try {
+  publicMessagesLoadPromise = (async () => {
     startPublicMessagesAutoRefresh();
-    const data = await api(`/api/admin/public-messages/feed?limit=${TABLE_PAGE_SIZE}&_=${Date.now()}`);
-    publicMessages = data.items || [];
-    renderPublicMessages(publicMessages);
+    const incremental = !force && Boolean(publicMessagesCursor);
+    const params = new URLSearchParams({
+      limit: String(PUBLIC_MESSAGES_LIMIT),
+      _: String(Date.now()),
+    });
+    if (incremental) params.set("after", publicMessagesCursor);
+    const data = await api(`/api/admin/public-messages/feed?${params.toString()}`);
+    const incoming = data.items || [];
+    if (incremental) {
+      const byId = new Map(publicMessages.map((item) => [String(item.id), item]));
+      let changed = false;
+      incoming.forEach((item) => {
+        const key = String(item.id);
+        const previous = byId.get(key);
+        if (!previous || JSON.stringify(previous) !== JSON.stringify(item)) changed = true;
+        byId.set(key, item);
+      });
+      if (changed) {
+        publicMessages = Array.from(byId.values())
+          .sort((left, right) => new Date(right.received_at || 0) - new Date(left.received_at || 0))
+          .slice(0, PUBLIC_MESSAGES_LIMIT);
+        renderPublicMessages(publicMessages);
+      }
+    } else {
+      publicMessages = incoming.slice(0, PUBLIC_MESSAGES_LIMIT);
+      renderPublicMessages(publicMessages);
+    }
+    publicMessagesCursor = String(data.cursor || publicMessages[0]?.received_at || publicMessagesCursor || "");
     if (status) {
       status.className = "status viewer";
       status.textContent = `C\u1eadp nh\u1eadt ${new Date().toLocaleTimeString("vi-VN")}`;
     }
     if (message && !silent) message.className = "result hidden mb-4";
+  })();
+  try {
+    return await publicMessagesLoadPromise;
   } catch (error) {
     if (status) {
       status.className = "status inactive";
       status.textContent = "L\u1ed7i t\u1ea3i d\u1eef li\u1ec7u";
     }
     if (!silent) showMessage(message, error.message || "Kh\u00f4ng t\u1ea3i \u0111\u01b0\u1ee3c n\u1ed9i dung public.", "error");
+  } finally {
+    publicMessagesLoadPromise = null;
   }
 }
 
