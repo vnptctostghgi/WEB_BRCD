@@ -1586,6 +1586,8 @@ if (role === "admin") {
   $("#region-form")?.addEventListener("submit", saveRegion);
   $("#role-form")?.addEventListener("submit", saveRole);
   $("#connection-form")?.addEventListener("submit", saveConnection);
+  $("#connection-search")?.addEventListener("input", renderConnectionsTable);
+  $("#connection-picker")?.addEventListener("change", renderConnectionsTable);
   $("#sql-report-form")?.addEventListener("submit", saveSqlReport);
   $("#add-inline-sql-report")?.addEventListener("click", addInlineSqlReport);
   $("#sql-report-search")?.addEventListener("input", renderSqlReports);
@@ -4794,25 +4796,44 @@ function addInlineReportLink() {
 }
 
 async function loadSystem({ force = false } = {}) {
-  if (!force && isDataFresh("system") && isDataFresh("connections") && isDataFresh("sqlReports") && isDataFresh("oneBssReports") && isDataFresh("reportLinks") && isDataFresh("dataMining")) return;
-  $("#system-cards").innerHTML = loadingRow(1, "Đang tải thông tin hệ thống...");
-  const [data] = await Promise.all([
+  if (!force && isDataFresh("system") && isDataFresh("connections")) {
+    renderConnectionsTable();
+    warmSystemSecondarySections({ force: false });
+    return;
+  }
+  const cards = $("#system-cards");
+  if (cards) cards.innerHTML = loadingRow(1, "Đang tải thông tin hệ thống...");
+  const [systemResult, connectionsResult] = await Promise.allSettled([
     api("/api/admin/system"),
     loadConnections({ force }),
+  ]);
+  if (systemResult.status === "fulfilled") {
+    const data = systemResult.value;
+    markDataFresh("system");
+    if (cards) cards.innerHTML = [
+      ["APP", "Môi trường", data.environment],
+      ["STO", "Database chính", data.storage_backend],
+      ["API", "API dữ liệu", data.internal_api_mock_mode ? "Mock nội bộ" : data.internal_api_url],
+      ["USR", "Người dùng hoạt động", `${data.active_user_count}/${data.user_count}`],
+    ].map(([icon, label, value]) => `<article class="metric-card"><div class="metric-icon">${icon}</div><div><span>${label}</span><strong>${escapeHtml(value)}</strong></div></article>`).join("");
+  } else if (cards) {
+    cards.innerHTML = `<article class="metric-card"><div class="metric-icon">!</div><div><span>Hệ thống</span><strong>Không tải được</strong><small>${escapeHtml(systemResult.reason?.message || "Lỗi không xác định")}</small></div></article>`;
+  }
+  if (connectionsResult.status === "rejected") {
+    renderConnectionEditorLoading(connectionsResult.reason?.message || "Không tải được kết nối hệ thống.");
+  }
+  warmSystemSecondarySections({ force });
+}
+
+function warmSystemSecondarySections({ force = false } = {}) {
+  Promise.allSettled([
     loadZaloAutoMessages({ force }),
     loadZaloMessageLogs({ force }),
     loadDataMining({ force }),
     loadSqlReports({ force }),
     loadOneBssReports({ force }),
     loadReportLinks({ force }),
-  ]);
-  markDataFresh("system");
-  $("#system-cards").innerHTML = [
-    ["APP", "Môi trường", data.environment],
-    ["STO", "Database chính", data.storage_backend],
-    ["API", "API dữ liệu", data.internal_api_mock_mode ? "Mock nội bộ" : data.internal_api_url],
-    ["USR", "Người dùng hoạt động", `${data.active_user_count}/${data.user_count}`],
-  ].map(([icon, label, value]) => `<article class="metric-card"><div class="metric-icon">${icon}</div><div><span>${label}</span><strong>${escapeHtml(value)}</strong></div></article>`).join("");
+  ]).catch(() => {});
 }
 
 async function loadWorkstation(options = {}) {
