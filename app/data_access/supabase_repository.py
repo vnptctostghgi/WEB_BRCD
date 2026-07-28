@@ -66,6 +66,7 @@ ONEBSS_WORKER_COLUMNS = {
     "claimed_at",
     "updated_at",
 }
+FTP_FALLBACK_STORE_KEY = "secret_ftp_report_store"
 
 FEATURE_ROWS.append({"code": "quantrisql", "name": "Quản trị SQL", "parent_code": "quantriketnoi", "sort_order": 23})
 FEATURE_ROWS.append({"code": "quantridulieuonebss", "name": "Quản trị dữ liệu OneBSS", "parent_code": "quantriketnoi", "sort_order": 24})
@@ -971,19 +972,39 @@ class SupabaseRepository:
         params = {"order": "ten_bao_cao.asc"}
         if active_only:
             params["is_active"] = "eq.true"
-        rows = self._get("ftp_reports", params)
+        try:
+            rows = self._get("ftp_reports", params)
+        except RuntimeError as error:
+            if self._is_missing_ftp_table_error(error):
+                return self._ftp_fallback_list_reports(active_only)
+            raise
         return [self._decode_ftp_report(row) for row in rows]
 
     def get_ftp_report_by_id(self, report_id: int) -> dict[str, Any] | None:
-        rows = self._get("ftp_reports", {"id": f"eq.{report_id}", "limit": "1"})
+        try:
+            rows = self._get("ftp_reports", {"id": f"eq.{report_id}", "limit": "1"})
+        except RuntimeError as error:
+            if self._is_missing_ftp_table_error(error):
+                return self._ftp_fallback_get_report_by_id(report_id)
+            raise
         return self._decode_ftp_report(rows[0]) if rows else None
 
     def get_ftp_report_by_code(self, ma_bao_cao: str) -> dict[str, Any] | None:
-        rows = self._get("ftp_reports", {"ma_bao_cao": f"eq.{ma_bao_cao}", "limit": "1"})
+        try:
+            rows = self._get("ftp_reports", {"ma_bao_cao": f"eq.{ma_bao_cao}", "limit": "1"})
+        except RuntimeError as error:
+            if self._is_missing_ftp_table_error(error):
+                return self._ftp_fallback_get_report_by_code(ma_bao_cao)
+            raise
         return self._decode_ftp_report(rows[0]) if rows else None
 
     def generate_ftp_report_code(self) -> str:
-        rows = self._get("ftp_reports", {"select": "ma_bao_cao", "ma_bao_cao": "like.FTP%", "order": "ma_bao_cao.desc"})
+        try:
+            rows = self._get("ftp_reports", {"select": "ma_bao_cao", "ma_bao_cao": "like.FTP%", "order": "ma_bao_cao.desc"})
+        except RuntimeError as error:
+            if self._is_missing_ftp_table_error(error):
+                return self._ftp_fallback_generate_report_code()
+            raise
         numbers = []
         for row in rows:
             match = re.search(r"(\d+)$", str(row.get("ma_bao_cao") or ""))
@@ -1011,13 +1032,29 @@ class SupabaseRepository:
             "updated_at": self._now(),
         }
         if report_id:
-            self._patch("ftp_reports", {"id": f"eq.{report_id}"}, payload)
+            try:
+                self._patch("ftp_reports", {"id": f"eq.{report_id}"}, payload)
+            except RuntimeError as error:
+                if self._is_missing_ftp_table_error(error):
+                    return self._ftp_fallback_save_report(report_id, payload)
+                raise
             return int(report_id)
         payload["created_at"] = self._now()
-        return int(self._insert("ftp_reports", payload)["id"])
+        try:
+            return int(self._insert("ftp_reports", payload)["id"])
+        except RuntimeError as error:
+            if self._is_missing_ftp_table_error(error):
+                return self._ftp_fallback_save_report(None, payload)
+            raise
 
     def delete_ftp_report(self, report_id: int) -> None:
-        self._delete("ftp_reports", {"id": f"eq.{report_id}"})
+        try:
+            self._delete("ftp_reports", {"id": f"eq.{report_id}"})
+        except RuntimeError as error:
+            if self._is_missing_ftp_table_error(error):
+                self._ftp_fallback_delete_report(report_id)
+                return
+            raise
 
     def save_ftp_report_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         run_id = str(payload.get("run_id") or f"FTPRUN{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}{secrets.token_hex(3).upper()}")
@@ -1042,15 +1079,30 @@ class SupabaseRepository:
             "claimed_at": str(payload.get("claimed_at") or ""),
             "updated_at": str(payload.get("updated_at") or self._now()),
         }
-        self._insert("ftp_report_runs", row)
+        try:
+            self._insert("ftp_report_runs", row)
+        except RuntimeError as error:
+            if self._is_missing_ftp_table_error(error):
+                return self._ftp_fallback_save_run(row)
+            raise
         return self._decode_ftp_report_run(row)
 
     def get_ftp_report_run(self, run_id: str) -> dict[str, Any] | None:
-        rows = self._get("ftp_report_runs", {"run_id": f"eq.{run_id}", "limit": "1"})
+        try:
+            rows = self._get("ftp_report_runs", {"run_id": f"eq.{run_id}", "limit": "1"})
+        except RuntimeError as error:
+            if self._is_missing_ftp_table_error(error):
+                return self._ftp_fallback_get_run(run_id)
+            raise
         return self._decode_ftp_report_run(rows[0]) if rows else None
 
     def claim_next_ftp_report_run(self, worker_id: str) -> dict[str, Any] | None:
-        rows = self._get("ftp_report_runs", {"status": "eq.queued", "order": "started_at.asc", "limit": "1"})
+        try:
+            rows = self._get("ftp_report_runs", {"status": "eq.queued", "order": "started_at.asc", "limit": "1"})
+        except RuntimeError as error:
+            if self._is_missing_ftp_table_error(error):
+                return self._ftp_fallback_claim_next_run(worker_id)
+            raise
         if not rows:
             return None
         run_id = str(rows[0].get("run_id") or "")
@@ -1088,24 +1140,194 @@ class SupabaseRepository:
         payload = {key: value for key, value in updates.items() if key in allowed}
         payload["updated_at"] = str(payload.get("updated_at") or self._now())
         if payload:
-            self._patch("ftp_report_runs", {"run_id": f"eq.{run_id}"}, payload)
+            try:
+                self._patch("ftp_report_runs", {"run_id": f"eq.{run_id}"}, payload)
+            except RuntimeError as error:
+                if self._is_missing_ftp_table_error(error):
+                    return self._ftp_fallback_update_run(run_id, payload)
+                raise
         return self.get_ftp_report_run(run_id)
 
     def list_ftp_report_runs(self, ma_bao_cao: str = "", limit: int = 50) -> list[dict[str, Any]]:
         params = {"order": "started_at.desc", "limit": str(min(max(int(limit or 50), 1), 200))}
         if ma_bao_cao:
             params["ma_bao_cao"] = f"eq.{ma_bao_cao}"
-        rows = self._get("ftp_report_runs", params)
+        try:
+            rows = self._get("ftp_report_runs", params)
+        except RuntimeError as error:
+            if self._is_missing_ftp_table_error(error):
+                return self._ftp_fallback_list_runs(ma_bao_cao, limit)
+            raise
         return [self._decode_ftp_report_run(row) for row in rows]
 
     def clear_ftp_report_runs(self, ma_bao_cao: str = "") -> int:
         if ma_bao_cao:
-            existing = self._get("ftp_report_runs", {"select": "run_id", "ma_bao_cao": f"eq.{ma_bao_cao}"})
-            self._delete("ftp_report_runs", {"ma_bao_cao": f"eq.{ma_bao_cao}"})
+            try:
+                existing = self._get("ftp_report_runs", {"select": "run_id", "ma_bao_cao": f"eq.{ma_bao_cao}"})
+                self._delete("ftp_report_runs", {"ma_bao_cao": f"eq.{ma_bao_cao}"})
+            except RuntimeError as error:
+                if self._is_missing_ftp_table_error(error):
+                    return self._ftp_fallback_clear_runs(ma_bao_cao)
+                raise
         else:
-            existing = self._get("ftp_report_runs", {"select": "run_id"})
-            self._delete("ftp_report_runs", {"run_id": "not.is.null"})
+            try:
+                existing = self._get("ftp_report_runs", {"select": "run_id"})
+                self._delete("ftp_report_runs", {"run_id": "not.is.null"})
+            except RuntimeError as error:
+                if self._is_missing_ftp_table_error(error):
+                    return self._ftp_fallback_clear_runs("")
+                raise
         return len(existing)
+
+    def _ftp_fallback_store(self) -> dict[str, Any]:
+        connection = self.get_system_connection_by_code("ftp_storage") or {}
+        config = connection.get("config") if isinstance(connection.get("config"), dict) else {}
+        store = config.get(FTP_FALLBACK_STORE_KEY)
+        if isinstance(store, str):
+            try:
+                store = json.loads(store)
+            except json.JSONDecodeError:
+                store = {}
+        if not isinstance(store, dict):
+            store = {}
+        reports = [self._decode_ftp_report(item) for item in store.get("reports", []) if isinstance(item, dict)]
+        runs = [self._decode_ftp_report_run(item) for item in store.get("runs", []) if isinstance(item, dict)]
+        return {
+            "reports": reports,
+            "runs": runs,
+            "next_report_id": int(store.get("next_report_id") or (max([int(item.get("id") or 0) for item in reports], default=0) + 1)),
+        }
+
+    def _save_ftp_fallback_store(self, store: dict[str, Any]) -> None:
+        connection = self.get_system_connection_by_code("ftp_storage") or {}
+        config = dict(connection.get("config") if isinstance(connection.get("config"), dict) else {})
+        config[FTP_FALLBACK_STORE_KEY] = {
+            "reports": store.get("reports") or [],
+            "runs": store.get("runs") or [],
+            "next_report_id": int(store.get("next_report_id") or 1),
+        }
+        self.upsert_system_connection(
+            "ftp_storage",
+            str(connection.get("name") or "FTP"),
+            str(connection.get("connection_type") or "ftp"),
+            str(connection.get("description") or "Kết nối FTP nội bộ để máy trạm lấy file báo cáo."),
+            config,
+            bool(connection.get("is_active", True)),
+        )
+
+    def _ftp_fallback_list_reports(self, active_only: bool = False) -> list[dict[str, Any]]:
+        reports = self._ftp_fallback_store()["reports"]
+        if active_only:
+            reports = [item for item in reports if item.get("is_active")]
+        return sorted(reports, key=lambda item: str(item.get("ten_bao_cao") or "").casefold())
+
+    def _ftp_fallback_get_report_by_id(self, report_id: int) -> dict[str, Any] | None:
+        return next((item for item in self._ftp_fallback_store()["reports"] if int(item.get("id") or 0) == int(report_id)), None)
+
+    def _ftp_fallback_get_report_by_code(self, ma_bao_cao: str) -> dict[str, Any] | None:
+        code = str(ma_bao_cao or "").strip().upper()
+        return next((item for item in self._ftp_fallback_store()["reports"] if str(item.get("ma_bao_cao") or "").upper() == code), None)
+
+    def _ftp_fallback_generate_report_code(self) -> str:
+        numbers: list[int] = []
+        for report in self._ftp_fallback_store()["reports"]:
+            match = re.search(r"(\d+)$", str(report.get("ma_bao_cao") or ""))
+            if match:
+                numbers.append(int(match.group(1)))
+        return f"FTP{(max(numbers) if numbers else 0) + 1:04d}"
+
+    def _ftp_fallback_save_report(self, report_id: int | None, payload: dict[str, Any]) -> int:
+        store = self._ftp_fallback_store()
+        reports = list(store["reports"])
+        now = self._now()
+        code = str(payload.get("ma_bao_cao") or "").strip().upper()
+        if report_id:
+            target_id = int(report_id)
+            updated = False
+            for index, report in enumerate(reports):
+                if int(report.get("id") or 0) == target_id:
+                    reports[index] = self._decode_ftp_report({**report, **payload, "id": target_id, "ma_bao_cao": code, "updated_at": now})
+                    updated = True
+                    break
+            if not updated:
+                raise ValueError("Khong tim thay cau hinh FTP can cap nhat.")
+            store["reports"] = reports
+            self._save_ftp_fallback_store(store)
+            return target_id
+        if any(str(report.get("ma_bao_cao") or "").upper() == code for report in reports):
+            raise sqlite3.IntegrityError("Ma bao cao FTP da ton tai.")
+        next_id = int(store.get("next_report_id") or 1)
+        reports.append(self._decode_ftp_report({**payload, "id": next_id, "ma_bao_cao": code, "created_at": payload.get("created_at") or now, "updated_at": now}))
+        store["reports"] = reports
+        store["next_report_id"] = next_id + 1
+        self._save_ftp_fallback_store(store)
+        return next_id
+
+    def _ftp_fallback_delete_report(self, report_id: int) -> None:
+        store = self._ftp_fallback_store()
+        store["reports"] = [item for item in store["reports"] if int(item.get("id") or 0) != int(report_id)]
+        self._save_ftp_fallback_store(store)
+
+    def _ftp_fallback_save_run(self, row: dict[str, Any]) -> dict[str, Any]:
+        store = self._ftp_fallback_store()
+        run = self._decode_ftp_report_run(row)
+        store["runs"] = [item for item in store["runs"] if item.get("run_id") != run.get("run_id")]
+        store["runs"].append(run)
+        self._save_ftp_fallback_store(store)
+        return run
+
+    def _ftp_fallback_get_run(self, run_id: str) -> dict[str, Any] | None:
+        target = str(run_id or "")
+        return next((item for item in self._ftp_fallback_store()["runs"] if str(item.get("run_id") or "") == target), None)
+
+    def _ftp_fallback_claim_next_run(self, worker_id: str) -> dict[str, Any] | None:
+        queued = [
+            item for item in self._ftp_fallback_store()["runs"]
+            if str(item.get("status") or "").lower() == "queued"
+        ]
+        if not queued:
+            return None
+        run = sorted(queued, key=lambda item: str(item.get("started_at") or ""))[0]
+        return self._ftp_fallback_update_run(str(run.get("run_id") or ""), {
+            "status": "running",
+            "message": "May tram da nhan task FTP va dang tai file.",
+            "worker_id": str(worker_id or "")[:120],
+            "claimed_at": self._now(),
+        })
+
+    def _ftp_fallback_update_run(self, run_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+        store = self._ftp_fallback_store()
+        target = str(run_id or "")
+        updated_run: dict[str, Any] | None = None
+        runs: list[dict[str, Any]] = []
+        for run in store["runs"]:
+            if str(run.get("run_id") or "") == target:
+                updated_run = self._decode_ftp_report_run({**run, **updates, "updated_at": updates.get("updated_at") or self._now()})
+                runs.append(updated_run)
+            else:
+                runs.append(run)
+        store["runs"] = runs
+        self._save_ftp_fallback_store(store)
+        return updated_run
+
+    def _ftp_fallback_list_runs(self, ma_bao_cao: str = "", limit: int = 50) -> list[dict[str, Any]]:
+        code = str(ma_bao_cao or "").strip().upper()
+        runs = self._ftp_fallback_store()["runs"]
+        if code:
+            runs = [item for item in runs if str(item.get("ma_bao_cao") or "").upper() == code]
+        runs = sorted(runs, key=lambda item: str(item.get("started_at") or ""), reverse=True)
+        return runs[: min(max(int(limit or 50), 1), 200)]
+
+    def _ftp_fallback_clear_runs(self, ma_bao_cao: str = "") -> int:
+        store = self._ftp_fallback_store()
+        code = str(ma_bao_cao or "").strip().upper()
+        before = len(store["runs"])
+        if code:
+            store["runs"] = [item for item in store["runs"] if str(item.get("ma_bao_cao") or "").upper() != code]
+        else:
+            store["runs"] = []
+        self._save_ftp_fallback_store(store)
+        return before - len(store["runs"])
 
     def save_onebss_report_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         run_id = str(payload.get("run_id") or f"OBRUN{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}{secrets.token_hex(3).upper()}")
@@ -1897,6 +2119,14 @@ class SupabaseRepository:
     def _is_missing_user_login_sessions_error(error: Exception) -> bool:
         text = str(error).lower()
         return "user_login_sessions" in text and any(
+            marker in text
+            for marker in ("pgrst", "does not exist", "could not find", "schema cache", "relation")
+        )
+
+    @staticmethod
+    def _is_missing_ftp_table_error(error: Exception) -> bool:
+        text = str(error).lower()
+        return ("ftp_reports" in text or "ftp_report_runs" in text) and any(
             marker in text
             for marker in ("pgrst", "does not exist", "could not find", "schema cache", "relation")
         )

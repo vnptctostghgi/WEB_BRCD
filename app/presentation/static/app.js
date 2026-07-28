@@ -161,7 +161,7 @@ const dashboardViewerLayoutCache = new Map();
 const dashboardBuilderLayoutCache = new Map();
 const DATA_CACHE_TTL_MS = 2 * 60 * 1000;
 const NAVIGATION_CLIENT_CACHE_TTL_MS = 60 * 1000;
-const NAVIGATION_CLIENT_CACHE_VERSION = "2026-07-28-2";
+const NAVIGATION_CLIENT_CACHE_VERSION = "2026-07-28-3";
 const TABLE_PAGE_SIZE = 20;
 const PUBLIC_MESSAGES_LIMIT = 10;
 const TABLE_SHORT_PAGE_SIZE = 10;
@@ -357,7 +357,7 @@ function ensureReportsRuntimeScriptLoaded() {
   if (reportsRuntimeScriptPromise) return reportsRuntimeScriptPromise;
   reportsRuntimeScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/reports-runtime.js?v=1";
+    script.src = "/static/reports-runtime.js?v=2";
     script.defer = true;
     script.dataset.reportsRuntime = "true";
     script.addEventListener("load", () => {
@@ -727,6 +727,10 @@ function setTableLoading(selector, colspan, text) {
 function setButtonLoading(button, isLoading) {
   button.disabled = isLoading;
   button.classList.toggle("loading", isLoading);
+}
+
+function fillDynamicReportSelect() {
+  window.VNPTReportsRuntime?.fillDynamicReportSelect?.();
 }
 
 window.VNPTApp = {

@@ -107,11 +107,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=188" in public_response.text
+        assert "/static/app.js?v=189" in public_response.text
         assert "/static/styles.css?v=121" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
-        public_js = client.get("/static/app.js?v=188")
+        public_js = client.get("/static/app.js?v=189")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -122,6 +122,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert "function readCachedNavigation" in public_js.text
         assert "function fetchNavigation" in public_js.text
         assert "function warmSystemSecondarySections" in public_js.text
+        assert "function fillDynamicReportSelect()" in public_js.text
+        assert "/static/reports-runtime.js?v=2" in public_js.text
+        reports_runtime_js = client.get("/static/reports-runtime.js?v=2")
+        assert reports_runtime_js.status_code == 200
+        assert "fillDynamicReportSelect }" in reports_runtime_js.text
         assert 'Promise.allSettled([' in public_js.text
         assert '$("#connection-picker")?.addEventListener("change", renderConnectionsTable)' in public_js.text
         assert "function permissionDisplayFeatures" in public_js.text
@@ -327,7 +332,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=188" in page.text
+        assert "/static/app.js?v=189" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -3828,6 +3833,77 @@ def test_supabase_ftp_report_run_uses_ftp_table(monkeypatch) -> None:
     assert run["file_name_template"] == "test_{yyyymmdd}.xlsx"
 
 
+def test_supabase_ftp_fallback_uses_protected_connection_config(monkeypatch) -> None:
+    from app.data_access.supabase_repository import FTP_FALLBACK_STORE_KEY
+
+    repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
+    connection = {
+        "id": 1,
+        "code": "ftp_storage",
+        "name": "FTP",
+        "connection_type": "ftp",
+        "description": "FTP fallback",
+        "config": {"host": "10.159.23.100", "username": "thangph.cto", "password": "$Phthang125125"},
+        "is_active": True,
+    }
+
+    def missing_table(*args, **kwargs):
+        raise RuntimeError('Supabase REST loi 404: {"code":"PGRST205","message":"Could not find the table public.ftp_reports in the schema cache"}')
+
+    def fake_get_connection(code):
+        assert code == "ftp_storage"
+        return connection
+
+    def fake_upsert_connection(code, name, connection_type, description, config, is_active):
+        connection.update({
+            "code": code,
+            "name": name,
+            "connection_type": connection_type,
+            "description": description,
+            "config": config,
+            "is_active": is_active,
+        })
+        return 1
+
+    monkeypatch.setattr(repository, "_get", missing_table)
+    monkeypatch.setattr(repository, "_insert", missing_table)
+    monkeypatch.setattr(repository, "_patch", missing_table)
+    monkeypatch.setattr(repository, "_delete", missing_table)
+    monkeypatch.setattr(repository, "get_system_connection_by_code", fake_get_connection)
+    monkeypatch.setattr(repository, "upsert_system_connection", fake_upsert_connection)
+
+    assert repository.generate_ftp_report_code() == "FTP0001"
+    report_id = repository.save_ftp_report(None, "FTP0001", "FTP fallback", "/reports", "file_{yyyymmdd}.xlsx")
+    assert report_id == 1
+    reports = repository.list_ftp_reports()
+    assert reports[0]["ma_bao_cao"] == "FTP0001"
+    assert repository.get_ftp_report_by_code("FTP0001")["folder_path"] == "/reports"
+
+    public_config, protected_keys = routes.public_connection_config(connection["config"])
+    assert FTP_FALLBACK_STORE_KEY not in public_config
+    assert FTP_FALLBACK_STORE_KEY in protected_keys
+
+    run = repository.save_ftp_report_run({
+        "run_id": "FTP-RUN-FALLBACK",
+        "ma_bao_cao": "FTP0001",
+        "ten_bao_cao": "FTP fallback",
+        "status": "queued",
+        "folder_path": "/reports",
+        "file_name_template": "file_{yyyymmdd}.xlsx",
+    })
+    assert run["status"] == "queued"
+    claimed = repository.claim_next_ftp_report_run("ws-fallback")
+    assert claimed["run_id"] == "FTP-RUN-FALLBACK"
+    assert claimed["status"] == "running"
+    assert claimed["worker_id"] == "ws-fallback"
+
+    updated = repository.update_ftp_report_run("FTP-RUN-FALLBACK", {"status": "success", "file_name": "file.xlsx"})
+    assert updated["status"] == "success"
+    assert repository.list_ftp_report_runs("FTP0001")[0]["file_name"] == "file.xlsx"
+    assert repository.clear_ftp_report_runs("FTP0001") == 1
+    assert repository.list_ftp_report_runs("FTP0001") == []
+
+
 def test_supabase_onebss_report_save_falls_back_without_otp_service_code(monkeypatch) -> None:
     repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
     payloads = []
@@ -4556,16 +4632,16 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         home = client.get("/")
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
-        assert "/static/shell.js?v=12" in home.text
-        assert "/static/app.js?v=188" not in home.text
-        shell_js = client.get("/static/shell.js?v=12")
+        assert "/static/shell.js?v=13" in home.text
+        assert "/static/app.js?v=189" not in home.text
+        shell_js = client.get("/static/shell.js?v=13")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
         assert "function dedupeFeaturesForDisplay" in shell_js.text
         assert "function readCachedNavigation" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=188" in shell_js.text
+        assert "/static/app.js?v=189" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -4578,8 +4654,8 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
-        assert "/static/shell.js?v=12" in dashboard.text
-        assert "/static/app.js?v=188" not in dashboard.text
+        assert "/static/shell.js?v=13" in dashboard.text
+        assert "/static/app.js?v=189" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -4590,49 +4666,49 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "view-reports" in reports.text
         assert "view-mobile-gateway" not in reports.text
         assert "sql-report-dialog" not in reports.text
-        assert "/static/app.js?v=188" in reports.text
+        assert "/static/app.js?v=189" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=188" in workstation.text
+        assert "/static/app.js?v=189" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=188" in work_tasks.text
+        assert "/static/app.js?v=189" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=188" in report_links.text
+        assert "/static/app.js?v=189" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=188" in system.text
+        assert "/static/app.js?v=189" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=188" in onebss_mining.text
+        assert "/static/app.js?v=189" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 
         ftp_mining = client.get("/daodulieuftp")
         assert ftp_mining.status_code == 200
         assert "view-ftp-mining" in ftp_mining.text
-        assert "/static/app.js?v=188" in ftp_mining.text
+        assert "/static/app.js?v=189" in ftp_mining.text
         assert "/static/ftp-mining.js" not in ftp_mining.text
         assert ftp_mining.text.count('class="app-view') == 1
 

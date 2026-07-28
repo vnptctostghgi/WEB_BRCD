@@ -1189,5 +1189,5 @@ function bindReportsRuntimeEvents() {
 }
 
 bindReportsRuntimeEvents();
-window.VNPTReportsRuntime = { loadDynamicReports, loadOneBssMining };
+window.VNPTReportsRuntime = { loadDynamicReports, loadOneBssMining, fillDynamicReportSelect };
 })();
