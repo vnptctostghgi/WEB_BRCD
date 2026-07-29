@@ -65,6 +65,25 @@ class ConnectionService:
             config=ftp_config,
             is_active=bool(existing_ftp.get("is_active")) if existing_ftp else bool(ftp_config.get("host") and ftp_config.get("username") and ftp_config.get("password")),
         )
+        existing_oracle = self.repository.get_system_connection_by_code("oracle_agency_db") or {}
+        existing_oracle_config = existing_oracle.get("config") if isinstance(existing_oracle.get("config"), dict) else {}
+        oracle_config = {
+            "host": existing_oracle_config.get("host") or "",
+            "port": existing_oracle_config.get("port") or 1521,
+            "service": existing_oracle_config.get("service") or existing_oracle_config.get("service_name") or "",
+            "username": existing_oracle_config.get("username") or existing_oracle_config.get("user") or "",
+            "password": existing_oracle_config.get("password") or "",
+            "secret_ref": "DB_PASS",
+            **existing_oracle_config,
+        }
+        self.repository.upsert_system_connection(
+            code="oracle_agency_db",
+            name=str(existing_oracle.get("name") or "Oracle DB noi bo"),
+            connection_type="oracle",
+            description=str(existing_oracle.get("description") or "Cau hinh Oracle de nhung san vao bo cai may tram SQL."),
+            config=oracle_config,
+            is_active=bool(existing_oracle.get("is_active")) if existing_oracle else False,
+        )
         existing_drive = self.repository.get_system_connection_by_code("drive_storage") or {}
         existing_drive_config = existing_drive.get("config") if isinstance(existing_drive.get("config"), dict) else {}
         self.repository.upsert_system_connection(
@@ -177,6 +196,37 @@ class ConnectionService:
                         "port": config.get("port") or 21,
                         "username_configured": bool(str(config.get("username") or "").strip()),
                         "password_configured": bool(str(config.get("password") or "").strip()),
+                    },
+                },
+                connection,
+            )
+
+        if connection["connection_type"] == "oracle":
+            config = connection.get("config") if isinstance(connection.get("config"), dict) else {}
+            missing = [
+                label
+                for label, value in (
+                    ("host", config.get("host") or config.get("db_host")),
+                    ("service", config.get("service") or config.get("service_name") or config.get("db_service")),
+                    ("username", config.get("username") or config.get("user") or config.get("db_user")),
+                    ("password", config.get("password") or config.get("db_pass")),
+                )
+                if not str(value or "").strip()
+            ]
+            return self._with_connection(
+                {
+                    "ok": not missing,
+                    "message": (
+                        "Da cau hinh Oracle. May tram se kiem tra ket noi that bang API local."
+                        if not missing
+                        else f"Oracle thieu cau hinh: {', '.join(missing)}."
+                    ),
+                    "details": {
+                        "host": config.get("host") or config.get("db_host") or "",
+                        "port": config.get("port") or config.get("db_port") or 1521,
+                        "service_configured": bool(str(config.get("service") or config.get("service_name") or config.get("db_service") or "").strip()),
+                        "username_configured": bool(str(config.get("username") or config.get("user") or config.get("db_user") or "").strip()),
+                        "password_configured": bool(str(config.get("password") or config.get("db_pass") or "").strip()),
                     },
                 },
                 connection,

@@ -6,6 +6,11 @@ param(
   [string]$InternalApiUrl = "https://api.vnptcto.com/api/du-lieu-web",
   [string]$WorkerDriveUploadApiUrl = "http://127.0.0.1:8000/api/du-lieu-web",
   [string]$ApiRoot = "C:\VNPTCTO",
+  [string]$OracleDbHost = "",
+  [string]$OracleDbPort = "1521",
+  [string]$OracleDbService = "",
+  [string]$OracleDbUser = "",
+  [string]$OracleDbPass = "",
   [string]$ConfigFile = "",
   [switch]$StartNow,
   [switch]$SkipApiMiddleware,
@@ -365,11 +370,11 @@ function Ensure-ApiEnvFile {
       "EXPORT_DIR=$(DotEnvValue (Join-Path $ApiRoot 'exports'))"
       "EXPORT_PAGE_SIZE=5000"
       "EXPORT_MAX_ROWS=1000000"
-      "DB_HOST=''"
-      "DB_PORT='1521'"
-      "DB_SERVICE=''"
-      "DB_USER=''"
-      "DB_PASS=''"
+      "DB_HOST=$(DotEnvValue $oracleDbHost)"
+      "DB_PORT=$(DotEnvValue $oracleDbPort)"
+      "DB_SERVICE=$(DotEnvValue $oracleDbService)"
+      "DB_USER=$(DotEnvValue $oracleDbUser)"
+      "DB_PASS=$(DotEnvValue $oracleDbPass)"
       "GOOGLE_DRIVE_AUTH_MODE=$(DotEnvValue $driveAuthMode)"
       "GOOGLE_DRIVE_OAUTH_CLIENT_FILE=$(DotEnvValue $oauthClientFile)"
       "GOOGLE_DRIVE_OAUTH_TOKEN_FILE=$(DotEnvValue $oauthTokenFile)"
@@ -381,6 +386,11 @@ function Ensure-ApiEnvFile {
   }
   Set-DotEnvValue $apiEnv "API_TOKEN" $InternalApiToken
   Set-DotEnvValue $apiEnv "EXPORT_DIR" (Join-Path $ApiRoot "exports")
+  if (-not [string]::IsNullOrWhiteSpace($oracleDbHost)) { Set-DotEnvValue $apiEnv "DB_HOST" $oracleDbHost }
+  if (-not [string]::IsNullOrWhiteSpace($oracleDbPort)) { Set-DotEnvValue $apiEnv "DB_PORT" $oracleDbPort }
+  if (-not [string]::IsNullOrWhiteSpace($oracleDbService)) { Set-DotEnvValue $apiEnv "DB_SERVICE" $oracleDbService }
+  if (-not [string]::IsNullOrWhiteSpace($oracleDbUser)) { Set-DotEnvValue $apiEnv "DB_USER" $oracleDbUser }
+  if (-not [string]::IsNullOrWhiteSpace($oracleDbPass)) { Set-DotEnvValue $apiEnv "DB_PASS" $oracleDbPass }
   Set-DotEnvValue $apiEnv "GOOGLE_DRIVE_FOLDER_ID" $googleDriveFolderId
   Set-DotEnvValue $apiEnv "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64" $googleDriveServiceAccountJsonBase64
   Set-DotEnvValue $apiEnv "GOOGLE_DRIVE_AUTH_MODE" $driveAuthMode
@@ -565,6 +575,11 @@ $BaseUrl = Resolve-SetupValue $setupConfig "BaseUrl" $BaseUrl "https://vnptcto.c
 $InternalApiUrl = Resolve-SetupValue $setupConfig "InternalApiUrl" $InternalApiUrl "https://api.vnptcto.com/api/du-lieu-web" "INTERNAL_API_URL"
 $WorkerDriveUploadApiUrl = Resolve-SetupValue $setupConfig "WorkerDriveUploadApiUrl" $WorkerDriveUploadApiUrl "http://127.0.0.1:8000/api/du-lieu-web" "ONEBSS_DRIVE_UPLOAD_API_URL"
 $ApiRoot = Resolve-SetupValue $setupConfig "ApiRoot" $ApiRoot "C:\VNPTCTO" ""
+$oracleDbHost = Resolve-SetupValue $setupConfig "OracleDbHost" $OracleDbHost "" "DB_HOST"
+$oracleDbPort = Resolve-SetupValue $setupConfig "OracleDbPort" $OracleDbPort "1521" "DB_PORT"
+$oracleDbService = Resolve-SetupValue $setupConfig "OracleDbService" $OracleDbService "" "DB_SERVICE"
+$oracleDbUser = Resolve-SetupValue $setupConfig "OracleDbUser" $OracleDbUser "" "DB_USER"
+$oracleDbPass = Resolve-SetupValue $setupConfig "OracleDbPass" $OracleDbPass "" "DB_PASS"
 $InternalApiToken = Resolve-SetupValue $setupConfig "InternalApiToken" $InternalApiToken "" "INTERNAL_API_TOKEN"
 $WorkerId = Resolve-SetupValue $setupConfig "WorkerId" $WorkerId "" "ONEBSS_WORKER_ID"
 $workerIdPrefix = Resolve-SetupValue $setupConfig "WorkerIdPrefix" "" "may-tram" ""
@@ -654,11 +669,11 @@ Invoke-External "powershell.exe" @workerSetupArgs
 Write-Step "Cai Scheduled Task OneBSS worker"
 $installWorkerTask = Join-Path $InstallRoot "scripts\install_onebss_worker_task.ps1"
 $taskArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $installWorkerTask, "-NoPause")
-$canStartWorkerNow = -not [string]::IsNullOrWhiteSpace($InternalApiToken) -and -not [string]::IsNullOrWhiteSpace($onebssUsername) -and -not [string]::IsNullOrWhiteSpace($onebssPassword)
+$canStartWorkerNow = -not [string]::IsNullOrWhiteSpace($InternalApiToken)
 if ($startNowResolved -and $canStartWorkerNow) {
   $taskArgs += "-StartNow"
 } elseif ($startNowResolved) {
-  Write-Warning "Bo qua buoc start worker ngay vi thieu token hoac tai khoan OneBSS. Scheduled Task van da duoc cai de tu chay sau khi cau hinh du."
+  Write-Warning "Bo qua buoc start worker ngay vi thieu token web. Scheduled Task van da duoc cai de tu chay sau khi cau hinh du."
 }
 Invoke-External "powershell.exe" @taskArgs
 
@@ -679,5 +694,5 @@ Write-Host "Da cai xong may tram VNPTCTO." -ForegroundColor Green
 Write-Host "Thu muc: $InstallRoot"
 Write-Host "Worker ID: $WorkerId"
 Write-Host "Web: $BaseUrl"
-Write-Host "Neu chua cau hinh DB/Drive API trung gian, cap nhat file: $ApiRoot\api-trung-gian\.env"
+Write-Host "Cau hinh API trung gian: $ApiRoot\api-trung-gian\.env"
 Pause-BeforeExit

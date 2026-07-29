@@ -2447,7 +2447,7 @@ def workstation_setup_readme() -> str:
 
 1. Giai nen goi ZIP nay vao mot thu muc tam.
 2. Bam chuot phai SETUP_VNPTCTO_WORKSTATION.bat va chon Run as administrator.
-3. Cho script tu cai dat. Khong can go token, tai khoan hay duong dan nao.
+3. Cho script tu cai dat. Khong can go token, tai khoan, Oracle, Drive hay duong dan nao neu web da cau hinh san.
 4. Sau khi cai xong, khong can de mo PowerShell. Worker se chay nen bang Scheduled Task.
 5. Log worker mac dinh:
    - D:\\Tool_Tram_VNPTCTO.COM\\logs\\onebss-worker.log
@@ -2471,12 +2471,35 @@ def powershell_bool(value: bool) -> str:
     return "$true" if value else "$false"
 
 
+def workstation_oracle_config(repository: AppRepository) -> dict[str, str]:
+    connection = repository.get_system_connection_by_code("oracle_agency_db") or {}
+    if not connection.get("is_active"):
+        return {}
+    config = connection.get("config") if isinstance(connection.get("config"), dict) else {}
+
+    def first_value(*keys: str) -> str:
+        for key in keys:
+            value = config.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+        return ""
+
+    return {
+        "host": first_value("host", "db_host", "DB_HOST"),
+        "port": first_value("port", "db_port", "DB_PORT") or "1521",
+        "service": first_value("service", "service_name", "db_service", "DB_SERVICE"),
+        "username": first_value("username", "user", "db_user", "DB_USER"),
+        "password": first_value("password", "db_pass", "DB_PASS"),
+    }
+
+
 def workstation_setup_config_script(request: Request) -> str:
     settings = get_settings()
     public_config = workstation_public_config(request)
     repository = build_app_repository()
     drive_oauth_config = load_google_drive_oauth_config(repository)
     configured_drive_folder_id = google_drive_folder_id(settings, "", repository)
+    oracle_config = workstation_oracle_config(repository)
     drive_oauth_refresh_token = ""
     try:
         drive_oauth_refresh_token = oauth_refresh_token_from_config(settings, drive_oauth_config)
@@ -2489,6 +2512,11 @@ def workstation_setup_config_script(request: Request) -> str:
         ("WorkerDriveUploadApiUrl", "http://127.0.0.1:8000/api/du-lieu-web", "Local API used by workstation worker for Drive uploads."),
         ("InstallRoot", "D:\\Tool_Tram_VNPTCTO.COM", "Default workstation install folder."),
         ("ApiRoot", "C:\\VNPTCTO", "Default local API middleware folder."),
+        ("OracleDbHost", oracle_config.get("host", ""), "Oracle host for local SQL API."),
+        ("OracleDbPort", oracle_config.get("port", "1521"), "Oracle port for local SQL API."),
+        ("OracleDbService", oracle_config.get("service", ""), "Oracle service name for local SQL API."),
+        ("OracleDbUser", oracle_config.get("username", ""), "Oracle username for local SQL API."),
+        ("OracleDbPass", oracle_config.get("password", ""), "Oracle password for local SQL API."),
         ("WorkerIdPrefix", "may-tram", "The setup script appends the Windows computer name."),
         ("OneBssLoginUrl", settings.onebss_login_url, "OneBSS login URL."),
         ("OneBssUsername", settings.onebss_username, "OneBSS username from web settings."),

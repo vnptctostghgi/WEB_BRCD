@@ -188,6 +188,23 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert payload["hardware_profile"]["cpu"] == "Core i3"
         assert any(role["code"] == "onebss_worker" for role in payload["roles"])
         assert payload["setup"]["package_url"] == "/api/admin/workstation/setup-package"
+        saved_oracle = client.put(
+            "/api/admin/connections/oracle_agency_db",
+            json={
+                "name": "Oracle DB noi bo",
+                "connection_type": "oracle",
+                "description": "Oracle cho may tram",
+                "config": {
+                    "host": "10.10.10.20",
+                    "port": 1521,
+                    "service": "ONEBSS",
+                    "username": "REPORT_USER",
+                    "password": "oracle-secret",
+                },
+                "is_active": True,
+            },
+        )
+        assert saved_oracle.status_code == 200
 
         package = client.get("/api/admin/workstation/setup-package")
         assert package.status_code == 200
@@ -213,7 +230,13 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "VNPTCTO_WORKSTATION_SETUP/scripts/test_vnptcto_workstation.ps1" in names
         assert "VNPTCTO_WORKSTATION_SETUP/scripts/run_onebss_worker_background.ps1" in names
         assert "InternalApiToken = 'test-worker-token'" in config_text
+        assert "OracleDbHost = '10.10.10.20'" in config_text
+        assert "OracleDbPort = '1521'" in config_text
+        assert "OracleDbService = 'ONEBSS'" in config_text
+        assert "OracleDbUser = 'REPORT_USER'" in config_text
+        assert "OracleDbPass = 'oracle-secret'" in config_text
         assert "Khong can go token" in readme_text
+        assert "Oracle" in readme_text
         assert "Read-Host $Prompt" not in setup_script
         assert "Nhap INTERNAL_API_TOKEN" not in setup_script
         assert "Test-PythonLauncher" in setup_script
@@ -223,6 +246,10 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "GoogleDriveOauthRefreshToken" in config_text
         assert 'Set-UserEnvironment "ONEBSS_DRIVE_UPLOAD_API_URL" $WorkerDriveUploadApiUrl' in setup_script
         assert "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64" in setup_script
+        assert "OracleDbHost" in setup_script
+        assert "DB_HOST=$(DotEnvValue $oracleDbHost)" in setup_script
+        assert 'Set-DotEnvValue $apiEnv "DB_PASS" $oracleDbPass' in setup_script
+        assert "$canStartWorkerNow = -not [string]::IsNullOrWhiteSpace($InternalApiToken)" in setup_script
         assert "drive-oauth-token.json" in setup_script
         assert "Ensure-ApiDriveOauthFiles" in setup_script
         assert '$driveAuthMode = "oauth"' in setup_script
@@ -804,12 +831,17 @@ def test_system_connections_include_zalo_bot() -> None:
         connections = response.json()["connections"]
         codes = {connection["code"] for connection in connections}
         assert "zalo_bot" in codes
+        assert "oracle_agency_db" in codes
         ftp = next(connection for connection in connections if connection["code"] == "ftp_storage")
         assert ftp["connection_type"] == "ftp"
         assert ftp["config"]["host"] == "10.159.23.100"
         assert ftp["config"]["username"] == "thangph.cto"
         assert "password" not in ftp["config"]
         assert "password" in ftp["protected_config_keys"]
+        oracle = next(connection for connection in connections if connection["code"] == "oracle_agency_db")
+        assert oracle["connection_type"] == "oracle"
+        assert "password" not in oracle["config"]
+        assert "password" in oracle["protected_config_keys"]
 
 
 def test_admin_can_manage_report_links_and_active_links_are_public() -> None:
