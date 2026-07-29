@@ -3885,6 +3885,33 @@ def _cleanup_dynamic_report_export_jobs() -> None:
             logger.warning("Cannot remove old dynamic report export job metadata: %s", job_path)
 
 
+def _dynamic_report_progress_step(message: str, status_value: str, timestamp: float | None = None) -> dict[str, Any]:
+    return {
+        "message": str(message or "").strip(),
+        "status": str(status_value or "").strip().lower(),
+        "at": float(timestamp or time.time()),
+    }
+
+
+def _dynamic_report_progress_steps(
+    job: dict[str, Any],
+    message: str,
+    status_value: str,
+    *,
+    timestamp: float | None = None,
+) -> list[dict[str, Any]]:
+    text = str(message or "").strip()
+    if not text:
+        raw_steps = job.get("progress_steps")
+        return [dict(item) for item in raw_steps if isinstance(item, dict)] if isinstance(raw_steps, list) else []
+    normalized_status = str(status_value or job.get("status") or "").strip().lower()
+    raw_steps = job.get("progress_steps")
+    steps = [dict(item) for item in raw_steps if isinstance(item, dict)] if isinstance(raw_steps, list) else []
+    if not steps or str(steps[-1].get("message") or "") != text or str(steps[-1].get("status") or "") != normalized_status:
+        steps.append(_dynamic_report_progress_step(text, normalized_status, timestamp))
+    return steps[-12:]
+
+
 def _set_dynamic_report_export_job(job_id: str, **updates: Any) -> None:
     snapshot: dict[str, Any] | None = None
     with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
@@ -3895,6 +3922,13 @@ def _set_dynamic_report_export_job(job_id: str, **updates: Any) -> None:
                 return
             job = dict(loaded)
             DYNAMIC_REPORT_EXPORT_JOBS[job_id] = job
+        updates = dict(updates)
+        if "message" in updates and "progress_steps" not in updates:
+            updates["progress_steps"] = _dynamic_report_progress_steps(
+                job,
+                str(updates.get("message") or ""),
+                str(updates.get("status") or job.get("status") or ""),
+            )
         job.update(updates)
         job["updated_at"] = time.time()
         snapshot = dict(job)
@@ -3987,6 +4021,7 @@ def _dynamic_report_export_job_response(job_id: str, job: dict[str, Any]) -> dic
         "status": status_value,
         "message": job.get("message") or "",
         "progress": job.get("progress") or {},
+        "progress_steps": job.get("progress_steps") if isinstance(job.get("progress_steps"), list) else [],
         "rows": int(job.get("rows") or 0),
         "total": int(job.get("total") or 0),
         "report_code": job.get("report_code") or "",
@@ -4528,7 +4563,7 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
         _set_dynamic_report_export_job(
             job_id,
             status="running_worker",
-            message=f"May tram {payload.worker_id} da nhan lenh xuat Excel va dang ket noi Oracle noi bo.",
+            message=f"May tram {payload.worker_id} da nhan lenh lay du lieu SQL va dang ket noi Oracle noi bo.",
             worker_id=payload.worker_id,
         )
         updated = _get_dynamic_report_export_job(job_id) or job
@@ -4599,7 +4634,7 @@ def update_sql_worker_task_status(request: Request, run_id: str, payload: SqlWor
     _set_dynamic_report_export_job(
         run_id,
         status=payload.status.strip().lower() or "running_worker",
-        message=payload.message or "May tram dang xuat Excel va upload Google Drive.",
+        message=payload.message or "May tram dang lay du lieu SQL va upload Google Drive.",
         worker_id=payload.worker_id or export_job.get("worker_id") or "",
         details=payload.details or export_job.get("details") or {},
     )
@@ -4844,6 +4879,7 @@ def start_dynamic_report_export_job(request: Request, payload: RunReportPayload)
             "created_at": now,
             "updated_at": now,
             "progress": {},
+            "progress_steps": [_dynamic_report_progress_step(message, status_value, now)],
             "created_by": actor["username"],
             "report_code": report_info["ma_bao_cao"],
             "report_name": report_info["ten_bao_cao"],

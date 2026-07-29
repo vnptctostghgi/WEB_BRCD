@@ -140,6 +140,24 @@ function dynamicReportExportStatusClass(status) {
   return "pending";
 }
 
+function dynamicReportProgressSteps(job, status) {
+  const steps = Array.isArray(job?.progress_steps) ? job.progress_steps.filter((step) => step && typeof step === "object") : [];
+  if (steps.length) return steps.slice(-6);
+  const fallback = job?.message || dynamicReportExportStatusLabel(status);
+  return fallback ? [{ message: fallback, status }] : [];
+}
+
+function dynamicReportProgressHtml(job, status) {
+  const steps = dynamicReportProgressSteps(job, status);
+  const items = steps.map((step, index) => {
+    const stepStatus = String(step.status || status || "").toLowerCase();
+    const isLatest = index === steps.length - 1;
+    const className = `sql-progress-step ${isLatest ? "current" : ""} ${dynamicReportExportStatusClass(stepStatus)}`;
+    return `<li class="${className}"><span class="sql-progress-dot" aria-hidden="true"></span><span>${escapeHtml(step.message || dynamicReportExportStatusLabel(stepStatus))}</span></li>`;
+  }).join("");
+  return `<div class="sql-progress"><span class="status ${dynamicReportExportStatusClass(status)}">${escapeHtml(dynamicReportExportStatusLabel(status))}</span>${items ? `<ol class="sql-progress-steps">${items}</ol>` : ""}</div>`;
+}
+
 function upsertDynamicReportExportJob(job) {
   const current = repairDataEncoding(job || {});
   const jobId = dynamicReportHistoryItemKey(current);
@@ -193,7 +211,7 @@ function renderDynamicReportExportJobs() {
   const heading = document.querySelector(".dynamic-report-export-heading h2");
   if (heading) heading.textContent = "Kết quả lấy dữ liệu";
   const head = body.closest("table")?.querySelector("thead");
-  if (head) head.innerHTML = "<tr><th>Thời gian</th><th>Báo cáo</th><th>Trạng thái</th><th>File / link Drive</th></tr>";
+  if (head) head.innerHTML = "<tr><th>Thời gian</th><th>Báo cáo</th><th>Tiến trình</th><th>File / link Drive</th></tr>";
   if (!dynamicReportExportJobs.length) {
     body.innerHTML = emptyRow(4, "Chưa có dữ liệu", "File và link Drive sẽ xuất hiện ở đây sau khi máy trạm xử lý xong.");
     return;
@@ -205,7 +223,7 @@ function renderDynamicReportExportJobs() {
       <tr>
         <td>${escapeHtml(createdAt)}</td>
         <td><strong>${escapeHtml(job.report_code || job.ma_bao_cao || "-")}</strong><small class="cell-note">${escapeHtml(job.report_name || job.ten_bao_cao || "")}</small></td>
-        <td><span class="status ${dynamicReportExportStatusClass(status)}">${escapeHtml(dynamicReportExportStatusLabel(status))}</span></td>
+        <td class="sql-progress-cell">${dynamicReportProgressHtml(job, status)}</td>
         <td class="table-action-cell">${dynamicReportExportResultHtml(job, status)}</td>
       </tr>
     `;

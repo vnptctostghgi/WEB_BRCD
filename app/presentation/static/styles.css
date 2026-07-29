@@ -3879,7 +3879,7 @@ legend {
 }
 
 .dynamic-report-export-table {
-  min-width: 640px;
+  min-width: 820px;
 }
 
 .dynamic-report-export-table .table-action {
@@ -3891,6 +3891,53 @@ legend {
 .dynamic-report-export-table .cell-note {
   display: block;
   margin-top: .18rem;
+}
+
+.sql-progress {
+  display: grid;
+  gap: .4rem;
+  min-width: 15rem;
+}
+
+.sql-progress-steps {
+  display: grid;
+  gap: .28rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sql-progress-step {
+  display: grid;
+  grid-template-columns: .55rem minmax(0, 1fr);
+  gap: .45rem;
+  align-items: start;
+  color: rgba(226, 232, 240, .78);
+  font-size: .78rem;
+  line-height: 1.35;
+}
+
+.sql-progress-dot {
+  width: .46rem;
+  height: .46rem;
+  border-radius: 999px;
+  margin-top: .22rem;
+  background: rgba(148, 163, 184, .76);
+}
+
+.sql-progress-step.current .sql-progress-dot {
+  background: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, .16);
+}
+
+.sql-progress-step.active .sql-progress-dot {
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, .15);
+}
+
+.sql-progress-step.inactive .sql-progress-dot {
+  background: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, .15);
 }
 
 #view-onebss-mining .page-header {

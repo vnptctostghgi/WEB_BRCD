@@ -32,7 +32,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.07.29-sql-drive-export-worker"
+WORKER_VERSION = "2026.07.29-sql-progress-worker"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -466,10 +466,20 @@ def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
         query = task.get("query") if isinstance(task.get("query"), dict) else {}
         action = str(query.get("action") or "").strip()
         report_code = str(task.get("report_code") or query.get("ma_bao_cao") or "")
-        send_progress(
-            "May tram da nhan task SQL. Dang goi API du lieu local.",
-            details={"report": report_code, "api_urls": internal_sql_api_urls()},
-        )
+        if action == "export_sql_report_to_drive":
+            send_progress(
+                "May tram da nhan lenh lay du lieu SQL. Dang chuan bi ket noi Oracle noi bo.",
+                details={"step": "received", "report": report_code, "api_urls": internal_sql_api_urls()},
+            )
+            send_progress(
+                "Dang ket noi Oracle noi bo, xuat Excel va upload Google Drive.",
+                details={"step": "oracle_export_drive", "report": report_code, "api_urls": internal_sql_api_urls()},
+            )
+        else:
+            send_progress(
+                "May tram da nhan task SQL. Dang goi API du lieu local.",
+                details={"step": "received", "report": report_code, "api_urls": internal_sql_api_urls()},
+            )
         result = run_sql_worker_query(task)
 
         def result_int(*values: Any) -> int:
@@ -495,6 +505,10 @@ def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
                 or result.get("web_content_link")
                 or ""
             ).strip()
+            send_progress(
+                "Da nhan ket qua tu API local. Dang cap nhat file va link Drive len web.",
+                details={"step": "returning_drive_link", "report": report_code, "drive_url": drive_url},
+            )
             details = {
                 **details,
                 "duration_ms": int((time.monotonic() - started) * 1000),
