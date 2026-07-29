@@ -203,8 +203,13 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "Test-PythonLauncher" in start_worker_script
         assert "Python.Python.3.12" in start_worker_script
         assert "WorkerDriveUploadApiUrl = 'http://127.0.0.1:8000/api/du-lieu-web'" in config_text
+        assert "GoogleDriveOauthRefreshToken" in config_text
         assert 'Set-UserEnvironment "ONEBSS_DRIVE_UPLOAD_API_URL" $WorkerDriveUploadApiUrl' in setup_script
         assert "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64" in setup_script
+        assert "drive-oauth-token.json" in setup_script
+        assert "Ensure-ApiDriveOauthFiles" in setup_script
+        assert '$driveAuthMode = "oauth"' in setup_script
+        assert '$driveAuthMode = "service_account"' not in setup_script
         assert "LeastPrivilege" not in setup_script
         assert "LeastPrivilege" not in install_task_script
         assert "-RunLevel Limited" in setup_script
@@ -3709,6 +3714,7 @@ def test_onebss_worker_retries_transient_file_upload(monkeypatch, tmp_path) -> N
 def test_onebss_worker_uploads_result_file_for_download(monkeypatch, tmp_path) -> None:
     settings = get_settings().model_copy(update={"data_mining_download_dir": str(tmp_path)})
     monkeypatch.setattr(routes, "get_settings", lambda: settings)
+    monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings_arg, storage_link="": "")
     with TestClient(app) as client:
         login(client)
         created = client.post(
@@ -3759,9 +3765,60 @@ def test_onebss_worker_uploads_result_file_for_download(monkeypatch, tmp_path) -
         assert download.content == b"zip-bytes"
 
 
+def test_onebss_worker_web_upload_uses_global_drive_folder(monkeypatch, tmp_path) -> None:
+    settings = get_settings().model_copy(
+        update={
+            "data_mining_download_dir": str(tmp_path),
+            "google_drive_folder_id": "drive-folder-global",
+        }
+    )
+    saved_calls = []
+
+    def fake_save_downloaded_file(settings_arg, source_file, storage_link):
+        saved_calls.append((str(source_file), storage_link))
+        return {
+            "ok": True,
+            "message": "Da upload vao thu muc Drive chung.",
+            "storage_link": "https://drive.google.com/file/d/global-drive-file/view",
+            "storage_status": "uploaded_google_drive:global-drive-file",
+        }
+
+    monkeypatch.setattr(routes, "get_settings", lambda: settings)
+    monkeypatch.setattr(routes, "save_downloaded_file", fake_save_downloaded_file)
+    with TestClient(app) as client:
+        login(client)
+        created = client.post(
+            "/api/admin/onebss-reports",
+            json={
+                "ten_bao_cao": "OneBSS global Drive upload",
+                "danh_sach_bien": ["P_TUNGAY"],
+                "report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST_GLOBAL_DRIVE&name=Test",
+                "storage_link": "",
+            },
+        )
+        assert created.status_code == 200
+        code = created.json()["ma_bao_cao"]
+
+        response = client.post("/api/onebss-reports/run", json={"ma_bao_cao": code, "parameters": {"P_TUNGAY": "01/07/2026"}})
+        assert response.status_code == 200
+        job_id = response.json()["job_id"]
+        upload = client.post(
+            f"/api/onebss-worker/tasks/{job_id}/file",
+            files={"file": ("result.xlsx", b"xlsx-bytes", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            headers={"Authorization": "Bearer test-worker-token"},
+        )
+
+        assert upload.status_code == 200
+        uploaded = upload.json()["file"]
+        assert uploaded["storage_link"] == "https://drive.google.com/file/d/global-drive-file/view"
+        assert uploaded["storage_status"] == "uploaded_google_drive:global-drive-file"
+        assert saved_calls and saved_calls[0][1] == "drive-folder-global"
+
+
 def test_onebss_worker_result_preserves_uploaded_web_file(monkeypatch, tmp_path) -> None:
     settings = get_settings().model_copy(update={"data_mining_download_dir": str(tmp_path)})
     monkeypatch.setattr(routes, "get_settings", lambda: settings)
+    monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings_arg, storage_link="": "")
     with TestClient(app) as client:
         login(client)
         created = client.post(

@@ -111,7 +111,7 @@ def google_drive_auth_mode() -> str:
     token_file = google_drive_oauth_token_file()
     if token_file.exists():
         return "oauth"
-    return "service_account"
+    return "oauth"
 
 
 def google_drive_oauth_client_file() -> Path:
@@ -206,10 +206,9 @@ def oauth_drive_client() -> tuple[Any, dict[str, Any]]:
 
 def service_account_quota_message() -> str:
     return (
-        "Google Drive dang dung Service Account nhung thu muc dich khong nam trong Shared Drive. "
-        "Service Account khong co dung luong luu tru rieng nen khong the upload vao My Drive/thu muc Drive thuong. "
-        "Hay tao Google Shared Drive, them client_email cua service account lam Content manager/Manager, "
-        "tao thu muc trong Shared Drive do va cap nhat GOOGLE_DRIVE_FOLDER_ID bang ID thu muc moi."
+        "Thu muc Google Drive nay la thu muc My Drive duoc share thong thuong. "
+        "Service Account khong co dung luong de upload vao kieu thu muc nay. "
+        "Hay dung GOOGLE_DRIVE_AUTH_MODE=oauth va cap quyen bang tai khoan Google da duoc share thu muc."
     )
 
 

@@ -40,6 +40,8 @@ from app.application.google_drive_service import (
     google_drive_oauth_credentials,
     google_drive_oauth_client_configured,
     google_drive_oauth_status,
+    load_google_drive_oauth_config,
+    oauth_refresh_token_from_config,
     save_google_drive_oauth_tokens,
 )
 from app.application.vault_service import VaultService
@@ -2402,6 +2404,13 @@ def powershell_bool(value: bool) -> str:
 def workstation_setup_config_script(request: Request) -> str:
     settings = get_settings()
     public_config = workstation_public_config(request)
+    drive_oauth_config = load_google_drive_oauth_config(build_app_repository())
+    configured_drive_folder_id = google_drive_folder_id(settings, "")
+    drive_oauth_refresh_token = ""
+    try:
+        drive_oauth_refresh_token = oauth_refresh_token_from_config(settings, drive_oauth_config)
+    except GoogleDriveConfigurationError:
+        drive_oauth_refresh_token = ""
     config_values: list[tuple[str, Any, str]] = [
         ("BaseUrl", public_config["web_base_url"], "Web public base URL."),
         ("InternalApiToken", secret_text(settings.internal_api_token), "Worker token used for task claiming and heartbeat."),
@@ -2414,10 +2423,12 @@ def workstation_setup_config_script(request: Request) -> str:
         ("OneBssUsername", settings.onebss_username, "OneBSS username from web settings."),
         ("OneBssPassword", secret_text(settings.onebss_password), "OneBSS password from web settings."),
         ("OneBssDownloadTimeoutSeconds", str(settings.onebss_download_timeout_seconds), "OneBSS download timeout."),
-        ("GoogleDriveFolderId", settings.google_drive_folder_id, "Optional Drive folder for local fallback."),
+        ("GoogleDriveFolderId", configured_drive_folder_id, "Optional Drive folder for local fallback."),
         ("GoogleDriveOauthClientId", settings.google_drive_oauth_client_id, "Optional Drive OAuth client ID."),
         ("GoogleDriveOauthClientSecret", secret_text(settings.google_drive_oauth_client_secret), "Optional Drive OAuth client secret."),
         ("GoogleDriveOauthRedirectUri", settings.google_drive_oauth_redirect_uri, "Optional Drive OAuth redirect URI."),
+        ("GoogleDriveOauthRefreshToken", drive_oauth_refresh_token, "Optional Drive OAuth refresh token for one-click workstation upload."),
+        ("GoogleDriveOauthEmail", drive_oauth_config.get("oauth_email") or "", "Optional Drive OAuth account email."),
         ("GoogleDriveServiceAccountJsonBase64", secret_text(settings.google_drive_service_account_json_base64), "Optional Drive service account JSON base64."),
     ]
     lines = [
@@ -5597,9 +5608,13 @@ async def upload_onebss_worker_task_file(request: Request, run_id: str, file: Up
     storage_link = ""
     storage_status = "uploaded_worker_file"
     storage_message = "Da nhan file ket qua tu may tram."
+    settings = get_settings()
     report = repository.get_onebss_report_by_code(str(run.get("ma_bao_cao") or "")) or {}
-    if report.get("storage_link"):
-        storage_result = save_downloaded_file(get_settings(), target_file, str(report.get("storage_link") or ""))
+    storage_target = str(report.get("storage_link") or "").strip()
+    if not storage_target:
+        storage_target = google_drive_folder_id(settings, "")
+    if storage_target:
+        storage_result = save_downloaded_file(settings, target_file, storage_target)
         if storage_result.get("ok") and str(storage_result.get("storage_status") or "").startswith("uploaded_google_drive:"):
             storage_link = str(storage_result.get("storage_link") or "")
             storage_status = str(storage_result.get("storage_status") or storage_status)

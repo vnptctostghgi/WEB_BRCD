@@ -279,6 +279,31 @@ def upload_file_to_google_drive(settings: Settings, local_path: Path, file_name:
     return result
 
 
+def service_account_quota_message() -> str:
+    return (
+        "Thu muc Google Drive nay la thu muc My Drive duoc share thong thuong. "
+        "Service Account khong co dung luong de upload vao kieu thu muc nay. "
+        "Hay ket noi Google Drive OAuth tren web de upload bang tai khoan Google da duoc share."
+    )
+
+
+def is_service_account_quota_error(error: Exception) -> bool:
+    detail = str(error).lower()
+    return "service accounts do not have storage quota" in detail or "storagequotaexceeded" in detail
+
+
+def ensure_service_account_shared_drive_folder(drive: Any, folder_id: str) -> None:
+    folder = drive.files().get(
+        fileId=folder_id,
+        fields="id,name,mimeType,driveId",
+        supportsAllDrives=True,
+    ).execute()
+    if folder.get("mimeType") != "application/vnd.google-apps.folder":
+        raise GoogleDriveConfigurationError("GOOGLE_DRIVE_FOLDER_ID khong phai ID cua thu muc Google Drive.")
+    if not str(folder.get("driveId") or "").strip():
+        raise GoogleDriveConfigurationError(service_account_quota_message())
+
+
 def upload_with_credentials(
     credentials: Any,
     local_path: Path,
@@ -296,18 +321,25 @@ def upload_with_credentials(
         raise GoogleDriveConfigurationError("May chu chua cai thu vien Google Drive API.") from error
 
     drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
+    if auth_mode == "service_account":
+        ensure_service_account_shared_drive_folder(drive, folder_id)
     media = MediaFileUpload(
         str(local_path),
         mimetype=mime_type or guess_excel_mimetype(local_path),
         resumable=True,
     )
     metadata = {"name": file_name, "parents": [folder_id]}
-    uploaded = drive.files().create(
-        body=metadata,
-        media_body=media,
-        fields="id,name,webViewLink,webContentLink",
-        supportsAllDrives=True,
-    ).execute()
+    try:
+        uploaded = drive.files().create(
+            body=metadata,
+            media_body=media,
+            fields="id,name,webViewLink,webContentLink",
+            supportsAllDrives=True,
+        ).execute()
+    except Exception as error:
+        if auth_mode == "service_account" and is_service_account_quota_error(error):
+            raise GoogleDriveConfigurationError(service_account_quota_message()) from error
+        raise
     return {
         "ok": True,
         "status": "uploaded_google_drive",

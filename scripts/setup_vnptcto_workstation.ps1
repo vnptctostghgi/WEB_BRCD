@@ -356,10 +356,9 @@ function Ensure-WorkstationEnvFile {
 function Ensure-ApiEnvFile {
   param([string]$ApiDir)
   $apiEnv = Join-Path $ApiDir ".env"
+  $oauthTokenFile = Join-Path $ApiDir "drive-oauth-token.json"
+  $oauthClientFile = Join-Path $ApiDir "drive-oauth-client.json"
   $driveAuthMode = "oauth"
-  if (-not [string]::IsNullOrWhiteSpace($googleDriveServiceAccountJsonBase64)) {
-    $driveAuthMode = "service_account"
-  }
   if (-not (Test-Path -LiteralPath $apiEnv)) {
     Set-Content -Path $apiEnv -Value @(
       "API_TOKEN=$(DotEnvValue $InternalApiToken)"
@@ -372,11 +371,12 @@ function Ensure-ApiEnvFile {
       "DB_USER=''"
       "DB_PASS=''"
       "GOOGLE_DRIVE_AUTH_MODE=$(DotEnvValue $driveAuthMode)"
-      "GOOGLE_DRIVE_OAUTH_CLIENT_FILE=$(DotEnvValue (Join-Path $ApiDir 'drive-oauth-client.json'))"
-      "GOOGLE_DRIVE_OAUTH_TOKEN_FILE=$(DotEnvValue (Join-Path $ApiDir 'drive-oauth-token.json'))"
+      "GOOGLE_DRIVE_OAUTH_CLIENT_FILE=$(DotEnvValue $oauthClientFile)"
+      "GOOGLE_DRIVE_OAUTH_TOKEN_FILE=$(DotEnvValue $oauthTokenFile)"
       "GOOGLE_DRIVE_FOLDER_ID=$(DotEnvValue $googleDriveFolderId)"
       "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64=$(DotEnvValue $googleDriveServiceAccountJsonBase64)"
     ) -Encoding UTF8
+    Ensure-ApiDriveOauthFiles $ApiDir $oauthClientFile $oauthTokenFile
     return
   }
   Set-DotEnvValue $apiEnv "API_TOKEN" $InternalApiToken
@@ -384,6 +384,47 @@ function Ensure-ApiEnvFile {
   Set-DotEnvValue $apiEnv "GOOGLE_DRIVE_FOLDER_ID" $googleDriveFolderId
   Set-DotEnvValue $apiEnv "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64" $googleDriveServiceAccountJsonBase64
   Set-DotEnvValue $apiEnv "GOOGLE_DRIVE_AUTH_MODE" $driveAuthMode
+  Set-DotEnvValue $apiEnv "GOOGLE_DRIVE_OAUTH_CLIENT_FILE" $oauthClientFile
+  Set-DotEnvValue $apiEnv "GOOGLE_DRIVE_OAUTH_TOKEN_FILE" $oauthTokenFile
+  Ensure-ApiDriveOauthFiles $ApiDir $oauthClientFile $oauthTokenFile
+}
+
+function Ensure-ApiDriveOauthFiles {
+  param(
+    [string]$ApiDir,
+    [string]$OauthClientFile,
+    [string]$OauthTokenFile
+  )
+  if ([string]::IsNullOrWhiteSpace($googleDriveOauthClientId) -or [string]::IsNullOrWhiteSpace($googleDriveOauthClientSecret)) {
+    return
+  }
+  New-Item -ItemType Directory -Path $ApiDir -Force | Out-Null
+  $redirectUri = $googleDriveOauthRedirectUri
+  if ([string]::IsNullOrWhiteSpace($redirectUri)) {
+    $redirectUri = "http://127.0.0.1:8000/drive-oauth/callback"
+  }
+  $clientPayload = @{
+    installed = @{
+      client_id = $googleDriveOauthClientId
+      client_secret = $googleDriveOauthClientSecret
+      auth_uri = "https://accounts.google.com/o/oauth2/auth"
+      token_uri = "https://oauth2.googleapis.com/token"
+      redirect_uris = @($redirectUri)
+    }
+  }
+  $clientPayload | ConvertTo-Json -Depth 5 | Set-Content -Path $OauthClientFile -Encoding UTF8
+  if ([string]::IsNullOrWhiteSpace($googleDriveOauthRefreshToken)) {
+    return
+  }
+  $tokenPayload = @{
+    token = ""
+    refresh_token = $googleDriveOauthRefreshToken
+    token_uri = "https://oauth2.googleapis.com/token"
+    client_id = $googleDriveOauthClientId
+    client_secret = $googleDriveOauthClientSecret
+    scopes = @("https://www.googleapis.com/auth/drive")
+  }
+  $tokenPayload | ConvertTo-Json -Depth 5 | Set-Content -Path $OauthTokenFile -Encoding UTF8
 }
 
 function Install-ApiMiddleware {
@@ -535,6 +576,8 @@ $googleDriveFolderId = Resolve-SetupValue $setupConfig "GoogleDriveFolderId" "" 
 $googleDriveOauthClientId = Resolve-SetupValue $setupConfig "GoogleDriveOauthClientId" "" "" "GOOGLE_DRIVE_OAUTH_CLIENT_ID"
 $googleDriveOauthClientSecret = Resolve-SetupValue $setupConfig "GoogleDriveOauthClientSecret" "" "" "GOOGLE_DRIVE_OAUTH_CLIENT_SECRET"
 $googleDriveOauthRedirectUri = Resolve-SetupValue $setupConfig "GoogleDriveOauthRedirectUri" "" "" "GOOGLE_DRIVE_OAUTH_REDIRECT_URI"
+$googleDriveOauthRefreshToken = Resolve-SetupValue $setupConfig "GoogleDriveOauthRefreshToken" "" "" ""
+$googleDriveOauthEmail = Resolve-SetupValue $setupConfig "GoogleDriveOauthEmail" "" "" ""
 $googleDriveServiceAccountJsonBase64 = Resolve-SetupValue $setupConfig "GoogleDriveServiceAccountJsonBase64" "" "" "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64"
 
 $script:SkipApiMiddlewareResolved = [bool]$SkipApiMiddleware
