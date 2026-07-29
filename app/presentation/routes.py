@@ -1313,6 +1313,11 @@ def _parse_dynamic_report_history_log(row: dict[str, Any]) -> dict[str, Any] | N
             return None
     if not isinstance(details, dict):
         return None
+    history_details = details.get("details") if isinstance(details.get("details"), dict) else {}
+    filters = details.get("filters") if isinstance(details.get("filters"), dict) else {}
+    search_columns = details.get("search_columns") if isinstance(details.get("search_columns"), list) else []
+    payload = history_details.get("payload") if isinstance(history_details.get("payload"), dict) else {}
+    progress_steps = history_details.get("progress_steps") if isinstance(history_details.get("progress_steps"), list) else []
     history_id = str(details.get("history_id") or details.get("job_id") or row.get("id") or "").strip()
     rows = _dynamic_report_history_int(details.get("rows"))
     total = _dynamic_report_history_int(details.get("total"), rows)
@@ -1332,6 +1337,13 @@ def _parse_dynamic_report_history_log(row: dict[str, Any]) -> dict[str, Any] | N
         "drive_url": details.get("drive_url") or "",
         "download_url": details.get("download_url") or "",
         "file_name": details.get("file_name") or "",
+        "filters": filters,
+        "search": details.get("search") or "",
+        "search_columns": search_columns,
+        "payload": payload,
+        "drive_folder_id": history_details.get("drive_folder_id") or details.get("drive_folder_id") or "",
+        "progress_steps": progress_steps,
+        "details": history_details,
         "created_by": row.get("actor") or "",
         "created_at": details.get("created_at") or row.get("created_at") or "",
     }
@@ -1350,6 +1362,11 @@ def _list_dynamic_report_history(limit: int = 30) -> list[dict[str, Any]]:
     for row in rows:
         item = _parse_dynamic_report_history_log(row)
         if not item:
+            continue
+        if (
+            str(item.get("event_type") or "").lower() == "export"
+            and str(item.get("status") or "").lower() in DYNAMIC_REPORT_EXPORT_ACTIVE_STATUSES
+        ):
             continue
         key = item.get("history_id") or str(item.get("id") or "")
         if key in seen:
@@ -3912,6 +3929,121 @@ def _dynamic_report_progress_steps(
     return steps[-12:]
 
 
+def _dynamic_report_history_timestamp(value: Any) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value or "").strip()
+    if not text:
+        return 0.0
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _dynamic_report_export_job_from_history_item(item: dict[str, Any], now: float | None = None) -> dict[str, Any] | None:
+    if str(item.get("event_type") or "").lower() != "export":
+        return None
+    status_value = str(item.get("status") or "").strip().lower()
+    if status_value not in DYNAMIC_REPORT_EXPORT_ACTIVE_STATUSES:
+        return None
+    created_at = _dynamic_report_history_timestamp(item.get("created_at"))
+    current_time = float(now or time.time())
+    if created_at and current_time - created_at > DYNAMIC_REPORT_EXPORT_JOB_TTL_SECONDS:
+        return None
+    message = str(item.get("message") or "").strip()
+    drive_folder_id = str(item.get("drive_folder_id") or "").strip()
+    worker_status = status_value in {"queued_worker", "running_worker"}
+    worker_message = "may tram" in message.lower() or "máy trạm" in message.lower()
+    if not drive_folder_id:
+        try:
+            drive_folder_id = google_drive_folder_id(get_settings(), "", build_app_repository())
+        except Exception:
+            drive_folder_id = ""
+    if status_value == "queued" and (worker_message or drive_folder_id):
+        status_value = "queued_worker"
+    if status_value == "running" and (worker_message or drive_folder_id):
+        status_value = "running_worker"
+    if status_value in {"queued_worker", "running_worker"} and not (worker_status or worker_message or drive_folder_id):
+        return None
+    if status_value == "queued_worker" and not drive_folder_id:
+        return None
+    payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+    filters = payload.get("filters") if isinstance(payload.get("filters"), dict) else item.get("filters")
+    search_columns = payload.get("search_columns") if isinstance(payload.get("search_columns"), list) else item.get("search_columns")
+    try:
+        run_payload = RunReportPayload(
+            ma_bao_cao=str(payload.get("ma_bao_cao") or item.get("report_code") or item.get("ma_bao_cao") or ""),
+            filters=filters if isinstance(filters, dict) else {},
+            page=int(payload.get("page") or 1),
+            page_size=int(payload.get("page_size") or 20),
+            search=str(payload.get("search") or item.get("search") or ""),
+            search_columns=search_columns if isinstance(search_columns, list) else [],
+        )
+    except Exception:
+        return None
+    job_id = str(item.get("job_id") or item.get("history_id") or "").strip()
+    if not job_id:
+        return None
+    progress_steps = item.get("progress_steps") if isinstance(item.get("progress_steps"), list) else []
+    if not progress_steps:
+        progress_steps = [_dynamic_report_progress_step(message, status_value, created_at or current_time)]
+    return {
+        "job_id": job_id,
+        "history_id": str(item.get("history_id") or job_id),
+        "status": status_value,
+        "message": message or "Da khoi phuc lenh lay du lieu SQL dang cho may tram.",
+        "created_at": created_at or current_time,
+        "updated_at": current_time,
+        "progress": {},
+        "progress_steps": progress_steps[-12:],
+        "created_by": str(item.get("created_by") or "system"),
+        "report_code": str(item.get("report_code") or item.get("ma_bao_cao") or run_payload.ma_bao_cao),
+        "report_name": str(item.get("report_name") or item.get("ten_bao_cao") or ""),
+        "payload": run_payload.model_dump(),
+        "drive_folder_id": drive_folder_id,
+        "details": item.get("details") if isinstance(item.get("details"), dict) else {},
+    }
+
+
+def _recover_dynamic_report_export_job_from_history(job_id: str = "", skip_job_ids: set[str] | None = None) -> dict[str, Any] | None:
+    now = time.time()
+    latest_by_id: dict[str, dict[str, Any]] = {}
+    skipped = {str(item or "").strip() for item in (skip_job_ids or set()) if str(item or "").strip()}
+    try:
+        rows = build_app_repository().list_audit_logs(limit=800)
+    except Exception:
+        logger.exception("Cannot read dynamic report export history for recovery")
+        return None
+    for row in rows:
+        item = _parse_dynamic_report_history_log(row)
+        if not item:
+            continue
+        key = str(item.get("job_id") or item.get("history_id") or "").strip()
+        if not key or key in latest_by_id:
+            continue
+        if key in skipped:
+            continue
+        latest_by_id[key] = item
+    wanted_id = str(job_id or "").strip()
+    items = [latest_by_id.get(wanted_id)] if wanted_id else latest_by_id.values()
+    for item in items:
+        if not item:
+            continue
+        recovered = _dynamic_report_export_job_from_history_item(item, now)
+        if not recovered:
+            continue
+        recovered_id = str(recovered.get("job_id") or "").strip()
+        if not recovered_id:
+            continue
+        with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+            DYNAMIC_REPORT_EXPORT_JOBS[recovered_id] = dict(recovered)
+        _persist_dynamic_report_export_job(recovered_id, recovered)
+        if not wanted_id or recovered_id == wanted_id:
+            return recovered
+    return None
+
+
 def _set_dynamic_report_export_job(job_id: str, **updates: Any) -> None:
     snapshot: dict[str, Any] | None = None
     with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
@@ -3943,7 +4075,7 @@ def _get_dynamic_report_export_job(job_id: str) -> dict[str, Any] | None:
             return dict(job)
     loaded = _load_dynamic_report_export_job(job_id)
     if not loaded:
-        return None
+        return _recover_dynamic_report_export_job_from_history(job_id)
     with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
         DYNAMIC_REPORT_EXPORT_JOBS[job_id] = dict(loaded)
     return dict(loaded)
@@ -3998,6 +4130,10 @@ def _list_dynamic_report_export_job_snapshots(limit: int = 100) -> list[dict[str
             current = jobs_by_id.get(job_id)
             if not current or float(loaded.get("updated_at") or 0) >= float(current.get("updated_at") or 0):
                 jobs_by_id[job_id] = loaded
+    _recover_dynamic_report_export_job_from_history(skip_job_ids=set(jobs_by_id))
+    with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+        for job_id, job in DYNAMIC_REPORT_EXPORT_JOBS.items():
+            jobs_by_id[job_id] = dict(job)
     jobs = list(jobs_by_id.values())
     active_jobs = sorted(
         [job for job in jobs if str(job.get("status") or "").lower() in DYNAMIC_REPORT_EXPORT_ACTIVE_STATUSES],
@@ -4871,6 +5007,7 @@ def start_dynamic_report_export_job(request: Request, payload: RunReportPayload)
         if use_workstation
         else "Da dua yeu cau xuat Excel vao hang doi."
     )
+    initial_step = _dynamic_report_progress_step(message, status_value, now)
     with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
         DYNAMIC_REPORT_EXPORT_JOBS[job_id] = {
             "job_id": job_id,
@@ -4879,7 +5016,7 @@ def start_dynamic_report_export_job(request: Request, payload: RunReportPayload)
             "created_at": now,
             "updated_at": now,
             "progress": {},
-            "progress_steps": [_dynamic_report_progress_step(message, status_value, now)],
+            "progress_steps": [initial_step],
             "created_by": actor["username"],
             "report_code": report_info["ma_bao_cao"],
             "report_name": report_info["ten_bao_cao"],
@@ -4891,7 +5028,7 @@ def start_dynamic_report_export_job(request: Request, payload: RunReportPayload)
     _record_dynamic_report_history(
         actor=actor["username"],
         event_type="export",
-        status_value="queued",
+        status_value=status_value,
         ma_bao_cao=report_info["ma_bao_cao"],
         report_name=report_info["ten_bao_cao"],
         message=message,
@@ -4900,6 +5037,11 @@ def start_dynamic_report_export_job(request: Request, payload: RunReportPayload)
         search_columns=payload.search_columns,
         history_id=job_id,
         job_id=job_id,
+        details={
+            "payload": payload.model_dump(),
+            "drive_folder_id": drive_folder_id,
+            "progress_steps": [initial_step],
+        },
     )
     if use_workstation:
         return _dynamic_report_export_job_response(job_id, job_snapshot)

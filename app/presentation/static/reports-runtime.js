@@ -280,7 +280,7 @@ async function loadDynamicReportHistory({ silent = false } = {}) {
       api(`/api/reports/history?limit=${TABLE_HISTORY_LIMIT}`),
       api(`/api/reports/export-jobs?limit=${TABLE_HISTORY_LIMIT}`),
     ]);
-    mergeDynamicReportExportJobs([...(queueData.jobs || []), ...(historyData.items || [])]);
+    mergeDynamicReportExportJobs([...(historyData.items || []), ...(queueData.jobs || [])]);
   } catch (error) {
     if (!silent) showToast(error.message, "error");
   }
@@ -301,7 +301,17 @@ async function monitorDynamicReportExportJob(jobId) {
       }
     }
   } catch (error) {
-    showToast(error.message, "error");
+    const message = error.message || "";
+    if (/job/i.test(message) && /Excel/i.test(message)) {
+      upsertDynamicReportExportJob({
+        job_id: jobId,
+        status: "failed",
+        message: "Lenh lay du lieu nay khong con trong hang doi web. Hay bam Lay du lieu lai.",
+        can_cancel: false,
+      });
+    } else {
+      showToast(message, "error");
+    }
   } finally {
     dynamicReportHistoryPollingJobs.delete(jobId);
     loadDynamicReportHistory({ silent: true }).catch(() => {});
