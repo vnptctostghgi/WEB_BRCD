@@ -8,12 +8,12 @@
     <link rel="icon" type="image/png" href="/static/images/system-logo.png" />
     <link rel="apple-touch-icon" href="/static/images/system-logo.png" />
     {% if shell_only %}
-    <link rel="preload" href="/static/shell.js?v=15" as="script" />
+    <link rel="preload" href="/static/shell.js?v=16" as="script" />
     {% else %}
-    <link rel="preload" href="/static/app.js?v=192" as="script" />
+    <link rel="preload" href="/static/app.js?v=193" as="script" />
     {% endif %}
     <link rel="stylesheet" href="/static/tailwind-built.css?v=1" />
-    <link rel="stylesheet" href="/static/styles.css?v=122" />
+    <link rel="stylesheet" href="/static/styles.css?v=123" />
   </head>
   <body class="app-booting min-h-screen bg-sky-50 text-slate-900 antialiased" data-role="{{ user.role }}" data-nav-cache-key="{{ user.id }}:{{ user.role }}:{{ user.permissions|length }}" data-must-change="{{ user.must_change_password }}" data-billing-blocked="{{ user.billing_access_blocked }}" data-can-manage-vault="{{ user.role == 'admin' or 'themvasuataikhoan' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'xemmatkhaudaluu' in user.permissions }}">
     <svg class="icon-sprite" aria-hidden="true">
@@ -80,7 +80,7 @@
             </details>
             {% endif %}
             {% if user.role == "admin" %}
-            <button class="nav-item" data-feature-code="truyvansql" data-view="reports" data-title="Truy vấn SQL" data-keywords="truy van sql bao cao thong ke bieu do"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Truy vấn SQL</span></button>
+            <button class="nav-item" data-feature-code="truyvansql" data-view="reports" data-title="Đào dữ liệu SQL" data-keywords="dao du lieu sql oracle excel drive may tram"><svg class="nav-svg"><use href="#icon-database"></use></svg><span>Đào dữ liệu SQL</span></button>
             <details class="nav-group">
               <summary data-feature-code="baocaomoi"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-chart"></use></svg><strong>Báo cáo mới</strong></summary>
               <button class="nav-item child" data-feature-code="thietkelayoutbaocao" data-view="dashboard-builder" data-title="Thiết kế Layout báo cáo" data-keywords="dashboard builder thiet ke layout bao cao tab bieu do"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Thiết kế Layout báo cáo</span></button>
@@ -362,42 +362,25 @@
 
         {% if render_view("reports") %}
         <section class="app-view" id="view-reports">
-          <div class="page-header"><div><p class="eyebrow">Truy vấn SQL</p><h1>Truy vấn SQL</h1><p class="subtitle">Dữ liệu được lấy theo thời gian thực qua API nội bộ và hiển thị có phân trang.</p></div></div>
+          <div class="page-header"><div><p class="eyebrow">Đào dữ liệu SQL</p><h1>Đào dữ liệu SQL</h1><p class="subtitle">Máy trạm nội bộ lấy dữ liệu Oracle, xuất Excel và trả link Google Drive.</p></div></div>
           <section class="data-card sql-query-panel">
             <form id="dynamic-report-form" class="dynamic-report-form">
               <div class="dynamic-report-controls">
                 <label class="dynamic-report-report">Loại báo cáo<select class="form-control" id="dynamic-report-select" name="ma_bao_cao"></select></label>
-                <label class="dynamic-report-search">Tìm kiếm gần đúng<input class="form-control" id="dynamic-report-search" name="search" placeholder="Nhập tên, mã thuê bao, địa chỉ..." autocomplete="off" /></label>
-                <label class="dynamic-report-page-size">Số dòng<select class="form-control" id="dynamic-report-page-size"><option value="10">10</option><option value="20" selected>20</option></select></label>
               </div>
               <div class="dynamic-report-filter-row">
                 <div id="dynamic-report-filters" class="dynamic-report-filters"></div>
                 <div class="dynamic-report-actions">
                   <button class="btn-primary" id="run-dynamic-report" type="submit"><svg class="button-svg"><use href="#icon-database"></use></svg><span class="button-label">Lấy dữ liệu</span><span class="spinner"></span></button>
-                  <button class="btn-secondary" id="search-dynamic-report" type="button"><svg class="button-svg"><use href="#icon-search"></use></svg><span class="button-label">Tìm</span></button>
-                  <button class="btn-secondary" id="export-dynamic-report" type="button"><svg class="button-svg"><use href="#icon-download"></use></svg><span class="button-label">Xuất file Excel</span><span class="spinner"></span></button>
                 </div>
               </div>
             </form>
             <div id="dynamic-report-message" class="result hidden mt-4"></div>
-            <div class="table-scroll mt-4">
-              <table>
-                <thead id="dynamic-report-head"></thead>
-                <tbody id="dynamic-report-body"></tbody>
-              </table>
-            </div>
-            <div class="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
-              <span id="dynamic-report-page-info">Chưa có dữ liệu</span>
-              <div class="action-group">
-                <button class="btn-secondary" id="dynamic-report-prev" type="button">Trang trước</button>
-                <button class="btn-secondary" id="dynamic-report-next" type="button">Trang sau</button>
-              </div>
-            </div>
             <div class="dynamic-report-export-results">
-              <div class="dynamic-report-export-heading"><h2>Kết quả xuất file</h2></div>
+              <div class="dynamic-report-export-heading"><h2>Kết quả lấy dữ liệu</h2></div>
               <div class="table-scroll">
                 <table class="compact-admin-table inline-admin-table dynamic-report-export-table">
-                  <thead><tr><th>Thời gian</th><th>Báo cáo</th><th>Trạng thái</th><th>Số dòng</th><th>Kết quả</th></tr></thead>
+                  <thead><tr><th>Thời gian</th><th>Báo cáo</th><th>Trạng thái</th><th>File / link Drive</th></tr></thead>
                   <tbody id="dynamic-report-export-results"></tbody>
                 </table>
               </div>
@@ -467,7 +450,7 @@
 
         {% if render_view("reports-old") %}
         <section class="app-view hidden" id="view-reports-old">
-          <div class="page-header"><div><p class="eyebrow">Truy vấn SQL</p><h1>Truy vấn SQL</h1><p class="subtitle">Khu vực này sẽ hiển thị biểu đồ và báo cáo BRCĐ theo yêu cầu tiếp theo.</p></div></div>
+          <div class="page-header"><div><p class="eyebrow">Đào dữ liệu SQL</p><h1>Đào dữ liệu SQL</h1><p class="subtitle">Khu vực này sẽ hiển thị biểu đồ và báo cáo BRCĐ theo yêu cầu tiếp theo.</p></div></div>
           <section class="data-card"><div class="grid gap-4 md:grid-cols-3"><div class="chart-placeholder">Thuê bao</div><div class="chart-placeholder">Doanh thu</div><div class="chart-placeholder">Chất lượng</div></div></section>
         </section>
         {% endif %}
@@ -921,9 +904,9 @@
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
     {% if shell_only %}
-    <script defer src="/static/shell.js?v=15"></script>
+    <script defer src="/static/shell.js?v=16"></script>
     {% else %}
-    <script defer src="/static/app.js?v=192"></script>
+    <script defer src="/static/app.js?v=193"></script>
     {% endif %}
   </body>
 </html>

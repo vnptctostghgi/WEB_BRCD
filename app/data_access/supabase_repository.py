@@ -45,7 +45,7 @@ FEATURE_ROWS = [
     {"code": "quantrimenu", "name": "Quản trị menu", "parent_code": "quantriweb", "sort_order": 27},
     {"code": "maytram", "name": "Máy trạm", "parent_code": "quantriweb", "sort_order": 28},
     {"code": "quanlycongviec", "name": "Quản lý công việc", "parent_code": None, "sort_order": 28},
-    {"code": "truyvansql", "name": "Truy vấn SQL", "parent_code": None, "sort_order": 30},
+    {"code": "truyvansql", "name": "Đào dữ liệu SQL", "parent_code": None, "sort_order": 30},
     {"code": "baocaomoi", "name": "Báo cáo mới", "parent_code": None, "sort_order": 35},
     {"code": "thietkelayoutbaocao", "name": "Thiết kế Layout báo cáo", "parent_code": "baocaomoi", "sort_order": 36},
     {"code": "daodulieuonebss", "name": "Đào dữ liệu OneBSS", "parent_code": "baocaomoi", "sort_order": 37},
@@ -214,7 +214,7 @@ class SupabaseRepository:
 
     def _patch_fixed_feature_labels(self) -> None:
         try:
-            self._patch("features", {"code": "eq.truyvansql"}, {"name": "Truy vấn SQL"})
+            self._patch("features", {"code": "eq.truyvansql"}, {"name": "Đào dữ liệu SQL"})
             self._patch("features", {"code": "eq.baocaomoi"}, {"name": "Báo cáo mới"})
             self._patch("features", {"code": "eq.quantriweb"}, {"name": "Quản trị hệ thống"})
             report_children = self._get("features", {"parent_code": "eq.truyvansql", "select": "code"})

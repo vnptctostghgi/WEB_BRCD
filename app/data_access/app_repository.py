@@ -29,7 +29,7 @@ FEATURE_ROWS = [
     ("quantrimenu", "Quản trị menu", "quantriweb", 27),
     ("maytram", "Máy trạm", "quantriweb", 28),
     ("quanlycongviec", "Quản lý công việc", None, 28),
-    ("truyvansql", "Truy vấn SQL", None, 30),
+    ("truyvansql", "Đào dữ liệu SQL", None, 30),
     ("baocaomoi", "Báo cáo mới", None, 35),
     ("thietkelayoutbaocao", "Thiết kế Layout báo cáo", "baocaomoi", 36),
     ("daodulieuonebss", "Đào dữ liệu OneBSS", "baocaomoi", 37),
@@ -746,7 +746,7 @@ class AppRepository:
                     "UPDATE features SET name=?, parent_code=?, sort_order=? WHERE code=?",
                     [(name, parent_code, sort_order, code) for code, name, parent_code, sort_order in FEATURE_ROWS],
                 )
-            connection.execute("UPDATE features SET name='Truy vấn SQL' WHERE code='truyvansql'")
+            connection.execute("UPDATE features SET name='Đào dữ liệu SQL' WHERE code='truyvansql'")
             connection.execute("UPDATE features SET name='Báo cáo mới' WHERE code='baocaomoi'")
             connection.execute("UPDATE features SET name='Quản trị hệ thống' WHERE code='quantriweb'")
             connection.execute(

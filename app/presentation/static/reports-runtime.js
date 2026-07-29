@@ -8,7 +8,6 @@
   const emptyRow = app.emptyRow || ((colspan, title, description = "") => `<tr><td colspan="${colspan}">${title}${description ? ` ${description}` : ""}</td></tr>`);
   const escapeHtml = app.escapeHtml || ((value) => String(value ?? ""));
   const repairDataEncoding = app.repairDataEncoding || ((value) => value);
-  const repairTextEncoding = app.repairTextEncoding || ((value) => String(value ?? ""));
   const renderCompactCode = app.renderCompactCode || ((value) => `<code>${escapeHtml(value)}</code>`);
   const setButtonLoading = app.setButtonLoading || (() => {});
   const showMessage = app.showMessage || (() => {});
@@ -28,13 +27,6 @@
   let oneBssJobPollToken = 0;
   let oneBssRunInProgress = false;
   let oneBssRunParameterEditing = false;
-  let dynamicReportPage = 1;
-  let dynamicReportTotal = 0;
-  let dynamicReportLoaded = false;
-  let dynamicReportColumns = [];
-  let dynamicReportLoadedRows = [];
-  let dynamicReportFilteredRows = [];
-  let dynamicReportSearchActive = false;
   let dynamicReportExportJobs = [];
   const dynamicReportHistoryPollingJobs = new Set();
   let reportsRuntimeEventsBound = false;
@@ -52,7 +44,7 @@ async function loadDynamicReports() {
   }
   fillDynamicReportSelect();
   renderDynamicReportFilters();
-  if (!dynamicReportLoaded) clearDynamicReportCache();
+  clearDynamicReportCache();
 }
 
 function fillDynamicReportSelect() {
@@ -102,152 +94,24 @@ function dynamicReportFilters() {
   return filters;
 }
 
-function dynamicReportPayload({ page = dynamicReportPage, includeSearch = dynamicReportSearchActive } = {}) {
-  const search = includeSearch ? ($("#dynamic-report-search")?.value || "").trim() : "";
+function dynamicReportPayload({ page = 1 } = {}) {
   return {
     ma_bao_cao: $("#dynamic-report-select")?.value || "",
     filters: dynamicReportFilters(),
-    search,
-    search_columns: search ? dynamicReportColumns : [],
+    search: "",
+    search_columns: [],
     page,
-    page_size: Number($("#dynamic-report-page-size")?.value || 20),
+    page_size: 20,
   };
 }
 
 function clearDynamicReportCache() {
-  dynamicReportPage = 1;
-  dynamicReportTotal = 0;
-  dynamicReportLoaded = false;
-  dynamicReportColumns = [];
-  dynamicReportLoadedRows = [];
-  dynamicReportFilteredRows = [];
-  dynamicReportSearchActive = false;
-  $("#dynamic-report-head") && ($("#dynamic-report-head").innerHTML = "");
-  $("#dynamic-report-body") && ($("#dynamic-report-body").innerHTML = emptyRow(1, "Chưa có dữ liệu", "Bấm Lấy dữ liệu để tải báo cáo."));
-  $("#dynamic-report-page-info") && ($("#dynamic-report-page-info").textContent = "Chưa có dữ liệu");
-  $("#dynamic-report-prev") && ($("#dynamic-report-prev").disabled = true);
-  $("#dynamic-report-next") && ($("#dynamic-report-next").disabled = true);
-}
-
-function normalizeDynamicSearchText(value) {
-  return String(value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-async function applyDynamicReportSearch() {
-  const message = $("#dynamic-report-message");
-  if (!dynamicReportColumns.length) {
-    showMessage(message, "Bấm Lấy dữ liệu trước để hệ thống nhận danh sách cột, sau đó mới Tìm.", "error");
-    return;
-  }
-  const search = ($("#dynamic-report-search")?.value || "").trim();
-  dynamicReportPage = 1;
-  dynamicReportSearchActive = Boolean(search);
-  await loadDynamicReportData({ includeSearch: dynamicReportSearchActive });
-}
-
-async function waitDynamicReportRunJob(jobId, { message = null } = {}) {
-  let lastMessage = "";
-  for (let attempt = 0; attempt < 900; attempt += 1) {
-    await sleep(attempt === 0 ? 250 : 1200);
-    const job = repairDataEncoding(await api(`/api/reports/run-jobs/${encodeURIComponent(jobId)}`));
-    upsertDynamicReportExportJob(job);
-    if (job.message && job.message !== lastMessage) {
-      lastMessage = job.message;
-      if (message) showMessage(message, job.message);
-    }
-    if (job.status === "complete") return job;
-    if (job.status === "failed") throw new Error(job.message || "Khong tai duoc du lieu bao cao.");
-  }
-  throw new Error("Truy van SQL qua lau. Hay thu hep dieu kien loc hoac kiem tra hang doi.");
-}
-
-async function loadDynamicReportData({ includeSearch = dynamicReportSearchActive } = {}) {
-  const select = $("#dynamic-report-select");
-  const message = $("#dynamic-report-message");
-  const button = $("#run-dynamic-report");
-  if (!select || !select.value) {
-    $("#dynamic-report-head").innerHTML = "";
-    $("#dynamic-report-body").innerHTML = emptyRow(1, "Chưa có báo cáo", "Hãy thêm cấu hình SQL trong Quản trị kết nối.");
-    return;
-  }
-  setButtonLoading(button, true);
-  try {
-    const started = repairDataEncoding(await api("/api/reports/run-jobs", {
-      method: "POST",
-      body: JSON.stringify(dynamicReportPayload({ includeSearch })),
-    }));
-    upsertDynamicReportExportJob({
-      ...started,
-      event_type: "load",
-      report_code: select.value,
-      report_name: select.selectedOptions?.[0]?.textContent || "",
-      created_at: new Date().toISOString(),
-    });
-    showMessage(message, started.message || "Da dua truy van SQL vao hang doi.");
-    if (!started.job_id) throw new Error("Khong thay job truy van SQL.");
-    const response = await waitDynamicReportRunJob(started.job_id, { message });
-    if (response.ok === false) throw new Error(response.message || "Không tải được dữ liệu báo cáo.");
-    const rows = Array.isArray(response.rows) ? response.rows : [];
-    dynamicReportColumns = response.columns || dynamicReportColumns;
-    if (!dynamicReportColumns.length && rows[0]) dynamicReportColumns = Object.keys(rows[0]);
-    dynamicReportLoadedRows = rows;
-    dynamicReportFilteredRows = [];
-    dynamicReportLoaded = true;
-    renderDynamicReportTable(response);
-    loadDynamicReportHistory({ silent: true }).catch(() => {});
-    showMessage(message, response.message || (includeSearch ? "Đã tải kết quả tìm kiếm." : "Đã tải dữ liệu báo cáo."));
-  } catch (error) {
-    showMessage(message, error.message, "error");
-  } finally {
-    setButtonLoading(button, false);
-  }
-}
-
-function downloadFileNameFromDisposition(headerValue) {
-  const value = String(headerValue || "");
-  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(value);
-  if (encoded?.[1]) {
-    try {
-      return decodeURIComponent(encoded[1].replace(/"/g, ""));
-    } catch {
-      return encoded[1].replace(/"/g, "");
-    }
-  }
-  const plain = /filename="?([^";]+)"?/i.exec(value);
-  return plain?.[1] || "";
-}
-
-function dynamicReportFallbackFileName() {
-  const code = ($("#dynamic-report-select")?.value || "truy_van_sql").toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "truy_van_sql";
-  const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
-  return `${code}_${stamp}.xlsx`;
-}
-
-function downloadDynamicReportBlob(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename || dynamicReportFallbackFileName();
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  return;
 }
 
 function dynamicReportHistoryItemKey(job) {
   const current = job || {};
   return current.history_id || current.job_id || current.local_id || `local-${Date.now()}`;
-}
-
-function dynamicReportHistoryTypeLabel(value) {
-  const normalized = String(value || "").toLowerCase();
-  if (normalized === "export") return "Xuất file";
-  return "Lấy dữ liệu";
 }
 
 function dynamicReportExportStatusLabel(status) {
@@ -258,7 +122,9 @@ function dynamicReportExportStatusLabel(status) {
   if (normalized === "complete") return "Hoàn tất";
   if (normalized === "failed") return "Lỗi";
   if (normalized === "running") return "Đang chạy";
+  if (normalized === "running_worker") return "Máy trạm đang chạy";
   if (normalized === "queued") return "Đang chờ";
+  if (normalized === "queued_worker") return "Chờ máy trạm";
   return status || "-";
 }
 
@@ -270,16 +136,8 @@ function dynamicReportExportStatusClass(status) {
   if (normalized === "complete") return "active";
   if (normalized === "failed") return "inactive";
   if (normalized === "running") return "admin";
+  if (normalized === "running_worker") return "admin";
   return "pending";
-}
-
-function dynamicReportExportRowsText(job) {
-  const progressRows = Number(job.progress?.rows || 0);
-  const progressTotal = Number(job.progress?.total || 0);
-  const rows = Number(job.rows || progressRows || 0);
-  const total = Number(job.total || progressTotal || 0);
-  if (!rows && !total) return "-";
-  return total && total !== rows ? `${rows.toLocaleString("vi-VN")}/${total.toLocaleString("vi-VN")}` : rows.toLocaleString("vi-VN");
 }
 
 function upsertDynamicReportExportJob(job) {
@@ -309,12 +167,7 @@ function upsertDynamicReportExportJob(job) {
 
 function dynamicReportExportIsActive(job) {
   const status = String(job?.status || "").toLowerCase();
-  return ["queued", "running", "cancel_requested"].includes(status);
-}
-
-function dynamicReportQueueText(job) {
-  const position = Number(job?.queue_position || 0);
-  return position > 0 ? `#${position}` : "-";
+  return ["queued", "queued_worker", "running", "running_worker", "cancel_requested"].includes(status);
 }
 
 function dynamicReportExportResultHtml(job, status) {
@@ -322,8 +175,9 @@ function dynamicReportExportResultHtml(job, status) {
   const action = [];
   if (link) {
     action.push(`<a class="table-action" href="${escapeHtml(link)}" target="_blank" rel="noopener">Mở file</a>`);
+    if (job.drive_url) action.push(`<a class="table-action" href="${escapeHtml(job.drive_url)}" target="_blank" rel="noopener">Link Drive</a>`);
   } else {
-    action.push(`<span>${escapeHtml(job.message || (status === "failed" ? "Xuất file lỗi" : "Đang xử lý"))}</span>`);
+    action.push(`<span>${escapeHtml(job.message || (status === "failed" ? "Lấy dữ liệu lỗi" : "Đang xử lý"))}</span>`);
   }
   if (job.can_cancel || dynamicReportExportIsActive(job)) {
     const isStopping = status === "cancel_requested";
@@ -337,11 +191,11 @@ function renderDynamicReportExportJobs() {
   const body = $("#dynamic-report-export-results");
   if (!body) return;
   const heading = document.querySelector(".dynamic-report-export-heading h2");
-  if (heading) heading.textContent = "Hàng đợi và lịch sử kết quả";
+  if (heading) heading.textContent = "Kết quả lấy dữ liệu";
   const head = body.closest("table")?.querySelector("thead");
-  if (head) head.innerHTML = "<tr><th>Thời gian</th><th>Thứ tự</th><th>Loại</th><th>Báo cáo</th><th>Trạng thái</th><th>Số dòng</th><th>Kết quả / thao tác</th></tr>";
+  if (head) head.innerHTML = "<tr><th>Thời gian</th><th>Báo cáo</th><th>Trạng thái</th><th>File / link Drive</th></tr>";
   if (!dynamicReportExportJobs.length) {
-    body.innerHTML = emptyRow(7, "Chưa có hàng đợi", "Kết quả lấy dữ liệu và xuất file sẽ xuất hiện ở đây.");
+    body.innerHTML = emptyRow(4, "Chưa có dữ liệu", "File và link Drive sẽ xuất hiện ở đây sau khi máy trạm xử lý xong.");
     return;
   }
   body.innerHTML = dynamicReportExportJobs.map((job) => {
@@ -350,11 +204,8 @@ function renderDynamicReportExportJobs() {
     return `
       <tr>
         <td>${escapeHtml(createdAt)}</td>
-        <td>${escapeHtml(dynamicReportQueueText(job))}</td>
-        <td>${escapeHtml(dynamicReportHistoryTypeLabel(job.event_type))}</td>
         <td><strong>${escapeHtml(job.report_code || job.ma_bao_cao || "-")}</strong><small class="cell-note">${escapeHtml(job.report_name || job.ten_bao_cao || "")}</small></td>
         <td><span class="status ${dynamicReportExportStatusClass(status)}">${escapeHtml(dynamicReportExportStatusLabel(status))}</span></td>
-        <td>${escapeHtml(dynamicReportExportRowsText(job))}</td>
         <td class="table-action-cell">${dynamicReportExportResultHtml(job, status)}</td>
       </tr>
     `;
@@ -426,8 +277,8 @@ async function monitorDynamicReportExportJob(jobId) {
       const job = repairDataEncoding(await api(`/api/reports/export-jobs/${encodeURIComponent(jobId)}`));
       upsertDynamicReportExportJob(job);
       if (!dynamicReportExportIsActive(job)) {
-        if (job.status === "complete") showToast(job.message || "Đã xuất file xong. Bấm Mở file trong bảng lịch sử.");
-        if (job.status === "cancelled") showToast(job.message || "Đã ngừng lệnh xuất file.");
+        if (job.status === "complete") showToast(job.message || "Đã lấy dữ liệu xong. Bấm Mở file trong bảng kết quả.");
+        if (job.status === "cancelled") showToast(job.message || "Đã ngừng lệnh lấy dữ liệu.");
         break;
       }
     }
@@ -458,57 +309,20 @@ async function handleDynamicReportExportAction(event) {
   }
 }
 
-async function waitDynamicReportExportJob(jobId, button) {
-  let lastMessage = "";
-  for (let attempt = 0; attempt < 900; attempt += 1) {
-    await sleep(attempt === 0 ? 1000 : 2000);
-    const job = repairDataEncoding(await api(`/api/reports/export-jobs/${encodeURIComponent(jobId)}`));
-    upsertDynamicReportExportJob(job);
-    if (job.message && job.message !== lastMessage) {
-      lastMessage = job.message;
-      button?.setAttribute("title", repairTextEncoding(job.message));
-      if (job.status === "queued") setDynamicReportExportStatus(job.message);
-    }
-    if (job.status === "complete") return job;
-    if (job.status === "failed") throw new Error(job.message || "Không xuất được file Excel.");
-  }
-  throw new Error("Tạo file Excel quá lâu. Hãy kiểm tra lại job xuất hoặc thu hẹp điều kiện báo cáo.");
-}
-
-function downloadDynamicReportExportJob(job) {
-  if (!job.download_url) throw new Error("Job xuất Excel chưa có link tải file.");
-  if (job.drive_url) {
-    setDynamicReportExportStatus(job.message || "Đã xuất file Excel lên Google Drive.", "success", job);
-    const opened = window.open(job.drive_url, "_blank", "noopener");
-    if (!opened) window.location.href = job.drive_url;
-    return;
-  }
-  setDynamicReportExportStatus(
-    `${job.message || "Đã tạo file Excel."} Nếu trình duyệt chưa tự tải, bấm link này:`,
-    "success",
-    job,
-  );
-  window.location.href = job.download_url;
-}
-
-async function exportDynamicReport() {
+async function exportDynamicReport({ buttonSelector = "#run-dynamic-report", includeSearch = false } = {}) {
   const select = $("#dynamic-report-select");
   const message = $("#dynamic-report-message");
-  const button = $("#export-dynamic-report");
+  const button = $(buttonSelector);
   let activeExportJob = null;
   if (!select || !select.value) {
-    showMessage(message, "Chọn loại báo cáo trước khi xuất file.", "error");
-    return;
-  }
-  if (!dynamicReportColumns.length) {
-    showMessage(message, "Bấm Lấy dữ liệu trước, sau đó mới xuất file Excel.", "error");
+    showMessage(message, "Chọn loại báo cáo trước khi lấy dữ liệu.", "error");
     return;
   }
   setButtonLoading(button, true);
   try {
     const started = repairDataEncoding(await api("/api/reports/export-jobs", {
       method: "POST",
-      body: JSON.stringify(dynamicReportPayload({ page: 1, includeSearch: dynamicReportSearchActive })),
+      body: JSON.stringify(dynamicReportPayload({ page: 1, includeSearch })),
     }));
     activeExportJob = upsertDynamicReportExportJob({
       ...started,
@@ -516,12 +330,12 @@ async function exportDynamicReport() {
       report_name: select.selectedOptions?.[0]?.textContent || "",
       created_at: new Date().toISOString(),
     });
-    if (!started.job_id) throw new Error("Không thấy job xuất file.");
-    showMessage(message, started.message || "Đang xuất file Excel ở chế độ nền.");
-    setDynamicReportExportStatus(started.message || "Đang xuất file Excel ở chế độ nền.");
+    if (!started.job_id) throw new Error("Không thấy job lấy dữ liệu.");
+    showMessage(message, started.message || "Đang lấy dữ liệu trên máy trạm.");
+    setDynamicReportExportStatus(started.message || "Đang lấy dữ liệu trên máy trạm.");
     monitorDynamicReportExportJob(started.job_id);
     loadDynamicReportHistory({ silent: true }).catch(() => {});
-    showMessage(message, "Đã đưa lệnh xuất file vào hàng đợi. Khi xong, link sẽ hiện ở bảng bên dưới.");
+    showMessage(message, "Đã đưa lệnh lấy dữ liệu vào hàng đợi. Khi xong, file và link Drive sẽ hiện ở bảng bên dưới.");
     return;
   } catch (error) {
     upsertDynamicReportExportJob({
@@ -540,23 +354,6 @@ async function exportDynamicReport() {
     button?.removeAttribute("title");
     setButtonLoading(button, false);
   }
-}
-
-function renderDynamicReportTable(response) {
-  const columns = response.columns || [];
-  const rows = response.rows || [];
-  dynamicReportLoaded = true;
-  dynamicReportTotal = response.pagination?.total || rows.length;
-  $("#dynamic-report-head").innerHTML = columns.length ? `<tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>` : "";
-  $("#dynamic-report-body").innerHTML = rows.length
-    ? rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(row[column])}</td>`).join("")}</tr>`).join("")
-    : emptyRow(Math.max(columns.length, 1), "Không có dữ liệu", "Thử thay đổi điều kiện lọc hoặc kiểm tra câu SQL.");
-  const page = response.pagination?.page || dynamicReportPage;
-  const pageSize = response.pagination?.page_size || Number($("#dynamic-report-page-size")?.value || 20);
-  dynamicReportPage = page;
-  $("#dynamic-report-page-info").textContent = `Trang ${page} · ${rows.length}/${dynamicReportTotal} dòng`;
-  $("#dynamic-report-prev").disabled = page <= 1;
-  $("#dynamic-report-next").disabled = page * pageSize >= dynamicReportTotal;
 }
 
 async function loadOneBssMining({ force = false } = {}) {
@@ -1149,42 +946,14 @@ function bindReportsRuntimeEvents() {
   });
   $("#dynamic-report-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    dynamicReportPage = 1;
-    dynamicReportSearchActive = false;
-    await loadDynamicReportData({ includeSearch: false });
+    await exportDynamicReport({ buttonSelector: "#run-dynamic-report", includeSearch: false });
   });
-  $("#dynamic-report-search")?.addEventListener("input", () => {
-    dynamicReportPage = 1;
-  });
-  $("#dynamic-report-search")?.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      applyDynamicReportSearch();
-    }
-  });
-  $("#search-dynamic-report")?.addEventListener("click", applyDynamicReportSearch);
-  $("#dynamic-report-page-size")?.addEventListener("change", async () => {
-    dynamicReportPage = 1;
-    if (dynamicReportLoaded) await loadDynamicReportData();
-  });
-  $("#export-dynamic-report")?.addEventListener("click", exportDynamicReport);
   $("#dynamic-report-export-results")?.addEventListener("click", handleDynamicReportExportAction);
   renderDynamicReportExportJobs();
   loadDynamicReportHistory({ silent: true }).catch(() => {});
   $("#dynamic-report-select")?.addEventListener("change", () => {
     clearDynamicReportCache();
     renderDynamicReportFilters();
-  });
-  $("#dynamic-report-prev")?.addEventListener("click", async () => {
-    if (dynamicReportPage <= 1) return;
-    dynamicReportPage -= 1;
-    await loadDynamicReportData();
-  });
-  $("#dynamic-report-next")?.addEventListener("click", async () => {
-    const pageSize = Number($("#dynamic-report-page-size")?.value || 20);
-    if (dynamicReportPage * pageSize >= dynamicReportTotal) return;
-    dynamicReportPage += 1;
-    await loadDynamicReportData();
   });
 }
 

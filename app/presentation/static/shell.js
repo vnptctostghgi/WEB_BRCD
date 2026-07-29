@@ -13,7 +13,7 @@ const navFeatureConfig = {
   phanquyennguoidung: { view: "permissions", icon: "shield", keywords: "phan quyen nguoi dung chuc nang" },
   phanquyendulieunguoidung: { view: "data-permissions", icon: "database", keywords: "phan quyen du lieu phan vung" },
   nhatkyhoatdong: { view: "audit", icon: "audit", keywords: "nhat ky audit log" },
-  truyvansql: { view: "reports", icon: "chart", keywords: "truy van sql bao cao thong ke bieu do" },
+  truyvansql: { view: "reports", icon: "database", keywords: "dao du lieu sql oracle excel drive may tram" },
   thietkelayoutbaocao: { view: "dashboard-builder", icon: "chart", keywords: "dashboard builder thiet ke layout bao cao tab bieu do" },
   daodulieuonebss: { view: "onebss-mining", icon: "database", keywords: "dao du lieu onebss bao cao excel" },
   daodulieuftp: { view: "ftp-mining", icon: "download", keywords: "dao du lieu ftp bao cao file may tram" },
@@ -28,7 +28,7 @@ const navGroupIcons = {
   quantriketnoi: "plug",
   taikhoanweb: "vault",
   dashboard: "dashboard",
-  truyvansql: "chart",
+  truyvansql: "database",
   baocaomoi: "chart",
 };
 
@@ -445,7 +445,7 @@ function warmFeatureBundle() {
   const link = document.createElement("link");
   link.rel = "preload";
   link.as = "script";
-  link.href = "/static/app.js?v=192";
+  link.href = "/static/app.js?v=193";
   link.dataset.featureBundleWarm = "true";
   document.head.appendChild(link);
 }

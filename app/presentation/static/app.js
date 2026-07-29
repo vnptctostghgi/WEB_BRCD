@@ -357,7 +357,7 @@ function ensureReportsRuntimeScriptLoaded() {
   if (reportsRuntimeScriptPromise) return reportsRuntimeScriptPromise;
   reportsRuntimeScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/reports-runtime.js?v=3";
+    script.src = "/static/reports-runtime.js?v=5";
     script.defer = true;
     script.dataset.reportsRuntime = "true";
     script.addEventListener("load", () => {
@@ -487,7 +487,7 @@ const navFeatureConfig = {
   phanquyennguoidung: { view: "permissions", icon: "shield", keywords: "phan quyen nguoi dung chuc nang" },
   phanquyendulieunguoidung: { view: "data-permissions", icon: "database", keywords: "phan quyen du lieu phan vung" },
   nhatkyhoatdong: { view: "audit", icon: "audit", keywords: "nhat ky audit log" },
-  truyvansql: { view: "reports", icon: "chart", keywords: "truy van sql bao cao thong ke bieu do" },
+  truyvansql: { view: "reports", icon: "database", keywords: "dao du lieu sql oracle excel drive may tram" },
   thietkelayoutbaocao: { view: "dashboard-builder", icon: "chart", keywords: "dashboard builder thiet ke layout bao cao tab bieu do" },
   daodulieuonebss: { view: "onebss-mining", icon: "database", keywords: "dao du lieu onebss bao cao excel" },
   daodulieuftp: { view: "ftp-mining", icon: "download", keywords: "dao du lieu ftp bao cao file may tram" },
@@ -503,7 +503,7 @@ const navGroupIcons = {
   quantriketnoi: "plug",
   taikhoanweb: "vault",
   dashboard: "dashboard",
-  truyvansql: "chart",
+  truyvansql: "database",
   baocaomoi: "chart",
 };
 

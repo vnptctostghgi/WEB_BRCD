@@ -32,7 +32,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.07.29-sql-local-worker"
+WORKER_VERSION = "2026.07.29-sql-drive-export-worker"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -463,12 +463,72 @@ def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
         )
 
     try:
-        report_code = str(task.get("report_code") or (task.get("query") or {}).get("ma_bao_cao") or "")
+        query = task.get("query") if isinstance(task.get("query"), dict) else {}
+        action = str(query.get("action") or "").strip()
+        report_code = str(task.get("report_code") or query.get("ma_bao_cao") or "")
         send_progress(
             "May tram da nhan task SQL. Dang goi API du lieu local.",
             details={"report": report_code, "api_urls": internal_sql_api_urls()},
         )
         result = run_sql_worker_query(task)
+
+        def result_int(*values: Any) -> int:
+            for value in values:
+                if isinstance(value, list):
+                    return len(value)
+                try:
+                    if value not in (None, ""):
+                        return int(value)
+                except (TypeError, ValueError):
+                    continue
+            return 0
+
+        if action == "export_sql_report_to_drive":
+            columns = result.get("columns") if isinstance(result.get("columns"), list) else []
+            pagination = result.get("pagination") if isinstance(result.get("pagination"), dict) else {}
+            total = result_int(result.get("total"), result.get("rows"), pagination.get("total"))
+            details = result.get("details") if isinstance(result.get("details"), dict) else {}
+            drive_url = str(
+                result.get("drive_url")
+                or result.get("storage_link")
+                or result.get("web_view_link")
+                or result.get("web_content_link")
+                or ""
+            ).strip()
+            details = {
+                **details,
+                "duration_ms": int((time.monotonic() - started) * 1000),
+                "file_id": str(result.get("file_id") or ""),
+                "file_name": str(result.get("file_name") or query.get("file_name") or ""),
+                "drive_url": drive_url,
+                "storage_link": drive_url,
+                "rows": total,
+                "total": result_int(result.get("total"), total),
+            }
+            finish_response = request_json(
+                client,
+                "POST",
+                f"/api/sql-worker/tasks/{run_id}/result",
+                json={
+                    "ok": bool(result.get("ok", True)),
+                    "status": "success" if result.get("ok", True) else "failed",
+                    "message": result.get("message") or "May tram da xuat Excel va upload Google Drive.",
+                    "columns": columns,
+                    "rows": [],
+                    "pagination": {"page": 1, "page_size": result_int(pagination.get("page_size"), total), "total": total},
+                    "report": task.get("report") if isinstance(task.get("report"), dict) else {},
+                    "details": details,
+                    "drive_url": drive_url,
+                    "storage_link": drive_url,
+                    "file_name": str(result.get("file_name") or query.get("file_name") or ""),
+                    "file_id": str(result.get("file_id") or ""),
+                    "total": result_int(result.get("total"), total),
+                },
+            )
+            if response_is_cancelled(finish_response):
+                return
+            return
+
         rows = result.get("rows") or result.get("data") or []
         if not isinstance(rows, list):
             rows = []

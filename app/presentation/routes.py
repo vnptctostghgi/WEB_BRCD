@@ -106,7 +106,7 @@ DYNAMIC_REPORT_EXPORT_JOB_TTL_SECONDS = 60 * 60
 DYNAMIC_REPORT_EXPORT_DIR = Path(tempfile.gettempdir()) / "vnptcto_dynamic_report_exports"
 DYNAMIC_REPORT_EXPORT_JOB_DIR = DYNAMIC_REPORT_EXPORT_DIR / "jobs"
 DYNAMIC_REPORT_HISTORY_ACTION = "dynamic_report_history"
-DYNAMIC_REPORT_EXPORT_ACTIVE_STATUSES = {"queued", "running", "cancel_requested"}
+DYNAMIC_REPORT_EXPORT_ACTIVE_STATUSES = {"queued", "queued_worker", "running", "running_worker", "cancel_requested"}
 DYNAMIC_REPORT_EXPORT_FINAL_STATUSES = {"complete", "failed", "cancelled"}
 ONEBSS_REPORT_JOBS: dict[str, dict[str, Any]] = {}
 ONEBSS_REPORT_JOBS_LOCK = threading.Lock()
@@ -491,10 +491,15 @@ class SqlWorkerResultPayload(BaseModel):
     status: str = ""
     message: str = ""
     columns: list[str] = Field(default_factory=list)
-    rows: list[dict[str, Any]] = Field(default_factory=list)
+    rows: list[dict[str, Any]] | int = Field(default_factory=list)
     pagination: dict[str, Any] = Field(default_factory=dict)
     report: dict[str, Any] = Field(default_factory=dict)
     details: dict[str, Any] = Field(default_factory=dict)
+    drive_url: str = ""
+    storage_link: str = ""
+    file_name: str = ""
+    file_id: str = ""
+    total: int = 0
 
 
 class ExportLoadedReportPayload(BaseModel):
@@ -3885,7 +3890,11 @@ def _set_dynamic_report_export_job(job_id: str, **updates: Any) -> None:
     with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
         job = DYNAMIC_REPORT_EXPORT_JOBS.get(job_id)
         if not job:
-            return
+            loaded = _load_dynamic_report_export_job(job_id)
+            if not loaded:
+                return
+            job = dict(loaded)
+            DYNAMIC_REPORT_EXPORT_JOBS[job_id] = job
         job.update(updates)
         job["updated_at"] = time.time()
         snapshot = dict(job)
@@ -4437,6 +4446,18 @@ def _dynamic_report_payload_from_job(job: dict[str, Any]) -> RunReportPayload:
     )
 
 
+def _dynamic_report_export_payload_from_job(job: dict[str, Any]) -> RunReportPayload:
+    payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
+    return RunReportPayload(
+        ma_bao_cao=str(payload.get("ma_bao_cao") or job.get("report_code") or ""),
+        filters=payload.get("filters") if isinstance(payload.get("filters"), dict) else {},
+        page=int(payload.get("page") or 1),
+        page_size=int(payload.get("page_size") or 20),
+        search=str(payload.get("search") or ""),
+        search_columns=payload.get("search_columns") if isinstance(payload.get("search_columns"), list) else [],
+    )
+
+
 def _next_dynamic_report_sql_worker_job() -> tuple[str, dict[str, Any]] | None:
     with DYNAMIC_REPORT_RUN_JOBS_LOCK:
         candidates = [
@@ -4450,15 +4471,39 @@ def _next_dynamic_report_sql_worker_job() -> tuple[str, dict[str, Any]] | None:
     return candidates[0]
 
 
+def _next_dynamic_report_export_worker_job() -> tuple[str, dict[str, Any]] | None:
+    jobs = _list_dynamic_report_export_job_snapshots(200)
+    candidates = [
+        (str(job.get("job_id") or ""), dict(job))
+        for job in jobs
+        if str(job.get("job_id") or "").strip()
+        and str(job.get("status") or "").lower() == "queued_worker"
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: float(item[1].get("created_at") or 0))
+    return candidates[0]
+
+
 @router.post("/api/sql-worker/tasks/claim")
 def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> dict:
     onebss_worker_token(request)
     _cleanup_dynamic_report_run_jobs()
+    _cleanup_dynamic_report_export_jobs()
     candidate = _next_dynamic_report_sql_worker_job()
-    if not candidate:
-        return {"ok": True, "task": None, "message": "Khong co task SQL dang cho may tram."}
-    job_id, job = candidate
-    run_payload = _dynamic_report_payload_from_job(job)
+    if candidate:
+        job_id, job = candidate
+        task_kind = "load"
+        run_payload = _dynamic_report_payload_from_job(job)
+        drive_folder_id = ""
+    else:
+        export_candidate = _next_dynamic_report_export_worker_job()
+        if not export_candidate:
+            return {"ok": True, "task": None, "message": "Khong co task SQL dang cho may tram."}
+        job_id, job = export_candidate
+        task_kind = "export"
+        run_payload = _dynamic_report_export_payload_from_job(job)
+        drive_folder_id = str(job.get("drive_folder_id") or "").strip()
     prepared = build_database_service().prepare_dynamic_report_query(
         ma_bao_cao=run_payload.ma_bao_cao.strip().upper(),
         filters=run_payload.filters,
@@ -4468,37 +4513,65 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
         search_columns=run_payload.search_columns,
     )
     if not prepared.get("ok"):
-        _set_dynamic_report_run_job(
-            job_id,
-            status="failed",
-            message=prepared.get("message") or "Khong chuan bi duoc truy van SQL cho may tram.",
-            details=prepared.get("details") if isinstance(prepared.get("details"), dict) else {},
-        )
+        updates = {
+            "status": "failed",
+            "message": prepared.get("message") or "Khong chuan bi duoc truy van SQL cho may tram.",
+            "details": prepared.get("details") if isinstance(prepared.get("details"), dict) else {},
+        }
+        if task_kind == "export":
+            _set_dynamic_report_export_job(job_id, **updates)
+        else:
+            _set_dynamic_report_run_job(job_id, **updates)
         return {"ok": False, "task": None, "message": prepared.get("message") or "Khong chuan bi duoc truy van SQL."}
-    updated = _set_dynamic_report_run_job(
-        job_id,
-        status="running_worker",
-        message=f"May tram {payload.worker_id} da nhan task SQL va dang goi API local.",
-        worker_id=payload.worker_id,
-    )
+    if task_kind == "export":
+        filename = _dynamic_report_export_filename({"report": {"ma_bao_cao": prepared.get("ma_bao_cao") or run_payload.ma_bao_cao}})
+        _set_dynamic_report_export_job(
+            job_id,
+            status="running_worker",
+            message=f"May tram {payload.worker_id} da nhan lenh xuat Excel va dang ket noi Oracle noi bo.",
+            worker_id=payload.worker_id,
+        )
+        updated = _get_dynamic_report_export_job(job_id) or job
+        query = {
+            "action": "export_sql_report_to_drive",
+            "ten_bao_cao": prepared.get("ten_bao_cao") or "",
+            "ma_bao_cao": prepared.get("ma_bao_cao") or "",
+            "cau_lenh_sql": prepared.get("cau_lenh_sql") or "",
+            "tham_so": prepared.get("tham_so") if isinstance(prepared.get("tham_so"), dict) else {},
+            "drive_folder_id": drive_folder_id,
+            "file_name": filename,
+            "pagination": {
+                "page_size": int(get_settings().dynamic_report_export_page_size or 5000),
+                "max_rows": int(get_settings().dynamic_report_export_max_rows or 1000000),
+            },
+        }
+    else:
+        updated = _set_dynamic_report_run_job(
+            job_id,
+            status="running_worker",
+            message=f"May tram {payload.worker_id} da nhan task SQL va dang goi API local.",
+            worker_id=payload.worker_id,
+        )
+        query = {
+            "action": "run_sql_report",
+            "ten_bao_cao": prepared.get("ten_bao_cao") or "",
+            "ma_bao_cao": prepared.get("ma_bao_cao") or "",
+            "cau_lenh_sql": prepared.get("cau_lenh_sql") or "",
+            "tham_so": prepared.get("tham_so") if isinstance(prepared.get("tham_so"), dict) else {},
+            "pagination": {
+                "page": int(prepared.get("page") or 1),
+                "page_size": int(prepared.get("page_size") or 20),
+            },
+        }
     return {
         "ok": True,
         "task": {
             "run_id": job_id,
             "job_id": job_id,
+            "task_type": f"dynamic_report_{task_kind}",
             "report_code": prepared.get("ma_bao_cao") or "",
             "report_name": prepared.get("ten_bao_cao") or "",
-            "query": {
-                "action": "run_sql_report",
-                "ten_bao_cao": prepared.get("ten_bao_cao") or "",
-                "ma_bao_cao": prepared.get("ma_bao_cao") or "",
-                "cau_lenh_sql": prepared.get("cau_lenh_sql") or "",
-                "tham_so": prepared.get("tham_so") if isinstance(prepared.get("tham_so"), dict) else {},
-                "pagination": {
-                    "page": int(prepared.get("page") or 1),
-                    "page_size": int(prepared.get("page_size") or 20),
-                },
-            },
+            "query": query,
             "report": prepared.get("report") if isinstance(prepared.get("report"), dict) else {},
             "details": prepared.get("details") if isinstance(prepared.get("details"), dict) else {},
             "message": updated.get("message") or "",
@@ -4509,17 +4582,29 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
 @router.post("/api/sql-worker/tasks/{run_id}/status")
 def update_sql_worker_task_status(request: Request, run_id: str, payload: SqlWorkerStatusPayload) -> dict:
     onebss_worker_token(request)
-    job = _get_dynamic_report_run_job(run_id.strip())
-    if not job:
+    run_id = run_id.strip()
+    job = _get_dynamic_report_run_job(run_id)
+    if job:
+        updated = _set_dynamic_report_run_job(
+            run_id,
+            status=payload.status.strip().lower() or "running_worker",
+            message=payload.message or "May tram dang truy van SQL bang API local.",
+            worker_id=payload.worker_id or job.get("worker_id") or "",
+            details=payload.details or job.get("details") or {},
+        )
+        return {"ok": True, "run": _dynamic_report_run_job_response(run_id, updated)}
+    export_job = _get_dynamic_report_export_job(run_id)
+    if not export_job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task SQL.")
-    updated = _set_dynamic_report_run_job(
-        run_id.strip(),
+    _set_dynamic_report_export_job(
+        run_id,
         status=payload.status.strip().lower() or "running_worker",
-        message=payload.message or "May tram dang truy van SQL bang API local.",
-        worker_id=payload.worker_id or job.get("worker_id") or "",
-        details=payload.details or job.get("details") or {},
+        message=payload.message or "May tram dang xuat Excel va upload Google Drive.",
+        worker_id=payload.worker_id or export_job.get("worker_id") or "",
+        details=payload.details or export_job.get("details") or {},
     )
-    return {"ok": True, "run": _dynamic_report_run_job_response(run_id.strip(), updated)}
+    updated_export = _get_dynamic_report_export_job(run_id) or export_job
+    return {"ok": True, "run": _dynamic_report_export_job_response(run_id, updated_export)}
 
 
 @router.post("/api/sql-worker/tasks/{run_id}/result")
@@ -4527,12 +4612,105 @@ def finish_sql_worker_task(request: Request, run_id: str, payload: SqlWorkerResu
     onebss_worker_token(request)
     run_id = run_id.strip()
     job = _get_dynamic_report_run_job(run_id)
-    if not job:
+    export_job = _get_dynamic_report_export_job(run_id) if not job else None
+    if not job and not export_job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task SQL.")
-    run_payload = _dynamic_report_payload_from_job(job)
     rows = payload.rows if isinstance(payload.rows, list) else []
     pagination = payload.pagination if isinstance(payload.pagination, dict) else {}
     report = payload.report if isinstance(payload.report, dict) else {}
+    if export_job:
+        run_payload = _dynamic_report_export_payload_from_job(export_job)
+        if not report:
+            report = {
+                "ma_bao_cao": export_job.get("report_code") or run_payload.ma_bao_cao,
+                "ten_bao_cao": export_job.get("report_name") or "",
+            }
+        details = payload.details if isinstance(payload.details, dict) else {}
+
+        def as_int(*values: Any) -> int:
+            for value in values:
+                if isinstance(value, list):
+                    return len(value)
+                try:
+                    if value not in (None, ""):
+                        return int(value)
+                except (TypeError, ValueError):
+                    continue
+            return 0
+
+        file_id = str(payload.file_id or details.get("file_id") or "").strip()
+        drive_url = str(
+            payload.drive_url
+            or payload.storage_link
+            or details.get("drive_url")
+            or details.get("storage_link")
+            or details.get("web_view_link")
+            or details.get("web_content_link")
+            or ""
+        ).strip()
+        if not drive_url and file_id:
+            drive_url = f"https://drive.google.com/file/d/{quote(file_id, safe='')}/view"
+        filename = str(
+            payload.file_name
+            or details.get("file_name")
+            or details.get("filename")
+            or export_job.get("filename")
+            or ""
+        ).strip()
+        rows_count = as_int(
+            payload.total,
+            pagination.get("total"),
+            details.get("rows"),
+            details.get("total"),
+            payload.rows,
+            export_job.get("rows"),
+        )
+        ok_status = str(payload.status or "").lower() not in {"failed", "error"}
+        status_value = "complete" if payload.ok and ok_status and drive_url else "failed"
+        if not drive_url and payload.ok and ok_status:
+            message = "May tram da xuat file nhung chua tra ve link Google Drive."
+        else:
+            message = payload.message or (
+                "Da xuat Excel tren may tram va upload Google Drive."
+                if status_value == "complete"
+                else "May tram chua xuat duoc file Excel len Google Drive."
+            )
+        _set_dynamic_report_export_job(
+            run_id,
+            status=status_value,
+            message=message,
+            filename=filename,
+            drive_url=drive_url,
+            rows=rows_count,
+            total=as_int(pagination.get("total"), details.get("total"), rows_count),
+            details=details,
+            worker_id=str(details.get("worker_id") or export_job.get("worker_id") or ""),
+        )
+        updated_export = _get_dynamic_report_export_job(run_id) or export_job
+        try:
+            _record_dynamic_report_history(
+                actor=export_job.get("created_by") or "sql-worker",
+                event_type="export",
+                status_value="complete" if status_value == "complete" else "failed",
+                ma_bao_cao=run_payload.ma_bao_cao,
+                report=report,
+                rows=rows_count,
+                total=as_int(pagination.get("total"), details.get("total"), rows_count),
+                message=message,
+                filters=run_payload.filters,
+                search=run_payload.search,
+                search_columns=run_payload.search_columns,
+                history_id=run_id,
+                job_id=run_id,
+                drive_url=drive_url,
+                file_name=filename,
+                details=details,
+            )
+        except Exception:
+            logger.exception("Cannot write SQL worker export history")
+        return {"ok": status_value == "complete", "run": _dynamic_report_export_job_response(run_id, updated_export)}
+
+    run_payload = _dynamic_report_payload_from_job(job)
     if not report:
         report = {"ma_bao_cao": job.get("report_code") or run_payload.ma_bao_cao, "ten_bao_cao": job.get("report_name") or ""}
     result = {
@@ -4650,17 +4828,27 @@ def start_dynamic_report_export_job(request: Request, payload: RunReportPayload)
     job_id = uuid.uuid4().hex
     now = time.time()
     report_info = _dynamic_report_history_report(payload.ma_bao_cao)
+    drive_folder_id = google_drive_folder_id(get_settings(), "", build_app_repository())
+    use_workstation = bool(drive_folder_id)
+    status_value = "queued_worker" if use_workstation else "queued"
+    message = (
+        "Da gui lenh lay du lieu cho may tram. May tram se ket noi Oracle noi bo, xuat Excel va upload Google Drive."
+        if use_workstation
+        else "Da dua yeu cau xuat Excel vao hang doi."
+    )
     with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
         DYNAMIC_REPORT_EXPORT_JOBS[job_id] = {
             "job_id": job_id,
-            "status": "queued",
-            "message": "Đã đưa yêu cầu xuất Excel vào hàng đợi.",
+            "status": status_value,
+            "message": message,
             "created_at": now,
             "updated_at": now,
             "progress": {},
             "created_by": actor["username"],
             "report_code": report_info["ma_bao_cao"],
             "report_name": report_info["ten_bao_cao"],
+            "payload": payload.model_dump(),
+            "drive_folder_id": drive_folder_id,
         }
         job_snapshot = dict(DYNAMIC_REPORT_EXPORT_JOBS[job_id])
     _persist_dynamic_report_export_job(job_id, job_snapshot)
@@ -4670,13 +4858,15 @@ def start_dynamic_report_export_job(request: Request, payload: RunReportPayload)
         status_value="queued",
         ma_bao_cao=report_info["ma_bao_cao"],
         report_name=report_info["ten_bao_cao"],
-        message="Da dua yeu cau xuat Excel vao hang doi.",
+        message=message,
         filters=payload.filters,
         search=payload.search,
         search_columns=payload.search_columns,
         history_id=job_id,
         job_id=job_id,
     )
+    if use_workstation:
+        return _dynamic_report_export_job_response(job_id, job_snapshot)
     thread = threading.Thread(target=_run_dynamic_report_export_job, args=(job_id, payload, actor["username"]), daemon=True)
     thread.start()
     return {
@@ -4691,7 +4881,6 @@ def start_dynamic_report_export_job(request: Request, payload: RunReportPayload)
         "queue_position": 0,
         "can_cancel": True,
     }
-    return {"ok": True, "job_id": job_id, "status": "queued", "message": "Đang xuất file Excel ở chế độ nền."}
 
 
 @router.get("/api/reports/export-jobs")
@@ -4716,7 +4905,7 @@ def cancel_dynamic_report_export_job(request: Request, job_id: str) -> dict:
     if status_value in DYNAMIC_REPORT_EXPORT_FINAL_STATUSES:
         return _dynamic_report_export_job_response(job_id, job)
     now = time.time()
-    if status_value == "queued":
+    if status_value in {"queued", "queued_worker"}:
         _set_dynamic_report_export_job(
             job_id,
             status="cancelled",
