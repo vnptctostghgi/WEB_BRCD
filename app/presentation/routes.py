@@ -36,6 +36,7 @@ from app.application.google_drive_service import (
     GOOGLE_DRIVE_OAUTH_SCOPES,
     GoogleDriveConfigurationError,
     clear_google_drive_oauth_tokens,
+    extract_google_drive_folder_id,
     google_drive_folder_id,
     google_drive_oauth_credentials,
     google_drive_oauth_client_configured,
@@ -429,6 +430,10 @@ class SystemConnectionPayload(BaseModel):
     description: str = ""
     config: dict[str, Any] = Field(default_factory=dict)
     is_active: bool = False
+
+
+class GoogleDriveFolderPayload(BaseModel):
+    folder_id: str = ""
 
 
 class SqlReportPayload(BaseModel):
@@ -2229,6 +2234,7 @@ def workstation_status_from_age(age_seconds: float | None) -> str:
 
 def workstation_public_config(request: Request) -> dict[str, Any]:
     settings = get_settings()
+    drive_status = google_drive_oauth_status(settings, build_app_repository())
     public_url = str(getattr(settings, "app_public_url", "") or "").strip().rstrip("/")
     if not public_url:
         forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip()
@@ -2240,13 +2246,13 @@ def workstation_public_config(request: Request) -> dict[str, Any]:
         "internal_api_mock_mode": bool(settings.internal_api_mock_mode),
         "internal_api_token_configured": configured_secret(settings.internal_api_token),
         "onebss_server_credentials_configured": bool(settings.onebss_username.strip() and configured_secret(settings.onebss_password)),
-        "google_drive_server_configured": bool(
-            settings.google_drive_folder_id.strip()
-            or configured_secret(settings.google_drive_service_account_json_base64)
-            or configured_secret(settings.google_drive_service_account_json)
-            or settings.google_drive_service_account_file.strip()
-            or settings.google_drive_oauth_client_id.strip()
-        ),
+        "google_drive_server_configured": bool(drive_status.get("ready")),
+        "google_drive_oauth_ready": bool(drive_status.get("ready")),
+        "google_drive_oauth_connected": bool(drive_status.get("connected")),
+        "google_drive_oauth_client_configured": bool(drive_status.get("client_configured")),
+        "google_drive_folder_id": drive_status.get("folder_id") or "",
+        "google_drive_oauth_email": drive_status.get("email") or "",
+        "google_drive_missing_items": drive_status.get("missing_items") or [],
         "data_mining_download_dir": settings.data_mining_download_dir,
         "storage_backend": settings.app_database_backend,
     }
@@ -2956,6 +2962,33 @@ def download_workstation_setup_package(request: Request) -> Response:
 def google_drive_oauth_status_api(request: Request) -> dict:
     admin_user(request)
     return google_drive_oauth_status(get_settings(), build_app_repository())
+
+
+@router.post("/api/google-drive/oauth/folder")
+def save_google_drive_oauth_folder(request: Request, payload: GoogleDriveFolderPayload) -> dict:
+    actor = admin_user(request)
+    folder_id = extract_google_drive_folder_id(payload.folder_id) or str(payload.folder_id or "").strip()
+    if not folder_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Hay nhap link thu muc Google Drive hoac folder_id.")
+    repository = build_app_repository()
+    existing = repository.get_system_connection_by_code("drive_storage") or {}
+    existing_config = existing.get("config") if isinstance(existing.get("config"), dict) else {}
+    config = {
+        **existing_config,
+        "provider": "google_drive_oauth",
+        "folder": folder_id,
+        "folder_id": folder_id,
+    }
+    repository.upsert_system_connection(
+        "drive_storage",
+        str(existing.get("name") or "Google Drive"),
+        "drive",
+        str(existing.get("description") or "Google Drive OAuth upload cho OneBSS."),
+        config,
+        True,
+    )
+    repository.add_audit_log(actor["username"], "google_drive_folder_saved", f"Luu thu muc Google Drive {folder_id}")
+    return {"ok": True, "folder_id": folder_id, "status": google_drive_oauth_status(get_settings(), repository)}
 
 
 @router.post("/api/google-drive/oauth/start")

@@ -201,9 +201,19 @@ def google_drive_oauth_status(settings: Settings, repository: Any | None = None)
         connected = False
         token_error = str(error)
     folder_id = str(config.get("folder") or config.get("folder_id") or getattr(settings, "google_drive_folder_id", "") or "").strip()
+    client_configured = google_drive_oauth_client_configured(settings)
+    missing_items: list[str] = []
+    if not client_configured:
+        missing_items.append("GOOGLE_DRIVE_OAUTH_CLIENT_ID/GOOGLE_DRIVE_OAUTH_CLIENT_SECRET")
+    if not connected:
+        missing_items.append("Google Drive OAuth")
+    if not folder_id:
+        missing_items.append("Google Drive folder_id")
     return {
         "connected": connected,
-        "client_configured": google_drive_oauth_client_configured(settings),
+        "client_configured": client_configured,
+        "ready": connected and client_configured and bool(folder_id) and not token_error,
+        "missing_items": missing_items,
         "email": str(config.get("oauth_email") or "").strip(),
         "provider": str(config.get("provider") or "").strip(),
         "connected_at": str(config.get("oauth_connected_at") or "").strip(),

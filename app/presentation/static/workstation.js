@@ -63,7 +63,7 @@
     return [
       !config.internal_api_token_configured,
       Boolean(config.internal_api_mock_mode),
-      !config.google_drive_server_configured,
+      !config.google_drive_oauth_ready,
       Number(queue.waiting_otp || 0) > 0,
     ].filter(Boolean).length;
   }
@@ -139,10 +139,14 @@
     if (packageLink) packageLink.href = setup.package_url || "/api/admin/workstation/setup-package";
     const panel = $("#workstation-admin-panel");
     if (panel) {
+      const driveMissing = Array.isArray(config.google_drive_missing_items) ? config.google_drive_missing_items.join(", ") : "";
+      const driveNote = config.google_drive_oauth_ready
+        ? `OAuth ${config.google_drive_oauth_email || ""} -> ${config.google_drive_folder_id || ""}`.trim()
+        : (driveMissing || "Can luu folder va ket noi OAuth.");
       const checks = [
         ["Token worker", config.internal_api_token_configured, "Dung de nhan task va gui heartbeat."],
         ["API du lieu", !config.internal_api_mock_mode, config.internal_api_mock_mode ? "Dang o che do mock." : config.internal_api_url || ""],
-        ["Google Drive", config.google_drive_server_configured, "Dung cho upload file ket qua."],
+        ["Google Drive", config.google_drive_oauth_ready, driveNote],
         ["Bo cai", true, setup.script_name || "SETUP_VNPTCTO_WORKSTATION.bat"],
       ];
       panel.innerHTML = checks.map(([label, ok, note]) => `

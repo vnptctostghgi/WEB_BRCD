@@ -242,7 +242,7 @@ function ensureWorkstationScriptLoaded() {
   if (workstationScriptPromise) return workstationScriptPromise;
   workstationScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/workstation.js?v=1";
+    script.src = "/static/workstation.js?v=2";
     script.defer = true;
     script.dataset.workstation = "true";
     script.addEventListener("load", () => {
@@ -4942,6 +4942,12 @@ function renderConnectionsTable() {
   document.querySelectorAll("[data-connect-google-drive]").forEach((button) => {
     button.addEventListener("click", () => connectGoogleDrive(button));
   });
+  document.querySelectorAll("[data-save-google-drive-folder]").forEach((button) => {
+    button.addEventListener("click", () => saveGoogleDriveFolder(button));
+  });
+  document.querySelectorAll("[data-check-google-drive]").forEach((button) => {
+    button.addEventListener("click", () => checkGoogleDriveStatus(button));
+  });
   document.querySelectorAll("[data-disconnect-google-drive]").forEach((button) => {
     button.addEventListener("click", () => disconnectGoogleDrive(button));
   });
@@ -5081,7 +5087,7 @@ function renderConnectionEditor(connection) {
     </div>`;
 }
 
-function renderDriveOauthPanel(connection) {
+function renderDriveOauthPanelLegacy(connection) {
   if (connection.connection_type !== "drive" && connection.code !== "drive_storage") return "";
   const config = connection.config || {};
   const protectedKeys = connection.protected_config_keys || [];
@@ -5099,6 +5105,35 @@ function renderDriveOauthPanel(connection) {
       <div class="action-group">
         <button class="btn-secondary" type="button" data-connect-google-drive><span class="button-label">${connected ? "Kết nối lại Drive" : "Kết nối Google Drive"}</span><span class="spinner"></span></button>
         <button class="table-action danger ${connected ? "" : "hidden"}" type="button" data-disconnect-google-drive><span class="button-label">Ngắt kết nối</span><span class="spinner"></span></button>
+      </div>
+    </div>`;
+}
+
+function renderDriveOauthPanel(connection) {
+  if (connection.connection_type !== "drive" && connection.code !== "drive_storage") return "";
+  const config = connection.config || {};
+  const protectedKeys = connection.protected_config_keys || [];
+  const email = config.oauth_email || "";
+  const connectedAt = config.oauth_connected_at || "";
+  const folder = config.folder || config.folder_id || "";
+  const connected = Boolean(email || connectedAt || protectedKeys.includes("oauth_refresh_token_enc"));
+  const ready = connected && Boolean(folder);
+  const statusText = ready ? "San sang cho bo cai may tram" : (connected ? "Con thieu thu muc Drive mac dinh" : "Chua ket noi Google Drive OAuth");
+  return `
+    <div class="drive-oauth-panel">
+      <div>
+        <strong>Google Drive OAuth</strong>
+        <p>${connected ? `Da ket noi${email ? `: ${escapeHtml(email)}` : ""}${connectedAt ? ` (${escapeHtml(connectedAt)})` : ""}` : "Chua ket noi tai khoan Google Drive."}</p>
+        <p>${escapeHtml(statusText)}</p>
+      </div>
+      <label>Thu muc Drive mac dinh
+        <input class="form-control inline-admin-input" data-drive-folder-input value="${escapeHtml(folder)}" placeholder="Dan link folder Google Drive hoac folder_id" />
+      </label>
+      <div class="action-group">
+        <button class="btn-secondary" type="button" data-save-google-drive-folder><span class="button-label">Luu thu muc</span><span class="spinner"></span></button>
+        <button class="btn-secondary" type="button" data-connect-google-drive><span class="button-label">${connected ? "Ket noi lai Drive" : "Ket noi Google Drive"}</span><span class="spinner"></span></button>
+        <button class="table-action" type="button" data-check-google-drive><span class="button-label">Kiem tra Drive</span><span class="spinner"></span></button>
+        <button class="table-action danger ${connected ? "" : "hidden"}" type="button" data-disconnect-google-drive><span class="button-label">Ngat ket noi</span><span class="spinner"></span></button>
       </div>
     </div>`;
 }
@@ -5179,6 +5214,46 @@ async function saveConnection(event) {
     await loadConnections({ force: true });
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
+  }
+}
+
+async function saveGoogleDriveFolder(button) {
+  const row = button.closest("[data-connection-row]");
+  const input = row?.querySelector("[data-drive-folder-input]");
+  const folderId = (input?.value || "").trim();
+  if (!folderId) {
+    showToast("Hay dan link thu muc Google Drive hoac folder_id.", "error");
+    return;
+  }
+  setButtonLoading(button, true);
+  try {
+    const result = await api("/api/google-drive/oauth/folder", {
+      method: "POST",
+      body: JSON.stringify({ folder_id: folderId }),
+    });
+    showToast(result.status?.ready ? "Da luu thu muc Drive. Cau hinh da san sang." : "Da luu thu muc Drive. Hay ket noi Google Drive OAuth.");
+    await loadConnections({ force: true });
+  } catch (error) {
+    showToast(error.message, "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+async function checkGoogleDriveStatus(button) {
+  setButtonLoading(button, true);
+  try {
+    const status = await api("/api/google-drive/oauth/status");
+    if (status.ready) {
+      showToast(`Drive san sang${status.email ? `: ${status.email}` : ""}.`, "success");
+      return;
+    }
+    const missing = (status.missing_items || []).join(", ") || status.token_error || "Chua du cau hinh Drive.";
+    showToast(`Drive chua san sang: ${missing}`, "error");
+  } catch (error) {
+    showToast(error.message, "error");
+  } finally {
+    setButtonLoading(button, false);
   }
 }
 
