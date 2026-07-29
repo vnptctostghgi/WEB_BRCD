@@ -127,6 +127,7 @@ WORKSTATION_HEARTBEATS: dict[str, dict[str, Any]] = {}
 WORKSTATION_HEARTBEATS_LOCK = threading.Lock()
 WORKSTATION_HEARTBEAT_TTL_SECONDS = 10 * 60
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260729-oracle-dsn-restart-v2"
 WORKSTATION_SETUP_INCLUDE_PATHS = (
     ".env.example",
     "README.md",
@@ -3102,7 +3103,8 @@ def workstation_overview(request: Request) -> dict:
         "workers": workstation_workers_response(runs),
         "config": workstation_public_config(request),
         "setup": {
-            "package_url": "/api/admin/workstation/setup-package",
+            "package_url": f"/api/admin/workstation/setup-package?v={WORKSTATION_SETUP_PACKAGE_VERSION}",
+            "package_version": WORKSTATION_SETUP_PACKAGE_VERSION,
             "script_name": "SETUP_VNPTCTO_WORKSTATION.bat",
             "install_root": "D:\\Tool_Tram_VNPTCTO.COM",
             "task_names": [
@@ -3119,11 +3121,15 @@ def workstation_overview(request: Request) -> dict:
 def download_workstation_setup_package(request: Request) -> Response:
     admin_user(request)
     payload = workstation_setup_package_bytes(request)
-    filename = f"VNPTCTO_WORKSTATION_SETUP_{datetime.now():%Y%m%d_%H%M}.zip"
+    filename = f"VNPTCTO_WORKSTATION_SETUP_{WORKSTATION_SETUP_PACKAGE_VERSION}_{datetime.now():%Y%m%d_%H%M}.zip"
     return Response(
         content=payload,
         media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename=\"{filename}\""},
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{filename}\"",
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+        },
     )
 
 

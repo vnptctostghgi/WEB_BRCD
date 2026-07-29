@@ -200,7 +200,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         payload = overview.json()
         assert payload["hardware_profile"]["cpu"] == "Core i3"
         assert any(role["code"] == "onebss_worker" for role in payload["roles"])
-        assert payload["setup"]["package_url"] == "/api/admin/workstation/setup-package"
+        assert payload["setup"]["package_url"].startswith("/api/admin/workstation/setup-package?v=")
+        assert payload["setup"]["package_version"] == routes.WORKSTATION_SETUP_PACKAGE_VERSION
         saved_oracle = client.put(
             "/api/admin/connections/oracle_agency_db",
             json={
@@ -222,6 +223,11 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         package = client.get("/api/admin/workstation/setup-package")
         assert package.status_code == 200
         assert package.headers["content-type"] == "application/zip"
+        assert package.headers["cache-control"] == "no-store, max-age=0"
+        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION in package.headers["content-disposition"]
+        workstation_page = client.get("/maytram")
+        assert workstation_page.status_code == 200
+        assert f"/api/admin/workstation/setup-package?v={routes.WORKSTATION_SETUP_PACKAGE_VERSION}" in workstation_page.text
         with ZipFile(BytesIO(package.content)) as archive:
             names = set(archive.namelist())
             config_text = archive.read("VNPTCTO_WORKSTATION_SETUP/workstation-install-config.ps1").decode("utf-8")
