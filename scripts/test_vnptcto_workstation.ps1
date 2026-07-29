@@ -88,6 +88,7 @@ foreach ($taskName in @("VNPTCTO OneBSS Worker", "VNPTCTO API Trung Gian", "VNPT
 }
 
 $results.Add((Test-Http "Local API root" "http://127.0.0.1:8000/"))
+$results.Add((Test-Http "Local API config" "http://127.0.0.1:8000/config-status"))
 $results.Add((Test-Http "Local Oracle" "http://127.0.0.1:8000/test-oracle" 20))
 $results.Add((Test-Http "Local Drive" "http://127.0.0.1:8000/test-drive" 20))
 $cloudflared = Get-Service cloudflared -ErrorAction SilentlyContinue

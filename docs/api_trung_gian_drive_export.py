@@ -12,7 +12,7 @@ from typing import Any
 
 import oracledb
 import openpyxl
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from google.auth.transport.requests import Request as GoogleAuthRequest
@@ -30,6 +30,7 @@ app = FastAPI(title="API trung gian VNPT CTO")
 
 EXCEL_MAX_ROWS_PER_SHEET = 1_048_576
 GOOGLE_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
+API_MIDDLEWARE_VERSION = "2026.07.29-oracle-dsn-restart"
 ORACLE_DSN_ENV_KEYS = (
     "DB_DSN",
     "ORACLE_DSN",
@@ -144,6 +145,17 @@ def oracle_connect():
         password=config["password"],
         dsn=config["dsn"],
     )
+
+
+def config_present(*names: str) -> bool:
+    return bool(env_value(*names))
+
+
+def preview_value(value: str, limit: int = 90) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "..."
 
 
 def clean_sql(sql: str) -> str:
@@ -465,7 +477,45 @@ def write_export_to_excel(cursor, sql: str, binds: dict[str, Any], target_path: 
 
 @app.get("/")
 def home():
-    return {"status": "ok"}
+    return {"status": "ok", "version": API_MIDDLEWARE_VERSION}
+
+
+@app.get("/config-status")
+def config_status():
+    payload: dict[str, Any] = {
+        "status": "ok",
+        "version": API_MIDDLEWARE_VERSION,
+        "pid": os.getpid(),
+        "cwd": str(Path.cwd()),
+        "app_file": str(Path(__file__).resolve()),
+        "env_file": find_dotenv(usecwd=True),
+        "db_dsn_configured": config_present(*ORACLE_DSN_ENV_KEYS),
+        "db_host": env_value("DB_HOST", "ORACLE_HOST"),
+        "db_port": env_value("DB_PORT", "ORACLE_PORT") or "1521",
+        "db_service": env_value("DB_SERVICE", "ORACLE_SERVICE", "SERVICE_NAME"),
+        "db_sid_configured": config_present("DB_SID", "ORACLE_SID"),
+        "db_user_configured": config_present("DB_USER", "ORACLE_USER"),
+        "db_pass_configured": config_present("DB_PASS", "ORACLE_PASSWORD"),
+        "drive_folder_configured": config_present("GOOGLE_DRIVE_FOLDER_ID"),
+        "drive_auth_mode": google_drive_auth_mode(),
+    }
+    try:
+        config = oracle_connection_config()
+        payload.update(
+            {
+                "oracle_config_ok": True,
+                "dsn_source": config.get("source") or "",
+                "dsn_preview": preview_value(config.get("dsn") or ""),
+            }
+        )
+    except Exception as error:
+        payload.update(
+            {
+                "oracle_config_ok": False,
+                "oracle_config_error": f"{type(error).__name__}: {error}",
+            }
+        )
+    return payload
 
 
 @app.get("/test-oracle")

@@ -263,6 +263,7 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64" in setup_script
         assert "OracleDbDsn" in setup_script
         assert "OracleDbHost" in setup_script
+        assert "Stop-ApiMiddlewareProcesses" in setup_script
         assert "DB_DSN=$(DotEnvValue $oracleDbDsn)" in setup_script
         assert "DB_HOST=$(DotEnvValue $oracleDbHost)" in setup_script
         assert "DB_SID=$(DotEnvValue $oracleDbSid)" in setup_script
@@ -292,7 +293,11 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert 'Invoke-External "python" "-m" "venv"' not in start_worker_script
         assert "Hay cai Cloudflare Tunnel service rieng" not in api_task_script
         assert "bo qua Cloudflare Tunnel" in api_task_script
+        assert "Stop-LocalApiProcesses" in api_task_script
+        assert "config-status" in api_task_script
         assert "Bo qua vi chua cai cloudflared" in health_script
+        assert "Local API config" in health_script
+        assert "config-status" in health_script
         assert "workstation-setup-error.log" in setup_script
         assert "-NoPause" in setup_bat
         assert "-NoPause" in background_bat
@@ -336,6 +341,21 @@ def test_api_middleware_uses_oracle_dsn_and_rejects_bequeath(monkeypatch: pytest
     assert fallback["source"] == "DB_HOST/DB_SERVICE"
     assert "10.92.53.53" in fallback["dsn"]
     assert "DBCTO" in fallback["dsn"]
+
+
+def test_api_middleware_config_status_reports_version_without_password(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = load_api_middleware_module()
+    monkeypatch.setenv("DB_USER", "REPORT_USER")
+    monkeypatch.setenv("DB_PASS", "oracle-secret")
+    monkeypatch.setenv("DB_DSN", "10.92.53.53:1521/DBCTO")
+    monkeypatch.setenv("GOOGLE_DRIVE_FOLDER_ID", "drive-folder")
+    payload = module.config_status()
+
+    assert payload["version"] == module.API_MIDDLEWARE_VERSION
+    assert payload["oracle_config_ok"] is True
+    assert payload["dsn_source"] == "DB_DSN"
+    assert payload["db_pass_configured"] is True
+    assert "oracle-secret" not in json.dumps(payload)
 
 
 def test_api_middleware_reads_json_files_with_utf8_bom(tmp_path: Path) -> None:

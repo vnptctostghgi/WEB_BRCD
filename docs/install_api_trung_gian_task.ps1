@@ -55,6 +55,28 @@ function Find-PythonExe {
     return $python
 }
 
+function Stop-LocalApiProcesses {
+    foreach ($existingTask in @($WatchdogTaskName, $TaskName)) {
+        try {
+            $task = Get-ScheduledTask -TaskName $existingTask -ErrorAction SilentlyContinue
+            if ($task) {
+                Stop-ScheduledTask -TaskName $existingTask -ErrorAction SilentlyContinue
+            }
+        } catch {
+        }
+    }
+    $escapedApiDir = [regex]::Escape($ApiDir)
+    $listeners = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
+    foreach ($listener in $listeners) {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue
+        $commandLine = [string]($proc.CommandLine)
+        if ($commandLine -match "main:app|api-trung-gian|$escapedApiDir") {
+            Stop-Process -Id $listener.OwningProcess -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Start-Sleep -Seconds 2
+}
+
 Assert-Administrator
 
 if (-not (Test-Path -LiteralPath $ApiDir)) {
@@ -70,6 +92,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $ApiDir ".env"))) {
 }
 
 New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+Stop-LocalApiProcesses
 $VenvPythonExe = Join-Path $ApiDir ".venv\Scripts\python.exe"
 if (Test-Path -LiteralPath $VenvPythonExe) {
     $PythonExe = $VenvPythonExe
@@ -218,6 +241,11 @@ Get-ScheduledTask -TaskName $TaskName, $WatchdogTaskName | Select-Object TaskNam
 
 Write-Host ""
 Write-Host "Kiem tra nhanh:"
+try {
+    Invoke-RestMethod "http://127.0.0.1:8000/config-status" -TimeoutSec 20
+} catch {
+    Write-Warning "Local API config-status chua OK: $($_.Exception.Message)"
+}
 try {
     Invoke-RestMethod "http://127.0.0.1:8000/test-oracle" -TimeoutSec 20
 } catch {

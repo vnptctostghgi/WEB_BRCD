@@ -443,6 +443,29 @@ function Ensure-ApiDriveOauthFiles {
   $tokenPayload | ConvertTo-Json -Depth 5 | Set-Content -Path $OauthTokenFile -Encoding UTF8
 }
 
+function Stop-ApiMiddlewareProcesses {
+  param([string]$ApiDir)
+  foreach ($taskName in @("VNPTCTO API Watchdog", "VNPTCTO API Trung Gian")) {
+    try {
+      $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+      if ($task) {
+        Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+      }
+    } catch {
+    }
+  }
+  $escapedApiDir = [regex]::Escape($ApiDir)
+  $listeners = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
+  foreach ($listener in $listeners) {
+    $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue
+    $commandLine = [string]($proc.CommandLine)
+    if ($commandLine -match "main:app|api-trung-gian|$escapedApiDir") {
+      Stop-Process -Id $listener.OwningProcess -Force -ErrorAction SilentlyContinue
+    }
+  }
+  Start-Sleep -Seconds 2
+}
+
 function Install-ApiMiddleware {
   param([string]$Root)
   if ($script:SkipApiMiddlewareResolved) {
@@ -450,6 +473,7 @@ function Install-ApiMiddleware {
   }
   Write-Step "Cai API trung gian Oracle/Drive"
   $apiDir = Join-Path $ApiRoot "api-trung-gian"
+  Stop-ApiMiddlewareProcesses $apiDir
   New-Item -ItemType Directory -Path $apiDir -Force | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $ApiRoot "exports") -Force | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $ApiRoot "logs") -Force | Out-Null
