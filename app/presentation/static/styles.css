@@ -4276,14 +4276,14 @@ legend {
 }
 
 .onebss-file-link-primary {
-  color: #dff6ff;
+  color: var(--primary, #0B63B6);
   font-weight: 800;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
 
 .onebss-file-link-primary:hover {
-  color: #8bdcff;
+  color: var(--primary-hover, #084F95);
 }
 
 .onebss-time-cell {
@@ -6045,6 +6045,26 @@ tbody tr:hover {
 
 .app-shell :is(.status.error, .status.danger, .badge-danger, .result.error, .dropdown-action.danger, .table-action.danger, .btn-danger) {
   color: var(--danger) !important;
+}
+
+.app-shell :is(.dynamic-report-export-table a.table-action, #data-mining-runs-table a, #onebss-run-history a, #ftp-run-history a, .onebss-run-table a, .onebss-file-link-primary) {
+  color: var(--primary) !important;
+  font-weight: 800 !important;
+  text-decoration: underline !important;
+  text-decoration-color: rgba(11, 99, 182, .42) !important;
+  text-decoration-thickness: 1px !important;
+  text-underline-offset: 3px !important;
+}
+
+.app-shell :is(.dynamic-report-export-table a.table-action, #data-mining-runs-table a, #onebss-run-history a, #ftp-run-history a, .onebss-run-table a, .onebss-file-link-primary):hover {
+  color: var(--primary-hover) !important;
+  background: var(--primary-light) !important;
+  border-color: rgba(11, 99, 182, .36) !important;
+}
+
+.app-shell :is(.dynamic-report-export-table a.table-action, #data-mining-runs-table a, #onebss-run-history a, #ftp-run-history a, .onebss-run-table a, .onebss-file-link-primary):focus-visible {
+  outline: 2px solid rgba(11, 99, 182, .35) !important;
+  outline-offset: 2px !important;
 }
 
 .login-upgraded {

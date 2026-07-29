@@ -108,7 +108,7 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
         assert "/static/app.js?v=189" in public_response.text
-        assert "/static/styles.css?v=121" in public_response.text
+        assert "/static/styles.css?v=122" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
         public_js = client.get("/static/app.js?v=189")
@@ -141,12 +141,14 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert "/api/admin/public-messages/feed?limit=100" not in public_js.text
         assert "const PUBLIC_MESSAGES_LIMIT = 10" in public_js.text
         assert 'params.set("after", publicMessagesCursor)' in public_js.text
-        public_css = client.get("/static/styles.css?v=121")
+        public_css = client.get("/static/styles.css?v=122")
         assert public_css.status_code == 200
         assert "Compact desktop rail" in public_css.text
         assert ".sidebar:not(.menu-open) #main-navigation" in public_css.text
         assert ".permission-node" in public_css.text
         assert ".permission-children" in public_css.text
+        assert ".dynamic-report-export-table a.table-action" in public_css.text
+        assert "text-decoration-color: rgba(11, 99, 182, .42)" in public_css.text
 
         permissions_response = client.get("/phanquyennguoidung")
         assert permissions_response.status_code == 200
