@@ -357,7 +357,7 @@ function ensureReportsRuntimeScriptLoaded() {
   if (reportsRuntimeScriptPromise) return reportsRuntimeScriptPromise;
   reportsRuntimeScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/reports-runtime.js?v=2";
+    script.src = "/static/reports-runtime.js?v=3";
     script.defer = true;
     script.dataset.reportsRuntime = "true";
     script.addEventListener("load", () => {
@@ -731,6 +731,10 @@ function setButtonLoading(button, isLoading) {
 
 function fillDynamicReportSelect() {
   window.VNPTReportsRuntime?.fillDynamicReportSelect?.();
+}
+
+function fillOneBssRunSelect() {
+  window.VNPTReportsRuntime?.fillOneBssRunSelect?.();
 }
 
 window.VNPTApp = {
