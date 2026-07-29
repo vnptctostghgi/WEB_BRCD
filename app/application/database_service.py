@@ -4,7 +4,7 @@ import json
 import re
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 DEFINE_PATTERN = re.compile(r"^\s*define\s+([A-Za-z][A-Za-z0-9_$#]*)\s*=\s*(.+?)\s*$", re.IGNORECASE)
 IN_LIST_BIND_PATTERN = re.compile(r"\bin\s*\(\s*:([A-Za-z][A-Za-z0-9_$#]*)\s*\)", re.IGNORECASE)
+ORACLE_DATE_INPUT_FORMATS = ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%Y/%m/%d", "%d.%m.%Y", "%Y%m%d")
 REPORT_NOT_PROVIDED = object()
 
 
@@ -135,6 +136,9 @@ class DatabaseService:
         compiled_sql, define_details = self._compile_define_sql(report["cau_lenh_sql"], safe_filters)
         compiled_sql, bind_filters = self._expand_in_list_bind_params(compiled_sql, safe_filters)
         executable_filters = self._filters_for_compiled_sql(compiled_sql, bind_filters)
+        executable_filters, bind_date_details = self._normalize_oracle_date_binds(compiled_sql, executable_filters)
+        if bind_date_details:
+            define_details = {**define_details, **bind_date_details}
 
         safe_report_code = (
             self._normalized_report_code(report.get("ma_bao_cao"))
@@ -256,6 +260,9 @@ class DatabaseService:
         compiled_sql, define_details = self._compile_define_sql(report["cau_lenh_sql"], safe_filters)
         compiled_sql, bind_filters = self._expand_in_list_bind_params(compiled_sql, safe_filters)
         executable_filters = self._filters_for_compiled_sql(compiled_sql, bind_filters)
+        executable_filters, bind_date_details = self._normalize_oracle_date_binds(compiled_sql, executable_filters)
+        if bind_date_details:
+            define_details = {**define_details, **bind_date_details}
         safe_report_code = (
             self._normalized_report_code(report.get("ma_bao_cao"))
             or self._normalized_report_code(report.get("ten_bao_cao"))
@@ -335,6 +342,9 @@ class DatabaseService:
         compiled_sql, define_details = self._compile_define_sql(report["cau_lenh_sql"], safe_filters)
         compiled_sql, bind_filters = self._expand_in_list_bind_params(compiled_sql, safe_filters)
         executable_filters = self._filters_for_compiled_sql(compiled_sql, bind_filters)
+        executable_filters, bind_date_details = self._normalize_oracle_date_binds(compiled_sql, executable_filters)
+        if bind_date_details:
+            define_details = {**define_details, **bind_date_details}
         safe_report_code = (
             self._normalized_report_code(report.get("ma_bao_cao"))
             or self._normalized_report_code(report.get("ten_bao_cao"))
@@ -459,6 +469,9 @@ class DatabaseService:
         compiled_sql, define_details = self._compile_define_sql(report["cau_lenh_sql"], safe_filters)
         compiled_sql, bind_filters = self._expand_in_list_bind_params(compiled_sql, safe_filters)
         executable_filters = self._filters_for_compiled_sql(compiled_sql, bind_filters)
+        executable_filters, bind_date_details = self._normalize_oracle_date_binds(compiled_sql, executable_filters)
+        if bind_date_details:
+            define_details = {**define_details, **bind_date_details}
         search_text = str(search or "").strip()
         if search_text:
             try:
@@ -716,9 +729,18 @@ class DatabaseService:
             if in_select:
                 select_lines.append(line)
         compiled = "\n".join(select_lines).strip()
+        date_defines: dict[str, str] = {}
         for name, value in definitions.items():
+            mask = cls._oracle_date_mask_for_define(compiled, name)
+            if mask:
+                normalized_value = cls._format_oracle_date_value(value, mask)
+                if normalized_value != value:
+                    value = normalized_value
+                    date_defines[name] = mask
             compiled = re.sub(rf"&{re.escape(name)}\b", cls._escape_define_value(value), compiled, flags=re.IGNORECASE)
         details = {"define_params": list(definitions)} if definitions else {}
+        if date_defines:
+            details["date_define_formats"] = date_defines
         return compiled, details
 
     @staticmethod
@@ -733,6 +755,85 @@ class DatabaseService:
     @staticmethod
     def _escape_define_value(value: str) -> str:
         return str(value).replace("'", "''")
+
+    @classmethod
+    def _normalize_oracle_date_binds(cls, sql: str, filters: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        if not filters:
+            return filters, {}
+        normalized = dict(filters)
+        date_formats: dict[str, str] = {}
+        for key, value in filters.items():
+            mask = cls._oracle_date_mask_for_bind(sql, str(key))
+            if not mask:
+                continue
+            formatted = cls._format_oracle_date_value(value, mask)
+            if formatted != value:
+                normalized[key] = formatted
+                date_formats[str(key)] = mask
+        return normalized, {"date_bind_formats": date_formats} if date_formats else {}
+
+    @staticmethod
+    def _oracle_date_mask_for_bind(sql: str, name: str) -> str:
+        pattern = re.compile(
+            rf"\bto_(?:date|timestamp)\s*\(\s*:{re.escape(name)}\b\s*,\s*'([^']+)'",
+            re.IGNORECASE,
+        )
+        match = pattern.search(sql or "")
+        return str(match.group(1) or "").strip() if match else ""
+
+    @staticmethod
+    def _oracle_date_mask_for_define(sql: str, name: str) -> str:
+        pattern = re.compile(
+            rf"\bto_(?:date|timestamp)\s*\(\s*'?\s*&{re.escape(name)}\b\s*'?\s*,\s*'([^']+)'",
+            re.IGNORECASE,
+        )
+        match = pattern.search(sql or "")
+        return str(match.group(1) or "").strip() if match else ""
+
+    @classmethod
+    def _format_oracle_date_value(cls, value: Any, oracle_mask: str) -> Any:
+        parsed = cls._parse_oracle_date_input(value)
+        if not parsed:
+            return value
+        formatter = cls._oracle_mask_to_strftime(oracle_mask)
+        if not formatter:
+            return value
+        return parsed.strftime(formatter)
+
+    @staticmethod
+    def _parse_oracle_date_input(value: Any) -> datetime | None:
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, date):
+            return datetime.combine(value, datetime.min.time())
+        text = str(value or "").strip()
+        if not text:
+            return None
+        for fmt in ORACLE_DATE_INPUT_FORMATS:
+            try:
+                return datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+        return None
+
+    @staticmethod
+    def _oracle_mask_to_strftime(oracle_mask: str) -> str:
+        mask = str(oracle_mask or "").upper()
+        replacements = [
+            ("HH24", "%H"),
+            ("YYYY", "%Y"),
+            ("RRRR", "%Y"),
+            ("RR", "%y"),
+            ("YY", "%y"),
+            ("MM", "%m"),
+            ("DD", "%d"),
+            ("MI", "%M"),
+            ("SS", "%S"),
+        ]
+        result = mask
+        for token, replacement in replacements:
+            result = result.replace(token, replacement)
+        return result if "%" in result else ""
 
     @classmethod
     def _expand_in_list_bind_params(cls, sql: str, filters: dict[str, Any]) -> tuple[str, dict[str, Any]]:

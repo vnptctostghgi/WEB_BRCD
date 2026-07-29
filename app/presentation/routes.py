@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import hmac
 import json
 import logging
+import os
 import shutil
 import tempfile
 import threading
@@ -127,7 +128,7 @@ WORKSTATION_HEARTBEATS: dict[str, dict[str, Any]] = {}
 WORKSTATION_HEARTBEATS_LOCK = threading.Lock()
 WORKSTATION_HEARTBEAT_TTL_SECONDS = 10 * 60
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260729-oracle-dsn-dbpass-v3"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260729-oracle-secretref-v4"
 WORKSTATION_SETUP_INCLUDE_PATHS = (
     ".env.example",
     "README.md",
@@ -2555,33 +2556,59 @@ def workstation_oracle_config(repository: AppRepository, settings: Any | None = 
     def setting_secret(name: str) -> str:
         return secret_text(getattr(settings, name, ""))
 
-    host = first_value("host", "db_host", "DB_HOST") or setting_value("db_host")
-    port = first_value("port", "db_port", "DB_PORT") or setting_value("db_port") or "1521"
-    service = first_value("service", "service_name", "db_service", "DB_SERVICE") or setting_value("db_service")
-    sid = first_value("sid", "db_sid", "DB_SID") or setting_value("db_sid")
+    def env_value(*names: str) -> str:
+        for name in names:
+            if not name:
+                continue
+            for env_name in {name, name.upper(), name.lower()}:
+                value = os.environ.get(env_name)
+                if value is not None and str(value).strip():
+                    return str(value).strip()
+        return ""
+
+    password_secret_ref = first_value(
+        "password_secret_ref",
+        "db_pass_secret_ref",
+        "secret_ref",
+        "password_env",
+        "db_pass_env",
+    )
+
+    host = first_value("host", "db_host", "DB_HOST", "ORACLE_HOST", "ORACLE_DB_HOST") or setting_value("db_host") or env_value("DB_HOST", "ORACLE_HOST", "ORACLE_DB_HOST")
+    port = first_value("port", "db_port", "DB_PORT", "ORACLE_PORT", "ORACLE_DB_PORT") or setting_value("db_port") or env_value("DB_PORT", "ORACLE_PORT", "ORACLE_DB_PORT") or "1521"
+    service = first_value("service", "service_name", "db_service", "DB_SERVICE", "ORACLE_SERVICE", "ORACLE_DB_SERVICE") or setting_value("db_service") or env_value("DB_SERVICE", "ORACLE_SERVICE", "ORACLE_DB_SERVICE")
+    sid = first_value("sid", "db_sid", "DB_SID", "ORACLE_SID", "ORACLE_DB_SID") or setting_value("db_sid") or env_value("DB_SID", "ORACLE_SID", "ORACLE_DB_SID")
     dsn = first_value(
         "dsn",
         "db_dsn",
         "DB_DSN",
+        "ORACLE_DSN",
+        "ORACLE_DB_DSN",
         "connect_string",
         "connection_string",
         "db_connect_string",
         "oracle_connect_string",
         "tns",
         "tns_name",
-    ) or setting_value("db_dsn")
+    ) or setting_value("db_dsn") or env_value("DB_DSN", "ORACLE_DSN", "ORACLE_DB_DSN", "ORACLE_CONNECT_STRING")
     if not dsn and host and service:
         dsn = f"{host}:{port}/{service}"
+    username = first_value("username", "user", "db_user", "DB_USER", "DB_USERNAME", "ORACLE_USER", "ORACLE_DB_USER") or setting_value("db_user") or env_value("DB_USER", "DB_USERNAME", "ORACLE_USER", "ORACLE_DB_USER")
+    password = (
+        first_value("password", "db_pass", "DB_PASS", "DB_PASSWORD", "ORACLE_PASSWORD", "ORACLE_DB_PASS", "ORACLE_DB_PASSWORD")
+        or setting_secret("db_pass")
+        or env_value(password_secret_ref, "DB_PASS", "DB_PASSWORD", "ORACLE_PASSWORD", "ORACLE_DB_PASS", "ORACLE_DB_PASSWORD")
+    )
 
     return {
-        "active": "1" if is_active or any([dsn, host, service, sid, setting_value("db_user"), setting_secret("db_pass")]) else "",
+        "active": "1" if is_active or any([dsn, host, service, sid, username, password]) else "",
         "dsn": dsn,
         "host": host,
         "port": port,
         "service": service,
         "sid": sid,
-        "username": first_value("username", "user", "db_user", "DB_USER") or setting_value("db_user"),
-        "password": first_value("password", "db_pass", "DB_PASS") or setting_secret("db_pass"),
+        "username": username,
+        "password": password,
     }
 
 

@@ -433,6 +433,15 @@ def test_api_middleware_config_status_reports_version_without_password(monkeypat
     assert "oracle-secret" not in json.dumps(payload)
 
 
+def test_api_middleware_formats_oracle_date_binds() -> None:
+    module = load_api_middleware_module()
+    sql = "SELECT * FROM dual WHERE ngay >= TO_DATE(:P_TUNGAY, 'YYYYMMDD') AND ngay < TO_DATE(:P_DENNGAY, 'YYYY-MM-DD')"
+    binds = module.normalize_binds_for_sql(sql, {"P_TUNGAY": "01/07/2026", "P_DENNGAY": "30/07/2026"})
+
+    assert binds["P_TUNGAY"] == "20260701"
+    assert binds["P_DENNGAY"] == "2026-07-30"
+
+
 def test_api_middleware_reads_json_files_with_utf8_bom(tmp_path: Path) -> None:
     module = load_api_middleware_module()
     token_file = tmp_path / "drive-oauth-token.json"
@@ -2476,6 +2485,100 @@ def test_dynamic_report_drive_export_sends_compiled_sql_to_internal_api() -> Non
     assert "SEARCH_TERM_1" in captured["tham_so"]
     assert "SELECT * FROM (" in captured["cau_lenh_sql"]
     assert result["ignored_filters"] == ["IGNORED"]
+
+
+def test_sql_worker_claim_formats_oracle_date_binds_for_report_mask(monkeypatch) -> None:
+    import httpx
+
+    def raise_530(self, **kwargs):
+        request = httpx.Request("POST", "https://api.vnptcto.com/api/du-lieu-web")
+        response = httpx.Response(530, request=request, text="cloudflare tunnel error")
+        raise httpx.HTTPStatusError("cloudflare tunnel error", request=request, response=response)
+
+    monkeypatch.setattr(routes.InternalApiClient, "run_sql_report", raise_530)
+    with routes.DYNAMIC_REPORT_RUN_JOBS_LOCK:
+        routes.DYNAMIC_REPORT_RUN_JOBS.clear()
+
+    try:
+        with TestClient(app) as client:
+            login(client)
+            assert client.post(
+                "/api/admin/sql-reports",
+                json={
+                    "ten_bao_cao": "Doanh thu CNTT theo OneBSS",
+                    "ma_bao_cao": "BC_ORACLE_DATE_BIND",
+                    "cau_lenh_sql": (
+                        "SELECT ma_tb FROM css_cto.db_thuebao "
+                        "WHERE ngay >= TO_DATE(:P_TUNGAY, 'YYYYMMDD') "
+                        "AND ngay <= TO_DATE(:P_DENNGAY, 'YYYYMMDD');"
+                    ),
+                    "cac_tham_so": ["P_TUNGAY", "P_DENNGAY"],
+                },
+                ).status_code == 200
+
+            started = client.post(
+                "/api/reports/run-jobs",
+                json={
+                    "ma_bao_cao": "BC_ORACLE_DATE_BIND",
+                    "filters": {"P_TUNGAY": "01/07/2026", "P_DENNGAY": "30/07/2026"},
+                    "page": 1,
+                    "page_size": 20,
+                },
+            )
+            assert started.status_code == 200
+            job_id = started.json()["job_id"]
+            job = {}
+            for _ in range(20):
+                job = client.get(f"/api/reports/run-jobs/{job_id}").json()
+                if job["status"] == "queued_worker":
+                    break
+                time.sleep(0.05)
+            assert job["status"] == "queued_worker"
+
+            headers = {"Authorization": "Bearer test-worker-token"}
+            claim = client.post("/api/sql-worker/tasks/claim", json={"worker_id": "ws-date"}, headers=headers)
+            assert claim.status_code == 200
+            task = claim.json()["task"]
+            assert task["query"]["tham_so"]["P_TUNGAY"] == "20260701"
+            assert task["query"]["tham_so"]["P_DENNGAY"] == "20260730"
+    finally:
+        with routes.DYNAMIC_REPORT_RUN_JOBS_LOCK:
+            routes.DYNAMIC_REPORT_RUN_JOBS.clear()
+
+
+def test_dynamic_report_define_date_uses_oracle_mask() -> None:
+    class FakeInternalApi:
+        settings = get_settings()
+
+    class FakeRepository:
+        def get_sql_report_by_code(self, code):
+            return {
+                "ten_bao_cao": "Date define",
+                "ma_bao_cao": "DATE_DEFINE",
+                "cau_lenh_sql": (
+                    "DEFINE FROM_DATE = :P_TUNGAY\n"
+                    "SELECT * FROM dual WHERE SYSDATE >= TO_DATE('&FROM_DATE', 'YYYYMMDD');"
+                ),
+                "cac_tham_so": ["P_TUNGAY"],
+            }
+
+        def get_sql_report_by_id(self, report_id):
+            return None
+
+        def list_sql_reports(self):
+            return []
+
+    service = DatabaseService(FakeInternalApi(), FakeRepository())
+    prepared = service.prepare_dynamic_report_query(
+        ma_bao_cao="DATE_DEFINE",
+        filters={"P_TUNGAY": "01/07/2026"},
+        page=1,
+        page_size=20,
+    )
+
+    assert prepared["ok"] is True
+    assert "TO_DATE('20260701', 'YYYYMMDD')" in prepared["cau_lenh_sql"]
+    assert "01/07/2026" not in prepared["cau_lenh_sql"]
 
 
 def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:

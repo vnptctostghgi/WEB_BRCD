@@ -30,7 +30,8 @@ app = FastAPI(title="API trung gian VNPT CTO")
 
 EXCEL_MAX_ROWS_PER_SHEET = 1_048_576
 GOOGLE_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
-API_MIDDLEWARE_VERSION = "2026.07.29-oracle-dsn-restart"
+API_MIDDLEWARE_VERSION = "2026.07.29-oracle-date-binds"
+ORACLE_DATE_INPUT_FORMATS = ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%Y/%m/%d", "%d.%m.%Y", "%Y%m%d")
 ORACLE_DSN_ENV_KEYS = (
     "DB_DSN",
     "ORACLE_DSN",
@@ -78,8 +79,8 @@ def configure_oracle_client() -> None:
 
 
 def oracle_connection_config() -> dict[str, str]:
-    user = env_value("DB_USER", "ORACLE_USER")
-    password = env_value("DB_PASS", "ORACLE_PASSWORD")
+    user = env_value("DB_USER", "DB_USERNAME", "ORACLE_USER", "ORACLE_DB_USER")
+    password = env_value("DB_PASS", "DB_PASSWORD", "ORACLE_PASSWORD", "ORACLE_DB_PASS", "ORACLE_DB_PASSWORD")
     missing_credentials = []
     if not user:
         missing_credentials.append("DB_USER")
@@ -163,6 +164,68 @@ def clean_sql(sql: str) -> str:
     while value.endswith(";"):
         value = value[:-1].strip()
     return value
+
+
+def parse_oracle_date_input(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time())
+    text = str(value or "").strip()
+    if not text:
+        return None
+    for fmt in ORACLE_DATE_INPUT_FORMATS:
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def oracle_mask_to_strftime(mask: str) -> str:
+    result = str(mask or "").upper()
+    replacements = [
+        ("HH24", "%H"),
+        ("YYYY", "%Y"),
+        ("RRRR", "%Y"),
+        ("RR", "%y"),
+        ("YY", "%y"),
+        ("MM", "%m"),
+        ("DD", "%d"),
+        ("MI", "%M"),
+        ("SS", "%S"),
+    ]
+    for token, replacement in replacements:
+        result = result.replace(token, replacement)
+    return result if "%" in result else ""
+
+
+def format_oracle_date_value(value: Any, mask: str) -> Any:
+    parsed = parse_oracle_date_input(value)
+    formatter = oracle_mask_to_strftime(mask)
+    if not parsed or not formatter:
+        return value
+    return parsed.strftime(formatter)
+
+
+def oracle_date_mask_for_bind(sql: str, name: str) -> str:
+    pattern = re.compile(
+        rf"\bto_(?:date|timestamp)\s*\(\s*:{re.escape(name)}\b\s*,\s*'([^']+)'",
+        re.IGNORECASE,
+    )
+    match = pattern.search(sql or "")
+    return str(match.group(1) or "").strip() if match else ""
+
+
+def normalize_binds_for_sql(sql: str, binds: dict[str, Any]) -> dict[str, Any]:
+    if not binds:
+        return binds
+    normalized = dict(binds)
+    for key, value in binds.items():
+        mask = oracle_date_mask_for_bind(sql, str(key))
+        if mask:
+            normalized[key] = format_oracle_date_value(value, mask)
+    return normalized
 
 
 def safe_file_name(value: str) -> str:
@@ -494,8 +557,8 @@ def config_status():
         "db_port": env_value("DB_PORT", "ORACLE_PORT") or "1521",
         "db_service": env_value("DB_SERVICE", "ORACLE_SERVICE", "SERVICE_NAME"),
         "db_sid_configured": config_present("DB_SID", "ORACLE_SID"),
-        "db_user_configured": config_present("DB_USER", "ORACLE_USER"),
-        "db_pass_configured": config_present("DB_PASS", "ORACLE_PASSWORD"),
+        "db_user_configured": config_present("DB_USER", "DB_USERNAME", "ORACLE_USER", "ORACLE_DB_USER"),
+        "db_pass_configured": config_present("DB_PASS", "DB_PASSWORD", "ORACLE_PASSWORD", "ORACLE_DB_PASS", "ORACLE_DB_PASSWORD"),
         "drive_folder_configured": config_present("GOOGLE_DRIVE_FOLDER_ID"),
         "drive_auth_mode": google_drive_auth_mode(),
     }
@@ -679,6 +742,7 @@ def du_lieu_web(payload: dict[str, Any], authorization: str = Header(default="")
         binds = payload.get("tham_so") if isinstance(payload.get("tham_so"), dict) else {}
         if not sql:
             raise HTTPException(status_code=400, detail="Thieu cau_lenh_sql.")
+        binds = normalize_binds_for_sql(sql, binds)
 
         if action == "run_sql_report":
             pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
