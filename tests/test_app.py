@@ -178,6 +178,7 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
             readme_text = archive.read("VNPTCTO_WORKSTATION_SETUP/README_SETUP.txt").decode("utf-8")
             setup_bat = archive.read("VNPTCTO_WORKSTATION_SETUP/SETUP_VNPTCTO_WORKSTATION.bat").decode("utf-8")
             setup_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/setup_vnptcto_workstation.ps1").decode("utf-8")
+            install_task_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/install_onebss_worker_task.ps1").decode("utf-8")
             start_worker_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/start_onebss_worker.ps1").decode("utf-8")
         assert "VNPTCTO_WORKSTATION_SETUP/SETUP_VNPTCTO_WORKSTATION.bat" in names
         assert "VNPTCTO_WORKSTATION_SETUP/workstation-install-config.ps1" in names
@@ -190,6 +191,10 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "Test-PythonLauncher" in setup_script
         assert "Test-PythonLauncher" in start_worker_script
         assert "Python.Python.3.12" in start_worker_script
+        assert "LeastPrivilege" not in setup_script
+        assert "LeastPrivilege" not in install_task_script
+        assert "-RunLevel Limited" in setup_script
+        assert "-RunLevel Limited" in install_task_script
         assert 'Invoke-External "python" "-m" "venv"' not in start_worker_script
         assert "-NoPause" in setup_bat
         assert "\npause" not in setup_bat.lower()
