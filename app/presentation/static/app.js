@@ -5896,7 +5896,7 @@ function refreshOneBssReportPicker() {
   const current = picker.value;
   const filteredReports = oneBssReports.filter((report) => {
     if (!search) return true;
-    const text = [report.ten_bao_cao, report.ma_bao_cao, report.report_url, report.storage_link, JSON.stringify(report.parameters || {}), ...(report.danh_sach_bien || [])].join(" ").toLowerCase();
+    const text = [report.ten_bao_cao, report.ma_bao_cao, report.report_url, JSON.stringify(report.parameters || {}), ...(report.danh_sach_bien || [])].join(" ").toLowerCase();
     return text.includes(search);
   });
   picker.innerHTML = `<option value="">Thêm báo cáo mới / chưa chọn báo cáo</option>${filteredReports.map((report) => `<option value="${escapeHtml(report.ma_bao_cao)}">${escapeHtml(report.ten_bao_cao)} (${escapeHtml(report.ma_bao_cao)})</option>`).join("")}`;
@@ -5922,7 +5922,6 @@ function createOneBssReportDraft() {
     },
     otp_service_code: "onebss",
     report_url: "",
-    storage_link: "",
   };
   oneBssReportDrafts = [draft];
   return draft;
@@ -6132,7 +6131,6 @@ function renderOneBssReportEditor(report, isDraft = false) {
       </div>
       <label>Danh sách biến<input class="form-control inline-admin-input inline-admin-params" data-inline-onebss-field="danh_sach_bien" value="${escapeHtml(params)}" placeholder="P_PHANVUNG_ID, P_LOAI_NGAY, P_TUNGAY, P_DENNGAY, P_LOAI_BAOCAO, P_LOAI_BIENDONG" readonly /><small class="cell-note">Tự tách từ JSON mẫu hoặc từ JSON tham số xuất trực tiếp.</small></label>
       <label>Link lấy báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="report_url" value="${escapeHtml(report.report_url || "")}" placeholder="https://onebss.vnpt.vn/#/report/bi?..." /></label>
-      <label>Link lưu báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="storage_link" value="${escapeHtml(report.storage_link || "")}" placeholder="Link thư mục Google Drive hoặc thư mục nội bộ" /></label>
     </div>`;
 }
 
@@ -6173,7 +6171,7 @@ async function saveInlineOneBssReport(rowKey, button) {
     parameters,
     otp_service_code: row.querySelector('[data-inline-onebss-field="otp_service_code"]')?.value.trim().toLowerCase() || "onebss",
     report_url: row.querySelector('[data-inline-onebss-field="report_url"]')?.value.trim() || "",
-    storage_link: row.querySelector('[data-inline-onebss-field="storage_link"]')?.value.trim() || "",
+    storage_link: "",
   };
   if (!payload.ten_bao_cao || !payload.report_url) {
     showToast("Vui lòng nhập tên báo cáo và link lấy báo cáo OneBSS.", "error");

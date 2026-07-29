@@ -759,7 +759,7 @@ def finish_onebss_report_download_api(
     emit_onebss_progress(progress_callback, "Da di den bao cao OneBSS.")
     schedule_like = {
         "report_url": report_url,
-        "storage_link": report.get("storage_link") or "",
+        "storage_link": "",
         "file_name_template": report.get("ten_bao_cao") or report.get("ma_bao_cao") or "",
     }
     parameter_runs, merge_config, each_keys = build_onebss_parameter_runs(parameters)
@@ -784,7 +784,7 @@ def finish_onebss_report_download_api(
             target_file = downloaded.file_path
             emit_onebss_progress(progress_callback, "Da tai file bao cao OneBSS.")
             emit_onebss_progress(progress_callback, "Dang luu/upload file ket qua.")
-            storage_result = save_downloaded_file(settings, target_file, str(report.get("storage_link") or ""))
+            storage_result = save_downloaded_file(settings, target_file, "")
             ok = bool(storage_result.get("ok", True))
             export_info = downloaded.export_info
             return {
@@ -793,7 +793,7 @@ def finish_onebss_report_download_api(
                 "message": storage_result.get("message") or "Da tai bao cao OneBSS.",
                 "file_name": target_file.name,
                 "file_path": str(target_file),
-                "storage_link": storage_result.get("storage_link") or str(report.get("storage_link") or ""),
+                "storage_link": storage_result.get("storage_link") or "",
                 "storage_status": storage_result.get("storage_status") or "",
                 "report_id": export_info.get("report_id") or "",
                 "report_title": export_info.get("title") or report.get("ten_bao_cao") or "",
@@ -984,7 +984,7 @@ def download_onebss_grid_file_api(
     if target_file is None:
         schedule_like = {
             "report_url": report_url,
-            "storage_link": report.get("storage_link") or "",
+            "storage_link": "",
             "file_name_template": report.get("ten_bao_cao") or report.get("ma_bao_cao") or "",
         }
         target_file = build_target_file_path(
@@ -1053,7 +1053,7 @@ def download_onebss_export_file_api(
     if target_file is None:
         schedule_like = {
             "report_url": report_url,
-            "storage_link": report.get("storage_link") or "",
+            "storage_link": "",
             "file_name_template": report.get("ten_bao_cao") or report.get("ma_bao_cao") or "",
         }
         target_file = build_target_file_path(
@@ -1120,7 +1120,7 @@ def finish_onebss_report_download(
             target_file = downloaded.file_path
             emit_onebss_progress(progress_callback, "Da tai file bao cao OneBSS.")
             emit_onebss_progress(progress_callback, "Dang luu/upload file ket qua.")
-            storage_result = save_downloaded_file(settings, target_file, str(report.get("storage_link") or ""))
+            storage_result = save_downloaded_file(settings, target_file, "")
             context.storage_state(path=str(ONEBSS_STATE_PATH))
             ok = bool(storage_result.get("ok", True))
             export_info = downloaded.export_info
@@ -1130,7 +1130,7 @@ def finish_onebss_report_download(
                 "message": storage_result.get("message") or "Da tai bao cao OneBSS.",
                 "file_name": target_file.name,
                 "file_path": str(target_file),
-                "storage_link": storage_result.get("storage_link") or str(report.get("storage_link") or ""),
+                "storage_link": storage_result.get("storage_link") or "",
                 "storage_status": storage_result.get("storage_status") or "",
                 "report_id": export_info.get("report_id") or "",
                 "report_title": export_info.get("title") or report.get("ten_bao_cao") or "",
@@ -1205,7 +1205,7 @@ def download_onebss_report_file(
     if target_file is None:
         schedule_like = {
             "report_url": report_url,
-            "storage_link": report.get("storage_link") or "",
+            "storage_link": "",
             "file_name_template": report.get("ten_bao_cao") or report.get("ma_bao_cao") or "",
         }
         target_file = build_target_file_path(
@@ -1711,7 +1711,7 @@ def finalize_onebss_multiple_downloads(
         result_message = f"Da tai {len(downloaded_files)} file OneBSS rieng va dong goi thanh 1 file zip."
 
     emit_onebss_progress(progress_callback, "Dang luu/upload file ket qua.")
-    storage_result = save_downloaded_file(settings, target_file, str(report.get("storage_link") or ""))
+    storage_result = save_downloaded_file(settings, target_file, "")
     ok = bool(storage_result.get("ok", True))
     status = "success" if ok else str(storage_result.get("status") or "storage_failed")
     storage_message = storage_result.get("message") or "Da tai bao cao OneBSS."
@@ -1722,7 +1722,7 @@ def finalize_onebss_multiple_downloads(
         "message": message,
         "file_name": target_file.name,
         "file_path": str(target_file),
-        "storage_link": storage_result.get("storage_link") or str(report.get("storage_link") or ""),
+        "storage_link": storage_result.get("storage_link") or "",
         "storage_status": storage_result.get("storage_status") or "",
         "report_id": first_export.get("report_id") or "",
         "report_title": first_export.get("title") or report.get("ten_bao_cao") or "",

@@ -3348,7 +3348,7 @@ def save_admin_onebss_report(request: Request, payload: OneBssReportPayload) -> 
             variables,
             payload.parameters if isinstance(payload.parameters, dict) else {},
             report_url,
-            payload.storage_link.strip(),
+            "",
             payload.otp_service_code.strip().lower() or "onebss",
         )
     except sqlite3.IntegrityError as error:
@@ -5588,7 +5588,7 @@ def claim_onebss_worker_task(request: Request, payload: OneBssWorkerClaimPayload
             },
         )
         return {"ok": False, "task": None, "message": "Khong tim thay cau hinh bao cao OneBSS."}
-    folder_id = google_drive_folder_id(get_settings(), str(report.get("storage_link") or ""), repository)
+    folder_id = google_drive_folder_id(get_settings(), "", repository)
     return {
         "ok": True,
         "task": {
@@ -5599,7 +5599,7 @@ def claim_onebss_worker_task(request: Request, payload: OneBssWorkerClaimPayload
             "parameters": run.get("parameters") if isinstance(run.get("parameters"), dict) else {},
             "report": report,
             "report_url": report.get("report_url") or "",
-            "storage_link": report.get("storage_link") or "",
+            "storage_link": "",
             "drive_folder_id": folder_id,
             "otp_service_code": report.get("otp_service_code") or "onebss",
             "created_by": run.get("created_by") or "",
@@ -5690,9 +5690,7 @@ async def upload_onebss_worker_task_file(request: Request, run_id: str, file: Up
     storage_message = "Da nhan file ket qua tu may tram."
     settings = get_settings()
     report = repository.get_onebss_report_by_code(str(run.get("ma_bao_cao") or "")) or {}
-    storage_target = str(report.get("storage_link") or "").strip()
-    if not storage_target:
-        storage_target = google_drive_folder_id(settings, "", repository)
+    storage_target = google_drive_folder_id(settings, "", repository)
     if storage_target:
         storage_result = save_downloaded_file(settings, target_file, storage_target, repository)
         if storage_result.get("ok") and str(storage_result.get("storage_status") or "").startswith("uploaded_google_drive:"):
