@@ -195,6 +195,12 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "LeastPrivilege" not in install_task_script
         assert "-RunLevel Limited" in setup_script
         assert "-RunLevel Limited" in install_task_script
+        assert "Get-InteractiveTaskUserCandidates" in setup_script
+        assert "Get-InteractiveTaskUserCandidates" in install_task_script
+        assert "[Security.Principal.WindowsIdentity]::GetCurrent().Name" in install_task_script
+        assert "whoami.exe" in install_task_script
+        assert "-UserId $env:USERNAME" not in setup_script
+        assert "-UserId $env:USERNAME" not in install_task_script
         assert 'Invoke-External "python" "-m" "venv"' not in start_worker_script
         assert "-NoPause" in setup_bat
         assert "\npause" not in setup_bat.lower()

@@ -406,6 +406,67 @@ function Install-ApiMiddleware {
   }
 }
 
+function Add-UserCandidate {
+  param(
+    [System.Collections.Generic.List[string]]$Candidates,
+    [string]$Value
+  )
+  $text = ([string]$Value).Trim()
+  if (-not [string]::IsNullOrWhiteSpace($text) -and -not $Candidates.Contains($text)) {
+    $Candidates.Add($text) | Out-Null
+  }
+}
+
+function Get-InteractiveTaskUserCandidates {
+  $candidates = New-Object System.Collections.Generic.List[string]
+  try {
+    Add-UserCandidate $candidates ([Security.Principal.WindowsIdentity]::GetCurrent().Name)
+  } catch {
+  }
+  try {
+    Add-UserCandidate $candidates ((& whoami.exe 2>$null | Select-Object -First 1))
+  } catch {
+  }
+  if (-not [string]::IsNullOrWhiteSpace($env:USERDOMAIN) -and -not [string]::IsNullOrWhiteSpace($env:USERNAME)) {
+    Add-UserCandidate $candidates "$env:USERDOMAIN\$env:USERNAME"
+  }
+  if (-not [string]::IsNullOrWhiteSpace($env:COMPUTERNAME) -and -not [string]::IsNullOrWhiteSpace($env:USERNAME)) {
+    Add-UserCandidate $candidates "$env:COMPUTERNAME\$env:USERNAME"
+  }
+  Add-UserCandidate $candidates $env:USERNAME
+  return $candidates
+}
+
+function Register-VnptctoInteractiveTask {
+  param(
+    [string]$Name,
+    [object]$Action,
+    [object[]]$Trigger,
+    [object]$Settings,
+    [string]$Description
+  )
+  $lastError = ""
+  foreach ($userId in Get-InteractiveTaskUserCandidates) {
+    try {
+      $principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Limited
+      Register-ScheduledTask -TaskName $Name -Action $Action -Trigger $Trigger -Settings $Settings -Principal $principal -Description $Description -Force | Out-Null
+      Write-Host "Da tao Scheduled Task voi user: $userId" -ForegroundColor Green
+      return
+    } catch {
+      $lastError = $_.Exception.Message
+      Write-Warning "Chua tao duoc Scheduled Task voi user '$userId': $lastError"
+    }
+  }
+  try {
+    Register-ScheduledTask -TaskName $Name -Action $Action -Trigger $Trigger -Settings $Settings -Description $Description -Force | Out-Null
+    Write-Warning "Da tao Scheduled Task bang principal mac dinh cua Windows."
+    return
+  } catch {
+    $lastError = $_.Exception.Message
+  }
+  throw "Khong tao duoc Scheduled Task $Name. Loi cuoi: $lastError"
+}
+
 function Install-HealthCheckTask {
   param([string]$Root)
   Write-Step "Cai health-check may tram"
@@ -418,8 +479,7 @@ function Install-HealthCheckTask {
   $startupTrigger = New-ScheduledTaskTrigger -AtLogOn
   $intervalTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration (New-TimeSpan -Days 3650)
   $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -MultipleInstances IgnoreNew -StartWhenAvailable
-  $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-  Register-ScheduledTask -TaskName $taskName -Action $action -Trigger @($startupTrigger, $intervalTrigger) -Settings $settings -Principal $principal -Description "Kiem tra web, worker, API trung gian VNPTCTO." -Force | Out-Null
+  Register-VnptctoInteractiveTask -Name $taskName -Action $action -Trigger @($startupTrigger, $intervalTrigger) -Settings $settings -Description "Kiem tra web, worker, API trung gian VNPTCTO."
 }
 
 trap {
