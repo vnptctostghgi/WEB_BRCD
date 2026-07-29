@@ -4784,13 +4784,32 @@ def _next_dynamic_report_sql_worker_job() -> tuple[str, dict[str, Any]] | None:
 
 
 def _next_dynamic_report_export_worker_job() -> tuple[str, dict[str, Any]] | None:
-    jobs = _list_dynamic_report_export_job_snapshots(200)
-    candidates = [
-        (str(job.get("job_id") or ""), dict(job))
-        for job in jobs
-        if str(job.get("job_id") or "").strip()
-        and str(job.get("status") or "").lower() == "queued_worker"
-    ]
+    jobs_by_id: dict[str, dict[str, Any]] = {}
+    with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+        for job_id, job in DYNAMIC_REPORT_EXPORT_JOBS.items():
+            if str(job.get("status") or "").lower() == "queued_worker":
+                jobs_by_id[job_id] = dict(job)
+    if DYNAMIC_REPORT_EXPORT_JOB_DIR.exists():
+        for job_path in DYNAMIC_REPORT_EXPORT_JOB_DIR.glob("*.json"):
+            try:
+                loaded = json.loads(job_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(loaded, dict) or str(loaded.get("status") or "").lower() != "queued_worker":
+                continue
+            job_id = str(loaded.get("job_id") or job_path.stem).strip()
+            if not job_id:
+                continue
+            current = jobs_by_id.get(job_id)
+            if not current or float(loaded.get("updated_at") or 0) >= float(current.get("updated_at") or 0):
+                jobs_by_id[job_id] = loaded
+    candidates = [(job_id, dict(job)) for job_id, job in jobs_by_id.items()]
+    if not candidates:
+        recovered = _recover_dynamic_report_export_job_from_history(skip_job_ids=set(jobs_by_id))
+        if recovered and str(recovered.get("status") or "").lower() == "queued_worker":
+            recovered_id = str(recovered.get("job_id") or "").strip()
+            if recovered_id:
+                candidates.append((recovered_id, dict(recovered)))
     if not candidates:
         return None
     candidates.sort(key=lambda item: float(item[1].get("created_at") or 0))
@@ -5141,13 +5160,8 @@ def start_dynamic_report_export_job(request: Request, payload: RunReportPayload)
     now = time.time()
     report_info = _dynamic_report_history_report(payload.ma_bao_cao)
     drive_folder_id = google_drive_folder_id(get_settings(), "", build_app_repository())
-    use_workstation = bool(drive_folder_id)
-    status_value = "queued_worker" if use_workstation else "queued"
-    message = (
-        "Da gui lenh lay du lieu cho may tram. May tram se ket noi Oracle noi bo, xuat Excel va upload Google Drive."
-        if use_workstation
-        else "Da dua yeu cau xuat Excel vao hang doi."
-    )
+    status_value = "queued_worker"
+    message = "Da gui lenh lay du lieu cho may tram. May tram se ket noi Oracle noi bo, xuat Excel va upload Google Drive."
     initial_step = _dynamic_report_progress_step(message, status_value, now)
     with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
         DYNAMIC_REPORT_EXPORT_JOBS[job_id] = {
@@ -5182,24 +5196,10 @@ def start_dynamic_report_export_job(request: Request, payload: RunReportPayload)
             "payload": payload.model_dump(),
             "drive_folder_id": drive_folder_id,
             "progress_steps": [initial_step],
+            "worker_required": True,
         },
     )
-    if use_workstation:
-        return _dynamic_report_export_job_response(job_id, job_snapshot)
-    thread = threading.Thread(target=_run_dynamic_report_export_job, args=(job_id, payload, actor["username"]), daemon=True)
-    thread.start()
-    return {
-        "ok": True,
-        "job_id": job_id,
-        "history_id": job_id,
-        "event_type": "export",
-        "status": "queued",
-        "message": "Dang xuat file Excel o che do nen.",
-        "report_code": report_info["ma_bao_cao"],
-        "report_name": report_info["ten_bao_cao"],
-        "queue_position": 0,
-        "can_cancel": True,
-    }
+    return _dynamic_report_export_job_response(job_id, job_snapshot)
 
 
 @router.get("/api/reports/export-jobs")

@@ -2169,7 +2169,7 @@ def test_dynamic_report_search_and_excel_export_use_full_result_set(monkeypatch)
         assert loaded_sheet["A2"].value == "tb003"
 
 
-def test_dynamic_report_export_job_downloads_full_result_set(monkeypatch) -> None:
+def test_dynamic_report_direct_excel_export_downloads_full_result_set(monkeypatch) -> None:
     rows = [
         {"MA_TB": f"tb{index:04d}", "TEN_TB": f"Thue bao {index:04d}"}
         for index in range(5205)
@@ -2192,7 +2192,6 @@ def test_dynamic_report_export_job_downloads_full_result_set(monkeypatch) -> Non
         }
 
     monkeypatch.setattr(routes.InternalApiClient, "run_sql_report", fake_run_sql_report)
-    monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings, storage_link="", repository=None: "")
 
     with TestClient(app) as client:
         login(client)
@@ -2204,31 +2203,16 @@ def test_dynamic_report_export_job_downloads_full_result_set(monkeypatch) -> Non
         }
         assert client.post("/api/admin/sql-reports", json=payload).status_code == 200
 
-        started = client.post(
-            "/api/reports/export-jobs",
+        export = client.post(
+            "/api/reports/export",
             json={"ma_bao_cao": "BC_EXPORT_JOB", "filters": {}, "page": 1, "page_size": 20},
         )
-        assert started.status_code == 200
-        job_id = started.json()["job_id"]
-
-        status_body = {}
-        for _ in range(80):
-            status_response = client.get(f"/api/reports/export-jobs/{job_id}")
-            assert status_response.status_code == 200
-            status_body = status_response.json()
-            if status_body["status"] == "complete":
-                break
-            time.sleep(0.05)
-
-        assert status_body["status"] == "complete"
-        assert status_body["rows"] == len(rows)
+        assert export.status_code == 200
         assert [call["page"] for call in calls] == [1]
         assert all(call["page_size"] == 20000 for call in calls)
         assert all(call.get("timeout", 0) >= 20 for call in calls)
 
-        download = client.get(status_body["download_url"])
-        assert download.status_code == 200
-        workbook = openpyxl.load_workbook(BytesIO(download.content), read_only=True)
+        workbook = openpyxl.load_workbook(BytesIO(export.content), read_only=True)
         sheet = workbook.active
         exported_rows = list(sheet.iter_rows(values_only=True))
         assert len(exported_rows) == len(rows) + 1
@@ -2236,55 +2220,71 @@ def test_dynamic_report_export_job_downloads_full_result_set(monkeypatch) -> Non
         assert exported_rows[-1][0] == "tb5204"
 
 
-def test_dynamic_report_export_queue_can_cancel_waiting_job(monkeypatch) -> None:
-    started_first = threading.Event()
-    release_first = threading.Event()
-    calls = []
-
-    def fake_export_dynamic_report(self, **kwargs):
-        calls.append(kwargs)
-        if len(calls) == 1:
-            started_first.set()
-            release_first.wait(2)
-        return {
-            "ok": True,
-            "report": {"ma_bao_cao": kwargs["ma_bao_cao"], "ten_bao_cao": kwargs["ma_bao_cao"]},
-            "columns": ["MA_TB"],
-            "rows": [],
-            "details": {"export_rows": 1, "fetched_total": 1},
-        }
-
+def test_dynamic_report_export_worker_queue_can_cancel_waiting_job(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(routes, "DYNAMIC_REPORT_EXPORT_DIR", tmp_path / "exports")
+    monkeypatch.setattr(routes, "DYNAMIC_REPORT_EXPORT_JOB_DIR", tmp_path / "exports" / "jobs")
     monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings, storage_link="", repository=None: "")
-    monkeypatch.setattr(DatabaseService, "export_dynamic_report", fake_export_dynamic_report)
 
     with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
         routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
+    with routes.DYNAMIC_REPORT_RUN_JOBS_LOCK:
+        routes.DYNAMIC_REPORT_RUN_JOBS.clear()
 
-    try:
-        with TestClient(app) as client:
-            login(client)
-            first = client.post("/api/reports/export-jobs", json={"ma_bao_cao": "QUEUE_A", "filters": {}, "page": 1, "page_size": 20})
-            assert first.status_code == 200
-            assert started_first.wait(1)
+    with TestClient(app) as client:
+        login(client)
+        assert client.post(
+            "/api/admin/sql-reports",
+            json={
+                "ten_bao_cao": "Queue worker",
+                "ma_bao_cao": "QUEUE_WORKER",
+                "cau_lenh_sql": "SELECT ma_tb FROM css_cto.db_thuebao;",
+                "cac_tham_so": [],
+            },
+        ).status_code == 200
 
-            second = client.post("/api/reports/export-jobs", json={"ma_bao_cao": "QUEUE_B", "filters": {}, "page": 1, "page_size": 20})
-            assert second.status_code == 200
-            second_job_id = second.json()["job_id"]
+        started = client.post("/api/reports/export-jobs", json={"ma_bao_cao": "QUEUE_WORKER", "filters": {}, "page": 1, "page_size": 20})
+        assert started.status_code == 200
+        body = started.json()
+        job_id = body["job_id"]
+        assert body["status"] == "queued_worker"
+        assert body["worker_state"]["status"] in {"ready", "worker_without_sql_role", "no_online_worker"}
 
-            queue = client.get("/api/reports/export-jobs?limit=10")
-            assert queue.status_code == 200
-            queued_job = next(job for job in queue.json()["jobs"] if job["job_id"] == second_job_id)
-            assert queued_job["status"] == "queued"
-            assert queued_job["queue_position"] >= 1
-            assert queued_job["can_cancel"] is True
+        queue = client.get("/api/reports/export-jobs?limit=10")
+        assert queue.status_code == 200
+        queued_job = next(job for job in queue.json()["jobs"] if job["job_id"] == job_id)
+        assert queued_job["status"] == "queued_worker"
+        assert queued_job["queue_position"] >= 1
+        assert queued_job["can_cancel"] is True
 
-            cancelled = client.delete(f"/api/reports/export-jobs/{second_job_id}")
-            assert cancelled.status_code == 200
-            cancelled_body = cancelled.json()
-            assert cancelled_body["status"] == "cancelled"
-            assert cancelled_body["can_cancel"] is False
-    finally:
-        release_first.set()
+        headers = {"Authorization": "Bearer test-worker-token"}
+        claim = client.post("/api/sql-worker/tasks/claim", json={"worker_id": "ws-sql"}, headers=headers)
+        assert claim.status_code == 200
+        task = claim.json()["task"]
+        assert task["run_id"] == job_id
+        assert task["task_type"] == "dynamic_report_export"
+        assert task["query"]["drive_folder_id"] == ""
+        finished = client.post(
+            f"/api/sql-worker/tasks/{job_id}/result",
+            json={
+                "ok": True,
+                "status": "success",
+                "message": "May tram da xuat Excel va upload Google Drive.",
+                "drive_url": "https://drive.google.com/file/d/queue-worker/view",
+                "file_name": "queue_worker.xlsx",
+                "total": 1,
+            },
+            headers=headers,
+        )
+        assert finished.status_code == 200
+
+        started_again = client.post("/api/reports/export-jobs", json={"ma_bao_cao": "QUEUE_WORKER", "filters": {}, "page": 1, "page_size": 20})
+        assert started_again.status_code == 200
+        cancel_job_id = started_again.json()["job_id"]
+        cancelled = client.delete(f"/api/reports/export-jobs/{cancel_job_id}")
+        assert cancelled.status_code == 200
+        cancelled_body = cancelled.json()
+        assert cancelled_body["status"] == "cancelled"
+        assert cancelled_body["can_cancel"] is False
 
 
 def test_dynamic_report_export_job_can_return_drive_link(monkeypatch, tmp_path) -> None:
@@ -2293,6 +2293,8 @@ def test_dynamic_report_export_job_can_return_drive_link(monkeypatch, tmp_path) 
     monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings, storage_link="", repository=None: "drive-folder-001")
     with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
         routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
+    with routes.DYNAMIC_REPORT_RUN_JOBS_LOCK:
+        routes.DYNAMIC_REPORT_RUN_JOBS.clear()
 
     with TestClient(app) as client:
         login(client)
@@ -2381,6 +2383,8 @@ def test_dynamic_report_export_job_status_recovers_from_persisted_metadata(monke
     monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings, storage_link="", repository=None: "drive-folder-001")
     with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
         routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
+    with routes.DYNAMIC_REPORT_RUN_JOBS_LOCK:
+        routes.DYNAMIC_REPORT_RUN_JOBS.clear()
 
     with TestClient(app) as client:
         login(client)
@@ -2440,6 +2444,8 @@ def test_dynamic_report_export_job_recovers_from_audit_history(monkeypatch, tmp_
     monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings, storage_link="", repository=None: "drive-folder-001")
     with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
         routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
+    with routes.DYNAMIC_REPORT_RUN_JOBS_LOCK:
+        routes.DYNAMIC_REPORT_RUN_JOBS.clear()
 
     with TestClient(app) as client:
         login(client)
