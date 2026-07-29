@@ -2,7 +2,7 @@ param(
   [string]$BaseUrl = "",
   [string]$WorkerId = "",
   [string]$InternalApiUrl = "",
-  [string]$PublicApiRoot = "https://api.vnptcto.com",
+  [string]$PublicApiRoot = "",
   [switch]$NoPause
 )
 
@@ -90,7 +90,12 @@ foreach ($taskName in @("VNPTCTO OneBSS Worker", "VNPTCTO API Trung Gian", "VNPT
 $results.Add((Test-Http "Local API root" "http://127.0.0.1:8000/"))
 $results.Add((Test-Http "Local Oracle" "http://127.0.0.1:8000/test-oracle" 20))
 $results.Add((Test-Http "Local Drive" "http://127.0.0.1:8000/test-drive" 20))
-$results.Add((Test-Http "Public API root" "$($PublicApiRoot.TrimEnd('/'))/"))
+$cloudflared = Get-Service cloudflared -ErrorAction SilentlyContinue
+if ($cloudflared -and -not [string]::IsNullOrWhiteSpace($PublicApiRoot)) {
+  $results.Add((Test-Http "Public API root" "$($PublicApiRoot.TrimEnd('/'))/"))
+} else {
+  $results.Add([pscustomobject]@{ Name = "Public API root"; Ok = $true; Detail = "Bo qua vi chua cai cloudflared; khong bat buoc cho worker outbound." })
+}
 
 $failed = $results | Where-Object { -not $_.Ok }
 $results | Format-Table -AutoSize

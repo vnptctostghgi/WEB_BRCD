@@ -1,7 +1,7 @@
 # Run this file in an Administrator PowerShell window on the workstation.
 # It creates:
 # - VNPTCTO API Trung Gian: starts the local FastAPI middleware at boot.
-# - VNPTCTO API Watchdog: checks API/cloudflared every 5 minutes and restarts them if needed.
+# - VNPTCTO API Watchdog: checks local API every 5 minutes and restarts cloudflared only when the service exists.
 
 $ErrorActionPreference = "Stop"
 
@@ -107,6 +107,8 @@ if (`$cloudflared) {
         Start-Service cloudflared
         Write-WatchLog "Started cloudflared service."
     }
+} else {
+    Write-WatchLog "cloudflared service not installed; public tunnel check is skipped."
 }
 
 `$localOk = `$false
@@ -131,14 +133,16 @@ if (-not `$localOk) {
     Start-Sleep -Seconds 10
 }
 
-try {
-    Invoke-RestMethod `$PublicHealthUrl -TimeoutSec 12 | Out-Null
-} catch {
-    `$cloudflared = Get-Service cloudflared -ErrorAction SilentlyContinue
-    if (`$cloudflared) {
+`$cloudflared = Get-Service cloudflared -ErrorAction SilentlyContinue
+if (`$cloudflared) {
+    try {
+        Invoke-RestMethod `$PublicHealthUrl -TimeoutSec 12 | Out-Null
+    } catch {
         Restart-Service cloudflared -Force
         Write-WatchLog "Restarted cloudflared because public health check failed."
     }
+} else {
+    Write-WatchLog "Skipped public tunnel health check because cloudflared is not installed."
 }
 "@
 Set-Content -Path $WatchdogPs1 -Value $watchdogContent -Encoding ASCII
@@ -194,7 +198,7 @@ if ($cfService) {
         Start-Service cloudflared
     }
 } else {
-    Write-Warning "Khong tim thay service cloudflared. Hay cai Cloudflare Tunnel service rieng."
+    Write-Host "Khong co service cloudflared; bo qua Cloudflare Tunnel. Worker OneBSS van co the ket noi web bang duong outbound." -ForegroundColor Yellow
 }
 
 Start-ScheduledTask -TaskName $TaskName
@@ -219,8 +223,12 @@ try {
 } catch {
     Write-Warning "Local API chua OK: $($_.Exception.Message)"
 }
-try {
-    Invoke-RestMethod "https://api.vnptcto.com/test-oracle" -TimeoutSec 20
-} catch {
-    Write-Warning "Public tunnel chua OK: $($_.Exception.Message)"
+if ($cfService) {
+    try {
+        Invoke-RestMethod "https://api.vnptcto.com/test-oracle" -TimeoutSec 20
+    } catch {
+        Write-Warning "Public tunnel chua OK: $($_.Exception.Message)"
+    }
+} else {
+    Write-Host "Bo qua kiem tra public tunnel vi may chua cai cloudflared."
 }

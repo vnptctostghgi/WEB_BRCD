@@ -177,9 +177,15 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
             config_text = archive.read("VNPTCTO_WORKSTATION_SETUP/workstation-install-config.ps1").decode("utf-8")
             readme_text = archive.read("VNPTCTO_WORKSTATION_SETUP/README_SETUP.txt").decode("utf-8")
             setup_bat = archive.read("VNPTCTO_WORKSTATION_SETUP/SETUP_VNPTCTO_WORKSTATION.bat").decode("utf-8")
+            background_bat = archive.read("VNPTCTO_WORKSTATION_SETUP/START_ONEBSS_WORKER_BACKGROUND.bat").decode("utf-8")
+            install_autostart_bat = archive.read("VNPTCTO_WORKSTATION_SETUP/INSTALL_ONEBSS_WORKER_AUTOSTART.bat").decode("utf-8")
+            uninstall_autostart_bat = archive.read("VNPTCTO_WORKSTATION_SETUP/UNINSTALL_ONEBSS_WORKER_AUTOSTART.bat").decode("utf-8")
             setup_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/setup_vnptcto_workstation.ps1").decode("utf-8")
             install_task_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/install_onebss_worker_task.ps1").decode("utf-8")
             start_worker_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/start_onebss_worker.ps1").decode("utf-8")
+            uninstall_task_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/uninstall_onebss_worker_task.ps1").decode("utf-8")
+            health_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/test_vnptcto_workstation.ps1").decode("utf-8")
+            api_task_script = archive.read("VNPTCTO_WORKSTATION_SETUP/docs/install_api_trung_gian_task.ps1").decode("utf-8")
         assert "VNPTCTO_WORKSTATION_SETUP/SETUP_VNPTCTO_WORKSTATION.bat" in names
         assert "VNPTCTO_WORKSTATION_SETUP/workstation-install-config.ps1" in names
         assert "VNPTCTO_WORKSTATION_SETUP/scripts/setup_vnptcto_workstation.ps1" in names
@@ -202,7 +208,16 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "-UserId $env:USERNAME" not in setup_script
         assert "-UserId $env:USERNAME" not in install_task_script
         assert 'Invoke-External "python" "-m" "venv"' not in start_worker_script
+        assert "Hay cai Cloudflare Tunnel service rieng" not in api_task_script
+        assert "bo qua Cloudflare Tunnel" in api_task_script
+        assert "Bo qua vi chua cai cloudflared" in health_script
+        assert "workstation-setup-error.log" in setup_script
         assert "-NoPause" in setup_bat
+        assert "-NoPause" in background_bat
+        assert "-NoPause" in install_autostart_bat
+        assert "-NoPause" in uninstall_autostart_bat
+        assert "[switch]$NoPause" in uninstall_task_script
+        assert "timeout /t" not in setup_bat.lower()
         assert "\npause" not in setup_bat.lower()
 
 

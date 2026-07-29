@@ -482,10 +482,26 @@ function Install-HealthCheckTask {
   Register-VnptctoInteractiveTask -Name $taskName -Action $action -Trigger @($startupTrigger, $intervalTrigger) -Settings $settings -Description "Kiem tra web, worker, API trung gian VNPTCTO."
 }
 
+function Write-SetupErrorLog {
+  param([string]$Message)
+  try {
+    $root = [string]$InstallRoot
+    if ([string]::IsNullOrWhiteSpace($root)) {
+      $root = "D:\Tool_Tram_VNPTCTO.COM"
+    }
+    $logDir = Join-Path $root "logs"
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    $logFile = Join-Path $logDir "workstation-setup-error.log"
+    "$(Get-Date -Format "yyyy-MM-dd HH:mm:ss") $Message" | Add-Content -Path $logFile -Encoding UTF8
+  } catch {
+  }
+}
+
 trap {
   Write-Host ""
   Write-Host "Setup may tram VNPTCTO bi loi:" -ForegroundColor Red
   Write-Host $_.Exception.Message -ForegroundColor Red
+  Write-SetupErrorLog $_.Exception.Message
   Pause-BeforeExit
   exit 1
 }
