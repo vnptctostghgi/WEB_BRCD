@@ -32,7 +32,9 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.07.28-workstation-ftp"
+WORKER_VERSION = "2026.07.29-workstation-hidden-retry"
+LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
+PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
 
 
 def response_is_cancelled(data: dict[str, Any]) -> bool:
@@ -118,12 +120,34 @@ def wait_for_otp(client: httpx.Client, run_id: str, poll_seconds: float, progres
         time.sleep(poll_seconds)
 
 
-def internal_drive_upload_api_url() -> str:
-    return (
-        os.getenv("ONEBSS_DRIVE_UPLOAD_API_URL", "").strip()
-        or os.getenv("INTERNAL_API_URL", "").strip()
-        or "https://api.vnptcto.com/api/du-lieu-web"
-    )
+def _unique_urls(urls: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for url in urls:
+        value = str(url or "").strip()
+        if not value:
+            continue
+        key = value.rstrip("/").lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(value)
+    return unique
+
+
+def _is_public_tunnel_api_url(url: str) -> bool:
+    host = (urlparse(str(url or "")).hostname or "").lower()
+    return host == "api.vnptcto.com"
+
+
+def internal_drive_upload_api_urls() -> list[str]:
+    configured = os.getenv("ONEBSS_DRIVE_UPLOAD_API_URL", "").strip()
+    internal = os.getenv("INTERNAL_API_URL", "").strip()
+    urls: list[str] = []
+    if not configured or _is_public_tunnel_api_url(configured):
+        urls.append(LOCAL_DRIVE_UPLOAD_API_URL)
+    urls.extend([configured, internal, PUBLIC_DRIVE_UPLOAD_API_URL])
+    return _unique_urls(urls)
 
 
 def upload_result_file_to_internal_drive(file_path: str, drive_folder_id: str) -> dict[str, Any]:
@@ -133,9 +157,9 @@ def upload_result_file_to_internal_drive(file_path: str, drive_folder_id: str) -
     source = Path(str(file_path or ""))
     if not source.exists() or not source.is_file() or source.stat().st_size <= 0:
         return {}
-    api_url = internal_drive_upload_api_url()
     token = os.getenv("INTERNAL_API_TOKEN", "").strip()
-    if not api_url or not token:
+    api_urls = internal_drive_upload_api_urls()
+    if not api_urls or not token:
         return {}
     mime_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
     payload = {
@@ -148,9 +172,23 @@ def upload_result_file_to_internal_drive(file_path: str, drive_folder_id: str) -
     }
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     timeout_seconds = float(os.getenv("ONEBSS_DRIVE_UPLOAD_TIMEOUT_SECONDS", "300") or "300")
-    with httpx.Client(timeout=httpx.Timeout(timeout_seconds, connect=20.0)) as internal_client:
-        response = internal_client.post(api_url, json=payload, headers=headers)
-    response.raise_for_status()
+    last_error: Exception | None = None
+    for api_url in api_urls:
+        try:
+            with httpx.Client(timeout=httpx.Timeout(timeout_seconds, connect=10.0)) as internal_client:
+                response = internal_client.post(api_url, json=payload, headers=headers)
+            response.raise_for_status()
+            break
+        except (httpx.HTTPStatusError, httpx.RequestError) as error:
+            last_error = error
+            if api_url != api_urls[-1]:
+                print(f"Khong upload Drive qua {api_url}: {describe_request_error(error)}. Thu endpoint tiep theo.", file=sys.stderr)
+                continue
+            raise
+    else:
+        if last_error:
+            raise last_error
+        return {}
     data = response.json()
     if not isinstance(data, dict) or not data.get("ok"):
         return {}
@@ -171,17 +209,31 @@ def upload_task_file(client: httpx.Client, upload_path: str, file_path: str, can
     if not source.exists() or not source.is_file() or source.stat().st_size <= 0:
         return {}
     mime_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
-    with source.open("rb") as handle:
-        response = client.post(
-            upload_path,
-            files={"file": (source.name, handle, mime_type)},
-        )
-    response.raise_for_status()
-    data = response.json()
-    if isinstance(data, dict) and response_is_cancelled(data):
-        raise cancelled_error(str(data.get("message") or "Task da bi huy."))
-    uploaded = data.get("file") if isinstance(data.get("file"), dict) else {}
-    return uploaded if isinstance(uploaded, dict) else {}
+    attempt = 0
+    while True:
+        try:
+            with source.open("rb") as handle:
+                response = client.post(
+                    upload_path,
+                    files={"file": (source.name, handle, mime_type)},
+                )
+            response.raise_for_status()
+            data = response.json()
+            if isinstance(data, dict) and response_is_cancelled(data):
+                raise cancelled_error(str(data.get("message") or "Task da bi huy."))
+            uploaded = data.get("file") if isinstance(data.get("file"), dict) else {}
+            return uploaded if isinstance(uploaded, dict) else {}
+        except (httpx.HTTPStatusError, httpx.RequestError) as error:
+            if not is_transient_request_error(error):
+                raise
+            attempt += 1
+            delay_seconds = transient_retry_delay_seconds(attempt)
+            print(
+                f"Ket noi web loi tam thoi khi gui file ({describe_request_error(error)}). "
+                f"May tram se thu lai sau {int(delay_seconds)} giay.",
+                file=sys.stderr,
+            )
+            time.sleep(delay_seconds)
 
 
 def upload_result_file(client: httpx.Client, run_id: str, file_path: str) -> dict[str, Any]:

@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$WorkerScript = Join-Path $Root "scripts\start_onebss_worker.ps1"
+$WorkerScript = Join-Path $Root "scripts\run_onebss_worker_background.ps1"
 
 if (-not (Test-Path $WorkerScript)) {
   throw "Khong tim thay worker script: $WorkerScript"
@@ -76,7 +76,7 @@ function Register-VnptctoInteractiveTask {
 
 $Action = New-ScheduledTaskAction `
   -Execute "powershell.exe" `
-  -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$WorkerScript`" -NoPause" `
+  -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$WorkerScript`" -NoPause" `
   -WorkingDirectory $Root
 
 $Trigger = New-ScheduledTaskTrigger -AtLogOn
@@ -100,6 +100,12 @@ Register-VnptctoInteractiveTask `
 Write-Host "Da cai tu dong chay: $TaskName" -ForegroundColor Green
 Write-Host "May tram se tu chay lai khi user Windows dang nhap." -ForegroundColor Green
 Write-Host "Neu may bi tat hoan toan, task tren web se nam trong hang doi den khi may bat va dang nhap lai."
+$WorkerLogRoot = [Environment]::GetEnvironmentVariable("VNPTCTO_WORKSTATION_LOG_DIR", "User")
+if ([string]::IsNullOrWhiteSpace($WorkerLogRoot)) {
+  $WorkerLogRoot = Join-Path $Root "logs"
+}
+Write-Host "Log worker: $(Join-Path $WorkerLogRoot "onebss-worker.log")"
+Write-Host "Log loi worker: $(Join-Path $WorkerLogRoot "onebss-worker-error.log")"
 if ($StartNow) {
   Start-ScheduledTask -TaskName $TaskName
   Write-Host "Da khoi dong worker chay nen. Ban co the dong cua so nay." -ForegroundColor Green

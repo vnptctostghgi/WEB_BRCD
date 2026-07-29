@@ -2376,7 +2376,11 @@ def workstation_setup_readme() -> str:
 1. Giai nen goi ZIP nay vao mot thu muc tam.
 2. Bam chuot phai SETUP_VNPTCTO_WORKSTATION.bat va chon Run as administrator.
 3. Cho script tu cai dat. Khong can go token, tai khoan hay duong dan nao.
-4. Sau khi xong, kiem tra Scheduled Task neu can:
+4. Sau khi cai xong, khong can de mo PowerShell. Worker se chay nen bang Scheduled Task.
+5. Log worker mac dinh:
+   - D:\\Tool_Tram_VNPTCTO.COM\\logs\\onebss-worker.log
+   - D:\\Tool_Tram_VNPTCTO.COM\\logs\\onebss-worker-error.log
+6. Sau khi xong, kiem tra Scheduled Task neu can:
    - VNPTCTO OneBSS Worker
    - VNPTCTO API Trung Gian
    - VNPTCTO API Watchdog
@@ -2402,6 +2406,7 @@ def workstation_setup_config_script(request: Request) -> str:
         ("BaseUrl", public_config["web_base_url"], "Web public base URL."),
         ("InternalApiToken", secret_text(settings.internal_api_token), "Worker token used for task claiming and heartbeat."),
         ("InternalApiUrl", settings.internal_api_url, "Internal API used for SQL/Drive uploads."),
+        ("WorkerDriveUploadApiUrl", "http://127.0.0.1:8000/api/du-lieu-web", "Local API used by workstation worker for Drive uploads."),
         ("InstallRoot", "D:\\Tool_Tram_VNPTCTO.COM", "Default workstation install folder."),
         ("ApiRoot", "C:\\VNPTCTO", "Default local API middleware folder."),
         ("WorkerIdPrefix", "may-tram", "The setup script appends the Windows computer name."),

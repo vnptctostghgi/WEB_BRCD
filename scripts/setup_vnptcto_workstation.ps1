@@ -4,6 +4,7 @@ param(
   [string]$WorkerId = "",
   [string]$InternalApiToken = "",
   [string]$InternalApiUrl = "https://api.vnptcto.com/api/du-lieu-web",
+  [string]$WorkerDriveUploadApiUrl = "http://127.0.0.1:8000/api/du-lieu-web",
   [string]$ApiRoot = "C:\VNPTCTO",
   [string]$ConfigFile = "",
   [switch]$StartNow,
@@ -355,6 +356,10 @@ function Ensure-WorkstationEnvFile {
 function Ensure-ApiEnvFile {
   param([string]$ApiDir)
   $apiEnv = Join-Path $ApiDir ".env"
+  $driveAuthMode = "oauth"
+  if (-not [string]::IsNullOrWhiteSpace($googleDriveServiceAccountJsonBase64)) {
+    $driveAuthMode = "service_account"
+  }
   if (-not (Test-Path -LiteralPath $apiEnv)) {
     Set-Content -Path $apiEnv -Value @(
       "API_TOKEN=$(DotEnvValue $InternalApiToken)"
@@ -366,15 +371,19 @@ function Ensure-ApiEnvFile {
       "DB_SERVICE=''"
       "DB_USER=''"
       "DB_PASS=''"
-      "GOOGLE_DRIVE_AUTH_MODE='oauth'"
+      "GOOGLE_DRIVE_AUTH_MODE=$(DotEnvValue $driveAuthMode)"
       "GOOGLE_DRIVE_OAUTH_CLIENT_FILE=$(DotEnvValue (Join-Path $ApiDir 'drive-oauth-client.json'))"
       "GOOGLE_DRIVE_OAUTH_TOKEN_FILE=$(DotEnvValue (Join-Path $ApiDir 'drive-oauth-token.json'))"
-      "GOOGLE_DRIVE_FOLDER_ID=''"
+      "GOOGLE_DRIVE_FOLDER_ID=$(DotEnvValue $googleDriveFolderId)"
+      "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64=$(DotEnvValue $googleDriveServiceAccountJsonBase64)"
     ) -Encoding UTF8
     return
   }
   Set-DotEnvValue $apiEnv "API_TOKEN" $InternalApiToken
   Set-DotEnvValue $apiEnv "EXPORT_DIR" (Join-Path $ApiRoot "exports")
+  Set-DotEnvValue $apiEnv "GOOGLE_DRIVE_FOLDER_ID" $googleDriveFolderId
+  Set-DotEnvValue $apiEnv "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64" $googleDriveServiceAccountJsonBase64
+  Set-DotEnvValue $apiEnv "GOOGLE_DRIVE_AUTH_MODE" $driveAuthMode
 }
 
 function Install-ApiMiddleware {
@@ -475,7 +484,7 @@ function Install-HealthCheckTask {
     return
   }
   $taskName = "VNPTCTO Workstation Health Check"
-  $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$healthScript`" -NoPause" -WorkingDirectory $Root
+  $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$healthScript`" -NoPause" -WorkingDirectory $Root
   $startupTrigger = New-ScheduledTaskTrigger -AtLogOn
   $intervalTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration (New-TimeSpan -Days 3650)
   $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -MultipleInstances IgnoreNew -StartWhenAvailable
@@ -513,6 +522,7 @@ $setupConfig = Import-SetupConfig $sourceRoot
 $InstallRoot = Resolve-SetupValue $setupConfig "InstallRoot" $InstallRoot "D:\Tool_Tram_VNPTCTO.COM" "VNPTCTO_WORKSTATION_ROOT"
 $BaseUrl = Resolve-SetupValue $setupConfig "BaseUrl" $BaseUrl "https://vnptcto.com" "VNPTCTO_BASE_URL"
 $InternalApiUrl = Resolve-SetupValue $setupConfig "InternalApiUrl" $InternalApiUrl "https://api.vnptcto.com/api/du-lieu-web" "INTERNAL_API_URL"
+$WorkerDriveUploadApiUrl = Resolve-SetupValue $setupConfig "WorkerDriveUploadApiUrl" $WorkerDriveUploadApiUrl "http://127.0.0.1:8000/api/du-lieu-web" "ONEBSS_DRIVE_UPLOAD_API_URL"
 $ApiRoot = Resolve-SetupValue $setupConfig "ApiRoot" $ApiRoot "C:\VNPTCTO" ""
 $InternalApiToken = Resolve-SetupValue $setupConfig "InternalApiToken" $InternalApiToken "" "INTERNAL_API_TOKEN"
 $WorkerId = Resolve-SetupValue $setupConfig "WorkerId" $WorkerId "" "ONEBSS_WORKER_ID"
@@ -571,7 +581,7 @@ Set-UserEnvironment "VNPTCTO_WORKSTATION_ROOT" $InstallRoot
 Set-UserEnvironment "VNPTCTO_WORKSTATION_LOG_DIR" (Join-Path $InstallRoot "logs")
 Set-UserEnvironment "INTERNAL_API_TOKEN" $InternalApiToken
 Set-UserEnvironment "INTERNAL_API_URL" $InternalApiUrl
-Set-UserEnvironment "ONEBSS_DRIVE_UPLOAD_API_URL" $InternalApiUrl
+Set-UserEnvironment "ONEBSS_DRIVE_UPLOAD_API_URL" $WorkerDriveUploadApiUrl
 Set-UserEnvironment "ONEBSS_WORKER_ID" $WorkerId
 Set-UserEnvironment "ONEBSS_WORKER_POLL_SECONDS" "5"
 Set-UserEnvironment "ONEBSS_WORKER_HEARTBEAT_SECONDS" "60"

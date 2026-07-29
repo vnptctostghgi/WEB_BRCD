@@ -185,6 +185,7 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
             uninstall_autostart_bat = archive.read("VNPTCTO_WORKSTATION_SETUP/UNINSTALL_ONEBSS_WORKER_AUTOSTART.bat").decode("utf-8")
             setup_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/setup_vnptcto_workstation.ps1").decode("utf-8")
             install_task_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/install_onebss_worker_task.ps1").decode("utf-8")
+            background_worker_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/run_onebss_worker_background.ps1").decode("utf-8")
             start_worker_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/start_onebss_worker.ps1").decode("utf-8")
             uninstall_task_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/uninstall_onebss_worker_task.ps1").decode("utf-8")
             health_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/test_vnptcto_workstation.ps1").decode("utf-8")
@@ -193,6 +194,7 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "VNPTCTO_WORKSTATION_SETUP/workstation-install-config.ps1" in names
         assert "VNPTCTO_WORKSTATION_SETUP/scripts/setup_vnptcto_workstation.ps1" in names
         assert "VNPTCTO_WORKSTATION_SETUP/scripts/test_vnptcto_workstation.ps1" in names
+        assert "VNPTCTO_WORKSTATION_SETUP/scripts/run_onebss_worker_background.ps1" in names
         assert "InternalApiToken = 'test-worker-token'" in config_text
         assert "Khong can go token" in readme_text
         assert "Read-Host $Prompt" not in setup_script
@@ -200,12 +202,21 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "Test-PythonLauncher" in setup_script
         assert "Test-PythonLauncher" in start_worker_script
         assert "Python.Python.3.12" in start_worker_script
+        assert "WorkerDriveUploadApiUrl = 'http://127.0.0.1:8000/api/du-lieu-web'" in config_text
+        assert 'Set-UserEnvironment "ONEBSS_DRIVE_UPLOAD_API_URL" $WorkerDriveUploadApiUrl' in setup_script
+        assert "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64" in setup_script
         assert "LeastPrivilege" not in setup_script
         assert "LeastPrivilege" not in install_task_script
         assert "-RunLevel Limited" in setup_script
         assert "-RunLevel Limited" in install_task_script
         assert "Get-InteractiveTaskUserCandidates" in setup_script
         assert "Get-InteractiveTaskUserCandidates" in install_task_script
+        assert "run_onebss_worker_background.ps1" in install_task_script
+        assert "-WindowStyle Hidden" in install_task_script
+        assert "-WindowStyle Hidden" in setup_script
+        assert "onebss-worker.log" in background_worker_script
+        assert "onebss-worker-error.log" in background_worker_script
+        assert "start_onebss_worker.ps1" in background_worker_script
         assert "[Security.Principal.WindowsIdentity]::GetCurrent().Name" in install_task_script
         assert "whoami.exe" in install_task_script
         assert "-UserId $env:USERNAME" not in setup_script
@@ -3643,6 +3654,56 @@ def test_onebss_workstation_worker_retries_transient_web_errors(monkeypatch) -> 
 
     assert data == {"ok": True, "task": None}
     assert attempts["count"] == 2
+
+
+def test_onebss_worker_prefers_local_drive_upload_api_when_public_is_configured(monkeypatch) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    monkeypatch.setenv("ONEBSS_DRIVE_UPLOAD_API_URL", "https://api.vnptcto.com/api/du-lieu-web")
+    monkeypatch.setenv("INTERNAL_API_URL", "https://api.vnptcto.com/api/du-lieu-web")
+
+    urls = worker.internal_drive_upload_api_urls()
+
+    assert urls[0] == "http://127.0.0.1:8000/api/du-lieu-web"
+    assert urls.count("https://api.vnptcto.com/api/du-lieu-web") == 1
+
+
+def test_onebss_worker_retries_transient_file_upload(monkeypatch, tmp_path) -> None:
+    import httpx
+    from scripts import onebss_workstation_worker as worker
+
+    attempts = {"count": 0}
+    source = tmp_path / "result.xlsx"
+    source.write_bytes(b"xlsx")
+    monkeypatch.setattr(worker.time, "sleep", lambda seconds: None)
+
+    class FakeResponse:
+        def __init__(self, status_code: int, payload: dict | None = None) -> None:
+            self.status_code = status_code
+            self.payload = payload or {}
+            self.request = httpx.Request("POST", "https://vnptcto.com/api/onebss-worker/tasks/run-1/file")
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                response = httpx.Response(self.status_code, request=self.request)
+                raise httpx.HTTPStatusError("temporary upload error", request=self.request, response=response)
+
+        def json(self) -> dict:
+            return self.payload
+
+    class FakeClient:
+        def post(self, path: str, **kwargs):
+            attempts["count"] += 1
+            assert path == "/api/onebss-worker/tasks/run-1/file"
+            assert "files" in kwargs
+            if attempts["count"] == 1:
+                return FakeResponse(502)
+            return FakeResponse(200, {"ok": True, "file": {"file_name": "result.xlsx", "storage_status": "uploaded_worker_file"}})
+
+    uploaded = worker.upload_task_file(FakeClient(), "/api/onebss-worker/tasks/run-1/file", str(source))
+
+    assert attempts["count"] == 2
+    assert uploaded["file_name"] == "result.xlsx"
 
 
 def test_onebss_worker_uploads_result_file_for_download(monkeypatch, tmp_path) -> None:
