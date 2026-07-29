@@ -101,7 +101,7 @@
     }
     table.innerHTML = workers.map((worker) => `
         <tr>
-          <td><code class="compact-code">${escapeHtml(worker.worker_id || "")}</code></td>
+          <td><code class="compact-code">${escapeHtml(worker.worker_id || "")}</code><small class="cell-note">${escapeHtml([worker.version || "", ...(Array.isArray(worker.roles) ? worker.roles : [])].filter(Boolean).join(" · ") || "Chua ro phien ban/role")}</small></td>
           <td><span class="status ${workstationStatusClass(worker.status)}">${escapeHtml(workstationStatusLabel(worker.status))}</span></td>
           <td>${escapeHtml(workstationAgeText(worker.last_seen_age_seconds))}<small class="cell-note">${escapeHtml(worker.last_seen_at || "")}</small></td>
           <td>${escapeHtml(worker.last_task_report || "-")}<small class="cell-note">${escapeHtml(worker.last_task_status || "")}</small></td>

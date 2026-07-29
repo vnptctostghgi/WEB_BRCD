@@ -2464,6 +2464,38 @@ def workstation_workers_response(runs: list[dict[str, Any]]) -> list[dict[str, A
     return sorted(by_worker.values(), key=lambda item: (item.get("status") != "online", item.get("worker_id") or ""))
 
 
+def _dynamic_report_sql_worker_state() -> dict[str, Any]:
+    workers = workstation_workers_response([])
+    online_workers = [worker for worker in workers if str(worker.get("status") or "").lower() == "online"]
+    sql_workers = [
+        worker
+        for worker in online_workers
+        if "sql_report_worker" in {str(role or "").strip() for role in (worker.get("roles") if isinstance(worker.get("roles"), list) else [])}
+    ]
+    latest_worker = online_workers[0] if online_workers else (workers[0] if workers else {})
+    if sql_workers:
+        status_value = "ready"
+        message = f"Da thay {len(sql_workers)} may tram SQL online."
+    elif online_workers:
+        status_value = "worker_without_sql_role"
+        message = "Co may tram online nhung worker dang chay chua bao role dao du lieu SQL. Hay cap nhat bo cai may tram moi nhat."
+    else:
+        status_value = "no_online_worker"
+        message = "Chua thay may tram online de nhan lenh SQL."
+    return {
+        "status": status_value,
+        "message": message,
+        "online_count": len(online_workers),
+        "sql_count": len(sql_workers),
+        "latest_worker_id": latest_worker.get("worker_id") or "",
+        "latest_worker_status": latest_worker.get("status") or "",
+        "latest_worker_version": latest_worker.get("version") or "",
+        "latest_worker_roles": latest_worker.get("roles") if isinstance(latest_worker.get("roles"), list) else [],
+        "latest_worker_message": latest_worker.get("message") or "",
+        "latest_seen_age_seconds": int(latest_worker.get("last_seen_age_seconds") or 0),
+    }
+
+
 def workstation_setup_readme() -> str:
     return """VNPTCTO workstation setup
 
@@ -4165,9 +4197,13 @@ def _dynamic_report_export_job_response(job_id: str, job: dict[str, Any]) -> dic
         "ma_bao_cao": job.get("report_code") or "",
         "ten_bao_cao": job.get("report_name") or "",
         "created_at": job.get("created_at") or "",
+        "updated_at": job.get("updated_at") or job.get("created_at") or "",
+        "worker_id": job.get("worker_id") or "",
         "queue_position": int(job.get("queue_position") or 0),
         "can_cancel": status_value in DYNAMIC_REPORT_EXPORT_ACTIVE_STATUSES,
     }
+    if status_value in {"queued_worker", "running_worker"}:
+        response["worker_state"] = _dynamic_report_sql_worker_state()
     if status_value == "complete":
         drive_url = str(job.get("drive_url") or "")
         response["download_url"] = drive_url or f"/api/reports/export-jobs/{job_id}/download"

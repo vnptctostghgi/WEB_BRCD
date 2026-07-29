@@ -242,7 +242,7 @@ function ensureWorkstationScriptLoaded() {
   if (workstationScriptPromise) return workstationScriptPromise;
   workstationScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/workstation.js?v=2";
+    script.src = "/static/workstation.js?v=3";
     script.defer = true;
     script.dataset.workstation = "true";
     script.addEventListener("load", () => {
@@ -357,7 +357,7 @@ function ensureReportsRuntimeScriptLoaded() {
   if (reportsRuntimeScriptPromise) return reportsRuntimeScriptPromise;
   reportsRuntimeScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/reports-runtime.js?v=7";
+    script.src = "/static/reports-runtime.js?v=8";
     script.defer = true;
     script.dataset.reportsRuntime = "true";
     script.addEventListener("load", () => {

@@ -147,6 +147,75 @@ function dynamicReportProgressSteps(job, status) {
   return fallback ? [{ message: fallback, status }] : [];
 }
 
+function dynamicReportDateMs(value) {
+  if (value === null || value === undefined || value === "") return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? (value > 0 && value < 1000000000000 ? value * 1000 : value) : 0;
+  const text = String(value).trim();
+  if (!text) return 0;
+  if (/^\d+(\.\d+)?$/.test(text)) return dynamicReportDateMs(Number(text));
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function dynamicReportDateText(value) {
+  const ms = dynamicReportDateMs(value);
+  return ms ? new Date(ms).toLocaleString("vi-VN") : "-";
+}
+
+function dynamicReportDurationText(ms) {
+  const seconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+  if (seconds < 60) return `${seconds} giây`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} phút`;
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  return restMinutes ? `${hours} giờ ${restMinutes} phút` : `${hours} giờ`;
+}
+
+function dynamicReportLastUpdateMs(job) {
+  const steps = dynamicReportProgressSteps(job, job?.status);
+  const latestStepMs = steps.reduce((latest, step) => Math.max(latest, dynamicReportDateMs(step.at)), 0);
+  return dynamicReportDateMs(job?.updated_at) || latestStepMs || dynamicReportDateMs(job?.created_at);
+}
+
+function dynamicReportProgressHint(job, status) {
+  const normalized = String(status || "").toLowerCase();
+  const createdMs = dynamicReportDateMs(job?.created_at);
+  const updatedMs = dynamicReportLastUpdateMs(job);
+  const waitText = createdMs ? dynamicReportDurationText(Date.now() - createdMs) : "";
+  const updateText = updatedMs ? dynamicReportDurationText(Date.now() - updatedMs) : "";
+  const workerId = job?.worker_id ? ` (${job.worker_id})` : "";
+  let text = "";
+  let kind = "pending";
+  if (normalized === "queued_worker") {
+    const workerState = job?.worker_state && typeof job.worker_state === "object" ? job.worker_state : {};
+    if (workerState.status === "worker_without_sql_role") {
+      text = `${workerState.message || "Máy trạm online nhưng worker chưa có role SQL."}${waitText ? ` · đã chờ ${waitText}` : ""}`;
+    } else if (workerState.status === "no_online_worker") {
+      text = `${workerState.message || "Chưa thấy máy trạm online để nhận lệnh SQL."}${waitText ? ` · đã chờ ${waitText}` : ""}`;
+    } else {
+      text = `Chưa có máy trạm nhận lệnh${waitText ? ` · đã chờ ${waitText}` : ""}.`;
+    }
+    if (createdMs && Date.now() - createdMs > 60000) text += " Nếu vẫn đứng ở đây, hãy cập nhật/chạy lại bộ cài máy trạm mới nhất.";
+  } else if (normalized === "running_worker") {
+    kind = "admin";
+    text = `Máy trạm${workerId} đã nhận lệnh và đang xử lý${updateText ? ` · cập nhật ${updateText} trước` : ""}.`;
+    if (updatedMs && Date.now() - updatedMs > 300000) text += " Chưa có cập nhật mới từ máy trạm trong vài phút.";
+  } else if (normalized === "queued") {
+    text = `Đang chờ trong hàng đợi web${waitText ? ` · đã chờ ${waitText}` : ""}.`;
+  } else if (normalized === "running") {
+    kind = "admin";
+    text = `Web đang xử lý${updateText ? ` · cập nhật ${updateText} trước` : ""}.`;
+  } else if (normalized === "complete" || normalized === "success") {
+    kind = "active";
+    text = `Đã hoàn tất${updateText ? ` · cập nhật ${updateText} trước` : ""}.`;
+  } else if (normalized === "failed" || normalized === "cancelled") {
+    kind = "inactive";
+    text = updateText ? `Cập nhật cuối ${updateText} trước.` : "";
+  }
+  return text ? `<div class="sql-progress-hint ${kind}">${escapeHtml(text)}</div>` : "";
+}
+
 function dynamicReportProgressHtml(job, status) {
   const steps = dynamicReportProgressSteps(job, status);
   const items = steps.map((step, index) => {
@@ -155,7 +224,7 @@ function dynamicReportProgressHtml(job, status) {
     const className = `sql-progress-step ${isLatest ? "current" : ""} ${dynamicReportExportStatusClass(stepStatus)}`;
     return `<li class="${className}"><span class="sql-progress-dot" aria-hidden="true"></span><span>${escapeHtml(step.message || dynamicReportExportStatusLabel(stepStatus))}</span></li>`;
   }).join("");
-  return `<div class="sql-progress"><span class="status ${dynamicReportExportStatusClass(status)}">${escapeHtml(dynamicReportExportStatusLabel(status))}</span>${items ? `<ol class="sql-progress-steps">${items}</ol>` : ""}</div>`;
+  return `<div class="sql-progress"><span class="status ${dynamicReportExportStatusClass(status)}">${escapeHtml(dynamicReportExportStatusLabel(status))}</span>${dynamicReportProgressHint(job, status)}${items ? `<ol class="sql-progress-steps">${items}</ol>` : ""}</div>`;
 }
 
 function upsertDynamicReportExportJob(job) {
@@ -172,6 +241,8 @@ function upsertDynamicReportExportJob(job) {
     queue_position: current.queue_position || existing.queue_position || 0,
     can_cancel: current.can_cancel ?? existing.can_cancel ?? dynamicReportExportIsActive(current),
     created_at: current.created_at || existing.created_at || new Date().toISOString(),
+    updated_at: current.updated_at || existing.updated_at || current.created_at || existing.created_at || new Date().toISOString(),
+    worker_id: current.worker_id || existing.worker_id || "",
     report_code: current.report_code || existing.report_code || selected?.value || "",
     report_name: current.report_name || existing.report_name || selected?.selectedOptions?.[0]?.textContent || "",
   };
@@ -217,11 +288,13 @@ function renderDynamicReportExportJobs() {
     return;
   }
   body.innerHTML = dynamicReportExportJobs.map((job) => {
-    const createdAt = job.created_at ? new Date(job.created_at).toLocaleString("vi-VN") : "-";
+    const createdAt = dynamicReportDateText(job.created_at);
+    const updatedMs = dynamicReportLastUpdateMs(job);
+    const updatedText = updatedMs ? dynamicReportDurationText(Date.now() - updatedMs) : "";
     const status = String(job.status || "queued").toLowerCase();
     return `
       <tr>
-        <td>${escapeHtml(createdAt)}</td>
+        <td>${escapeHtml(createdAt)}${updatedText ? `<small class="cell-note">Cập nhật ${escapeHtml(updatedText)} trước</small>` : ""}</td>
         <td><strong>${escapeHtml(job.report_code || job.ma_bao_cao || "-")}</strong><small class="cell-note">${escapeHtml(job.report_name || job.ten_bao_cao || "")}</small></td>
         <td class="sql-progress-cell">${dynamicReportProgressHtml(job, status)}</td>
         <td class="table-action-cell">${dynamicReportExportResultHtml(job, status)}</td>
@@ -241,10 +314,7 @@ function setDynamicReportExportStatus(text, type = "success", job = null) {
 }
 
 function dynamicReportExportJobTime(job) {
-  const value = job?.created_at || job?.updated_at || 0;
-  if (typeof value === "number") return value * 1000;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+  return dynamicReportDateMs(job?.created_at || job?.updated_at || 0);
 }
 
 function mergeDynamicReportExportJobs(items) {
