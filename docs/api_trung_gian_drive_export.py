@@ -79,14 +79,21 @@ def load_service_account_info() -> dict[str, Any]:
     raw_base64 = os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64", "").strip()
     file_path = os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE", "").strip()
     if raw_base64:
-        raw_json = base64.b64decode(raw_base64).decode("utf-8")
+        raw_json = base64.b64decode(raw_base64).decode("utf-8-sig")
     elif file_path:
-        raw_json = Path(file_path).read_text(encoding="utf-8")
+        raw_json = Path(file_path).read_text(encoding="utf-8-sig")
     if not raw_json:
         raise RuntimeError("Chua cau hinh Google Drive service account tren may tram.")
-    info = json.loads(raw_json)
+    info = json.loads(raw_json.lstrip("\ufeff"))
     validate_service_account_info(info)
     return info
+
+
+def read_json_file(path: Path) -> dict[str, Any]:
+    data = json.loads(path.read_text(encoding="utf-8-sig").lstrip("\ufeff"))
+    if not isinstance(data, dict):
+        raise RuntimeError(f"File JSON khong phai object: {path}")
+    return data
 
 
 def validate_service_account_info(info: dict[str, Any]) -> None:
@@ -153,9 +160,7 @@ def load_oauth_state(state: str) -> dict[str, Any]:
     state_file = google_drive_oauth_state_file()
     if not state_file.exists():
         raise RuntimeError("Khong tim thay OAuth state tren may tram. Hay mo lai /drive-oauth/start.")
-    data = json.loads(state_file.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise RuntimeError("OAuth state tren may tram khong hop le. Hay mo lai /drive-oauth/start.")
+    data = read_json_file(state_file)
     if state and data.get("state") != state:
         raise RuntimeError("OAuth state khong khop. Hay mo lai /drive-oauth/start.")
     if not str(data.get("code_verifier") or "").strip():
@@ -167,7 +172,7 @@ def load_oauth_credentials() -> Credentials:
     token_file = google_drive_oauth_token_file()
     if not token_file.exists():
         raise RuntimeError("Chua ket noi Google Drive OAuth. Mo http://127.0.0.1:8000/drive-oauth/start tren may tram de cap quyen.")
-    credentials = Credentials.from_authorized_user_file(str(token_file), GOOGLE_DRIVE_SCOPES)
+    credentials = Credentials.from_authorized_user_info(read_json_file(token_file), GOOGLE_DRIVE_SCOPES)
     if credentials.expired and credentials.refresh_token:
         credentials.refresh(GoogleAuthRequest())
         token_file.write_text(credentials.to_json(), encoding="utf-8")
@@ -442,8 +447,8 @@ def drive_oauth_start():
             raise RuntimeError(f"Khong tim thay OAuth client JSON: {client_file}")
 
         os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
-        flow = Flow.from_client_secrets_file(
-            str(client_file),
+        flow = Flow.from_client_config(
+            read_json_file(client_file),
             scopes=GOOGLE_DRIVE_SCOPES,
             redirect_uri=google_drive_oauth_redirect_uri(),
             autogenerate_code_verifier=True,
@@ -473,8 +478,8 @@ def drive_oauth_callback(code: str = "", state: str = "", error: str = ""):
 
         os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
         oauth_state = load_oauth_state(state)
-        flow = Flow.from_client_secrets_file(
-            str(google_drive_oauth_client_file()),
+        flow = Flow.from_client_config(
+            read_json_file(google_drive_oauth_client_file()),
             scopes=GOOGLE_DRIVE_SCOPES,
             redirect_uri=google_drive_oauth_redirect_uri(),
             state=state or oauth_state.get("state"),

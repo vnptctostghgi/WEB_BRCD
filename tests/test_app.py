@@ -1,5 +1,7 @@
 ﻿import os
 import json
+import base64
+import importlib.util
 import sqlite3
 import threading
 import time
@@ -32,6 +34,15 @@ from app.data_access.supabase_repository import SupabaseRepository
 from app.main import app
 from app.presentation import routes
 from app.settings import Settings, get_settings
+
+
+def load_api_middleware_module():
+    module_path = Path("docs/api_trung_gian_drive_export.py")
+    spec = importlib.util.spec_from_file_location("api_trung_gian_drive_export_test", module_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def login(client: TestClient, username: str = "admin", password: str = "Admin@Brcd2026!") -> None:
@@ -244,6 +255,30 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "[switch]$NoPause" in uninstall_task_script
         assert "timeout /t" not in setup_bat.lower()
         assert "\npause" not in setup_bat.lower()
+
+
+def test_api_middleware_reads_json_files_with_utf8_bom(tmp_path: Path) -> None:
+    module = load_api_middleware_module()
+    token_file = tmp_path / "drive-oauth-token.json"
+    token_file.write_text('\ufeff{"refresh_token":"r","client_id":"c","client_secret":"s","token_uri":"https://oauth2.googleapis.com/token"}', encoding="utf-8")
+
+    assert module.read_json_file(token_file)["refresh_token"] == "r"
+
+
+def test_api_middleware_reads_service_account_base64_with_utf8_bom(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = load_api_middleware_module()
+    info = {
+        "type": "service_account",
+        "client_email": "svc@example.iam.gserviceaccount.com",
+        "private_key": "-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----\\n",
+        "token_uri": "https://oauth2.googleapis.com/token",
+    }
+    raw = "\ufeff" + json.dumps(info)
+    monkeypatch.setenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64", base64.b64encode(raw.encode("utf-8")).decode("ascii"))
+    monkeypatch.delenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON", raising=False)
+    monkeypatch.delenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE", raising=False)
+
+    assert module.load_service_account_info()["client_email"] == info["client_email"]
 
 
 def test_workstation_heartbeat_uses_worker_token() -> None:
