@@ -656,6 +656,19 @@ if ([string]::IsNullOrWhiteSpace($InternalApiToken)) {
 if ([string]::IsNullOrWhiteSpace($onebssUsername) -or [string]::IsNullOrWhiteSpace($onebssPassword)) {
   Write-Warning "Goi cai dat chua co tai khoan OneBSS. May tram se cai xong nhung worker OneBSS chua the chay cho den khi web co cau hinh tai khoan."
 }
+$oracleMissing = @()
+if ([string]::IsNullOrWhiteSpace($oracleDbDsn) -and ([string]::IsNullOrWhiteSpace($oracleDbHost) -or ([string]::IsNullOrWhiteSpace($oracleDbService) -and [string]::IsNullOrWhiteSpace($oracleDbSid)))) {
+  $oracleMissing += "DB_DSN hoac DB_HOST + DB_SERVICE/DB_SID"
+}
+if ([string]::IsNullOrWhiteSpace($oracleDbUser)) {
+  $oracleMissing += "DB_USER"
+}
+if ([string]::IsNullOrWhiteSpace($oracleDbPass)) {
+  $oracleMissing += "DB_PASS"
+}
+if ($oracleMissing.Count -gt 0) {
+  throw "Goi cai dat thieu cau hinh Oracle: $($oracleMissing -join ', '). Hay cap nhat DB co quan Oracle tren web roi tai lai bo cai moi."
+}
 
 Write-Step "Tao thu muc may tram"
 foreach ($dir in @($InstallRoot, "$InstallRoot\logs", "$InstallRoot\temp", "$InstallRoot\backups", "$InstallRoot\downloads", "$InstallRoot\exports", "$InstallRoot\data", "$InstallRoot\data\staging", $ApiRoot)) {

@@ -64,6 +64,7 @@
       !config.internal_api_token_configured,
       Boolean(config.internal_api_mock_mode),
       !config.google_drive_oauth_ready,
+      !config.oracle_config_ready,
       Number(queue.waiting_otp || 0) > 0,
     ].filter(Boolean).length;
   }
@@ -143,11 +144,16 @@
       const driveNote = config.google_drive_oauth_ready
         ? `OAuth ${config.google_drive_oauth_email || ""} -> ${config.google_drive_folder_id || ""}`.trim()
         : (driveMissing || "Can luu folder va ket noi OAuth.");
+      const oracleMissing = Array.isArray(config.oracle_missing_items) ? config.oracle_missing_items.join(", ") : "";
+      const oracleNote = config.oracle_config_ready
+        ? `${config.oracle_dsn_configured ? "DB_DSN" : (config.oracle_host || "Oracle")} / user OK / DB_PASS OK`
+        : (oracleMissing || "Thieu cau hinh Oracle.");
       const checks = [
         ["Token worker", config.internal_api_token_configured, "Dung de nhan task va gui heartbeat."],
         ["API du lieu", !config.internal_api_mock_mode, config.internal_api_mock_mode ? "Dang o che do mock." : config.internal_api_url || ""],
         ["Google Drive", config.google_drive_oauth_ready, driveNote],
-        ["Bo cai", true, setup.script_name || "SETUP_VNPTCTO_WORKSTATION.bat"],
+        ["Oracle DB", config.oracle_config_ready, oracleNote],
+        ["Bo cai", config.oracle_config_ready && config.google_drive_oauth_ready && config.internal_api_token_configured, setup.script_name || "SETUP_VNPTCTO_WORKSTATION.bat"],
       ];
       panel.innerHTML = checks.map(([label, ok, note]) => `
         <div class="workstation-admin-row">

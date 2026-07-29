@@ -127,7 +127,7 @@ WORKSTATION_HEARTBEATS: dict[str, dict[str, Any]] = {}
 WORKSTATION_HEARTBEATS_LOCK = threading.Lock()
 WORKSTATION_HEARTBEAT_TTL_SECONDS = 10 * 60
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260729-oracle-dsn-restart-v2"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260729-oracle-dsn-dbpass-v3"
 WORKSTATION_SETUP_INCLUDE_PATHS = (
     ".env.example",
     "README.md",
@@ -2281,7 +2281,10 @@ def workstation_status_from_age(age_seconds: float | None) -> str:
 
 def workstation_public_config(request: Request) -> dict[str, Any]:
     settings = get_settings()
-    drive_status = google_drive_oauth_status(settings, build_app_repository())
+    repository = build_app_repository()
+    drive_status = google_drive_oauth_status(settings, repository)
+    oracle_config = workstation_oracle_config(repository, settings)
+    oracle_missing_items = workstation_oracle_missing_items(oracle_config)
     public_url = str(getattr(settings, "app_public_url", "") or "").strip().rstrip("/")
     if not public_url:
         forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip()
@@ -2300,6 +2303,13 @@ def workstation_public_config(request: Request) -> dict[str, Any]:
         "google_drive_folder_id": drive_status.get("folder_id") or "",
         "google_drive_oauth_email": drive_status.get("email") or "",
         "google_drive_missing_items": drive_status.get("missing_items") or [],
+        "oracle_config_ready": not oracle_missing_items,
+        "oracle_missing_items": oracle_missing_items,
+        "oracle_dsn_configured": bool(oracle_config.get("dsn")),
+        "oracle_host": oracle_config.get("host") or "",
+        "oracle_service_configured": bool(oracle_config.get("service") or oracle_config.get("sid")),
+        "oracle_user_configured": bool(oracle_config.get("username")),
+        "oracle_password_configured": bool(oracle_config.get("password")),
         "data_mining_download_dir": settings.data_mining_download_dir,
         "storage_backend": settings.app_database_backend,
     }
@@ -2526,10 +2536,10 @@ def powershell_bool(value: bool) -> str:
     return "$true" if value else "$false"
 
 
-def workstation_oracle_config(repository: AppRepository) -> dict[str, str]:
+def workstation_oracle_config(repository: AppRepository, settings: Any | None = None) -> dict[str, str]:
+    settings = settings or get_settings()
     connection = repository.get_system_connection_by_code("oracle_agency_db") or {}
-    if not connection.get("is_active"):
-        return {}
+    is_active = bool(connection.get("is_active"))
     config = connection.get("config") if isinstance(connection.get("config"), dict) else {}
 
     def first_value(*keys: str) -> str:
@@ -2539,10 +2549,16 @@ def workstation_oracle_config(repository: AppRepository) -> dict[str, str]:
                 return str(value).strip()
         return ""
 
-    host = first_value("host", "db_host", "DB_HOST")
-    port = first_value("port", "db_port", "DB_PORT") or "1521"
-    service = first_value("service", "service_name", "db_service", "DB_SERVICE")
-    sid = first_value("sid", "db_sid", "DB_SID")
+    def setting_value(name: str) -> str:
+        return str(getattr(settings, name, "") or "").strip()
+
+    def setting_secret(name: str) -> str:
+        return secret_text(getattr(settings, name, ""))
+
+    host = first_value("host", "db_host", "DB_HOST") or setting_value("db_host")
+    port = first_value("port", "db_port", "DB_PORT") or setting_value("db_port") or "1521"
+    service = first_value("service", "service_name", "db_service", "DB_SERVICE") or setting_value("db_service")
+    sid = first_value("sid", "db_sid", "DB_SID") or setting_value("db_sid")
     dsn = first_value(
         "dsn",
         "db_dsn",
@@ -2553,19 +2569,33 @@ def workstation_oracle_config(repository: AppRepository) -> dict[str, str]:
         "oracle_connect_string",
         "tns",
         "tns_name",
-    )
+    ) or setting_value("db_dsn")
     if not dsn and host and service:
         dsn = f"{host}:{port}/{service}"
 
     return {
+        "active": "1" if is_active or any([dsn, host, service, sid, setting_value("db_user"), setting_secret("db_pass")]) else "",
         "dsn": dsn,
         "host": host,
         "port": port,
         "service": service,
         "sid": sid,
-        "username": first_value("username", "user", "db_user", "DB_USER"),
-        "password": first_value("password", "db_pass", "DB_PASS"),
+        "username": first_value("username", "user", "db_user", "DB_USER") or setting_value("db_user"),
+        "password": first_value("password", "db_pass", "DB_PASS") or setting_secret("db_pass"),
     }
+
+
+def workstation_oracle_missing_items(config: dict[str, str]) -> list[str]:
+    if not config.get("active"):
+        return ["oracle_agency_db chua bat hoac chua co cau hinh"]
+    missing: list[str] = []
+    if not config.get("dsn") and not (config.get("host") and (config.get("service") or config.get("sid"))):
+        missing.append("DB_DSN hoac DB_HOST + DB_SERVICE/DB_SID")
+    if not config.get("username"):
+        missing.append("DB_USER")
+    if not config.get("password"):
+        missing.append("DB_PASS")
+    return missing
 
 
 def workstation_setup_config_script(request: Request) -> str:
@@ -2574,7 +2604,7 @@ def workstation_setup_config_script(request: Request) -> str:
     repository = build_app_repository()
     drive_oauth_config = load_google_drive_oauth_config(repository)
     configured_drive_folder_id = google_drive_folder_id(settings, "", repository)
-    oracle_config = workstation_oracle_config(repository)
+    oracle_config = workstation_oracle_config(repository, settings)
     drive_oauth_refresh_token = ""
     try:
         drive_oauth_refresh_token = oauth_refresh_token_from_config(settings, drive_oauth_config)

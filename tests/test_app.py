@@ -118,11 +118,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=197" in public_response.text
+        assert "/static/app.js?v=198" in public_response.text
         assert "/static/styles.css?v=125" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
-        public_js = client.get("/static/app.js?v=197")
+        public_js = client.get("/static/app.js?v=198")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -140,7 +140,7 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert "/api/google-drive/oauth/status" in public_js.text
         assert "Link lưu báo cáo" not in public_js.text
         assert 'data-inline-onebss-field="storage_link"' not in public_js.text
-        assert "/static/workstation.js?v=3" in public_js.text
+        assert "/static/workstation.js?v=4" in public_js.text
         assert "window.VNPTReportsRuntime?.fillOneBssRunSelect?.()" in public_js.text
         assert "/static/reports-runtime.js?v=8" in public_js.text
         reports_runtime_js = client.get("/static/reports-runtime.js?v=8")
@@ -154,10 +154,12 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert "Chưa có máy trạm nhận lệnh" in reports_runtime_js.text
         assert "Máy trạm${workerId} đã nhận lệnh" in reports_runtime_js.text
         assert "progress_steps" in reports_runtime_js.text
-        workstation_js = client.get("/static/workstation.js?v=3")
+        workstation_js = client.get("/static/workstation.js?v=4")
         assert workstation_js.status_code == 200
         assert "worker.version" in workstation_js.text
         assert "worker.roles" in workstation_js.text
+        assert "oracle_config_ready" in workstation_js.text
+        assert "Oracle DB" in workstation_js.text
         assert 'Promise.allSettled([' in public_js.text
         assert '$("#connection-picker")?.addEventListener("change", renderConnectionsTable)' in public_js.text
         assert "function permissionDisplayFeatures" in public_js.text
@@ -219,6 +221,10 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
             },
         )
         assert saved_oracle.status_code == 200
+        configured_overview = client.get("/api/admin/workstation/overview")
+        assert configured_overview.status_code == 200
+        assert configured_overview.json()["config"]["oracle_config_ready"] is True
+        assert configured_overview.json()["config"]["oracle_password_configured"] is True
 
         package = client.get("/api/admin/workstation/setup-package")
         assert package.status_code == 200
@@ -270,6 +276,7 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "OracleDbDsn" in setup_script
         assert "OracleDbHost" in setup_script
         assert "Stop-ApiMiddlewareProcesses" in setup_script
+        assert "Goi cai dat thieu cau hinh Oracle" in setup_script
         assert "DB_DSN=$(DotEnvValue $oracleDbDsn)" in setup_script
         assert "DB_HOST=$(DotEnvValue $oracleDbHost)" in setup_script
         assert "DB_SID=$(DotEnvValue $oracleDbSid)" in setup_script
@@ -312,6 +319,68 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "[switch]$NoPause" in uninstall_task_script
         assert "timeout /t" not in setup_bat.lower()
         assert "\npause" not in setup_bat.lower()
+
+
+def test_workstation_oracle_password_can_fallback_to_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DB_PASS", "env-oracle-secret")
+    get_settings.cache_clear()
+    try:
+        with TestClient(app) as client:
+            login(client)
+            saved_oracle = client.put(
+                "/api/admin/connections/oracle_agency_db",
+                json={
+                    "name": "Oracle DB noi bo",
+                    "connection_type": "oracle",
+                    "description": "Oracle cho may tram",
+                    "config": {
+                        "host": "10.10.10.20",
+                        "port": 1521,
+                        "service": "ONEBSS",
+                        "username": "REPORT_USER",
+                        "password": "",
+                    },
+                    "is_active": True,
+                },
+            )
+            assert saved_oracle.status_code == 200
+            overview = client.get("/api/admin/workstation/overview")
+            assert overview.status_code == 200
+            assert overview.json()["config"]["oracle_config_ready"] is True
+            package = client.get("/api/admin/workstation/setup-package")
+            assert package.status_code == 200
+            with ZipFile(BytesIO(package.content)) as archive:
+                config_text = archive.read("VNPTCTO_WORKSTATION_SETUP/workstation-install-config.ps1").decode("utf-8")
+            assert "OracleDbPass = 'env-oracle-secret'" in config_text
+    finally:
+        get_settings.cache_clear()
+
+
+def test_workstation_overview_reports_missing_oracle_password() -> None:
+    with TestClient(app) as client:
+        login(client)
+        saved_oracle = client.put(
+            "/api/admin/connections/oracle_agency_db",
+            json={
+                "name": "Oracle DB noi bo",
+                "connection_type": "oracle",
+                "description": "Oracle cho may tram",
+                "config": {
+                    "host": "10.10.10.20",
+                    "port": 1521,
+                    "service": "ONEBSS",
+                    "username": "REPORT_USER",
+                    "password": "",
+                },
+                "is_active": True,
+            },
+        )
+        assert saved_oracle.status_code == 200
+        overview = client.get("/api/admin/workstation/overview")
+        assert overview.status_code == 200
+        config = overview.json()["config"]
+        assert config["oracle_config_ready"] is False
+        assert "DB_PASS" in config["oracle_missing_items"]
 
 
 def test_api_middleware_uses_oracle_dsn_and_rejects_bequeath(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -543,7 +612,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=197" in page.text
+        assert "/static/app.js?v=198" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -5351,7 +5420,7 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
         assert "/static/shell.js?v=20" in home.text
-        assert "/static/app.js?v=197" not in home.text
+        assert "/static/app.js?v=198" not in home.text
         shell_js = client.get("/static/shell.js?v=20")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
@@ -5359,7 +5428,7 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "function readCachedNavigation" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=197" in shell_js.text
+        assert "/static/app.js?v=198" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -5373,7 +5442,7 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
         assert "/static/shell.js?v=20" in dashboard.text
-        assert "/static/app.js?v=197" not in dashboard.text
+        assert "/static/app.js?v=198" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -5393,49 +5462,49 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "dynamic-report-body" not in reports.text
         assert "dynamic-report-prev" not in reports.text
         assert "dynamic-report-next" not in reports.text
-        assert "/static/app.js?v=197" in reports.text
+        assert "/static/app.js?v=198" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=197" in workstation.text
+        assert "/static/app.js?v=198" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=197" in work_tasks.text
+        assert "/static/app.js?v=198" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=197" in report_links.text
+        assert "/static/app.js?v=198" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=197" in system.text
+        assert "/static/app.js?v=198" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=197" in onebss_mining.text
+        assert "/static/app.js?v=198" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 
         ftp_mining = client.get("/daodulieuftp")
         assert ftp_mining.status_code == 200
         assert "view-ftp-mining" in ftp_mining.text
-        assert "/static/app.js?v=197" in ftp_mining.text
+        assert "/static/app.js?v=198" in ftp_mining.text
         assert "/static/ftp-mining.js" not in ftp_mining.text
         assert ftp_mining.text.count('class="app-view') == 1
 

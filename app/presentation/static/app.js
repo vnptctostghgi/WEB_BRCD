@@ -242,7 +242,7 @@ function ensureWorkstationScriptLoaded() {
   if (workstationScriptPromise) return workstationScriptPromise;
   workstationScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/workstation.js?v=3";
+    script.src = "/static/workstation.js?v=4";
     script.defer = true;
     script.dataset.workstation = "true";
     script.addEventListener("load", () => {

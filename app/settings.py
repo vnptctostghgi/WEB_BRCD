@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     internal_api_mock_mode: bool = True
     internal_api_timeout_seconds: int = 20
     internal_api_token: SecretStr = Field(default=SecretStr(""))
+    db_dsn: str = ""
+    db_host: str = ""
+    db_port: str = "1521"
+    db_service: str = ""
+    db_sid: str = ""
+    db_user: str = ""
+    db_pass: SecretStr = Field(default=SecretStr(""))
     dynamic_report_fetch_page_size: int = 500
     dynamic_report_export_page_size: int = 5000
     dynamic_report_export_max_rows: int = 1000000
