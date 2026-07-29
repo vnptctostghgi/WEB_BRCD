@@ -7,6 +7,7 @@ import ftplib
 import mimetypes
 import os
 import sys
+import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -32,7 +33,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.07.29-sql-progress-worker"
+WORKER_VERSION = "2026.07.30-synced-oracle-worker"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -422,7 +423,7 @@ def run_sql_worker_query(task: dict[str, Any]) -> dict[str, Any]:
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    timeout_seconds = float(os.getenv("SQL_WORKER_TIMEOUT_SECONDS", "300") or "300")
+    timeout_seconds = float(os.getenv("SQL_WORKER_TIMEOUT_SECONDS", "1800") or "1800")
     api_urls = internal_sql_api_urls()
     if not api_urls:
         raise RuntimeError("Chua cau hinh URL API du lieu local cho SQL worker.")
@@ -462,10 +463,37 @@ def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
             },
         )
 
+    def start_export_heartbeat(report_code: str) -> threading.Event:
+        stop_event = threading.Event()
+
+        def heartbeat_loop() -> None:
+            while not stop_event.wait(25):
+                elapsed_seconds = int(time.monotonic() - started)
+                try:
+                    send_progress(
+                        f"May tram van dang xuat Excel/upload Drive, da chay {elapsed_seconds} giay.",
+                        details={
+                            "step": "oracle_export_drive",
+                            "report": report_code,
+                            "elapsed_seconds": elapsed_seconds,
+                            "worker_version": WORKER_VERSION,
+                        },
+                    )
+                except Exception as error:
+                    print(f"Khong cap nhat duoc tien trinh SQL: {describe_request_error(error)}", file=sys.stderr)
+
+        threading.Thread(
+            target=heartbeat_loop,
+            name=f"vnptcto-sql-export-{run_id or 'task'}",
+            daemon=True,
+        ).start()
+        return stop_event
+
     try:
         query = task.get("query") if isinstance(task.get("query"), dict) else {}
         action = str(query.get("action") or "").strip()
         report_code = str(task.get("report_code") or query.get("ma_bao_cao") or "")
+        export_heartbeat: threading.Event | None = None
         if action == "export_sql_report_to_drive":
             send_progress(
                 "May tram da nhan lenh lay du lieu SQL. Dang chuan bi ket noi Oracle noi bo.",
@@ -475,12 +503,17 @@ def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
                 "Dang ket noi Oracle noi bo, xuat Excel va upload Google Drive.",
                 details={"step": "oracle_export_drive", "report": report_code, "api_urls": internal_sql_api_urls()},
             )
+            export_heartbeat = start_export_heartbeat(report_code)
         else:
             send_progress(
                 "May tram da nhan task SQL. Dang goi API du lieu local.",
                 details={"step": "received", "report": report_code, "api_urls": internal_sql_api_urls()},
             )
-        result = run_sql_worker_query(task)
+        try:
+            result = run_sql_worker_query(task)
+        finally:
+            if export_heartbeat is not None:
+                export_heartbeat.set()
 
         def result_int(*values: Any) -> int:
             for value in values:

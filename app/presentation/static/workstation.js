@@ -60,13 +60,15 @@
   }
 
   function workstationIssueCount(config, queue) {
-    return [
-      !config.internal_api_token_configured,
-      Boolean(config.internal_api_mock_mode),
-      !config.google_drive_oauth_ready,
-      !config.oracle_config_ready,
-      Number(queue.waiting_otp || 0) > 0,
-    ].filter(Boolean).length;
+    const setupMissing = Array.isArray(config.one_click_setup_missing_items)
+      ? config.one_click_setup_missing_items.length
+      : [
+          !config.internal_api_token_configured,
+          Boolean(config.internal_api_mock_mode),
+          !config.google_drive_oauth_ready,
+          !config.oracle_config_ready,
+        ].filter(Boolean).length;
+    return setupMissing + (Number(queue.waiting_otp || 0) > 0 ? 1 : 0);
   }
 
   function renderWorkstationOverview() {
@@ -77,9 +79,9 @@
     const onlineWorkers = workers.filter((worker) => String(worker.status || "").toLowerCase() === "online").length;
     const cards = [
       ["WS", "Worker online", `${onlineWorkers}/${workers.length || 0}`],
-      ["JOB", "OneBSS", `${Number(queue.queued || 0)} cho / ${Number(queue.active || 0)} chay`],
+      ["JOB", "Task nen", `${Number(queue.queued || 0)} cho / ${Number(queue.active || 0)} chay`],
       ["OTP", "Doi OTP", Number(queue.waiting_otp || 0)],
-      ["CFG", "Can xu ly", workstationIssueCount(config, queue)],
+      ["SET", "Bo cai", config.one_click_setup_ready ? "San sang" : `${workstationIssueCount(config, queue)} viec`],
     ];
     const cardsEl = $("#workstation-cards");
     if (cardsEl) {
@@ -140,24 +142,27 @@
     if (packageLink) packageLink.href = setup.package_url || "/api/admin/workstation/setup-package";
     const panel = $("#workstation-admin-panel");
     if (panel) {
-      const driveMissing = Array.isArray(config.google_drive_missing_items) ? config.google_drive_missing_items.join(", ") : "";
+      const missingItems = Array.isArray(config.one_click_setup_missing_items) ? config.one_click_setup_missing_items : [];
+      const setupReady = Boolean(config.one_click_setup_ready);
+      const setupMessage = config.one_click_setup_message || (
+        setupReady
+          ? "Bo cai da co san cau hinh. Tai ve may tram va chay mot lan."
+          : `Bo cai chua san sang: ${missingItems.join(", ") || "thieu cau hinh tren web"}.`
+      );
       const driveNote = config.google_drive_oauth_ready
-        ? `OAuth ${config.google_drive_oauth_email || ""} -> ${config.google_drive_folder_id || ""}`.trim()
-        : (driveMissing || "Can luu folder va ket noi OAuth.");
-      const oracleMissing = Array.isArray(config.oracle_missing_items) ? config.oracle_missing_items.join(", ") : "";
+        ? `Drive ${config.google_drive_folder_id || ""}`.trim()
+        : "Drive chua san sang tren web.";
       const oracleNote = config.oracle_config_ready
-        ? `${config.oracle_dsn_configured ? "DB_DSN" : (config.oracle_host || "Oracle")} / user OK / DB_PASS OK`
-        : (oracleMissing || "Thieu cau hinh Oracle.");
+        ? "Oracle da co trong bo cai."
+        : "Oracle chua san sang tren web.";
       const checks = [
-        ["Token worker", config.internal_api_token_configured, "Dung de nhan task va gui heartbeat."],
-        ["API du lieu", !config.internal_api_mock_mode, config.internal_api_mock_mode ? "Dang o che do mock." : config.internal_api_url || ""],
-        ["Google Drive", config.google_drive_oauth_ready, driveNote],
-        ["Oracle DB", config.oracle_config_ready, oracleNote],
-        ["Bo cai", config.oracle_config_ready && config.google_drive_oauth_ready && config.internal_api_token_configured, setup.script_name || "SETUP_VNPTCTO_WORKSTATION.bat"],
+        ["Bo cai mot lan", setupReady, setupMessage],
+        ["Oracle dong bo", config.oracle_config_ready, oracleNote],
+        ["Thu muc Drive", config.google_drive_oauth_ready, driveNote],
       ];
       panel.innerHTML = checks.map(([label, ok, note]) => `
         <div class="workstation-admin-row">
-          <span class="status ${ok ? "success" : "warning"}">${ok ? "OK" : "Can cau hinh"}</span>
+          <span class="status ${ok ? "success" : "warning"}">${ok ? "OK" : "Chua san sang"}</span>
           <div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(note || "")}</small></div>
         </div>
       `).join("");
@@ -165,7 +170,11 @@
     const tasks = $("#workstation-task-list");
     if (tasks) {
       const taskNames = Array.isArray(setup.task_names) ? setup.task_names : [];
-      tasks.innerHTML = taskNames.slice(0, 4).map((task) => `<span class="status viewer">${escapeHtml(task)}</span>`).join("");
+      tasks.innerHTML = [
+        setup.script_name || "SETUP_VNPTCTO_WORKSTATION.bat",
+        `v${setup.package_version || ""}`,
+        ...taskNames.slice(0, 2),
+      ].filter(Boolean).map((task) => `<span class="status viewer">${escapeHtml(task)}</span>`).join("");
     }
   }
 

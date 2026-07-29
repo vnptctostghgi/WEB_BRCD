@@ -30,7 +30,7 @@ app = FastAPI(title="API trung gian VNPT CTO")
 
 EXCEL_MAX_ROWS_PER_SHEET = 1_048_576
 GOOGLE_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
-API_MIDDLEWARE_VERSION = "2026.07.29-oracle-date-binds"
+API_MIDDLEWARE_VERSION = "2026.07.30-synced-oracle-stream-export"
 ORACLE_DATE_INPUT_FORMATS = ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%Y/%m/%d", "%d.%m.%Y", "%Y%m%d")
 ORACLE_DSN_ENV_KEYS = (
     "DB_DSN",
@@ -488,13 +488,19 @@ OFFSET :PAGING_OFFSET ROWS FETCH NEXT :PAGING_LIMIT ROWS ONLY
 
 
 def write_export_to_excel(cursor, sql: str, binds: dict[str, Any], target_path: Path, page_size: int, max_rows: int) -> dict[str, Any]:
+    safe_fetch_size = max(1000, min(int(page_size or 10000), 50000))
+    safe_max_rows = max(1, int(max_rows or 1000000))
+    try:
+        cursor.arraysize = safe_fetch_size
+        cursor.prefetchrows = safe_fetch_size
+    except Exception:
+        pass
+
     workbook = openpyxl.Workbook(write_only=True)
     sheet = None
     sheet_index = 0
     sheet_rows = 0
     total_written = 0
-    total = count_rows(cursor, sql, binds)
-    page = 1
     columns: list[str] = []
 
     def start_sheet() -> Any:
@@ -505,10 +511,11 @@ def write_export_to_excel(cursor, sql: str, binds: dict[str, Any], target_path: 
         sheet_rows = 0
         return ws
 
-    while total_written < max_rows:
-        page_columns, rows = fetch_page(cursor, sql, binds, page, page_size)
-        if not columns:
-            columns = page_columns or ["Ket qua"]
+    cursor.execute(sql, binds)
+    columns = [item[0] for item in (cursor.description or [])] or ["Ket qua"]
+
+    while total_written < safe_max_rows:
+        rows = cursor.fetchmany(min(safe_fetch_size, safe_max_rows - total_written))
         if not rows:
             break
         if sheet is None:
@@ -516,26 +523,32 @@ def write_export_to_excel(cursor, sql: str, binds: dict[str, Any], target_path: 
             sheet.append([WriteOnlyCell(sheet, value=column) for column in columns])
             sheet_rows = 1
         for row in rows:
-            if total_written >= max_rows:
+            if total_written >= safe_max_rows:
                 break
             if sheet_rows >= EXCEL_MAX_ROWS_PER_SHEET:
                 sheet = start_sheet()
                 sheet.append([WriteOnlyCell(sheet, value=column) for column in columns])
                 sheet_rows = 1
-            sheet.append([excel_value(row.get(column)) for column in columns])
+            if isinstance(row, dict):
+                values = [row.get(column) for column in columns]
+            else:
+                values = list(row)
+            sheet.append([excel_value(value) for value in values])
             sheet_rows += 1
             total_written += 1
-        if total and total_written >= total:
-            break
-        if len(rows) < page_size:
-            break
-        page += 1
 
     if sheet is None:
         sheet = start_sheet()
         sheet.append(columns or ["Ket qua"])
     workbook.save(target_path)
-    return {"rows": total_written, "total": total or total_written, "columns": columns}
+    return {
+        "rows": total_written,
+        "total": total_written,
+        "columns": columns,
+        "streaming": True,
+        "fetch_size": safe_fetch_size,
+        "truncated": total_written >= safe_max_rows,
+    }
 
 
 @app.get("/")
@@ -766,7 +779,7 @@ def du_lieu_web(payload: dict[str, Any], authorization: str = Header(default="")
             if not folder_id:
                 raise HTTPException(status_code=400, detail="Thieu drive_folder_id.")
             pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
-            page_size = int(pagination.get("page_size") or os.getenv("EXPORT_PAGE_SIZE", "5000"))
+            page_size = int(pagination.get("page_size") or os.getenv("EXPORT_PAGE_SIZE", "20000"))
             max_rows = int(pagination.get("max_rows") or os.getenv("EXPORT_MAX_ROWS", "1000000"))
             file_name = safe_file_name(payload.get("file_name") or f"{payload.get('ma_bao_cao')}_{datetime.now():%Y%m%d_%H%M%S}.xlsx")
             export_dir = Path(os.getenv("EXPORT_DIR", str(Path(tempfile.gettempdir()) / "vnptcto_exports")))
@@ -787,6 +800,11 @@ def du_lieu_web(payload: dict[str, Any], authorization: str = Header(default="")
                 "rows": result["rows"],
                 "total": result["total"],
                 "columns": result["columns"],
+                "details": {
+                    "streaming": bool(result.get("streaming")),
+                    "fetch_size": result.get("fetch_size"),
+                    "truncated": bool(result.get("truncated")),
+                },
             }
 
         raise HTTPException(status_code=400, detail=f"Action khong ho tro: {action}")

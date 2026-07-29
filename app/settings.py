@@ -43,9 +43,9 @@ class Settings(BaseSettings):
     db_user: str = ""
     db_pass: SecretStr = Field(default=SecretStr(""))
     dynamic_report_fetch_page_size: int = 500
-    dynamic_report_export_page_size: int = 5000
+    dynamic_report_export_page_size: int = 20000
     dynamic_report_export_max_rows: int = 1000000
-    dynamic_report_export_timeout_seconds: int = 300
+    dynamic_report_export_timeout_seconds: int = 1800
     dynamic_report_export_max_workers: int = 1
     dashboard_tab_max_workers: int = 10
     dashboard_chart_cache_enabled: bool = True

@@ -128,7 +128,7 @@ WORKSTATION_HEARTBEATS: dict[str, dict[str, Any]] = {}
 WORKSTATION_HEARTBEATS_LOCK = threading.Lock()
 WORKSTATION_HEARTBEAT_TTL_SECONDS = 10 * 60
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260729-oracle-secretref-v4"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260730-synced-oracle-v5"
 WORKSTATION_SETUP_INCLUDE_PATHS = (
     ".env.example",
     "README.md",
@@ -2286,11 +2286,21 @@ def workstation_public_config(request: Request) -> dict[str, Any]:
     drive_status = google_drive_oauth_status(settings, repository)
     oracle_config = workstation_oracle_config(repository, settings)
     oracle_missing_items = workstation_oracle_missing_items(oracle_config)
+    missing_items: list[str] = []
+    if not configured_secret(settings.internal_api_token):
+        missing_items.append("token web")
+    if bool(settings.internal_api_mock_mode):
+        missing_items.append("tat che do mock API")
+    if oracle_missing_items:
+        missing_items.append("Oracle")
+    if not bool(drive_status.get("ready")):
+        missing_items.append("Google Drive")
     public_url = str(getattr(settings, "app_public_url", "") or "").strip().rstrip("/")
     if not public_url:
         forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip()
         forwarded_host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",", 1)[0].strip()
         public_url = f"{forwarded_proto}://{forwarded_host}" if forwarded_proto and forwarded_host else str(request.base_url).rstrip("/")
+    one_click_ready = not missing_items
     return {
         "web_base_url": public_url,
         "internal_api_url": settings.internal_api_url,
@@ -2311,6 +2321,13 @@ def workstation_public_config(request: Request) -> dict[str, Any]:
         "oracle_service_configured": bool(oracle_config.get("service") or oracle_config.get("sid")),
         "oracle_user_configured": bool(oracle_config.get("username")),
         "oracle_password_configured": bool(oracle_config.get("password")),
+        "one_click_setup_ready": one_click_ready,
+        "one_click_setup_missing_items": missing_items,
+        "one_click_setup_message": (
+            "Bo cai da co san cau hinh. Tai ve may tram va chay SETUP_VNPTCTO_WORKSTATION.bat mot lan."
+            if one_click_ready
+            else f"Bo cai chua san sang: thieu {', '.join(missing_items)}."
+        ),
         "data_mining_download_dir": settings.data_mining_download_dir,
         "storage_backend": settings.app_database_backend,
     }
@@ -2656,6 +2673,9 @@ def workstation_setup_config_script(request: Request) -> str:
         ("OneBssUsername", settings.onebss_username, "OneBSS username from web settings."),
         ("OneBssPassword", secret_text(settings.onebss_password), "OneBSS password from web settings."),
         ("OneBssDownloadTimeoutSeconds", str(settings.onebss_download_timeout_seconds), "OneBSS download timeout."),
+        ("SqlWorkerTimeoutSeconds", str(settings.dynamic_report_export_timeout_seconds or 1800), "SQL/export timeout for long Oracle reports."),
+        ("ExportPageSize", str(settings.dynamic_report_export_page_size or 20000), "Rows fetched per Oracle batch when exporting."),
+        ("ExportMaxRows", str(settings.dynamic_report_export_max_rows or 1000000), "Maximum rows per export job."),
         ("GoogleDriveFolderId", configured_drive_folder_id, "Optional Drive folder for local fallback."),
         ("GoogleDriveOauthClientId", settings.google_drive_oauth_client_id, "Optional Drive OAuth client ID."),
         ("GoogleDriveOauthClientSecret", secret_text(settings.google_drive_oauth_client_secret), "Optional Drive OAuth client secret."),
@@ -4833,7 +4853,7 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
             "drive_folder_id": drive_folder_id,
             "file_name": filename,
             "pagination": {
-                "page_size": int(get_settings().dynamic_report_export_page_size or 5000),
+                "page_size": int(get_settings().dynamic_report_export_page_size or 20000),
                 "max_rows": int(get_settings().dynamic_report_export_max_rows or 1000000),
             },
         }

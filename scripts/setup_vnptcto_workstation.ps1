@@ -13,6 +13,9 @@ param(
   [string]$OracleDbSid = "",
   [string]$OracleDbUser = "",
   [string]$OracleDbPass = "",
+  [string]$SqlWorkerTimeoutSeconds = "1800",
+  [string]$ExportPageSize = "20000",
+  [string]$ExportMaxRows = "1000000",
   [string]$ConfigFile = "",
   [switch]$StartNow,
   [switch]$SkipApiMiddleware,
@@ -350,6 +353,9 @@ function Ensure-WorkstationEnvFile {
   Set-DotEnvValue $envFile "ONEBSS_WORKER_ID" $WorkerId
   Set-DotEnvValue $envFile "ONEBSS_LOGIN_URL" $onebssLoginUrl
   Set-DotEnvValue $envFile "ONEBSS_DOWNLOAD_TIMEOUT_SECONDS" $onebssDownloadTimeoutSeconds
+  Set-DotEnvValue $envFile "SQL_WORKER_TIMEOUT_SECONDS" $sqlWorkerTimeoutSeconds
+  Set-DotEnvValue $envFile "EXPORT_PAGE_SIZE" $exportPageSize
+  Set-DotEnvValue $envFile "EXPORT_MAX_ROWS" $exportMaxRows
   Set-DotEnvValue $envFile "ONEBSS_USERNAME" $env:ONEBSS_USERNAME
   Set-DotEnvValue $envFile "ONEBSS_PASSWORD" $env:ONEBSS_PASSWORD
   Set-DotEnvValue $envFile "GOOGLE_DRIVE_FOLDER_ID" $googleDriveFolderId
@@ -370,8 +376,8 @@ function Ensure-ApiEnvFile {
     Set-Content -Path $apiEnv -Value @(
       "API_TOKEN=$(DotEnvValue $InternalApiToken)"
       "EXPORT_DIR=$(DotEnvValue (Join-Path $ApiRoot 'exports'))"
-      "EXPORT_PAGE_SIZE=5000"
-      "EXPORT_MAX_ROWS=1000000"
+      "EXPORT_PAGE_SIZE=$(DotEnvValue $exportPageSize)"
+      "EXPORT_MAX_ROWS=$(DotEnvValue $exportMaxRows)"
       "DB_DSN=$(DotEnvValue $oracleDbDsn)"
       "DB_HOST=$(DotEnvValue $oracleDbHost)"
       "DB_PORT=$(DotEnvValue $oracleDbPort)"
@@ -390,6 +396,8 @@ function Ensure-ApiEnvFile {
   }
   Set-DotEnvValue $apiEnv "API_TOKEN" $InternalApiToken
   Set-DotEnvValue $apiEnv "EXPORT_DIR" (Join-Path $ApiRoot "exports")
+  Set-DotEnvValue $apiEnv "EXPORT_PAGE_SIZE" $exportPageSize
+  Set-DotEnvValue $apiEnv "EXPORT_MAX_ROWS" $exportMaxRows
   Set-DotEnvValue $apiEnv "DB_DSN" $oracleDbDsn
   if (-not [string]::IsNullOrWhiteSpace($oracleDbHost)) { Set-DotEnvValue $apiEnv "DB_HOST" $oracleDbHost }
   if (-not [string]::IsNullOrWhiteSpace($oracleDbPort)) { Set-DotEnvValue $apiEnv "DB_PORT" $oracleDbPort }
@@ -626,6 +634,9 @@ $googleDriveOauthRedirectUri = Resolve-SetupValue $setupConfig "GoogleDriveOauth
 $googleDriveOauthRefreshToken = Resolve-SetupValue $setupConfig "GoogleDriveOauthRefreshToken" "" "" ""
 $googleDriveOauthEmail = Resolve-SetupValue $setupConfig "GoogleDriveOauthEmail" "" "" ""
 $googleDriveServiceAccountJsonBase64 = Resolve-SetupValue $setupConfig "GoogleDriveServiceAccountJsonBase64" "" "" "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64"
+$sqlWorkerTimeoutSeconds = Resolve-SetupValue $setupConfig "SqlWorkerTimeoutSeconds" $SqlWorkerTimeoutSeconds "1800" "SQL_WORKER_TIMEOUT_SECONDS"
+$exportPageSize = Resolve-SetupValue $setupConfig "ExportPageSize" $ExportPageSize "20000" "EXPORT_PAGE_SIZE"
+$exportMaxRows = Resolve-SetupValue $setupConfig "ExportMaxRows" $ExportMaxRows "1000000" "EXPORT_MAX_ROWS"
 
 $script:SkipApiMiddlewareResolved = [bool]$SkipApiMiddleware
 if ($setupConfig.Contains("SkipApiMiddleware")) {
@@ -688,6 +699,9 @@ Set-UserEnvironment "ONEBSS_DRIVE_UPLOAD_API_URL" $WorkerDriveUploadApiUrl
 Set-UserEnvironment "ONEBSS_WORKER_ID" $WorkerId
 Set-UserEnvironment "ONEBSS_WORKER_POLL_SECONDS" "5"
 Set-UserEnvironment "ONEBSS_WORKER_HEARTBEAT_SECONDS" "60"
+Set-UserEnvironment "SQL_WORKER_TIMEOUT_SECONDS" $sqlWorkerTimeoutSeconds
+Set-UserEnvironment "EXPORT_PAGE_SIZE" $exportPageSize
+Set-UserEnvironment "EXPORT_MAX_ROWS" $exportMaxRows
 Set-UserEnvironment "ONEBSS_USERNAME" $onebssUsername
 Set-UserEnvironment "ONEBSS_PASSWORD" $onebssPassword
 Set-UserEnvironment "ONEBSS_LOGIN_URL" $onebssLoginUrl

@@ -572,8 +572,8 @@ class DatabaseService:
 
     def _dynamic_report_export_page_size(self) -> int:
         settings = getattr(self.internal_api, "settings", None)
-        configured = int(getattr(settings, "dynamic_report_export_page_size", 5000) or 5000)
-        return max(1000, min(configured, 20000))
+        configured = int(getattr(settings, "dynamic_report_export_page_size", 20000) or 20000)
+        return max(1000, min(configured, 50000))
 
     def _dynamic_report_export_max_rows(self) -> int:
         settings = getattr(self.internal_api, "settings", None)
@@ -582,7 +582,7 @@ class DatabaseService:
 
     def _dynamic_report_export_timeout_seconds(self) -> int:
         settings = getattr(self.internal_api, "settings", None)
-        configured = int(getattr(settings, "dynamic_report_export_timeout_seconds", 180) or 180)
+        configured = int(getattr(settings, "dynamic_report_export_timeout_seconds", 1800) or 1800)
         return max(20, configured)
 
     @staticmethod
