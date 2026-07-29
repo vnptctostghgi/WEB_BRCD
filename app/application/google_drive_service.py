@@ -56,10 +56,10 @@ def extract_google_drive_folder_id(value: Any) -> str:
     return ""
 
 
-def google_drive_folder_id(settings: Settings, storage_link: str = "") -> str:
+def google_drive_folder_id(settings: Settings, storage_link: str = "", repository: Any | None = None) -> str:
     configured_folder = str(getattr(settings, "google_drive_folder_id", "") or "").strip()
     if not configured_folder:
-        oauth_config = load_google_drive_oauth_config()
+        oauth_config = load_google_drive_oauth_config(repository)
         configured_folder = str(oauth_config.get("folder") or oauth_config.get("folder_id") or "").strip()
     return extract_google_drive_folder_id(storage_link) or configured_folder
 
@@ -248,10 +248,17 @@ def load_service_account_info(settings: Settings) -> dict[str, Any]:
     return info
 
 
-def upload_file_to_google_drive(settings: Settings, local_path: Path, file_name: str, folder_id: str, mime_type: str = "") -> dict[str, Any]:
+def upload_file_to_google_drive(
+    settings: Settings,
+    local_path: Path,
+    file_name: str,
+    folder_id: str,
+    mime_type: str = "",
+    repository: Any | None = None,
+) -> dict[str, Any]:
     if not folder_id:
         raise GoogleDriveConfigurationError("Chua cau hinh folder_id Google Drive.")
-    oauth_credentials = google_drive_oauth_credentials(settings)
+    oauth_credentials = google_drive_oauth_credentials(settings, repository)
     if oauth_credentials:
         credentials, oauth_config = oauth_credentials
         return upload_with_credentials(

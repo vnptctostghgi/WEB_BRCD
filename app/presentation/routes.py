@@ -115,6 +115,8 @@ ONEBSS_REPORT_SEMAPHORE = threading.Semaphore(1)
 ONEBSS_REPORT_JOB_TTL_SECONDS = 24 * 60 * 60
 ONEBSS_REPORT_JOB_DIR = Path(tempfile.gettempdir()) / "vnptcto_onebss_report_jobs"
 ONEBSS_REPORT_ACTIVE_STATUSES = {"queued", "running", "otp_required", "otp_invalid", "manual_otp_required"}
+ONEBSS_REPORT_STALE_WORKER_STATUSES = ONEBSS_REPORT_ACTIVE_STATUSES - {"queued"}
+ONEBSS_REPORT_STALE_ACTIVE_SECONDS = 45 * 60
 ONEBSS_REPORT_FINAL_STATUSES = {"success", "failed", "cancelled", "storage_failed", "google_drive_not_configured", "google_drive_upload_failed"}
 FTP_REPORT_ACTIVE_STATUSES = {"queued", "running"}
 FTP_REPORT_FINAL_STATUSES = {"success", "failed", "cancelled"}
@@ -2262,6 +2264,46 @@ def workstation_run_last_seen(run: dict[str, Any]) -> datetime | None:
     return newest_datetime(run.get("updated_at"), run.get("claimed_at"), run.get("started_at"), run.get("finished_at"))
 
 
+def _expire_stale_onebss_worker_runs(repository: Any, ma_bao_cao: str = "", limit: int = 200) -> int:
+    now = datetime.now(UTC)
+    expired = 0
+    try:
+        runs = repository.list_onebss_report_runs(ma_bao_cao=ma_bao_cao, limit=limit)
+    except Exception:
+        logger.exception("Cannot scan stale OneBSS worker runs")
+        return 0
+    for run in runs:
+        status_value = str(run.get("status") or "").lower()
+        if status_value not in ONEBSS_REPORT_STALE_WORKER_STATUSES:
+            continue
+        last_seen = newest_datetime(run.get("updated_at"), run.get("claimed_at")) or parse_datetime_value(run.get("started_at"))
+        if not last_seen:
+            continue
+        age_seconds = (now - last_seen).total_seconds()
+        if age_seconds <= ONEBSS_REPORT_STALE_ACTIVE_SECONDS:
+            continue
+        run_id = str(run.get("run_id") or "").strip()
+        if not run_id:
+            continue
+        try:
+            repository.update_onebss_report_run(
+                run_id,
+                {
+                    "status": "failed",
+                    "message": (
+                        "Task OneBSS bi treo qua "
+                        f"{int(ONEBSS_REPORT_STALE_ACTIVE_SECONDS / 60)} phut khong co cap nhat tu may tram. "
+                        "He thong da mo khoa de chay lai."
+                    ),
+                    "finished_at": datetime.now().isoformat(timespec="seconds"),
+                },
+            )
+            expired += 1
+        except Exception:
+            logger.exception("Cannot expire stale OneBSS worker run %s", run_id)
+    return expired
+
+
 def workstation_runs_overview(runs: list[dict[str, Any]]) -> dict[str, Any]:
     status_counts: dict[str, int] = {}
     workers: dict[str, dict[str, Any]] = {}
@@ -2410,8 +2452,9 @@ def powershell_bool(value: bool) -> str:
 def workstation_setup_config_script(request: Request) -> str:
     settings = get_settings()
     public_config = workstation_public_config(request)
-    drive_oauth_config = load_google_drive_oauth_config(build_app_repository())
-    configured_drive_folder_id = google_drive_folder_id(settings, "")
+    repository = build_app_repository()
+    drive_oauth_config = load_google_drive_oauth_config(repository)
+    configured_drive_folder_id = google_drive_folder_id(settings, "", repository)
     drive_oauth_refresh_token = ""
     try:
         drive_oauth_refresh_token = oauth_refresh_token_from_config(settings, drive_oauth_config)
@@ -3933,7 +3976,7 @@ def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload, creat
         _set_dynamic_report_export_job(job_id, status="running", message="Đang chuẩn bị dữ liệu xuất Excel.")
         DYNAMIC_REPORT_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
         target_path = DYNAMIC_REPORT_EXPORT_DIR / f"{job_id}.xlsx"
-        drive_folder_id = google_drive_folder_id(get_settings(), "")
+        drive_folder_id = google_drive_folder_id(get_settings(), "", build_app_repository())
 
         if drive_folder_id:
             filename = _dynamic_report_export_filename({"report": {"ma_bao_cao": payload.ma_bao_cao.strip().upper()}})
@@ -5310,10 +5353,12 @@ def list_onebss_report_configs(request: Request) -> dict:
 def list_onebss_report_runs(request: Request, ma_bao_cao: str = "", limit: int = 50) -> dict:
     admin_user(request)
     report_code = ma_bao_cao.strip().upper()
+    repository = build_app_repository()
     try:
+        _expire_stale_onebss_worker_runs(repository, ma_bao_cao=report_code)
         runs = [
             _decorate_onebss_report_run(run)
-            for run in build_app_repository().list_onebss_report_runs(ma_bao_cao=report_code, limit=limit)
+            for run in repository.list_onebss_report_runs(ma_bao_cao=report_code, limit=limit)
         ]
     except RuntimeError as error:
         raise_onebss_report_schema_error(error)
@@ -5478,6 +5523,7 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
     actor = admin_user(request)
     repository = build_app_repository()
     ma_bao_cao = payload.ma_bao_cao.strip().upper()
+    _expire_stale_onebss_worker_runs(repository, ma_bao_cao=ma_bao_cao)
     try:
         report = repository.get_onebss_report_by_code(ma_bao_cao)
     except (RuntimeError, sqlite3.Error, AttributeError) as error:
@@ -5525,6 +5571,7 @@ def claim_onebss_worker_task(request: Request, payload: OneBssWorkerClaimPayload
     onebss_worker_token(request)
     repository = build_app_repository()
     try:
+        _expire_stale_onebss_worker_runs(repository)
         run = repository.claim_next_onebss_report_run(payload.worker_id)
     except RuntimeError as error:
         raise_onebss_report_schema_error(error)
@@ -5541,7 +5588,7 @@ def claim_onebss_worker_task(request: Request, payload: OneBssWorkerClaimPayload
             },
         )
         return {"ok": False, "task": None, "message": "Khong tim thay cau hinh bao cao OneBSS."}
-    folder_id = google_drive_folder_id(get_settings(), str(report.get("storage_link") or ""))
+    folder_id = google_drive_folder_id(get_settings(), str(report.get("storage_link") or ""), repository)
     return {
         "ok": True,
         "task": {
@@ -5645,9 +5692,9 @@ async def upload_onebss_worker_task_file(request: Request, run_id: str, file: Up
     report = repository.get_onebss_report_by_code(str(run.get("ma_bao_cao") or "")) or {}
     storage_target = str(report.get("storage_link") or "").strip()
     if not storage_target:
-        storage_target = google_drive_folder_id(settings, "")
+        storage_target = google_drive_folder_id(settings, "", repository)
     if storage_target:
-        storage_result = save_downloaded_file(settings, target_file, storage_target)
+        storage_result = save_downloaded_file(settings, target_file, storage_target, repository)
         if storage_result.get("ok") and str(storage_result.get("storage_status") or "").startswith("uploaded_google_drive:"):
             storage_link = str(storage_result.get("storage_link") or "")
             storage_status = str(storage_result.get("storage_status") or storage_status)

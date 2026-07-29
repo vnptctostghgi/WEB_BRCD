@@ -5,7 +5,7 @@ import threading
 import time
 import uuid
 from io import BytesIO
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -1299,7 +1299,7 @@ def test_google_drive_folder_link_and_storage_upload(monkeypatch, tmp_path) -> N
 
     uploaded_calls = []
 
-    def fake_upload_file_to_google_drive(settings, local_path, file_name, folder_id):
+    def fake_upload_file_to_google_drive(settings, local_path, file_name, folder_id, mime_type="", repository=None):
         uploaded_calls.append((str(local_path), file_name, folder_id))
         return {"file_id": "drive-file-001", "web_view_link": "https://drive.google.com/file/d/drive-file-001/view"}
 
@@ -1314,6 +1314,40 @@ def test_google_drive_folder_link_and_storage_upload(monkeypatch, tmp_path) -> N
     assert result["storage_link"] == "https://drive.google.com/file/d/drive-file-001/view"
     assert result["storage_status"] == "uploaded_google_drive:drive-file-001"
     assert uploaded_calls == [(str(local_file), "report.xlsx", "1TJqLjq8OpZ_x_D-djxRk0w4HacUh4HmS")]
+
+
+def test_google_drive_oauth_folder_config_uploads_without_env_folder(monkeypatch, tmp_path) -> None:
+    from app.application import onebss_data_mining_service as service
+
+    uploaded_calls = []
+
+    class FakeRepository:
+        def get_system_connection_by_code(self, code):
+            assert code == "drive_storage"
+            return {
+                "config": {
+                    "provider": "google_drive_oauth",
+                    "folder": "oauth-folder-001",
+                    "oauth_refresh_token_enc": "enc:stored-refresh-token",
+                }
+            }
+
+    def fake_upload_file_to_google_drive(settings, local_path, file_name, folder_id, mime_type="", repository=None):
+        uploaded_calls.append((str(local_path), file_name, folder_id, repository))
+        return {"file_id": "drive-file-oauth", "web_view_link": "https://drive.google.com/file/d/drive-file-oauth/view"}
+
+    local_file = tmp_path / "report.xlsx"
+    local_file.write_bytes(b"excel")
+    settings = get_settings().model_copy(update={"google_drive_folder_id": ""})
+    repository = FakeRepository()
+    monkeypatch.setattr(service, "upload_file_to_google_drive", fake_upload_file_to_google_drive)
+
+    result = service.save_downloaded_file(settings, local_file, "", repository)
+
+    assert result["ok"] is True
+    assert result["storage_link"] == "https://drive.google.com/file/d/drive-file-oauth/view"
+    assert result["storage_status"] == "uploaded_google_drive:drive-file-oauth"
+    assert uploaded_calls == [(str(local_file), "report.xlsx", "oauth-folder-001", repository)]
 
 
 def test_google_drive_oauth_start_and_protected_config(monkeypatch) -> None:
@@ -1824,7 +1858,7 @@ def test_dynamic_report_export_job_downloads_full_result_set(monkeypatch) -> Non
         }
 
     monkeypatch.setattr(routes.InternalApiClient, "run_sql_report", fake_run_sql_report)
-    monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings, storage_link="": "")
+    monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings, storage_link="", repository=None: "")
 
     with TestClient(app) as client:
         login(client)
@@ -1886,7 +1920,7 @@ def test_dynamic_report_export_queue_can_cancel_waiting_job(monkeypatch) -> None
             "details": {"export_rows": 1, "fetched_total": 1},
         }
 
-    monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings, storage_link="": "")
+    monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings, storage_link="", repository=None: "")
     monkeypatch.setattr(DatabaseService, "export_dynamic_report", fake_export_dynamic_report)
 
     with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
@@ -1922,7 +1956,7 @@ def test_dynamic_report_export_queue_can_cancel_waiting_job(monkeypatch) -> None
 def test_dynamic_report_export_job_can_return_drive_link(monkeypatch) -> None:
     calls = []
 
-    def fake_drive_folder_id(settings, storage_link=""):
+    def fake_drive_folder_id(settings, storage_link="", repository=None):
         return "drive-folder-001"
 
     def fake_export_to_drive(self, **kwargs):
@@ -1965,7 +1999,7 @@ def test_dynamic_report_export_job_can_return_drive_link(monkeypatch) -> None:
 
 
 def test_dynamic_report_export_job_status_recovers_from_persisted_metadata(monkeypatch, tmp_path) -> None:
-    def fake_drive_folder_id(settings, storage_link=""):
+    def fake_drive_folder_id(settings, storage_link="", repository=None):
         return "drive-folder-001"
 
     def fake_export_to_drive(self, **kwargs):
@@ -3524,6 +3558,41 @@ def test_onebss_report_run_records_worker_errors() -> None:
         assert "browser launch failed" in runs[0]["message"]
 
 
+def test_onebss_report_run_expires_stale_worker_task(monkeypatch) -> None:
+    monkeypatch.setattr(routes, "ONEBSS_REPORT_STALE_ACTIVE_SECONDS", 1)
+    with TestClient(app) as client:
+        login(client)
+        created = client.post(
+            "/api/admin/onebss-reports",
+            json={
+                "ten_bao_cao": "OneBSS stale run",
+                "danh_sach_bien": ["P_TUNGAY"],
+                "report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST_STALE&name=Test",
+                "storage_link": "",
+            },
+        )
+        assert created.status_code == 200
+        code = created.json()["ma_bao_cao"]
+
+        response = client.post("/api/onebss-reports/run", json={"ma_bao_cao": code, "parameters": {"P_TUNGAY": "01/07/2026"}})
+        assert response.status_code == 200
+        job_id = response.json()["job_id"]
+        headers = {"Authorization": "Bearer test-worker-token"}
+        claim = client.post("/api/onebss-worker/tasks/claim", json={"worker_id": "ws-stale"}, headers=headers)
+        assert claim.status_code == 200
+        assert claim.json()["task"]["run_id"] == job_id
+
+        stale_at = (datetime.now(UTC) - timedelta(seconds=5)).isoformat(timespec="seconds").replace("+00:00", "Z")
+        repository = routes.build_app_repository()
+        repository.update_onebss_report_run(job_id, {"status": "running", "claimed_at": stale_at, "updated_at": stale_at})
+
+        runs = client.get(f"/api/onebss-reports/runs?ma_bao_cao={code}").json()["runs"]
+        assert len(runs) == 1
+        assert runs[0]["status"] == "failed"
+        assert "bi treo" in runs[0]["message"]
+        assert runs[0]["can_cancel"] is False
+
+
 def test_onebss_report_run_can_be_cancelled_without_worker_overwrite() -> None:
     with TestClient(app) as client:
         login(client)
@@ -3676,6 +3745,44 @@ def test_onebss_workstation_worker_retries_transient_web_errors(monkeypatch) -> 
     assert attempts["count"] == 2
 
 
+def test_onebss_workstation_worker_reports_unexpected_failure(monkeypatch) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"ok": True}
+
+    class FakeClient:
+        def request(self, method: str, path: str, **kwargs):
+            calls.append({"method": method, "path": path, "json": kwargs.get("json") or {}})
+            return FakeResponse()
+
+    def fail_onebss(*args, **kwargs):
+        raise RuntimeError("selenium timeout")
+
+    monkeypatch.setattr(worker, "run_onebss_report_request", fail_onebss)
+
+    worker.process_task(
+        FakeClient(),
+        {"run_id": "RUN-ERR", "report": {"ma_bao_cao": "ONEBSS_ERR"}, "parameters": {}},
+        "ws-err",
+        0,
+    )
+
+    result_calls = [call for call in calls if call["path"] == "/api/onebss-worker/tasks/RUN-ERR/result"]
+    assert len(result_calls) == 1
+    payload = result_calls[0]["json"]
+    assert payload["ok"] is False
+    assert payload["status"] == "failed"
+    assert "selenium timeout" in payload["message"]
+    assert payload["details"]["error_type"] == "RuntimeError"
+
+
 def test_onebss_worker_prefers_local_drive_upload_api_when_public_is_configured(monkeypatch) -> None:
     from scripts import onebss_workstation_worker as worker
 
@@ -3729,7 +3836,7 @@ def test_onebss_worker_retries_transient_file_upload(monkeypatch, tmp_path) -> N
 def test_onebss_worker_uploads_result_file_for_download(monkeypatch, tmp_path) -> None:
     settings = get_settings().model_copy(update={"data_mining_download_dir": str(tmp_path)})
     monkeypatch.setattr(routes, "get_settings", lambda: settings)
-    monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings_arg, storage_link="": "")
+    monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings_arg, storage_link="", repository=None: "")
     with TestClient(app) as client:
         login(client)
         created = client.post(
@@ -3789,7 +3896,7 @@ def test_onebss_worker_web_upload_uses_global_drive_folder(monkeypatch, tmp_path
     )
     saved_calls = []
 
-    def fake_save_downloaded_file(settings_arg, source_file, storage_link):
+    def fake_save_downloaded_file(settings_arg, source_file, storage_link, repository=None):
         saved_calls.append((str(source_file), storage_link))
         return {
             "ok": True,
@@ -3833,7 +3940,7 @@ def test_onebss_worker_web_upload_uses_global_drive_folder(monkeypatch, tmp_path
 def test_onebss_worker_result_preserves_uploaded_web_file(monkeypatch, tmp_path) -> None:
     settings = get_settings().model_copy(update={"data_mining_download_dir": str(tmp_path)})
     monkeypatch.setattr(routes, "get_settings", lambda: settings)
-    monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings_arg, storage_link="": "")
+    monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings_arg, storage_link="", repository=None: "")
     with TestClient(app) as client:
         login(client)
         created = client.post(

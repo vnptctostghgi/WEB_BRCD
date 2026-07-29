@@ -14,6 +14,7 @@ from app.application.google_drive_service import (
     GoogleDriveConfigurationError,
     extract_google_drive_folder_id,
     google_drive_folder_id,
+    load_google_drive_oauth_config,
     upload_file_to_google_drive,
 )
 from app.application.zalo_auto_message_service import install_playwright_chromium, playwright_needs_browser_install
@@ -408,12 +409,15 @@ def format_date_token(match: re.Match[str], current: datetime) -> str:
     return day.strftime("%d/%m/%Y")
 
 
-def save_downloaded_file(settings: Settings, source_file: Path, storage_link: str) -> dict[str, Any]:
+def save_downloaded_file(settings: Settings, source_file: Path, storage_link: str, repository: Any | None = None) -> dict[str, Any]:
     target = str(storage_link or "").strip()
-    folder_id = google_drive_folder_id(settings, target)
-    if folder_id and (extract_google_drive_folder_id(target) or str(getattr(settings, "google_drive_folder_id", "") or "").strip()):
+    folder_id = google_drive_folder_id(settings, target, repository)
+    oauth_config = load_google_drive_oauth_config(repository)
+    configured_folder = str(getattr(settings, "google_drive_folder_id", "") or "").strip()
+    oauth_folder = str(oauth_config.get("folder") or oauth_config.get("folder_id") or "").strip()
+    if folder_id and (extract_google_drive_folder_id(target) or configured_folder or oauth_folder):
         try:
-            uploaded = upload_file_to_google_drive(settings, source_file, source_file.name, folder_id)
+            uploaded = upload_file_to_google_drive(settings, source_file, source_file.name, folder_id, repository=repository)
         except GoogleDriveConfigurationError as error:
             return {
                 "ok": False,

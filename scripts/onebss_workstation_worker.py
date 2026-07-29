@@ -32,7 +32,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.07.29-workstation-hidden-retry"
+WORKER_VERSION = "2026.07.29-onebss-fail-safe"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
 
@@ -378,6 +378,29 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
             return
     except OneBssTaskCancelled as error:
         print(str(error), file=sys.stderr)
+        return
+    except Exception as error:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        error_message = str(error)[:500] or error.__class__.__name__
+        print(f"Task OneBSS loi: {error_message}", file=sys.stderr)
+        try:
+            request_json(
+                client,
+                "POST",
+                f"/api/onebss-worker/tasks/{run_id}/result",
+                json={
+                    "ok": False,
+                    "status": "failed",
+                    "message": f"May tram gap loi khi lay OneBSS: {error_message}",
+                    "duration_ms": duration_ms,
+                    "details": {"error_type": error.__class__.__name__},
+                },
+            )
+        except Exception as update_error:
+            print(
+                f"Khong cap nhat duoc ket qua OneBSS: {describe_request_error(update_error)}",
+                file=sys.stderr,
+            )
         return
 
 
