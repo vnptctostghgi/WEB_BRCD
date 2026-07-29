@@ -94,7 +94,7 @@ DYNAMIC_REPORT_RUN_JOBS: dict[str, dict[str, Any]] = {}
 DYNAMIC_REPORT_RUN_JOBS_LOCK = threading.Lock()
 DYNAMIC_REPORT_RUN_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dynamic-report-run")
 DYNAMIC_REPORT_RUN_JOB_TTL_SECONDS = 30 * 60
-DYNAMIC_REPORT_RUN_ACTIVE_STATUSES = {"queued", "running"}
+DYNAMIC_REPORT_RUN_ACTIVE_STATUSES = {"queued", "queued_worker", "running", "running_worker"}
 DYNAMIC_REPORT_RUN_FINAL_STATUSES = {"complete", "failed", "cancelled"}
 DYNAMIC_REPORT_EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 DYNAMIC_REPORT_EXPORT_JOBS_LOCK = threading.Lock()
@@ -473,6 +473,28 @@ class RunReportPayload(BaseModel):
     page_size: int = 20
     search: str = ""
     search_columns: list[str] = Field(default_factory=list)
+
+
+class SqlWorkerClaimPayload(BaseModel):
+    worker_id: str = "onebss-workstation"
+
+
+class SqlWorkerStatusPayload(BaseModel):
+    status: str = "running_worker"
+    message: str = ""
+    worker_id: str = ""
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class SqlWorkerResultPayload(BaseModel):
+    ok: bool = True
+    status: str = ""
+    message: str = ""
+    columns: list[str] = Field(default_factory=list)
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    pagination: dict[str, Any] = Field(default_factory=dict)
+    report: dict[str, Any] = Field(default_factory=dict)
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class ExportLoadedReportPayload(BaseModel):
@@ -4184,7 +4206,7 @@ def _get_dynamic_report_run_job(job_id: str) -> dict[str, Any] | None:
 
 
 def _dynamic_report_run_queue_position(job_id: str, job: dict[str, Any]) -> int:
-    if str(job.get("status") or "").lower() != "queued":
+    if str(job.get("status") or "").lower() not in {"queued", "queued_worker"}:
         return 0
     created_at = float(job.get("created_at") or time.time())
     with DYNAMIC_REPORT_RUN_JOBS_LOCK:
@@ -4192,7 +4214,7 @@ def _dynamic_report_run_queue_position(job_id: str, job: dict[str, Any]) -> int:
             current
             for current_id, current in DYNAMIC_REPORT_RUN_JOBS.items()
             if current_id != job_id
-            and str(current.get("status") or "").lower() == "queued"
+            and str(current.get("status") or "").lower() in {"queued", "queued_worker"}
             and float(current.get("created_at") or created_at) <= created_at
         ]
     return len(queued_before) + 1
@@ -4225,6 +4247,26 @@ def _dynamic_report_run_job_response(job_id: str, job: dict[str, Any]) -> dict[s
     return response
 
 
+def _dynamic_report_should_wait_for_sql_worker(result: dict[str, Any]) -> bool:
+    if result.get("ok", True):
+        return False
+    details = result.get("details") if isinstance(result.get("details"), dict) else {}
+    try:
+        http_status = int(details.get("http_status") or 0)
+    except (TypeError, ValueError):
+        http_status = 0
+    message = str(result.get("message") or "").lower()
+    return http_status in {502, 503, 504, 530} or any(f"http {code}" in message for code in (502, 503, 504, 530))
+
+
+def _dynamic_report_sql_worker_message(result: dict[str, Any]) -> str:
+    return (
+        "API du lieu noi bo qua tunnel dang loi tam thoi"
+        + (" (HTTP 530)." if "530" in str(result.get("message") or "") else ".")
+        + " Da chuyen lenh cho may tram xu ly bang API local."
+    )
+
+
 def _run_dynamic_report_run_job(job_id: str, payload: RunReportPayload, actor: str) -> None:
     _set_dynamic_report_run_job(job_id, status="running", message="Dang truy van SQL trong hang doi noi bo.")
     try:
@@ -4238,6 +4280,15 @@ def _run_dynamic_report_run_job(job_id: str, payload: RunReportPayload, actor: s
         )
         pagination = result.get("pagination") if isinstance(result.get("pagination"), dict) else {}
         rows = result.get("rows") if isinstance(result.get("rows"), list) else []
+        if _dynamic_report_should_wait_for_sql_worker(result):
+            _set_dynamic_report_run_job(
+                job_id,
+                status="queued_worker",
+                message=_dynamic_report_sql_worker_message(result),
+                result=result,
+                details=result.get("details") if isinstance(result.get("details"), dict) else {},
+            )
+            return
         status_value = "success" if result.get("ok", True) else "failed"
         _record_dynamic_report_history(
             actor=actor,
@@ -4329,6 +4380,7 @@ def start_dynamic_report_run_job(request: Request, payload: RunReportPayload) ->
             "created_by": actor["username"],
             "report_code": report_info["ma_bao_cao"],
             "report_name": report_info["ten_bao_cao"],
+            "payload": payload.model_dump(),
         }
         job_snapshot = dict(DYNAMIC_REPORT_RUN_JOBS[job_id])
     DYNAMIC_REPORT_RUN_EXECUTOR.submit(_run_dynamic_report_run_job, job_id, payload, actor["username"])
@@ -4343,6 +4395,157 @@ def get_dynamic_report_run_job(request: Request, job_id: str) -> dict:
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay job truy van SQL.")
     return _dynamic_report_run_job_response(job_id, job)
+
+
+def _dynamic_report_payload_from_job(job: dict[str, Any]) -> RunReportPayload:
+    payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
+    return RunReportPayload(
+        ma_bao_cao=str(payload.get("ma_bao_cao") or job.get("report_code") or ""),
+        filters=payload.get("filters") if isinstance(payload.get("filters"), dict) else {},
+        page=int(payload.get("page") or 1),
+        page_size=int(payload.get("page_size") or 20),
+        search=str(payload.get("search") or ""),
+        search_columns=payload.get("search_columns") if isinstance(payload.get("search_columns"), list) else [],
+    )
+
+
+def _next_dynamic_report_sql_worker_job() -> tuple[str, dict[str, Any]] | None:
+    with DYNAMIC_REPORT_RUN_JOBS_LOCK:
+        candidates = [
+            (job_id, dict(job))
+            for job_id, job in DYNAMIC_REPORT_RUN_JOBS.items()
+            if str(job.get("status") or "").lower() == "queued_worker"
+        ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: float(item[1].get("created_at") or 0))
+    return candidates[0]
+
+
+@router.post("/api/sql-worker/tasks/claim")
+def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> dict:
+    onebss_worker_token(request)
+    _cleanup_dynamic_report_run_jobs()
+    candidate = _next_dynamic_report_sql_worker_job()
+    if not candidate:
+        return {"ok": True, "task": None, "message": "Khong co task SQL dang cho may tram."}
+    job_id, job = candidate
+    run_payload = _dynamic_report_payload_from_job(job)
+    prepared = build_database_service().prepare_dynamic_report_query(
+        ma_bao_cao=run_payload.ma_bao_cao.strip().upper(),
+        filters=run_payload.filters,
+        page=run_payload.page,
+        page_size=run_payload.page_size,
+        search=run_payload.search,
+        search_columns=run_payload.search_columns,
+    )
+    if not prepared.get("ok"):
+        _set_dynamic_report_run_job(
+            job_id,
+            status="failed",
+            message=prepared.get("message") or "Khong chuan bi duoc truy van SQL cho may tram.",
+            details=prepared.get("details") if isinstance(prepared.get("details"), dict) else {},
+        )
+        return {"ok": False, "task": None, "message": prepared.get("message") or "Khong chuan bi duoc truy van SQL."}
+    updated = _set_dynamic_report_run_job(
+        job_id,
+        status="running_worker",
+        message=f"May tram {payload.worker_id} da nhan task SQL va dang goi API local.",
+        worker_id=payload.worker_id,
+    )
+    return {
+        "ok": True,
+        "task": {
+            "run_id": job_id,
+            "job_id": job_id,
+            "report_code": prepared.get("ma_bao_cao") or "",
+            "report_name": prepared.get("ten_bao_cao") or "",
+            "query": {
+                "action": "run_sql_report",
+                "ten_bao_cao": prepared.get("ten_bao_cao") or "",
+                "ma_bao_cao": prepared.get("ma_bao_cao") or "",
+                "cau_lenh_sql": prepared.get("cau_lenh_sql") or "",
+                "tham_so": prepared.get("tham_so") if isinstance(prepared.get("tham_so"), dict) else {},
+                "pagination": {
+                    "page": int(prepared.get("page") or 1),
+                    "page_size": int(prepared.get("page_size") or 20),
+                },
+            },
+            "report": prepared.get("report") if isinstance(prepared.get("report"), dict) else {},
+            "details": prepared.get("details") if isinstance(prepared.get("details"), dict) else {},
+            "message": updated.get("message") or "",
+        },
+    }
+
+
+@router.post("/api/sql-worker/tasks/{run_id}/status")
+def update_sql_worker_task_status(request: Request, run_id: str, payload: SqlWorkerStatusPayload) -> dict:
+    onebss_worker_token(request)
+    job = _get_dynamic_report_run_job(run_id.strip())
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task SQL.")
+    updated = _set_dynamic_report_run_job(
+        run_id.strip(),
+        status=payload.status.strip().lower() or "running_worker",
+        message=payload.message or "May tram dang truy van SQL bang API local.",
+        worker_id=payload.worker_id or job.get("worker_id") or "",
+        details=payload.details or job.get("details") or {},
+    )
+    return {"ok": True, "run": _dynamic_report_run_job_response(run_id.strip(), updated)}
+
+
+@router.post("/api/sql-worker/tasks/{run_id}/result")
+def finish_sql_worker_task(request: Request, run_id: str, payload: SqlWorkerResultPayload) -> dict:
+    onebss_worker_token(request)
+    run_id = run_id.strip()
+    job = _get_dynamic_report_run_job(run_id)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task SQL.")
+    run_payload = _dynamic_report_payload_from_job(job)
+    rows = payload.rows if isinstance(payload.rows, list) else []
+    pagination = payload.pagination if isinstance(payload.pagination, dict) else {}
+    report = payload.report if isinstance(payload.report, dict) else {}
+    if not report:
+        report = {"ma_bao_cao": job.get("report_code") or run_payload.ma_bao_cao, "ten_bao_cao": job.get("report_name") or ""}
+    result = {
+        "ok": bool(payload.ok),
+        "message": payload.message or ("Da tai du lieu bao cao tren may tram." if payload.ok else "May tram khong tai duoc du lieu bao cao."),
+        "details": payload.details if isinstance(payload.details, dict) else {},
+        "report": report,
+        "columns": payload.columns,
+        "rows": rows,
+        "pagination": pagination or {"page": run_payload.page, "page_size": run_payload.page_size, "total": len(rows)},
+    }
+    status_value = "complete" if payload.ok and str(payload.status or "").lower() not in {"failed", "error"} else "failed"
+    updated = _set_dynamic_report_run_job(
+        run_id,
+        status=status_value,
+        message=result["message"],
+        result=result,
+        rows=len(rows),
+        total=(pagination.get("total") if isinstance(pagination, dict) else None) or len(rows),
+        details=result["details"],
+    )
+    try:
+        _record_dynamic_report_history(
+            actor=job.get("created_by") or "sql-worker",
+            event_type="load",
+            status_value="success" if status_value == "complete" else "failed",
+            ma_bao_cao=run_payload.ma_bao_cao,
+            report=report,
+            rows=len(rows),
+            total=(pagination.get("total") if isinstance(pagination, dict) else None) or len(rows),
+            message=result["message"],
+            filters=run_payload.filters,
+            search=run_payload.search,
+            search_columns=run_payload.search_columns,
+            history_id=run_id,
+            job_id=run_id,
+            details=result["details"],
+        )
+    except Exception:
+        logger.exception("Cannot write SQL worker history")
+    return {"ok": payload.ok, "run": _dynamic_report_run_job_response(run_id, updated)}
 
 
 @router.post("/api/reports/run")

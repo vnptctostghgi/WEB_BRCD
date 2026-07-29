@@ -174,6 +174,7 @@ class DatabaseService:
                 compiled_sql,
                 executable_filters,
                 define_details,
+                http_status=error.response.status_code,
             )
         except httpx.HTTPError as error:
             logger.exception("Dynamic report connection error: %s", error)
@@ -209,6 +210,91 @@ class DatabaseService:
                 "page_size": int(result.get("page_size") or safe_page_size),
                 "total": total,
             },
+        }
+
+    def prepare_dynamic_report_query(
+        self,
+        *,
+        ma_bao_cao: str,
+        filters: dict[str, Any],
+        page: int,
+        page_size: int,
+        search: str = "",
+        search_columns: list[str] | None = None,
+        report_id: Any = None,
+        report_name: Any = None,
+    ) -> dict[str, Any]:
+        report = self._find_sql_report(ma_bao_cao, report_id=report_id, report_name=report_name)
+        if not report:
+            return {
+                "ok": False,
+                "message": "KhÃ´ng tÃ¬m tháº¥y cáº¥u hÃ¬nh bÃ¡o cÃ¡o.",
+                "columns": [],
+                "rows": [],
+                "pagination": {"page": page, "page_size": page_size, "total": 0},
+            }
+
+        safe_page = max(1, page)
+        safe_page_size = 10 if page_size <= 10 else 20
+        allowed_params = [str(param).strip().lstrip(":") for param in (report.get("cac_tham_so") or []) if str(param).strip()]
+        allowed_param_by_upper = {param.upper(): param for param in allowed_params}
+        safe_filters: dict[str, Any] = {}
+        ignored_filters: list[str] = []
+        for key, value in (filters or {}).items():
+            normalized_key = str(key).strip().lstrip(":").upper()
+            if not normalized_key:
+                continue
+            if allowed_param_by_upper:
+                target_key = allowed_param_by_upper.get(normalized_key)
+                if not target_key:
+                    ignored_filters.append(str(key))
+                    continue
+                safe_filters[target_key] = value
+            else:
+                safe_filters[str(key).strip().lstrip(":")] = value
+
+        compiled_sql, define_details = self._compile_define_sql(report["cau_lenh_sql"], safe_filters)
+        compiled_sql, bind_filters = self._expand_in_list_bind_params(compiled_sql, safe_filters)
+        executable_filters = self._filters_for_compiled_sql(compiled_sql, bind_filters)
+        safe_report_code = (
+            self._normalized_report_code(report.get("ma_bao_cao"))
+            or self._normalized_report_code(report.get("ten_bao_cao"))
+            or self._normalized_report_code(ma_bao_cao)
+            or str(report.get("ma_bao_cao") or ma_bao_cao).strip()
+        )
+        search_text = str(search or "").strip()
+        if search_text:
+            try:
+                compiled_sql, executable_filters = self._wrap_sql_for_search(
+                    compiled_sql,
+                    executable_filters,
+                    search_columns or [],
+                    search_text,
+                )
+            except RuntimeError as error:
+                return self._failed_report(str(error), safe_page, safe_page_size, "", compiled_sql, executable_filters, define_details)
+
+        details: dict[str, Any] = {}
+        if ignored_filters:
+            details = {**details, "ignored_filters": ignored_filters, "allowed_params": allowed_params}
+        if define_details:
+            details = {**details, **define_details, "sent_params": executable_filters}
+
+        return {
+            "ok": True,
+            "message": "Da chuan bi truy van SQL cho may tram.",
+            "details": details,
+            "report": {
+                "ten_bao_cao": report["ten_bao_cao"],
+                "ma_bao_cao": report["ma_bao_cao"],
+                "cac_tham_so": report.get("cac_tham_so") or [],
+            },
+            "ten_bao_cao": report["ten_bao_cao"],
+            "ma_bao_cao": safe_report_code,
+            "cau_lenh_sql": compiled_sql,
+            "tham_so": executable_filters,
+            "page": safe_page,
+            "page_size": safe_page_size,
         }
 
     def export_dynamic_report(
@@ -1210,8 +1296,11 @@ class DatabaseService:
         compiled_sql: str | None = None,
         sent_params: dict[str, Any] | None = None,
         extra_details: dict[str, Any] | None = None,
+        http_status: int | None = None,
     ) -> dict[str, Any]:
         details = {"error": detail}
+        if http_status is not None:
+            details["http_status"] = int(http_status)
         if compiled_sql is not None:
             details["compiled_sql_preview"] = compiled_sql[:1200]
         if sent_params is not None:

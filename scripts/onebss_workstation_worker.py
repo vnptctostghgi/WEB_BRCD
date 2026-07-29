@@ -32,7 +32,8 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.07.29-onebss-fail-safe"
+WORKER_VERSION = "2026.07.29-sql-local-worker"
+LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
 
@@ -83,7 +84,7 @@ def send_heartbeat(client: httpx.Client, worker_id: str, status: str = "idle", m
     payload = {
         "worker_id": worker_id,
         "status": status,
-        "roles": ["onebss_worker", "ftp_report_worker", "excel_export", "drive_upload"],
+        "roles": ["onebss_worker", "sql_report_worker", "ftp_report_worker", "excel_export", "drive_upload"],
         "version": WORKER_VERSION,
         "local_time": datetime.now().isoformat(timespec="seconds"),
         "message": message,
@@ -147,6 +148,15 @@ def internal_drive_upload_api_urls() -> list[str]:
     if not configured or _is_public_tunnel_api_url(configured):
         urls.append(LOCAL_DRIVE_UPLOAD_API_URL)
     urls.extend([configured, internal, PUBLIC_DRIVE_UPLOAD_API_URL])
+    return _unique_urls(urls)
+
+
+def internal_sql_api_urls() -> list[str]:
+    configured = os.getenv("SQL_WORKER_API_URL", "").strip() or os.getenv("INTERNAL_API_URL", "").strip()
+    urls: list[str] = []
+    if not configured or _is_public_tunnel_api_url(configured):
+        urls.append(LOCAL_INTERNAL_API_URL)
+    urls.append(configured)
     return _unique_urls(urls)
 
 
@@ -402,6 +412,110 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
                 file=sys.stderr,
             )
         return
+
+
+def run_sql_worker_query(task: dict[str, Any]) -> dict[str, Any]:
+    query = task.get("query") if isinstance(task.get("query"), dict) else {}
+    if not query:
+        raise RuntimeError("Task SQL khong co cau lenh truy van.")
+    token = os.getenv("INTERNAL_API_TOKEN", "").strip()
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    timeout_seconds = float(os.getenv("SQL_WORKER_TIMEOUT_SECONDS", "300") or "300")
+    api_urls = internal_sql_api_urls()
+    if not api_urls:
+        raise RuntimeError("Chua cau hinh URL API du lieu local cho SQL worker.")
+    last_error: Exception | None = None
+    for api_url in api_urls:
+        try:
+            with httpx.Client(timeout=httpx.Timeout(timeout_seconds, connect=10.0)) as internal_client:
+                response = internal_client.post(api_url, json=query, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, dict) else {"ok": True, "data": data}
+        except (httpx.HTTPStatusError, httpx.RequestError) as error:
+            last_error = error
+            if api_url != api_urls[-1]:
+                print(f"Khong chay SQL qua {api_url}: {describe_request_error(error)}. Thu endpoint tiep theo.", file=sys.stderr)
+                continue
+            raise
+    if last_error:
+        raise last_error
+    return {"ok": False, "message": "API du lieu local khong tra ket qua."}
+
+
+def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str) -> None:
+    run_id = str(task.get("run_id") or task.get("job_id") or "")
+    started = time.monotonic()
+
+    def send_progress(message: str, status: str = "running_worker", details: dict[str, Any] | None = None) -> None:
+        request_json(
+            client,
+            "POST",
+            f"/api/sql-worker/tasks/{run_id}/status",
+            json={
+                "status": status,
+                "message": message,
+                "worker_id": worker_id,
+                "details": details or {},
+            },
+        )
+
+    try:
+        report_code = str(task.get("report_code") or (task.get("query") or {}).get("ma_bao_cao") or "")
+        send_progress(
+            "May tram da nhan task SQL. Dang goi API du lieu local.",
+            details={"report": report_code, "api_urls": internal_sql_api_urls()},
+        )
+        result = run_sql_worker_query(task)
+        rows = result.get("rows") or result.get("data") or []
+        if not isinstance(rows, list):
+            rows = []
+        columns = result.get("columns") if isinstance(result.get("columns"), list) else []
+        if not columns and rows and isinstance(rows[0], dict):
+            columns = list(rows[0].keys())
+        pagination = {
+            "page": int(result.get("page") or ((task.get("query") or {}).get("pagination") or {}).get("page") or 1),
+            "page_size": int(result.get("page_size") or ((task.get("query") or {}).get("pagination") or {}).get("page_size") or len(rows) or 20),
+            "total": int(result.get("total") or len(rows)),
+        }
+        details = result.get("details") if isinstance(result.get("details"), dict) else {}
+        details = {**details, "duration_ms": int((time.monotonic() - started) * 1000)}
+        finish_response = request_json(
+            client,
+            "POST",
+            f"/api/sql-worker/tasks/{run_id}/result",
+            json={
+                "ok": bool(result.get("ok", True)),
+                "status": "success" if result.get("ok", True) else "failed",
+                "message": result.get("message") or "May tram da tai du lieu SQL qua API local.",
+                "columns": columns,
+                "rows": rows,
+                "pagination": pagination,
+                "report": task.get("report") if isinstance(task.get("report"), dict) else {},
+                "details": details,
+            },
+        )
+        if response_is_cancelled(finish_response):
+            return
+    except Exception as error:
+        message = str(error)[:500] or error.__class__.__name__
+        print(f"Task SQL loi: {message}", file=sys.stderr)
+        try:
+            request_json(
+                client,
+                "POST",
+                f"/api/sql-worker/tasks/{run_id}/result",
+                json={
+                    "ok": False,
+                    "status": "failed",
+                    "message": f"May tram khong chay duoc SQL qua API local: {message}",
+                    "details": {"error_type": error.__class__.__name__},
+                },
+            )
+        except Exception as update_error:
+            print(f"Khong cap nhat duoc ket qua SQL: {describe_request_error(update_error)}", file=sys.stderr)
 
 
 def safe_local_filename(value: str, fallback: str = "ftp_result") -> str:
@@ -660,19 +774,33 @@ def main() -> int:
                 send_heartbeat(client, args.worker_id, "idle", "May tram OneBSS da quay lai trang thai cho task.")
                 last_heartbeat = time.monotonic()
             else:
-                ftp_claim = request_json(client, "POST", "/api/ftp-worker/tasks/claim", json={"worker_id": args.worker_id})
-                ftp_task = ftp_claim.get("task") if isinstance(ftp_claim.get("task"), dict) else None
-                if ftp_task:
+                sql_claim = request_json(client, "POST", "/api/sql-worker/tasks/claim", json={"worker_id": args.worker_id})
+                sql_task = sql_claim.get("task") if isinstance(sql_claim.get("task"), dict) else None
+                if sql_task:
                     send_heartbeat(
                         client,
                         args.worker_id,
                         "busy",
-                        f"Dang xu ly task FTP {ftp_task.get('run_id') or ''}.",
-                        {"run_id": ftp_task.get("run_id") or "", "report": ftp_task.get("ma_bao_cao") or "", "task_type": "ftp"},
+                        f"Dang xu ly task SQL {sql_task.get('run_id') or ''}.",
+                        {"run_id": sql_task.get("run_id") or "", "report": sql_task.get("report_code") or "", "task_type": "sql"},
                     )
-                    process_ftp_task(client, ftp_task, args.worker_id)
-                    send_heartbeat(client, args.worker_id, "idle", "May tram FTP da quay lai trang thai cho task.")
+                    process_sql_task(client, sql_task, args.worker_id)
+                    send_heartbeat(client, args.worker_id, "idle", "May tram SQL da quay lai trang thai cho task.")
                     last_heartbeat = time.monotonic()
+                else:
+                    ftp_claim = request_json(client, "POST", "/api/ftp-worker/tasks/claim", json={"worker_id": args.worker_id})
+                    ftp_task = ftp_claim.get("task") if isinstance(ftp_claim.get("task"), dict) else None
+                    if ftp_task:
+                        send_heartbeat(
+                            client,
+                            args.worker_id,
+                            "busy",
+                            f"Dang xu ly task FTP {ftp_task.get('run_id') or ''}.",
+                            {"run_id": ftp_task.get("run_id") or "", "report": ftp_task.get("ma_bao_cao") or "", "task_type": "ftp"},
+                        )
+                        process_ftp_task(client, ftp_task, args.worker_id)
+                        send_heartbeat(client, args.worker_id, "idle", "May tram FTP da quay lai trang thai cho task.")
+                        last_heartbeat = time.monotonic()
             if args.once:
                 return 0
             time.sleep(args.poll_seconds)

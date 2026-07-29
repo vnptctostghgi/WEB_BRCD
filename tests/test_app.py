@@ -1745,6 +1745,71 @@ def test_dynamic_report_history_records_loaded_result(monkeypatch) -> None:
         assert item["total"] == 1
 
 
+def test_dynamic_report_http_530_falls_back_to_sql_worker(monkeypatch) -> None:
+    import httpx
+
+    def raise_530(self, **kwargs):
+        request = httpx.Request("POST", "https://api.vnptcto.com/api/du-lieu-web")
+        response = httpx.Response(530, request=request, text="cloudflare tunnel error")
+        raise httpx.HTTPStatusError("cloudflare tunnel error", request=request, response=response)
+
+    monkeypatch.setattr(routes.InternalApiClient, "run_sql_report", raise_530)
+
+    with TestClient(app) as client:
+        login(client)
+        payload = {
+            "ten_bao_cao": "Bao cao fallback worker",
+            "ma_bao_cao": "BC_SQL_WORKER_FALLBACK",
+            "cau_lenh_sql": "SELECT ma_tb, ten_tb FROM css_cto.db_thuebao WHERE trang_thai = :status;",
+            "cac_tham_so": ["status"],
+        }
+        assert client.post("/api/admin/sql-reports", json=payload).status_code == 200
+        started = client.post(
+            "/api/reports/run-jobs",
+            json={"ma_bao_cao": "BC_SQL_WORKER_FALLBACK", "filters": {"status": "1"}, "page": 1, "page_size": 20},
+        )
+        assert started.status_code == 200
+        job_id = started.json()["job_id"]
+
+        job = {}
+        for _ in range(20):
+            job = client.get(f"/api/reports/run-jobs/{job_id}").json()
+            if job["status"] == "queued_worker":
+                break
+            time.sleep(0.05)
+        assert job["status"] == "queued_worker"
+        assert "may tram" in job["message"].lower()
+
+        headers = {"Authorization": "Bearer test-worker-token"}
+        claim = client.post("/api/sql-worker/tasks/claim", json={"worker_id": "ws-sql"}, headers=headers)
+        assert claim.status_code == 200
+        task = claim.json()["task"]
+        assert task["run_id"] == job_id
+        assert task["query"]["action"] == "run_sql_report"
+        assert task["query"]["tham_so"] == {"status": "1"}
+        assert task["query"]["pagination"] == {"page": 1, "page_size": 20}
+
+        finished = client.post(
+            f"/api/sql-worker/tasks/{job_id}/result",
+            json={
+                "ok": True,
+                "status": "success",
+                "message": "May tram da tai du lieu SQL qua API local.",
+                "columns": ["MA_TB", "TEN_TB"],
+                "rows": [{"MA_TB": "tb-local", "TEN_TB": "Local API"}],
+                "pagination": {"page": 1, "page_size": 20, "total": 1},
+                "report": task["report"],
+                "details": {"source": "local_api"},
+            },
+            headers=headers,
+        )
+        assert finished.status_code == 200
+        completed = client.get(f"/api/reports/run-jobs/{job_id}").json()
+        assert completed["status"] == "complete"
+        assert completed["rows"] == [{"MA_TB": "tb-local", "TEN_TB": "Local API"}]
+        assert completed["pagination"]["total"] == 1
+
+
 def test_dynamic_report_search_and_excel_export_use_full_result_set(monkeypatch) -> None:
     rows = [
         {"MA_TB": "tb001", "TEN_TB": "Nguyen Van A", "DIACHI_LD": "Can Tho"},
@@ -3797,6 +3862,64 @@ def test_onebss_worker_prefers_local_drive_upload_api_when_public_is_configured(
 
     assert urls[0] == "http://127.0.0.1:8000/api/du-lieu-web"
     assert urls.count("https://api.vnptcto.com/api/du-lieu-web") == 1
+
+
+def test_sql_worker_prefers_local_internal_api_when_public_is_configured(monkeypatch) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    monkeypatch.setenv("INTERNAL_API_URL", "https://api.vnptcto.com/api/du-lieu-web")
+    monkeypatch.delenv("SQL_WORKER_API_URL", raising=False)
+
+    urls = worker.internal_sql_api_urls()
+
+    assert urls[0] == "http://127.0.0.1:8000/api/du-lieu-web"
+    assert urls.count("https://api.vnptcto.com/api/du-lieu-web") == 1
+
+
+def test_sql_worker_posts_result_to_web(monkeypatch) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"ok": True}
+
+    class FakeClient:
+        def request(self, method: str, path: str, **kwargs):
+            calls.append({"method": method, "path": path, "json": kwargs.get("json") or {}})
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        worker,
+        "run_sql_worker_query",
+        lambda task: {
+            "ok": True,
+            "columns": ["MA_TB"],
+            "rows": [{"MA_TB": "tb-local"}],
+            "total": 1,
+            "page": 1,
+            "page_size": 20,
+            "message": "ok local",
+        },
+    )
+
+    worker.process_sql_task(
+        FakeClient(),
+        {"run_id": "SQL-1", "report_code": "BC_SQL", "query": {"pagination": {"page": 1, "page_size": 20}}},
+        "ws-sql",
+    )
+
+    result_calls = [call for call in calls if call["path"] == "/api/sql-worker/tasks/SQL-1/result"]
+    assert len(result_calls) == 1
+    payload = result_calls[0]["json"]
+    assert payload["ok"] is True
+    assert payload["columns"] == ["MA_TB"]
+    assert payload["rows"] == [{"MA_TB": "tb-local"}]
+    assert payload["pagination"]["total"] == 1
 
 
 def test_onebss_worker_retries_transient_file_upload(monkeypatch, tmp_path) -> None:
