@@ -243,9 +243,11 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "VNPTCTO_WORKSTATION_SETUP/scripts/test_vnptcto_workstation.ps1" in names
         assert "VNPTCTO_WORKSTATION_SETUP/scripts/run_onebss_worker_background.ps1" in names
         assert "InternalApiToken = 'test-worker-token'" in config_text
+        assert "OracleDbDsn = '10.10.10.20:1521/ONEBSS'" in config_text
         assert "OracleDbHost = '10.10.10.20'" in config_text
         assert "OracleDbPort = '1521'" in config_text
         assert "OracleDbService = 'ONEBSS'" in config_text
+        assert "OracleDbSid" in config_text
         assert "OracleDbUser = 'REPORT_USER'" in config_text
         assert "OracleDbPass = 'oracle-secret'" in config_text
         assert "Khong can go token" in readme_text
@@ -259,8 +261,12 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "GoogleDriveOauthRefreshToken" in config_text
         assert 'Set-UserEnvironment "ONEBSS_DRIVE_UPLOAD_API_URL" $WorkerDriveUploadApiUrl' in setup_script
         assert "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64" in setup_script
+        assert "OracleDbDsn" in setup_script
         assert "OracleDbHost" in setup_script
+        assert "DB_DSN=$(DotEnvValue $oracleDbDsn)" in setup_script
         assert "DB_HOST=$(DotEnvValue $oracleDbHost)" in setup_script
+        assert "DB_SID=$(DotEnvValue $oracleDbSid)" in setup_script
+        assert 'Set-DotEnvValue $apiEnv "DB_DSN" $oracleDbDsn' in setup_script
         assert 'Set-DotEnvValue $apiEnv "DB_PASS" $oracleDbPass' in setup_script
         assert "$canStartWorkerNow = -not [string]::IsNullOrWhiteSpace($InternalApiToken)" in setup_script
         assert "drive-oauth-token.json" in setup_script
@@ -295,6 +301,41 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "[switch]$NoPause" in uninstall_task_script
         assert "timeout /t" not in setup_bat.lower()
         assert "\npause" not in setup_bat.lower()
+
+
+def test_api_middleware_uses_oracle_dsn_and_rejects_bequeath(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = load_api_middleware_module()
+    for key in (
+        "DB_DSN",
+        "ORACLE_DSN",
+        "TNS_DSN",
+        "DB_CONNECT_STRING",
+        "ORACLE_CONNECT_STRING",
+        "DB_HOST",
+        "DB_SERVICE",
+        "DB_SID",
+        "DB_USER",
+        "DB_PASS",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    monkeypatch.setenv("DB_USER", "REPORT_USER")
+    monkeypatch.setenv("DB_PASS", "oracle-secret")
+    monkeypatch.setenv("DB_DSN", "10.92.53.53:1521/DBCTO")
+    config = module.oracle_connection_config()
+    assert config["source"] == "DB_DSN"
+    assert config["dsn"] == "10.92.53.53:1521/DBCTO"
+
+    monkeypatch.setenv("DB_DSN", "/")
+    with pytest.raises(RuntimeError, match="bequeath"):
+        module.oracle_connection_config()
+
+    monkeypatch.setenv("DB_HOST", "10.92.53.53")
+    monkeypatch.setenv("DB_SERVICE", "DBCTO")
+    fallback = module.oracle_connection_config()
+    assert fallback["source"] == "DB_HOST/DB_SERVICE"
+    assert "10.92.53.53" in fallback["dsn"]
+    assert "DBCTO" in fallback["dsn"]
 
 
 def test_api_middleware_reads_json_files_with_utf8_bom(tmp_path: Path) -> None:

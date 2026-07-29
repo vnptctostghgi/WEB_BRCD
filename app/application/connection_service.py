@@ -68,9 +68,15 @@ class ConnectionService:
         existing_oracle = self.repository.get_system_connection_by_code("oracle_agency_db") or {}
         existing_oracle_config = existing_oracle.get("config") if isinstance(existing_oracle.get("config"), dict) else {}
         oracle_config = {
+            "dsn": existing_oracle_config.get("dsn")
+            or existing_oracle_config.get("db_dsn")
+            or existing_oracle_config.get("connect_string")
+            or existing_oracle_config.get("connection_string")
+            or "",
             "host": existing_oracle_config.get("host") or "",
             "port": existing_oracle_config.get("port") or 1521,
             "service": existing_oracle_config.get("service") or existing_oracle_config.get("service_name") or "",
+            "sid": existing_oracle_config.get("sid") or existing_oracle_config.get("db_sid") or "",
             "username": existing_oracle_config.get("username") or existing_oracle_config.get("user") or "",
             "password": existing_oracle_config.get("password") or "",
             "secret_ref": "DB_PASS",
@@ -203,15 +209,34 @@ class ConnectionService:
 
         if connection["connection_type"] == "oracle":
             config = connection.get("config") if isinstance(connection.get("config"), dict) else {}
+            dsn_configured = bool(
+                str(
+                    config.get("dsn")
+                    or config.get("db_dsn")
+                    or config.get("connect_string")
+                    or config.get("connection_string")
+                    or ""
+                ).strip()
+            )
+            host_configured = bool(str(config.get("host") or config.get("db_host") or "").strip())
+            service_configured = bool(
+                str(
+                    config.get("service")
+                    or config.get("service_name")
+                    or config.get("db_service")
+                    or config.get("sid")
+                    or config.get("db_sid")
+                    or ""
+                ).strip()
+            )
             missing = [
                 label
                 for label, value in (
-                    ("host", config.get("host") or config.get("db_host")),
-                    ("service", config.get("service") or config.get("service_name") or config.get("db_service")),
+                    ("dsn hoac host/service", dsn_configured or (host_configured and service_configured)),
                     ("username", config.get("username") or config.get("user") or config.get("db_user")),
                     ("password", config.get("password") or config.get("db_pass")),
                 )
-                if not str(value or "").strip()
+                if not bool(value)
             ]
             return self._with_connection(
                 {
@@ -222,9 +247,10 @@ class ConnectionService:
                         else f"Oracle thieu cau hinh: {', '.join(missing)}."
                     ),
                     "details": {
+                        "dsn_configured": dsn_configured,
                         "host": config.get("host") or config.get("db_host") or "",
                         "port": config.get("port") or config.get("db_port") or 1521,
-                        "service_configured": bool(str(config.get("service") or config.get("service_name") or config.get("db_service") or "").strip()),
+                        "service_configured": service_configured,
                         "username_configured": bool(str(config.get("username") or config.get("user") or config.get("db_user") or "").strip()),
                         "password_configured": bool(str(config.get("password") or config.get("db_pass") or "").strip()),
                     },

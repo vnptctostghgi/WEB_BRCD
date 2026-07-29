@@ -30,6 +30,14 @@ app = FastAPI(title="API trung gian VNPT CTO")
 
 EXCEL_MAX_ROWS_PER_SHEET = 1_048_576
 GOOGLE_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
+ORACLE_DSN_ENV_KEYS = (
+    "DB_DSN",
+    "ORACLE_DSN",
+    "TNS_DSN",
+    "DB_CONNECT_STRING",
+    "ORACLE_CONNECT_STRING",
+)
+ORACLE_CLIENT_INITIALIZED = False
 
 
 def require_token(authorization: str = "") -> None:
@@ -40,19 +48,101 @@ def require_token(authorization: str = "") -> None:
         raise HTTPException(status_code=401, detail="API token khong hop le.")
 
 
-def oracle_dsn() -> str:
-    return oracledb.makedsn(
-        os.getenv("DB_HOST"),
-        int(os.getenv("DB_PORT", "1521")),
-        service_name=os.getenv("DB_SERVICE"),
-    )
+def env_value(*names: str) -> str:
+    for name in names:
+        value = os.getenv(name, "")
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def parse_bool_env(name: str) -> bool:
+    return env_value(name).lower() in {"1", "true", "yes", "y", "on"}
+
+
+def suspicious_local_oracle_dsn(dsn: str) -> bool:
+    normalized = dsn.strip().lower()
+    return normalized in {"/", "//", "beq", "bequeath", "local"} or normalized.startswith("beq:")
+
+
+def configure_oracle_client() -> None:
+    global ORACLE_CLIENT_INITIALIZED
+    if ORACLE_CLIENT_INITIALIZED:
+        return
+    client_lib_dir = env_value("ORACLE_CLIENT_LIB_DIR")
+    if client_lib_dir or parse_bool_env("ORACLE_THICK_MODE"):
+        kwargs = {"lib_dir": client_lib_dir} if client_lib_dir else {}
+        oracledb.init_oracle_client(**kwargs)
+    ORACLE_CLIENT_INITIALIZED = True
+
+
+def oracle_connection_config() -> dict[str, str]:
+    user = env_value("DB_USER", "ORACLE_USER")
+    password = env_value("DB_PASS", "ORACLE_PASSWORD")
+    missing_credentials = []
+    if not user:
+        missing_credentials.append("DB_USER")
+    if not password:
+        missing_credentials.append("DB_PASS")
+    if missing_credentials:
+        raise RuntimeError(f"Thieu bien moi truong Oracle: {', '.join(missing_credentials)}")
+
+    dsn = env_value(*ORACLE_DSN_ENV_KEYS)
+    host = env_value("DB_HOST", "ORACLE_HOST")
+    port_text = env_value("DB_PORT", "ORACLE_PORT") or "1521"
+    service = env_value("DB_SERVICE", "ORACLE_SERVICE", "SERVICE_NAME")
+    sid = env_value("DB_SID", "ORACLE_SID")
+    source = "DB_DSN"
+
+    if dsn and suspicious_local_oracle_dsn(dsn):
+        if not host or not (service or sid):
+            raise RuntimeError(
+                "DB_DSN dang tro toi ket noi Oracle local/bequeath. "
+                "Hay cau hinh DB_DSN dang TCP hoac DB_HOST + DB_SERVICE/DB_SID tren web roi tai lai bo cai."
+            )
+        dsn = ""
+
+    if not dsn:
+        source = "DB_HOST/DB_SERVICE"
+        missing = []
+        if not host:
+            missing.append("DB_HOST")
+        if not service and not sid:
+            missing.append("DB_SERVICE hoac DB_SID")
+        if missing:
+            raise RuntimeError(
+                "Thieu cau hinh Oracle: "
+                + ", ".join(missing)
+                + ". Hay cau hinh DB co quan tren web roi tai lai bo cai may tram."
+            )
+        try:
+            port = int(port_text)
+        except ValueError as error:
+            raise RuntimeError(f"DB_PORT khong hop le: {port_text}") from error
+        dsn = oracledb.makedsn(host, port, service_name=service) if service else oracledb.makedsn(host, port, sid=sid)
+
+    if not dsn.strip() or suspicious_local_oracle_dsn(dsn):
+        raise RuntimeError("Cau hinh Oracle DSN khong hop le, khong duoc dung ket noi local/bequeath.")
+
+    return {
+        "user": user,
+        "password": password,
+        "dsn": dsn,
+        "source": source,
+        "host": host,
+        "port": port_text,
+        "service": service,
+        "sid": sid,
+    }
 
 
 def oracle_connect():
+    configure_oracle_client()
+    config = oracle_connection_config()
     return oracledb.connect(
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASS"),
-        dsn=oracle_dsn(),
+        user=config["user"],
+        password=config["password"],
+        dsn=config["dsn"],
     )
 
 
@@ -381,17 +471,19 @@ def home():
 @app.get("/test-oracle")
 def test_oracle():
     try:
-        missing = [key for key in ["DB_HOST", "DB_SERVICE", "DB_USER", "DB_PASS"] if not os.getenv(key)]
-        if missing:
-            return {
-                "status": "error",
-                "message": f"Thieu bien moi truong Oracle: {', '.join(missing)}",
-            }
+        config = oracle_connection_config()
         with oracle_connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute("SELECT SYSDATE FROM DUAL")
                 row = cursor.fetchone()
-        return {"status": "ok", "oracle_time": str(row[0])}
+        return {
+            "status": "ok",
+            "oracle_time": str(row[0]),
+            "dsn_source": config.get("source") or "",
+            "host": config.get("host") or "",
+            "service": config.get("service") or "",
+            "sid": config.get("sid") or "",
+        }
     except Exception as error:
         return {
             "status": "error",

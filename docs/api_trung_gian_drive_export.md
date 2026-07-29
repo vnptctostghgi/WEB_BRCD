@@ -33,9 +33,11 @@ python -m pip install fastapi uvicorn oracledb python-dotenv openpyxl google-api
 
 ```dotenv
 API_TOKEN=...
+DB_DSN=10.92.53.53:1521/DBCTO
 DB_HOST=...
 DB_PORT=1521
 DB_SERVICE=...
+DB_SID=
 DB_USER=...
 DB_PASS=...
 
@@ -47,6 +49,8 @@ EXPORT_DIR=C:\VNPTCTO\exports
 EXPORT_PAGE_SIZE=5000
 EXPORT_MAX_ROWS=1000000
 ```
+
+`DB_DSN` la uu tien so 1. Neu web da cau hinh host/port/service, bo cai se tu tao `DB_DSN` dang TCP, vi du `10.92.53.53:1521/DBCTO`. Khong dung `DB_DSN=/` vi day la ket noi local/bequeath va se loi tren python-oracledb thin mode.
 
 4. Neu cai thu cong va chua co token OAuth, mo tren may tram:
 

@@ -6,9 +6,11 @@ param(
   [string]$InternalApiUrl = "https://api.vnptcto.com/api/du-lieu-web",
   [string]$WorkerDriveUploadApiUrl = "http://127.0.0.1:8000/api/du-lieu-web",
   [string]$ApiRoot = "C:\VNPTCTO",
+  [string]$OracleDbDsn = "",
   [string]$OracleDbHost = "",
   [string]$OracleDbPort = "1521",
   [string]$OracleDbService = "",
+  [string]$OracleDbSid = "",
   [string]$OracleDbUser = "",
   [string]$OracleDbPass = "",
   [string]$ConfigFile = "",
@@ -370,9 +372,11 @@ function Ensure-ApiEnvFile {
       "EXPORT_DIR=$(DotEnvValue (Join-Path $ApiRoot 'exports'))"
       "EXPORT_PAGE_SIZE=5000"
       "EXPORT_MAX_ROWS=1000000"
+      "DB_DSN=$(DotEnvValue $oracleDbDsn)"
       "DB_HOST=$(DotEnvValue $oracleDbHost)"
       "DB_PORT=$(DotEnvValue $oracleDbPort)"
       "DB_SERVICE=$(DotEnvValue $oracleDbService)"
+      "DB_SID=$(DotEnvValue $oracleDbSid)"
       "DB_USER=$(DotEnvValue $oracleDbUser)"
       "DB_PASS=$(DotEnvValue $oracleDbPass)"
       "GOOGLE_DRIVE_AUTH_MODE=$(DotEnvValue $driveAuthMode)"
@@ -386,9 +390,11 @@ function Ensure-ApiEnvFile {
   }
   Set-DotEnvValue $apiEnv "API_TOKEN" $InternalApiToken
   Set-DotEnvValue $apiEnv "EXPORT_DIR" (Join-Path $ApiRoot "exports")
+  Set-DotEnvValue $apiEnv "DB_DSN" $oracleDbDsn
   if (-not [string]::IsNullOrWhiteSpace($oracleDbHost)) { Set-DotEnvValue $apiEnv "DB_HOST" $oracleDbHost }
   if (-not [string]::IsNullOrWhiteSpace($oracleDbPort)) { Set-DotEnvValue $apiEnv "DB_PORT" $oracleDbPort }
   if (-not [string]::IsNullOrWhiteSpace($oracleDbService)) { Set-DotEnvValue $apiEnv "DB_SERVICE" $oracleDbService }
+  if (-not [string]::IsNullOrWhiteSpace($oracleDbSid)) { Set-DotEnvValue $apiEnv "DB_SID" $oracleDbSid }
   if (-not [string]::IsNullOrWhiteSpace($oracleDbUser)) { Set-DotEnvValue $apiEnv "DB_USER" $oracleDbUser }
   if (-not [string]::IsNullOrWhiteSpace($oracleDbPass)) { Set-DotEnvValue $apiEnv "DB_PASS" $oracleDbPass }
   Set-DotEnvValue $apiEnv "GOOGLE_DRIVE_FOLDER_ID" $googleDriveFolderId
@@ -575,9 +581,11 @@ $BaseUrl = Resolve-SetupValue $setupConfig "BaseUrl" $BaseUrl "https://vnptcto.c
 $InternalApiUrl = Resolve-SetupValue $setupConfig "InternalApiUrl" $InternalApiUrl "https://api.vnptcto.com/api/du-lieu-web" "INTERNAL_API_URL"
 $WorkerDriveUploadApiUrl = Resolve-SetupValue $setupConfig "WorkerDriveUploadApiUrl" $WorkerDriveUploadApiUrl "http://127.0.0.1:8000/api/du-lieu-web" "ONEBSS_DRIVE_UPLOAD_API_URL"
 $ApiRoot = Resolve-SetupValue $setupConfig "ApiRoot" $ApiRoot "C:\VNPTCTO" ""
+$oracleDbDsn = Resolve-SetupValue $setupConfig "OracleDbDsn" $OracleDbDsn "" "DB_DSN"
 $oracleDbHost = Resolve-SetupValue $setupConfig "OracleDbHost" $OracleDbHost "" "DB_HOST"
 $oracleDbPort = Resolve-SetupValue $setupConfig "OracleDbPort" $OracleDbPort "1521" "DB_PORT"
 $oracleDbService = Resolve-SetupValue $setupConfig "OracleDbService" $OracleDbService "" "DB_SERVICE"
+$oracleDbSid = Resolve-SetupValue $setupConfig "OracleDbSid" $OracleDbSid "" "DB_SID"
 $oracleDbUser = Resolve-SetupValue $setupConfig "OracleDbUser" $OracleDbUser "" "DB_USER"
 $oracleDbPass = Resolve-SetupValue $setupConfig "OracleDbPass" $OracleDbPass "" "DB_PASS"
 $InternalApiToken = Resolve-SetupValue $setupConfig "InternalApiToken" $InternalApiToken "" "INTERNAL_API_TOKEN"

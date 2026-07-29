@@ -2538,10 +2538,30 @@ def workstation_oracle_config(repository: AppRepository) -> dict[str, str]:
                 return str(value).strip()
         return ""
 
+    host = first_value("host", "db_host", "DB_HOST")
+    port = first_value("port", "db_port", "DB_PORT") or "1521"
+    service = first_value("service", "service_name", "db_service", "DB_SERVICE")
+    sid = first_value("sid", "db_sid", "DB_SID")
+    dsn = first_value(
+        "dsn",
+        "db_dsn",
+        "DB_DSN",
+        "connect_string",
+        "connection_string",
+        "db_connect_string",
+        "oracle_connect_string",
+        "tns",
+        "tns_name",
+    )
+    if not dsn and host and service:
+        dsn = f"{host}:{port}/{service}"
+
     return {
-        "host": first_value("host", "db_host", "DB_HOST"),
-        "port": first_value("port", "db_port", "DB_PORT") or "1521",
-        "service": first_value("service", "service_name", "db_service", "DB_SERVICE"),
+        "dsn": dsn,
+        "host": host,
+        "port": port,
+        "service": service,
+        "sid": sid,
         "username": first_value("username", "user", "db_user", "DB_USER"),
         "password": first_value("password", "db_pass", "DB_PASS"),
     }
@@ -2566,9 +2586,11 @@ def workstation_setup_config_script(request: Request) -> str:
         ("WorkerDriveUploadApiUrl", "http://127.0.0.1:8000/api/du-lieu-web", "Local API used by workstation worker for Drive uploads."),
         ("InstallRoot", "D:\\Tool_Tram_VNPTCTO.COM", "Default workstation install folder."),
         ("ApiRoot", "C:\\VNPTCTO", "Default local API middleware folder."),
+        ("OracleDbDsn", oracle_config.get("dsn", ""), "Oracle TCP DSN/connect string for local SQL API."),
         ("OracleDbHost", oracle_config.get("host", ""), "Oracle host for local SQL API."),
         ("OracleDbPort", oracle_config.get("port", "1521"), "Oracle port for local SQL API."),
         ("OracleDbService", oracle_config.get("service", ""), "Oracle service name for local SQL API."),
+        ("OracleDbSid", oracle_config.get("sid", ""), "Optional Oracle SID for local SQL API."),
         ("OracleDbUser", oracle_config.get("username", ""), "Oracle username for local SQL API."),
         ("OracleDbPass", oracle_config.get("password", ""), "Oracle password for local SQL API."),
         ("WorkerIdPrefix", "may-tram", "The setup script appends the Windows computer name."),

@@ -50,9 +50,11 @@ Mở file `.env` và thay:
 
 ```dotenv
 DB_MOCK_MODE=false
+DB_DSN=host:1521/service-name
 DB_HOST=dia-chi-ip-hoac-hostname
 DB_PORT=1521
 DB_SERVICE=service-name-do-don-vi-cap
+DB_SID=
 DB_USER=tai-khoan-cua-ban
 DB_PASS=mat-khau-cua-ban
 ```
@@ -312,7 +314,7 @@ Khóa mã hóa kho tài khoản được dẫn xuất từ `SESSION_SECRET`. Ph�
 
 Phân hệ **Quản trị hệ thống** có thêm danh mục kết nối:
 
-- `DB cơ quan Oracle`: dùng biến `.env` `DB_HOST`, `DB_PORT`, `DB_SERVICE`, `DB_USER`, `DB_PASS`.
+- `DB cơ quan Oracle`: dùng biến `.env` `DB_DSN` hoặc `DB_HOST`, `DB_PORT`, `DB_SERVICE`/`DB_SID`, `DB_USER`, `DB_PASS`.
 - `DB của web Supabase`: dùng `SUPABASE_REST_URL` và `SUPABASE_SECRET_KEY`.
 - `FTP`: placeholder, chưa cấu hình server/user/password.
 - `Drive`: placeholder, chưa cấu hình OAuth/service account.
