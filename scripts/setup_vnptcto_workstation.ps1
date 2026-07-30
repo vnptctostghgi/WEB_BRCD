@@ -510,6 +510,63 @@ function Stop-WorkstationWorkerProcesses {
   Start-Sleep -Seconds 2
 }
 
+function Get-WorkstationWorkerProcesses {
+  param([string]$Root)
+  $escapedRoot = [regex]::Escape(([IO.Path]::GetFullPath($Root)).TrimEnd("\"))
+  $patterns = @(
+    "onebss_workstation_worker.py",
+    "start_onebss_worker.ps1",
+    "run_onebss_worker_background.ps1"
+  )
+  Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $commandLine = [string]$_.CommandLine
+    if ([int]$_.ProcessId -eq [int]$PID) { return $false }
+    if ($commandLine -notmatch $escapedRoot) { return $false }
+    foreach ($pattern in $patterns) {
+      if ($commandLine -match [regex]::Escape($pattern)) { return $true }
+    }
+    return $false
+  }
+}
+
+function Start-WorkstationWorkerNow {
+  param([string]$Root)
+  Write-Step "Khoi dong worker may tram nen"
+  $running = @(Get-WorkstationWorkerProcesses $Root)
+  if ($running.Count -gt 0) {
+    Write-Host "Worker dang chay PID: $($running.ProcessId -join ', ')" -ForegroundColor Green
+    return
+  }
+  try {
+    Start-ScheduledTask -TaskName "VNPTCTO OneBSS Worker" -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 5
+  } catch {
+  }
+  $running = @(Get-WorkstationWorkerProcesses $Root)
+  if ($running.Count -gt 0) {
+    Write-Host "Worker da chay qua Scheduled Task PID: $($running.ProcessId -join ', ')" -ForegroundColor Green
+    return
+  }
+  $launcher = Join-Path $Root "scripts\run_onebss_worker_background.ps1"
+  if (-not (Test-Path -LiteralPath $launcher)) {
+    Write-Warning "Khong tim thay launcher worker: $launcher"
+    return
+  }
+  try {
+    $launcherArg = "`"$launcher`""
+    Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $launcherArg, "-NoPause") -WorkingDirectory $Root -WindowStyle Hidden | Out-Null
+    Start-Sleep -Seconds 3
+    $running = @(Get-WorkstationWorkerProcesses $Root)
+    if ($running.Count -gt 0) {
+      Write-Host "Worker da chay nen PID: $($running.ProcessId -join ', ')" -ForegroundColor Green
+    } else {
+      Write-Warning "Da goi khoi dong worker nhung chua thay process. Kiem tra logs\onebss-worker-error.log."
+    }
+  } catch {
+    Write-Warning "Khong khoi dong duoc worker nen: $($_.Exception.Message)"
+  }
+}
+
 function Install-ApiMiddleware {
   param([string]$Root)
   if ($script:SkipApiMiddlewareResolved) {
@@ -775,6 +832,9 @@ if ($startNowResolved -and $canStartWorkerNow) {
 Invoke-External "powershell.exe" @taskArgs
 
 Install-ApiMiddleware $InstallRoot
+if ($startNowResolved -and $canStartWorkerNow) {
+  Start-WorkstationWorkerNow $InstallRoot
+}
 Install-HealthCheckTask $InstallRoot
 
 Write-Step "Kiem tra nhanh"

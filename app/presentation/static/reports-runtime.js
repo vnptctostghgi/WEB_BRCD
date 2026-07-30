@@ -191,12 +191,14 @@ function dynamicReportProgressHint(job, status) {
     const workerState = job?.worker_state && typeof job.worker_state === "object" ? job.worker_state : {};
     if (workerState.status === "ready") {
       text = `${workerState.message || "Đã thấy máy trạm online. Web đang chờ máy trạm nhận lệnh SQL."}${waitText ? ` · đã chờ ${waitText}` : ""}`;
+    } else if (workerState.status === "no_sql_worker") {
+      text = `${workerState.message || "Đã thấy health-check nhưng chưa thấy worker SQL đang chạy."}${waitText ? ` · đã chờ ${waitText}` : ""}`;
     } else if (workerState.status === "no_online_worker") {
       text = `${workerState.message || "Chưa thấy máy trạm online để nhận lệnh SQL."}${waitText ? ` · đã chờ ${waitText}` : ""}`;
     } else {
       text = `Chưa có máy trạm nhận lệnh${waitText ? ` · đã chờ ${waitText}` : ""}.`;
     }
-    if (createdMs && Date.now() - createdMs > 60000 && workerState.status === "no_online_worker") text += " Nếu vẫn đứng ở đây, hãy mở trang Máy trạm để kiểm tra worker online.";
+    if (createdMs && Date.now() - createdMs > 60000 && ["no_online_worker", "no_sql_worker"].includes(workerState.status)) text += " Nếu vẫn đứng ở đây, hãy mở trang Máy trạm để kiểm tra worker online.";
   } else if (normalized === "running_worker") {
     kind = "admin";
     text = `Máy trạm${workerId} đã nhận lệnh và đang xử lý${updateText ? ` · cập nhật ${updateText} trước` : ""}.`;

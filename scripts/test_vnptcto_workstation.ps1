@@ -54,8 +54,68 @@ function Test-Http {
   }
 }
 
+function Get-WorkerProcesses {
+  $root = [Environment]::GetEnvironmentVariable("VNPTCTO_WORKSTATION_ROOT", "User")
+  if ([string]::IsNullOrWhiteSpace($root)) {
+    $root = Join-Path $PSScriptRoot ".."
+  }
+  $escapedRoot = [regex]::Escape(([IO.Path]::GetFullPath($root)).TrimEnd("\"))
+  $patterns = @(
+    "onebss_workstation_worker.py",
+    "start_onebss_worker.ps1",
+    "run_onebss_worker_background.ps1"
+  )
+  Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $commandLine = [string]$_.CommandLine
+    if ($commandLine -notmatch $escapedRoot) { return $false }
+    foreach ($pattern in $patterns) {
+      if ($commandLine -match [regex]::Escape($pattern)) { return $true }
+    }
+    return $false
+  }
+}
+
+function Start-WorkerIfMissing {
+  $processes = @(Get-WorkerProcesses)
+  if ($processes.Count -gt 0) {
+    return [pscustomobject]@{ Ok = $true; Detail = "Dang chay PID: $($processes.ProcessId -join ', ')" }
+  }
+  try {
+    Start-ScheduledTask -TaskName "VNPTCTO OneBSS Worker" -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 5
+  } catch {
+  }
+  $processes = @(Get-WorkerProcesses)
+  if ($processes.Count -gt 0) {
+    return [pscustomobject]@{ Ok = $true; Detail = "Da start Scheduled Task, PID: $($processes.ProcessId -join ', ')" }
+  }
+  $root = [Environment]::GetEnvironmentVariable("VNPTCTO_WORKSTATION_ROOT", "User")
+  if ([string]::IsNullOrWhiteSpace($root)) {
+    $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+  }
+  $launcher = Join-Path $root "scripts\run_onebss_worker_background.ps1"
+  if (-not (Test-Path -LiteralPath $launcher)) {
+    return [pscustomobject]@{ Ok = $false; Detail = "Khong tim thay launcher worker: $launcher" }
+  }
+  try {
+    $launcherArg = "`"$launcher`""
+    Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $launcherArg, "-NoPause") -WorkingDirectory $root -WindowStyle Hidden | Out-Null
+    Start-Sleep -Seconds 3
+  } catch {
+    return [pscustomobject]@{ Ok = $false; Detail = $_.Exception.Message }
+  }
+  $processes = @(Get-WorkerProcesses)
+  if ($processes.Count -gt 0) {
+    return [pscustomobject]@{ Ok = $true; Detail = "Da start launcher, PID: $($processes.ProcessId -join ', ')" }
+  }
+  return [pscustomobject]@{ Ok = $false; Detail = "Da goi start worker nhung chua thay process. Xem onebss-worker-error.log." }
+}
+
 $results = New-Object System.Collections.Generic.List[object]
 $results.Add((Test-Http "Web login" "$($BaseUrl.TrimEnd('/'))/login"))
+
+$workerStart = Start-WorkerIfMissing
+$results.Add([pscustomobject]@{ Name = "Worker process"; Ok = $workerStart.Ok; Detail = $workerStart.Detail })
 
 $token = [Environment]::GetEnvironmentVariable("INTERNAL_API_TOKEN", "User")
 if (-not [string]::IsNullOrWhiteSpace($token)) {
@@ -63,11 +123,14 @@ if (-not [string]::IsNullOrWhiteSpace($token)) {
     $body = @{
       worker_id = $WorkerId
       status = "health_check"
-      roles = @("health_check", "onebss_worker")
+      roles = @("health_check")
       version = "health-check-2026.07.20"
       local_time = (Get-Date).ToString("s")
       message = "Health check tu may tram."
-      details = @{ computer = $env:COMPUTERNAME }
+      details = @{
+        computer = $env:COMPUTERNAME
+        worker_process = $workerStart.Detail
+      }
     } | ConvertTo-Json -Depth 5
     Invoke-RestMethod -Uri "$($BaseUrl.TrimEnd('/'))/api/workstation/heartbeat" -Method Post -Headers @{ Authorization = "Bearer $token" } -ContentType "application/json" -Body $body -TimeoutSec 15 | Out-Null
     $results.Add([pscustomobject]@{ Name = "Heartbeat web"; Ok = $true; Detail = $WorkerId })
