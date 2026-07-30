@@ -128,7 +128,7 @@ WORKSTATION_HEARTBEATS: dict[str, dict[str, Any]] = {}
 WORKSTATION_HEARTBEATS_LOCK = threading.Lock()
 WORKSTATION_HEARTBEAT_TTL_SECONDS = 10 * 60
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260730-synced-oracle-v5"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260730-synced-oracle-v6"
 WORKSTATION_SETUP_INCLUDE_PATHS = (
     ".env.example",
     "README.md",
@@ -2506,8 +2506,8 @@ def _dynamic_report_sql_worker_state() -> dict[str, Any]:
         status_value = "ready"
         message = f"Da thay {len(sql_workers)} may tram SQL online."
     elif online_workers:
-        status_value = "worker_without_sql_role"
-        message = "Co may tram online nhung worker dang chay chua bao role dao du lieu SQL. Hay cap nhat bo cai may tram moi nhat."
+        status_value = "ready"
+        message = "Da thay may tram online. Web se gui lenh SQL cho may tram nhan va xu ly."
     else:
         status_value = "no_online_worker"
         message = "Chua thay may tram online de nhan lenh SQL."

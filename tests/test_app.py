@@ -118,11 +118,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=199" in public_response.text
+        assert "/static/app.js?v=200" in public_response.text
         assert "/static/styles.css?v=125" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
-        public_js = client.get("/static/app.js?v=199")
+        public_js = client.get("/static/app.js?v=200")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -142,8 +142,8 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert 'data-inline-onebss-field="storage_link"' not in public_js.text
         assert "/static/workstation.js?v=5" in public_js.text
         assert "window.VNPTReportsRuntime?.fillOneBssRunSelect?.()" in public_js.text
-        assert "/static/reports-runtime.js?v=8" in public_js.text
-        reports_runtime_js = client.get("/static/reports-runtime.js?v=8")
+        assert "/static/reports-runtime.js?v=9" in public_js.text
+        reports_runtime_js = client.get("/static/reports-runtime.js?v=9")
         assert reports_runtime_js.status_code == 200
         assert "fillDynamicReportSelect, fillOneBssRunSelect }" in reports_runtime_js.text
         assert "fillOneBssRunSelect }" in reports_runtime_js.text
@@ -234,6 +234,7 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         workstation_page = client.get("/maytram")
         assert workstation_page.status_code == 200
         assert f"/api/admin/workstation/setup-package?v={routes.WORKSTATION_SETUP_PACKAGE_VERSION}" in workstation_page.text
+        assert "setup-package?v=20260730-synced-oracle-v5" not in workstation_page.text
         with ZipFile(BytesIO(package.content)) as archive:
             names = set(archive.namelist())
             config_text = archive.read("VNPTCTO_WORKSTATION_SETUP/workstation-install-config.ps1").decode("utf-8")
@@ -279,6 +280,9 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "OracleDbDsn" in setup_script
         assert "OracleDbHost" in setup_script
         assert "Stop-ApiMiddlewareProcesses" in setup_script
+        assert "Stop-WorkstationWorkerProcesses" in setup_script
+        assert "onebss_workstation_worker.py" in setup_script
+        assert "Stop-ScheduledTask -TaskName \"VNPTCTO OneBSS Worker\"" in setup_script
         assert "Goi cai dat thieu cau hinh Oracle" in setup_script
         assert "DB_DSN=$(DotEnvValue $oracleDbDsn)" in setup_script
         assert "DB_HOST=$(DotEnvValue $oracleDbHost)" in setup_script
@@ -509,19 +513,31 @@ def test_api_middleware_streams_excel_export_without_count_or_offset(monkeypatch
 
 
 def test_workstation_heartbeat_uses_worker_token() -> None:
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/workstation/heartbeat",
-            json={"worker_id": "ws-test", "status": "idle", "roles": ["onebss_worker"]},
-            headers={"Authorization": "Bearer test-worker-token"},
-        )
-        assert response.status_code == 200
-        assert response.json()["worker_id"] == "ws-test"
+    with routes.WORKSTATION_HEARTBEATS_LOCK:
+        routes.WORKSTATION_HEARTBEATS.clear()
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/workstation/heartbeat",
+                json={"worker_id": "ws-test", "status": "idle", "roles": ["onebss_worker"]},
+                headers={"Authorization": "Bearer test-worker-token"},
+            )
+            assert response.status_code == 200
+            assert response.json()["worker_id"] == "ws-test"
 
-        login(client)
-        overview = client.get("/api/admin/workstation/overview")
-        workers = overview.json()["workers"]
-        assert any(worker["worker_id"] == "ws-test" and worker["status"] == "online" for worker in workers)
+            login(client)
+            overview = client.get("/api/admin/workstation/overview")
+            workers = overview.json()["workers"]
+            assert any(worker["worker_id"] == "ws-test" and worker["status"] == "online" for worker in workers)
+
+            sql_worker_state = routes._dynamic_report_sql_worker_state()
+            assert sql_worker_state["status"] == "ready"
+            assert sql_worker_state["online_count"] == 1
+            assert sql_worker_state["sql_count"] == 0
+            assert "cap nhat bo cai" not in sql_worker_state["message"].lower()
+    finally:
+        with routes.WORKSTATION_HEARTBEATS_LOCK:
+            routes.WORKSTATION_HEARTBEATS.clear()
 
 
 def test_favicon_redirects_to_system_logo() -> None:
@@ -663,7 +679,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=199" in page.text
+        assert "/static/app.js?v=200" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -2247,7 +2263,7 @@ def test_dynamic_report_export_worker_queue_can_cancel_waiting_job(monkeypatch, 
         body = started.json()
         job_id = body["job_id"]
         assert body["status"] == "queued_worker"
-        assert body["worker_state"]["status"] in {"ready", "worker_without_sql_role", "no_online_worker"}
+        assert body["worker_state"]["status"] in {"ready", "no_online_worker"}
 
         queue = client.get("/api/reports/export-jobs?limit=10")
         assert queue.status_code == 200
@@ -2316,7 +2332,7 @@ def test_dynamic_report_export_job_can_return_drive_link(monkeypatch, tmp_path) 
         job_id = started_body["job_id"]
         assert started_body["status"] == "queued_worker"
         assert started_body["updated_at"]
-        assert started_body["worker_state"]["status"] in {"ready", "worker_without_sql_role", "no_online_worker"}
+        assert started_body["worker_state"]["status"] in {"ready", "no_online_worker"}
         assert any("Da gui lenh lay du lieu" in step["message"] for step in started_body["progress_steps"])
         history = client.get("/api/reports/history?limit=5")
         assert history.status_code == 200
@@ -5570,16 +5586,16 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         home = client.get("/")
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
-        assert "/static/shell.js?v=20" in home.text
-        assert "/static/app.js?v=199" not in home.text
-        shell_js = client.get("/static/shell.js?v=20")
+        assert "/static/shell.js?v=21" in home.text
+        assert "/static/app.js?v=200" not in home.text
+        shell_js = client.get("/static/shell.js?v=21")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
         assert "function dedupeFeaturesForDisplay" in shell_js.text
         assert "function readCachedNavigation" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=199" in shell_js.text
+        assert "/static/app.js?v=200" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -5592,8 +5608,8 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
-        assert "/static/shell.js?v=20" in dashboard.text
-        assert "/static/app.js?v=199" not in dashboard.text
+        assert "/static/shell.js?v=21" in dashboard.text
+        assert "/static/app.js?v=200" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -5613,49 +5629,49 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "dynamic-report-body" not in reports.text
         assert "dynamic-report-prev" not in reports.text
         assert "dynamic-report-next" not in reports.text
-        assert "/static/app.js?v=199" in reports.text
+        assert "/static/app.js?v=200" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=199" in workstation.text
+        assert "/static/app.js?v=200" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=199" in work_tasks.text
+        assert "/static/app.js?v=200" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=199" in report_links.text
+        assert "/static/app.js?v=200" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=199" in system.text
+        assert "/static/app.js?v=200" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=199" in onebss_mining.text
+        assert "/static/app.js?v=200" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 
         ftp_mining = client.get("/daodulieuftp")
         assert ftp_mining.status_code == 200
         assert "view-ftp-mining" in ftp_mining.text
-        assert "/static/app.js?v=199" in ftp_mining.text
+        assert "/static/app.js?v=200" in ftp_mining.text
         assert "/static/ftp-mining.js" not in ftp_mining.text
         assert ftp_mining.text.count('class="app-view') == 1
 

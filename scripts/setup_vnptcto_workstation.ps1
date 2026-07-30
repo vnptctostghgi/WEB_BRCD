@@ -474,6 +474,42 @@ function Stop-ApiMiddlewareProcesses {
   Start-Sleep -Seconds 2
 }
 
+function Stop-WorkstationWorkerProcesses {
+  param([string]$Root)
+  Write-Step "Dung worker may tram cu neu dang chay"
+  try {
+    $task = Get-ScheduledTask -TaskName "VNPTCTO OneBSS Worker" -ErrorAction SilentlyContinue
+    if ($task) {
+      Stop-ScheduledTask -TaskName "VNPTCTO OneBSS Worker" -ErrorAction SilentlyContinue
+    }
+  } catch {
+  }
+  $escapedRoot = [regex]::Escape(([IO.Path]::GetFullPath($Root)).TrimEnd("\"))
+  $patterns = @(
+    "onebss_workstation_worker.py",
+    "start_onebss_worker.ps1",
+    "run_onebss_worker_background.ps1"
+  )
+  $currentPid = $PID
+  $processes = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $commandLine = [string]$_.CommandLine
+    if ([int]$_.ProcessId -eq [int]$currentPid) { return $false }
+    if ($commandLine -notmatch $escapedRoot) { return $false }
+    foreach ($pattern in $patterns) {
+      if ($commandLine -match [regex]::Escape($pattern)) { return $true }
+    }
+    return $false
+  }
+  foreach ($proc in $processes) {
+    try {
+      Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+      Write-Host "Da dung worker cu PID $($proc.ProcessId)" -ForegroundColor Yellow
+    } catch {
+    }
+  }
+  Start-Sleep -Seconds 2
+}
+
 function Install-ApiMiddleware {
   param([string]$Root)
   if ($script:SkipApiMiddlewareResolved) {
@@ -685,6 +721,8 @@ Write-Step "Tao thu muc may tram"
 foreach ($dir in @($InstallRoot, "$InstallRoot\logs", "$InstallRoot\temp", "$InstallRoot\backups", "$InstallRoot\downloads", "$InstallRoot\exports", "$InstallRoot\data", "$InstallRoot\data\staging", $ApiRoot)) {
   New-Item -ItemType Directory -Path $dir -Force | Out-Null
 }
+
+Stop-WorkstationWorkerProcesses $InstallRoot
 
 Write-Step "Copy source/tool hien tai"
 Copy-WorkspaceFiles $sourceRoot $InstallRoot

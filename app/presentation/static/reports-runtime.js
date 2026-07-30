@@ -189,14 +189,14 @@ function dynamicReportProgressHint(job, status) {
   let kind = "pending";
   if (normalized === "queued_worker") {
     const workerState = job?.worker_state && typeof job.worker_state === "object" ? job.worker_state : {};
-    if (workerState.status === "worker_without_sql_role") {
-      text = `${workerState.message || "Máy trạm online nhưng worker chưa có role SQL."}${waitText ? ` · đã chờ ${waitText}` : ""}`;
+    if (workerState.status === "ready") {
+      text = `${workerState.message || "Đã thấy máy trạm online. Web đang chờ máy trạm nhận lệnh SQL."}${waitText ? ` · đã chờ ${waitText}` : ""}`;
     } else if (workerState.status === "no_online_worker") {
       text = `${workerState.message || "Chưa thấy máy trạm online để nhận lệnh SQL."}${waitText ? ` · đã chờ ${waitText}` : ""}`;
     } else {
       text = `Chưa có máy trạm nhận lệnh${waitText ? ` · đã chờ ${waitText}` : ""}.`;
     }
-    if (createdMs && Date.now() - createdMs > 60000) text += " Nếu vẫn đứng ở đây, hãy cập nhật/chạy lại bộ cài máy trạm mới nhất.";
+    if (createdMs && Date.now() - createdMs > 60000 && workerState.status === "no_online_worker") text += " Nếu vẫn đứng ở đây, hãy mở trang Máy trạm để kiểm tra worker online.";
   } else if (normalized === "running_worker") {
     kind = "admin";
     text = `Máy trạm${workerId} đã nhận lệnh và đang xử lý${updateText ? ` · cập nhật ${updateText} trước` : ""}.`;
