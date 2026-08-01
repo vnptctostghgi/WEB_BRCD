@@ -2652,6 +2652,8 @@ def test_sql_worker_claim_recovers_export_job_from_audit_history(monkeypatch, tm
         with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
             routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
         routes._dynamic_report_export_job_path(job_id).unlink(missing_ok=True)
+        with routes.DYNAMIC_REPORT_EXPORT_HISTORY_RECOVERY_LOCK:
+            routes.DYNAMIC_REPORT_EXPORT_HISTORY_RECOVERY_LAST_TS = 0.0
 
         headers = {"Authorization": "Bearer test-worker-token"}
         claim = client.post("/api/sql-worker/tasks/claim", json={"worker_id": "ws-direct-claim"}, headers=headers)
@@ -4575,7 +4577,7 @@ def test_sql_worker_posts_result_to_web(monkeypatch) -> None:
     assert payload["pagination"]["total"] == 1
 
 
-def test_workstation_worker_claims_sql_before_onebss(monkeypatch) -> None:
+def test_workstation_worker_claims_onebss_before_sql(monkeypatch) -> None:
     from scripts import onebss_workstation_worker as worker
 
     calls = []
@@ -4592,22 +4594,32 @@ def test_workstation_worker_claims_sql_before_onebss(monkeypatch) -> None:
                     return None
 
                 def json(self) -> dict:
+                    if path == "/api/onebss-worker/tasks/claim":
+                        return {
+                            "ok": True,
+                            "task": {
+                                "run_id": "ONEBSS-FIRST",
+                                "report": {"ma_bao_cao": "BC_ONEBSS"},
+                                "parameters": {},
+                            },
+                        }
                     if path == "/api/sql-worker/tasks/claim":
-                        return {"ok": True, "task": {"run_id": "SQL-FIRST", "report_code": "BC_SQL", "query": {}}}
+                        return {"ok": True, "task": {"run_id": "SQL-SHOULD-WAIT", "report_code": "BC_SQL", "query": {}}}
                     return {"ok": True, "task": None}
 
             return FakeResponse()
 
-    def fake_sql_task(client, task, worker_id):
-        processed.append((task["run_id"], worker_id))
+    def fake_onebss_task(client, task, worker_id, poll_seconds):
+        processed.append(("onebss", task["run_id"], worker_id))
 
-    monkeypatch.setattr(worker, "process_sql_task", fake_sql_task)
+    monkeypatch.setattr(worker, "process_task", fake_onebss_task)
+    monkeypatch.setattr(worker, "process_sql_task", lambda *args, **kwargs: processed.append(("sql",)))
     monkeypatch.setattr(worker, "send_heartbeat", lambda *args, **kwargs: None)
 
     assert worker.poll_worker_once(FakeClient(), "ws-priority", 0) is True
-    assert processed == [("SQL-FIRST", "ws-priority")]
-    assert calls[0]["path"] == "/api/sql-worker/tasks/claim"
-    assert all(call["path"] != "/api/onebss-worker/tasks/claim" for call in calls)
+    assert processed == [("onebss", "ONEBSS-FIRST", "ws-priority")]
+    assert calls[0]["path"] == "/api/onebss-worker/tasks/claim"
+    assert all(call["path"] != "/api/sql-worker/tasks/claim" for call in calls)
 
 
 def test_sql_worker_posts_drive_export_result_to_web(monkeypatch) -> None:

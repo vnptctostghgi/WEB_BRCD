@@ -850,22 +850,6 @@ def process_ftp_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
 
 
 def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float) -> bool:
-    sql_claim = request_json(client, "POST", "/api/sql-worker/tasks/claim", json={"worker_id": worker_id}, timeout=10.0, _retry_forever=False)
-    if sql_claim.get("transient_error"):
-        return False
-    sql_task = sql_claim.get("task") if isinstance(sql_claim.get("task"), dict) else None
-    if sql_task:
-        send_heartbeat(
-            client,
-            worker_id,
-            "busy",
-            f"Dang xu ly task SQL {sql_task.get('run_id') or ''}.",
-            {"run_id": sql_task.get("run_id") or "", "report": sql_task.get("report_code") or "", "task_type": "sql"},
-        )
-        process_sql_task(client, sql_task, worker_id)
-        send_heartbeat(client, worker_id, "idle", "May tram SQL da quay lai trang thai cho task.")
-        return True
-
     claim = request_json(client, "POST", "/api/onebss-worker/tasks/claim", json={"worker_id": worker_id}, timeout=10.0, _retry_forever=False)
     if claim.get("transient_error"):
         return False
@@ -880,6 +864,22 @@ def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float) 
         )
         process_task(client, task, worker_id, poll_seconds)
         send_heartbeat(client, worker_id, "idle", "May tram OneBSS da quay lai trang thai cho task.")
+        return True
+
+    sql_claim = request_json(client, "POST", "/api/sql-worker/tasks/claim", json={"worker_id": worker_id}, timeout=10.0, _retry_forever=False)
+    if sql_claim.get("transient_error"):
+        return False
+    sql_task = sql_claim.get("task") if isinstance(sql_claim.get("task"), dict) else None
+    if sql_task:
+        send_heartbeat(
+            client,
+            worker_id,
+            "busy",
+            f"Dang xu ly task SQL {sql_task.get('run_id') or ''}.",
+            {"run_id": sql_task.get("run_id") or "", "report": sql_task.get("report_code") or "", "task_type": "sql"},
+        )
+        process_sql_task(client, sql_task, worker_id)
+        send_heartbeat(client, worker_id, "idle", "May tram SQL da quay lai trang thai cho task.")
         return True
 
     ftp_claim = request_json(client, "POST", "/api/ftp-worker/tasks/claim", json={"worker_id": worker_id}, timeout=10.0, _retry_forever=False)

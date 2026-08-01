@@ -105,6 +105,9 @@ DYNAMIC_REPORT_EXPORT_SEMAPHORE_LOCK = threading.Lock()
 DYNAMIC_REPORT_EXPORT_SEMAPHORE: threading.Semaphore | None = None
 DYNAMIC_REPORT_EXPORT_SEMAPHORE_WORKERS = 0
 DYNAMIC_REPORT_EXPORT_JOB_TTL_SECONDS = 60 * 60
+DYNAMIC_REPORT_EXPORT_HISTORY_RECOVERY_INTERVAL_SECONDS = 60
+DYNAMIC_REPORT_EXPORT_HISTORY_RECOVERY_LAST_TS = 0.0
+DYNAMIC_REPORT_EXPORT_HISTORY_RECOVERY_LOCK = threading.Lock()
 DYNAMIC_REPORT_EXPORT_DIR = Path(tempfile.gettempdir()) / "vnptcto_dynamic_report_exports"
 DYNAMIC_REPORT_EXPORT_JOB_DIR = DYNAMIC_REPORT_EXPORT_DIR / "jobs"
 DYNAMIC_REPORT_HISTORY_ACTION = "dynamic_report_history"
@@ -129,7 +132,7 @@ WORKSTATION_HEARTBEATS: dict[str, dict[str, Any]] = {}
 WORKSTATION_HEARTBEATS_LOCK = threading.Lock()
 WORKSTATION_HEARTBEAT_TTL_SECONDS = 10 * 60
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260801-sql-worker-v8"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260801-onebss-priority-v9"
 WORKSTATION_SETUP_INCLUDE_PATHS = (
     ".env.example",
     "README.md",
@@ -4173,12 +4176,17 @@ def _dynamic_report_export_job_from_history_item(item: dict[str, Any], now: floa
     }
 
 
-def _recover_dynamic_report_export_job_from_history(job_id: str = "", skip_job_ids: set[str] | None = None) -> dict[str, Any] | None:
+def _recover_dynamic_report_export_job_from_history(
+    job_id: str = "",
+    skip_job_ids: set[str] | None = None,
+    *,
+    audit_limit: int = 800,
+) -> dict[str, Any] | None:
     now = time.time()
     latest_by_id: dict[str, dict[str, Any]] = {}
     skipped = {str(item or "").strip() for item in (skip_job_ids or set()) if str(item or "").strip()}
     try:
-        rows = build_app_repository().list_audit_logs(limit=800)
+        rows = build_app_repository().list_audit_logs(limit=min(max(int(audit_limit or 800), 50), 800))
     except Exception:
         logger.exception("Cannot read dynamic report export history for recovery")
         return None
@@ -4942,6 +4950,16 @@ def _next_dynamic_report_sql_worker_job() -> tuple[str, dict[str, Any]] | None:
     return candidates[0]
 
 
+def _should_attempt_dynamic_report_export_history_recovery() -> bool:
+    global DYNAMIC_REPORT_EXPORT_HISTORY_RECOVERY_LAST_TS
+    now = time.monotonic()
+    with DYNAMIC_REPORT_EXPORT_HISTORY_RECOVERY_LOCK:
+        if now - DYNAMIC_REPORT_EXPORT_HISTORY_RECOVERY_LAST_TS < DYNAMIC_REPORT_EXPORT_HISTORY_RECOVERY_INTERVAL_SECONDS:
+            return False
+        DYNAMIC_REPORT_EXPORT_HISTORY_RECOVERY_LAST_TS = now
+    return True
+
+
 def _next_dynamic_report_export_worker_job(*, recover_from_history: bool = True) -> tuple[str, dict[str, Any]] | None:
     jobs_by_id: dict[str, dict[str, Any]] = {}
     with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
@@ -4974,8 +4992,8 @@ def _next_dynamic_report_export_worker_job(*, recover_from_history: bool = True)
             for job in persisted
             if str(job.get("job_id") or job.get("run_id") or "")
         ]
-    if recover_from_history and not candidates:
-        recovered = _recover_dynamic_report_export_job_from_history()
+    if recover_from_history and not candidates and _should_attempt_dynamic_report_export_history_recovery():
+        recovered = _recover_dynamic_report_export_job_from_history(audit_limit=80)
         if recovered and str(recovered.get("status") or "").lower() == "queued_worker":
             recovered_id = str(recovered.get("job_id") or recovered.get("run_id") or "").strip()
             if recovered_id:
