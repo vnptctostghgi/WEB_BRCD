@@ -158,6 +158,13 @@ app.include_router(mobile_gateway_router)
 app.include_router(mobile_gateway_admin_router)
 app.include_router(internal_email_admin_router)
 app.include_router(public_messages_admin_router)
+
+
+@app.get("/api/ping", include_in_schema=False)
+def ping() -> dict:
+    return {"ok": True, "status": "alive", "bootstrap": _startup_bootstrap_snapshot()}
+
+
 app.include_router(presentation_router)
 
 
@@ -171,11 +178,6 @@ async def add_response_headers(request: Request, call_next):
     if settings.is_production:
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
-
-
-@app.get("/api/ping", include_in_schema=False)
-def ping() -> dict:
-    return {"ok": True, "status": "alive", "bootstrap": _startup_bootstrap_snapshot()}
 
 
 @app.exception_handler(Exception)

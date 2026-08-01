@@ -1978,6 +1978,16 @@ def test_system_status_requires_login_and_reports_internal_api_policy() -> None:
         assert payload["query_policy"]["page_size_max"] == 20
 
 
+def test_api_ping_is_not_captured_by_frontend_route() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/ping")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["ok"] is True
+        assert payload["status"] == "alive"
+        assert "bootstrap" in payload
+
+
 def test_admin_can_manage_sql_reports_and_run_dynamic_report() -> None:
     with TestClient(app) as client:
         login(client)
@@ -2156,6 +2166,47 @@ def test_dynamic_report_direct_tunnel_endpoint_is_disabled(monkeypatch) -> None:
         assert job_body["status"] == "failed"
         assert job_body["details"]["disabled_endpoint"] is True
         assert calls == []
+
+
+def test_database_service_disables_direct_tunnel_sql_calls() -> None:
+    calls = []
+
+    class FakeInternalApi:
+        api_url = "https://api.vnptcto.com/api/du-lieu-web"
+
+        def run_sql_report(self, **kwargs):
+            calls.append(kwargs)
+            raise AssertionError("direct tunnel SQL call should be blocked")
+
+    class FakeRepository:
+        def get_sql_report_by_id(self, report_id):
+            return None
+
+        def get_sql_report_by_code(self, code):
+            return {
+                "ten_bao_cao": "Bao cao worker only",
+                "ma_bao_cao": "BC_WORKER_ONLY_SERVICE",
+                "cau_lenh_sql": "SELECT ma_tb FROM css_cto.db_thuebao WHERE trang_thai = :STATUS;",
+                "cac_tham_so": ["STATUS"],
+            }
+
+        def list_sql_reports(self):
+            return []
+
+    service = DatabaseService(FakeInternalApi(), FakeRepository())
+    result = service.run_dynamic_report(
+        ma_bao_cao="BC_WORKER_ONLY_SERVICE",
+        filters={"STATUS": "1"},
+        page=1,
+        page_size=20,
+    )
+    fiber = service.run_dashboard_fiber()
+
+    assert result["ok"] is False
+    assert result["details"]["disabled_endpoint"] is True
+    assert result["details"]["use_endpoint"] == "/api/reports/export-jobs"
+    assert fiber["ok"] is False
+    assert calls == []
 
 
 def test_dynamic_report_search_and_excel_export_use_full_result_set(monkeypatch) -> None:

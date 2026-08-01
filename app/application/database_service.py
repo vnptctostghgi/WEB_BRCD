@@ -34,6 +34,17 @@ class DatabaseService:
         self.internal_api = internal_api
         self.app_repository = app_repository
 
+    def _internal_sql_tunnel_disabled(self) -> bool:
+        api_url = str(getattr(self.internal_api, "api_url", "") or "").strip().lower()
+        if not api_url:
+            settings = getattr(self.internal_api, "settings", None)
+            api_url = str(getattr(settings, "internal_api_url", "") or "").strip().lower()
+        return "api.vnptcto.com" in api_url
+
+    @staticmethod
+    def _internal_sql_tunnel_disabled_message() -> str:
+        return "Da tat truy van SQL truc tiep qua tunnel api.vnptcto.com. Hay dung luong may tram/queue de lay du lieu."
+
     @staticmethod
     def _normalized_report_code(value: Any) -> str:
         text = str(value or "").strip()
@@ -154,6 +165,24 @@ class DatabaseService:
                 executable_filters,
                 search_columns or [],
                 search_text,
+            )
+
+        if self._internal_sql_tunnel_disabled():
+            disabled_details = {
+                **define_details,
+                "disabled_endpoint": True,
+                "use_endpoint": "/api/reports/export-jobs",
+            }
+            if ignored_filters:
+                disabled_details = {**disabled_details, "ignored_filters": ignored_filters, "allowed_params": allowed_params}
+            return self._failed_report(
+                self._internal_sql_tunnel_disabled_message(),
+                safe_page,
+                safe_page_size,
+                "direct_tunnel_disabled",
+                compiled_sql,
+                executable_filters,
+                disabled_details,
             )
 
         try:
@@ -612,6 +641,8 @@ class DatabaseService:
         total = 0
         fetched_rows = 0
         page = 1
+        if self._internal_sql_tunnel_disabled():
+            raise RuntimeError(self._internal_sql_tunnel_disabled_message())
         while fetched_rows < max_rows:
             result = self.internal_api.run_sql_report(
                 ten_bao_cao=ten_bao_cao,
@@ -1349,6 +1380,14 @@ class DatabaseService:
     def run_dashboard_datcoc_test(self) -> dict[str, Any]:
         page = 1
         page_size = 20
+        if self._internal_sql_tunnel_disabled():
+            return self._failed_report(
+                self._internal_sql_tunnel_disabled_message(),
+                page,
+                page_size,
+                "direct_tunnel_disabled",
+                extra_details={"disabled_endpoint": True},
+            )
         try:
             result = self.internal_api.run_sql_report(
                 ten_bao_cao="Kiểm tra đặt cọc",
@@ -1477,6 +1516,11 @@ class DatabaseService:
         page = 1
         page_size = 50
         sql = self._dashboard_fiber_sql(unit_prefix)
+        if self._internal_sql_tunnel_disabled():
+            return self._failed_fiber_group(
+                self._internal_sql_tunnel_disabled_message(),
+                "direct_tunnel_disabled",
+            )
         try:
             result = self.internal_api.run_sql_report(
                 ten_bao_cao=ten_bao_cao,
