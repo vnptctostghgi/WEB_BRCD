@@ -4396,6 +4396,45 @@ def test_onebss_report_run_expires_stale_worker_task(monkeypatch) -> None:
         assert runs[0]["can_cancel"] is False
 
 
+def test_onebss_report_run_expires_queued_task_when_no_worker(monkeypatch) -> None:
+    monkeypatch.setattr(routes, "ONEBSS_REPORT_QUEUED_NO_WORKER_SECONDS", 1)
+    with routes.WORKSTATION_HEARTBEATS_LOCK:
+        routes.WORKSTATION_HEARTBEATS.clear()
+    try:
+        with TestClient(app) as client:
+            login(client)
+            created = client.post(
+                "/api/admin/onebss-reports",
+                json={
+                    "ten_bao_cao": "OneBSS no worker",
+                    "danh_sach_bien": ["P_TUNGAY"],
+                    "report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST_NO_WORKER&name=Test",
+                    "storage_link": "",
+                },
+            )
+            assert created.status_code == 200
+            code = created.json()["ma_bao_cao"]
+
+            response = client.post("/api/onebss-reports/run", json={"ma_bao_cao": code, "parameters": {"P_TUNGAY": "01/07/2026"}})
+            assert response.status_code == 200
+            body = response.json()
+            assert body["status"] == "queued"
+            assert "chua thay worker OneBSS online" in body["message"]
+
+            job_id = body["job_id"]
+            stale_at = (datetime.now(UTC) - timedelta(seconds=5)).isoformat(timespec="seconds").replace("+00:00", "Z")
+            routes.build_app_repository().update_onebss_report_run(job_id, {"updated_at": stale_at})
+
+            job = client.get(f"/api/onebss-reports/jobs/{job_id}")
+            assert job.status_code == 200
+            assert job.json()["status"] == "failed"
+            assert "Chua thay worker OneBSS online" in job.json()["message"]
+            assert job.json()["can_cancel"] is False
+    finally:
+        with routes.WORKSTATION_HEARTBEATS_LOCK:
+            routes.WORKSTATION_HEARTBEATS.clear()
+
+
 def test_onebss_report_run_can_be_cancelled_without_worker_overwrite() -> None:
     with TestClient(app) as client:
         login(client)

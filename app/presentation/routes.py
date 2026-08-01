@@ -122,6 +122,7 @@ ONEBSS_REPORT_JOB_DIR = Path(tempfile.gettempdir()) / "vnptcto_onebss_report_job
 ONEBSS_REPORT_ACTIVE_STATUSES = {"queued", "running", "otp_required", "otp_invalid", "manual_otp_required"}
 ONEBSS_REPORT_STALE_WORKER_STATUSES = ONEBSS_REPORT_ACTIVE_STATUSES - {"queued"}
 ONEBSS_REPORT_STALE_ACTIVE_SECONDS = 15 * 60
+ONEBSS_REPORT_QUEUED_NO_WORKER_SECONDS = 2 * 60
 ONEBSS_REPORT_FINAL_STATUSES = {"success", "failed", "cancelled", "storage_failed", "google_drive_not_configured", "google_drive_upload_failed"}
 FTP_REPORT_ACTIVE_STATUSES = {"queued", "running"}
 FTP_REPORT_FINAL_STATUSES = {"success", "failed", "cancelled"}
@@ -133,6 +134,7 @@ WORKSTATION_HEARTBEATS_LOCK = threading.Lock()
 WORKSTATION_HEARTBEAT_TTL_SECONDS = 10 * 60
 WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_worker", "ftp_report_worker", "excel_export", "drive_upload"]
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
+WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
 WORKSTATION_SETUP_PACKAGE_VERSION = "20260802-onebss-timeout-v11"
 WORKSTATION_SETUP_INCLUDE_PATHS = (
@@ -2322,6 +2324,51 @@ def workstation_status_from_age(age_seconds: float | None) -> str:
     return "offline"
 
 
+def _onebss_worker_state() -> dict[str, Any]:
+    now_ts = time.time()
+    workers: list[dict[str, Any]] = []
+    for heartbeat in workstation_heartbeat_records():
+        worker_id = str(heartbeat.get("worker_id") or "").strip()
+        if not worker_id:
+            continue
+        roles = {str(role or "").strip() for role in (heartbeat.get("roles") if isinstance(heartbeat.get("roles"), list) else [])}
+        if not WORKSTATION_ONEBSS_ROLE_CODES.intersection(roles):
+            continue
+        received_at_ts = float(heartbeat.get("received_at_ts") or 0)
+        age_seconds = max(0.0, now_ts - received_at_ts) if received_at_ts else None
+        status_value = workstation_status_from_age(age_seconds)
+        if status_value not in {"online", "recent"}:
+            continue
+        workers.append(
+            {
+                "worker_id": worker_id,
+                "status": status_value,
+                "runtime_status": heartbeat.get("status") or "idle",
+                "version": heartbeat.get("version") or "",
+                "message": heartbeat.get("message") or "",
+                "last_seen_age_seconds": int(age_seconds or 0),
+            }
+        )
+    if workers:
+        busy_count = sum(1 for worker in workers if str(worker.get("runtime_status") or "").lower() == "busy")
+        return {
+            "status": "busy" if busy_count >= len(workers) else "ready",
+            "message": (
+                f"Da thay {len(workers)} worker OneBSS online nhung dang xu ly task khac."
+                if busy_count >= len(workers)
+                else f"Da thay {len(workers)} worker OneBSS online."
+            ),
+            "online_count": len(workers),
+            "workers": workers,
+        }
+    return {
+        "status": "no_onebss_worker",
+        "message": "Chua thay worker OneBSS online de nhan lenh. Hay mo/cai lai may tram moi nhat.",
+        "online_count": 0,
+        "workers": [],
+    }
+
+
 def workstation_public_config(request: Request) -> dict[str, Any]:
     settings = get_settings()
     repository = build_app_repository()
@@ -2382,6 +2429,8 @@ def workstation_run_last_seen(run: dict[str, Any]) -> datetime | None:
 def _expire_stale_onebss_worker_runs(repository: Any, ma_bao_cao: str = "", limit: int = 200) -> int:
     now = datetime.now(UTC)
     expired = 0
+    onebss_worker_state = _onebss_worker_state()
+    has_onebss_worker = int(onebss_worker_state.get("online_count") or 0) > 0
     try:
         runs = repository.list_onebss_report_runs(ma_bao_cao=ma_bao_cao, limit=limit)
     except Exception:
@@ -2389,13 +2438,30 @@ def _expire_stale_onebss_worker_runs(repository: Any, ma_bao_cao: str = "", limi
         return 0
     for run in runs:
         status_value = str(run.get("status") or "").lower()
-        if status_value not in ONEBSS_REPORT_STALE_WORKER_STATUSES:
+        if status_value == "queued":
+            if has_onebss_worker:
+                continue
+            last_seen = parse_datetime_value(run.get("updated_at")) or parse_datetime_value(run.get("started_at"))
+            stale_seconds = ONEBSS_REPORT_QUEUED_NO_WORKER_SECONDS
+            stale_message = (
+                "Chua thay worker OneBSS online nhan lenh sau "
+                f"{int(ONEBSS_REPORT_QUEUED_NO_WORKER_SECONDS / 60)} phut. "
+                "He thong da dung task nay de khong treo hang doi. Hay chay lai bo cai/may tram roi bam lay bao cao lai."
+            )
+        elif status_value in ONEBSS_REPORT_STALE_WORKER_STATUSES:
+            last_seen = newest_datetime(run.get("updated_at"), run.get("claimed_at")) or parse_datetime_value(run.get("started_at"))
+            stale_seconds = ONEBSS_REPORT_STALE_ACTIVE_SECONDS
+            stale_message = (
+                "Task OneBSS bi treo qua "
+                f"{int(ONEBSS_REPORT_STALE_ACTIVE_SECONDS / 60)} phut khong co cap nhat tu may tram. "
+                "He thong da mo khoa de chay lai."
+            )
+        else:
             continue
-        last_seen = newest_datetime(run.get("updated_at"), run.get("claimed_at")) or parse_datetime_value(run.get("started_at"))
         if not last_seen:
             continue
         age_seconds = (now - last_seen).total_seconds()
-        if age_seconds <= ONEBSS_REPORT_STALE_ACTIVE_SECONDS:
+        if age_seconds <= stale_seconds:
             continue
         run_id = str(run.get("run_id") or "").strip()
         if not run_id:
@@ -2405,11 +2471,7 @@ def _expire_stale_onebss_worker_runs(repository: Any, ma_bao_cao: str = "", limi
                 run_id,
                 {
                     "status": "failed",
-                    "message": (
-                        "Task OneBSS bi treo qua "
-                        f"{int(ONEBSS_REPORT_STALE_ACTIVE_SECONDS / 60)} phut khong co cap nhat tu may tram. "
-                        "He thong da mo khoa de chay lai."
-                    ),
+                    "message": stale_message,
                     "finished_at": datetime.now().isoformat(timespec="seconds"),
                 },
             )
@@ -6574,13 +6636,22 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
         raise_onebss_operation_error(error, "Khong kiem tra duoc task OneBSS dang ton tai")
     if existing_run and str(existing_run.get("status") or "").lower() in ONEBSS_REPORT_ACTIVE_STATUSES:
         return _onebss_report_job_response(job_id, {**existing_run, "job_id": job_id})
+    worker_state = _onebss_worker_state()
+    queued_message = (
+        "Da dua yeu cau lay du lieu OneBSS vao hang doi may tram."
+        if int(worker_state.get("online_count") or 0) > 0
+        else (
+            "Da dua yeu cau lay du lieu OneBSS vao hang doi, nhung chua thay worker OneBSS online. "
+            "Hay mo/cai lai may tram; neu khong co worker nhan lenh, task se tu dung sau 2 phut."
+        )
+    )
     try:
         run = repository.save_onebss_report_run({
             "run_id": job_id,
             "ma_bao_cao": report.get("ma_bao_cao") or ma_bao_cao,
             "ten_bao_cao": report.get("ten_bao_cao") or ma_bao_cao,
             "status": "queued",
-            "message": "Da dua yeu cau lay du lieu OneBSS vao hang doi may tram.",
+            "message": queued_message,
             "parameters": run_parameters,
             "started_at": started_at,
             "finished_at": "",
