@@ -123,6 +123,7 @@ ONEBSS_REPORT_ACTIVE_STATUSES = {"queued", "running", "otp_required", "otp_inval
 ONEBSS_REPORT_STALE_WORKER_STATUSES = ONEBSS_REPORT_ACTIVE_STATUSES - {"queued"}
 ONEBSS_REPORT_STALE_ACTIVE_SECONDS = 15 * 60
 ONEBSS_REPORT_QUEUED_NO_WORKER_SECONDS = 2 * 60
+ONEBSS_REPORT_CLAIM_NO_PROGRESS_SECONDS = 3 * 60
 ONEBSS_REPORT_FINAL_STATUSES = {"success", "failed", "cancelled", "storage_failed", "google_drive_not_configured", "google_drive_upload_failed"}
 FTP_REPORT_ACTIVE_STATUSES = {"queued", "running"}
 FTP_REPORT_FINAL_STATUSES = {"success", "failed", "cancelled"}
@@ -2426,6 +2427,21 @@ def workstation_run_last_seen(run: dict[str, Any]) -> datetime | None:
     return newest_datetime(run.get("updated_at"), run.get("claimed_at"), run.get("started_at"), run.get("finished_at"))
 
 
+def _onebss_run_has_only_claim_progress(run: dict[str, Any]) -> bool:
+    message = str(run.get("message") or "").strip().lower()
+    if "may tram da nhan task va dang xu ly onebss" not in message:
+        return False
+    if str(run.get("worker_session_id") or "").strip() or str(run.get("otp_request_id") or "").strip():
+        return False
+    if str(run.get("file_name") or "").strip() or str(run.get("storage_status") or "").strip():
+        return False
+    claimed_at = parse_datetime_value(run.get("claimed_at"))
+    updated_at = parse_datetime_value(run.get("updated_at"))
+    if not claimed_at or not updated_at:
+        return True
+    return abs((updated_at - claimed_at).total_seconds()) <= 5
+
+
 def _expire_stale_onebss_worker_runs(repository: Any, ma_bao_cao: str = "", limit: int = 200) -> int:
     now = datetime.now(UTC)
     expired = 0
@@ -2450,12 +2466,20 @@ def _expire_stale_onebss_worker_runs(repository: Any, ma_bao_cao: str = "", limi
             )
         elif status_value in ONEBSS_REPORT_STALE_WORKER_STATUSES:
             last_seen = newest_datetime(run.get("updated_at"), run.get("claimed_at")) or parse_datetime_value(run.get("started_at"))
-            stale_seconds = ONEBSS_REPORT_STALE_ACTIVE_SECONDS
-            stale_message = (
-                "Task OneBSS bi treo qua "
-                f"{int(ONEBSS_REPORT_STALE_ACTIVE_SECONDS / 60)} phut khong co cap nhat tu may tram. "
-                "He thong da mo khoa de chay lai."
-            )
+            if status_value == "running" and _onebss_run_has_only_claim_progress(run):
+                stale_seconds = ONEBSS_REPORT_CLAIM_NO_PROGRESS_SECONDS
+                stale_message = (
+                    "May tram da nhan lenh OneBSS nhung khong gui buoc xu ly tiep theo sau "
+                    f"{int(ONEBSS_REPORT_CLAIM_NO_PROGRESS_SECONDS / 60)} phut. "
+                    "He thong da dung task nay de khong treo hang doi. Hay khoi dong lai worker/may tram roi bam lay bao cao lai."
+                )
+            else:
+                stale_seconds = ONEBSS_REPORT_STALE_ACTIVE_SECONDS
+                stale_message = (
+                    "Task OneBSS bi treo qua "
+                    f"{int(ONEBSS_REPORT_STALE_ACTIVE_SECONDS / 60)} phut khong co cap nhat tu may tram. "
+                    "He thong da mo khoa de chay lai."
+                )
         else:
             continue
         if not last_seen:

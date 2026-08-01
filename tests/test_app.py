@@ -4382,7 +4382,10 @@ def test_onebss_report_run_expires_stale_worker_task(monkeypatch) -> None:
 
         stale_at = (datetime.now(UTC) - timedelta(seconds=5)).isoformat(timespec="seconds").replace("+00:00", "Z")
         repository = routes.build_app_repository()
-        repository.update_onebss_report_run(job_id, {"status": "running", "claimed_at": stale_at, "updated_at": stale_at})
+        repository.update_onebss_report_run(
+            job_id,
+            {"status": "running", "message": "Dang ket noi OneBSS.", "claimed_at": stale_at, "updated_at": stale_at},
+        )
 
         job = client.get(f"/api/onebss-reports/jobs/{job_id}")
         assert job.status_code == 200
@@ -4393,6 +4396,45 @@ def test_onebss_report_run_expires_stale_worker_task(monkeypatch) -> None:
         assert len(runs) == 1
         assert runs[0]["status"] == "failed"
         assert "bi treo" in runs[0]["message"]
+        assert runs[0]["can_cancel"] is False
+
+
+def test_onebss_report_run_expires_claimed_task_without_progress(monkeypatch) -> None:
+    monkeypatch.setattr(routes, "ONEBSS_REPORT_CLAIM_NO_PROGRESS_SECONDS", 1)
+    with TestClient(app) as client:
+        login(client)
+        created = client.post(
+            "/api/admin/onebss-reports",
+            json={
+                "ten_bao_cao": "OneBSS claimed no progress",
+                "danh_sach_bien": ["P_TUNGAY"],
+                "report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST_CLAIMED&name=Test",
+                "storage_link": "",
+            },
+        )
+        assert created.status_code == 200
+        code = created.json()["ma_bao_cao"]
+
+        response = client.post("/api/onebss-reports/run", json={"ma_bao_cao": code, "parameters": {"P_TUNGAY": "01/07/2026"}})
+        assert response.status_code == 200
+        job_id = response.json()["job_id"]
+        headers = {"Authorization": "Bearer test-worker-token"}
+        claim = client.post("/api/onebss-worker/tasks/claim", json={"worker_id": "ws-claimed"}, headers=headers)
+        assert claim.status_code == 200
+        assert claim.json()["task"]["run_id"] == job_id
+
+        stale_at = (datetime.now(UTC) - timedelta(seconds=5)).isoformat(timespec="seconds").replace("+00:00", "Z")
+        routes.build_app_repository().update_onebss_report_run(job_id, {"claimed_at": stale_at, "updated_at": stale_at})
+
+        job = client.get(f"/api/onebss-reports/jobs/{job_id}")
+        assert job.status_code == 200
+        assert job.json()["status"] == "failed"
+        assert "khong gui buoc xu ly tiep theo" in job.json()["message"]
+
+        runs = client.get(f"/api/onebss-reports/runs?ma_bao_cao={code}").json()["runs"]
+        assert len(runs) == 1
+        assert runs[0]["status"] == "failed"
+        assert "khong gui buoc xu ly tiep theo" in runs[0]["message"]
         assert runs[0]["can_cancel"] is False
 
 
