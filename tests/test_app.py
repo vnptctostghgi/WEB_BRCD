@@ -234,9 +234,11 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert routes.WORKSTATION_SETUP_PACKAGE_VERSION in package.headers["content-disposition"]
         workstation_page = client.get("/maytram")
         assert workstation_page.status_code == 200
+        assert 'id="view-workstation"' in workstation_page.text
         assert f"/api/admin/workstation/setup-package?v={routes.WORKSTATION_SETUP_PACKAGE_VERSION}" in workstation_page.text
         assert "setup-package?v=20260730-synced-oracle-v5" not in workstation_page.text
         assert "setup-package?v=20260730-synced-oracle-v6" not in workstation_page.text
+        assert "setup-package?v=20260730-synced-oracle-v7" not in workstation_page.text
         with ZipFile(BytesIO(package.content)) as archive:
             names = set(archive.namelist())
             config_text = archive.read("VNPTCTO_WORKSTATION_SETUP/workstation-install-config.ps1").decode("utf-8")
@@ -326,8 +328,10 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "Bo qua vi chua cai cloudflared" in health_script
         assert "Start-WorkerIfMissing" in health_script
         assert "Worker process" in health_script
-        assert 'roles = @("health_check")' in health_script
-        assert 'roles = @("health_check", "onebss_worker")' not in health_script
+        assert '$heartbeatRoles = @("health_check")' in health_script
+        assert 'if ($workerStart.Ok)' in health_script
+        assert '"sql_report_worker"' in health_script
+        assert 'roles = $heartbeatRoles' in health_script
         assert "Local API config" in health_script
         assert "config-status" in health_script
         assert "workstation-setup-error.log" in setup_script
@@ -2609,6 +2613,48 @@ def test_dynamic_report_export_job_recovers_from_audit_history(monkeypatch, tmp_
 
         headers = {"Authorization": "Bearer test-worker-token"}
         claim = client.post("/api/sql-worker/tasks/claim", json={"worker_id": "ws-audit"}, headers=headers)
+        assert claim.status_code == 200
+        task = claim.json()["task"]
+        assert task["run_id"] == job_id
+        assert task["task_type"] == "dynamic_report_export"
+        assert task["query"]["drive_folder_id"] == "drive-folder-001"
+        assert task["query"]["tham_so"] == {"STATUS": "1"}
+
+
+def test_sql_worker_claim_recovers_export_job_from_audit_history(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(routes, "DYNAMIC_REPORT_EXPORT_DIR", tmp_path / "exports")
+    monkeypatch.setattr(routes, "DYNAMIC_REPORT_EXPORT_JOB_DIR", tmp_path / "exports" / "jobs")
+    monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings, storage_link="", repository=None: "drive-folder-001")
+    with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+        routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
+    with routes.DYNAMIC_REPORT_RUN_JOBS_LOCK:
+        routes.DYNAMIC_REPORT_RUN_JOBS.clear()
+
+    with TestClient(app) as client:
+        login(client)
+        assert client.post(
+            "/api/admin/sql-reports",
+            json={
+                "ten_bao_cao": "CRS claim recovery",
+                "ma_bao_cao": "BC_DRIVE_CLAIM_RECOVERY",
+                "cau_lenh_sql": "SELECT ma_tb FROM css_cto.db_thuebao WHERE trang_thai = :STATUS;",
+                "cac_tham_so": ["STATUS"],
+            },
+        ).status_code == 200
+        started = client.post(
+            "/api/reports/export-jobs",
+            json={"ma_bao_cao": "BC_DRIVE_CLAIM_RECOVERY", "filters": {"STATUS": "1"}, "page": 1, "page_size": 20},
+        )
+        assert started.status_code == 200
+        job_id = started.json()["job_id"]
+        assert started.json()["status"] == "queued_worker"
+
+        with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+            routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
+        routes._dynamic_report_export_job_path(job_id).unlink(missing_ok=True)
+
+        headers = {"Authorization": "Bearer test-worker-token"}
+        claim = client.post("/api/sql-worker/tasks/claim", json={"worker_id": "ws-direct-claim"}, headers=headers)
         assert claim.status_code == 200
         task = claim.json()["task"]
         assert task["run_id"] == job_id

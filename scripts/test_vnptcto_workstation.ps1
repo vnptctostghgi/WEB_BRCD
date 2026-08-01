@@ -120,10 +120,14 @@ $results.Add([pscustomobject]@{ Name = "Worker process"; Ok = $workerStart.Ok; D
 $token = [Environment]::GetEnvironmentVariable("INTERNAL_API_TOKEN", "User")
 if (-not [string]::IsNullOrWhiteSpace($token)) {
   try {
+    $heartbeatRoles = @("health_check")
+    if ($workerStart.Ok) {
+      $heartbeatRoles = @("health_check", "onebss_worker", "sql_report_worker", "ftp_report_worker", "excel_export", "drive_upload")
+    }
     $body = @{
       worker_id = $WorkerId
       status = "health_check"
-      roles = @("health_check")
+      roles = $heartbeatRoles
       version = "health-check-2026.07.20"
       local_time = (Get-Date).ToString("s")
       message = "Health check tu may tram."

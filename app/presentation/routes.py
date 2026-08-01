@@ -129,7 +129,7 @@ WORKSTATION_HEARTBEATS: dict[str, dict[str, Any]] = {}
 WORKSTATION_HEARTBEATS_LOCK = threading.Lock()
 WORKSTATION_HEARTBEAT_TTL_SECONDS = 10 * 60
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260730-synced-oracle-v7"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260801-sql-worker-v8"
 WORKSTATION_SETUP_INCLUDE_PATHS = (
     ".env.example",
     "README.md",
@@ -2811,6 +2811,7 @@ def render_index_page(request: Request, feature_path: str) -> Response:
             "shell_only": shell_only,
             "initial_view": initial_view,
             "render_view": render_view,
+            "workstation_setup_package_version": WORKSTATION_SETUP_PACKAGE_VERSION,
         },
     )
 
@@ -3993,7 +3994,13 @@ def _persist_dynamic_report_export_job(job_id: str, job: dict[str, Any]) -> None
     except Exception as error:
         logger.warning("Cannot persist dynamic report export job %s: %s", job_id, error)
     try:
-        build_app_repository().save_report_run({**job, "job_id": job_id, "run_type": "export"})
+        repository = build_app_repository()
+        save_report_run = getattr(repository, "save_report_run", None)
+        if callable(save_report_run):
+            safe_job = _dynamic_report_export_json_value(job)
+            if not isinstance(safe_job, dict):
+                safe_job = {}
+            save_report_run({**safe_job, "job_id": job_id, "run_id": job_id, "run_type": "export"})
     except Exception as error:
         logger.warning("Cannot persist dynamic report export job %s to Supabase: %s", job_id, error)
 
@@ -4570,9 +4577,14 @@ def _set_dynamic_report_run_job(job_id: str, **updates: Any) -> dict[str, Any]:
         DYNAMIC_REPORT_RUN_JOBS[job_id] = job
         snapshot = dict(job)
     try:
-        build_app_repository().save_report_run({**snapshot, "job_id": job_id, "run_type": "load"})
+        repository = build_app_repository()
+        save_report_run = getattr(repository, "save_report_run", None)
+        if callable(save_report_run):
+            save_report_run({**snapshot, "job_id": job_id, "run_id": job_id, "run_type": "load"})
         if str(snapshot.get("status") or "").lower() == "complete" and isinstance(snapshot.get("result"), dict):
-            build_app_repository().save_report_result(job_id, snapshot["result"])
+            save_report_result = getattr(repository, "save_report_result", None)
+            if callable(save_report_result):
+                save_report_result(job_id, snapshot["result"])
             payload = snapshot.get("payload") if isinstance(snapshot.get("payload"), dict) else {}
             cache_metadata = payload.get("dashboard_cache_metadata") if isinstance(payload.get("dashboard_cache_metadata"), dict) else None
             if cache_metadata:
@@ -4926,11 +4938,11 @@ def _next_dynamic_report_sql_worker_job() -> tuple[str, dict[str, Any]] | None:
         return None
     # Legacy direct-view jobs are no longer the primary SQL path. Prefer the
     # newest one so stale browser polling cannot block a fresh operator action.
-    candidates.sort(key=lambda item: float(item[1].get("created_at") or 0), reverse=True)
+    candidates.sort(key=lambda item: _dynamic_report_job_sort_value(item[1]), reverse=True)
     return candidates[0]
 
 
-def _next_dynamic_report_export_worker_job() -> tuple[str, dict[str, Any]] | None:
+def _next_dynamic_report_export_worker_job(*, recover_from_history: bool = True) -> tuple[str, dict[str, Any]] | None:
     jobs_by_id: dict[str, dict[str, Any]] = {}
     with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
         for job_id, job in DYNAMIC_REPORT_EXPORT_JOBS.items():
@@ -4962,11 +4974,17 @@ def _next_dynamic_report_export_worker_job() -> tuple[str, dict[str, Any]] | Non
             for job in persisted
             if str(job.get("job_id") or job.get("run_id") or "")
         ]
+    if recover_from_history and not candidates:
+        recovered = _recover_dynamic_report_export_job_from_history()
+        if recovered and str(recovered.get("status") or "").lower() == "queued_worker":
+            recovered_id = str(recovered.get("job_id") or recovered.get("run_id") or "").strip()
+            if recovered_id:
+                candidates = [(recovered_id, dict(recovered))]
     if not candidates:
         return None
     # Prefer the newest operator request; stale queued exports should not keep a
     # fresh SQL mining command stuck behind old browser/session state.
-    candidates.sort(key=lambda item: float(item[1].get("created_at") or 0), reverse=True)
+    candidates.sort(key=lambda item: _dynamic_report_job_sort_value(item[1]), reverse=True)
     return candidates[0]
 
 
@@ -4975,7 +4993,7 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
     onebss_worker_token(request)
     _cleanup_dynamic_report_run_jobs()
     _cleanup_dynamic_report_export_jobs()
-    export_candidate = _next_dynamic_report_export_worker_job()
+    export_candidate = _next_dynamic_report_export_worker_job(recover_from_history=False)
     if export_candidate:
         job_id, job = export_candidate
         task_kind = "export"
@@ -4984,11 +5002,18 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
     else:
         candidate = _next_dynamic_report_sql_worker_job()
         if not candidate:
-            return {"ok": True, "task": None, "message": "Khong co task SQL dang cho may tram."}
-        job_id, job = candidate
-        task_kind = "load"
-        run_payload = _dynamic_report_payload_from_job(job)
-        drive_folder_id = ""
+            export_candidate = _next_dynamic_report_export_worker_job(recover_from_history=True)
+            if not export_candidate:
+                return {"ok": True, "task": None, "message": "Khong co task SQL dang cho may tram."}
+            job_id, job = export_candidate
+            task_kind = "export"
+            run_payload = _dynamic_report_export_payload_from_job(job)
+            drive_folder_id = str(job.get("drive_folder_id") or "").strip()
+        else:
+            job_id, job = candidate
+            task_kind = "load"
+            run_payload = _dynamic_report_payload_from_job(job)
+            drive_folder_id = ""
     prepared = build_database_service().prepare_dynamic_report_query(
         ma_bao_cao=run_payload.ma_bao_cao.strip().upper(),
         filters=run_payload.filters,
