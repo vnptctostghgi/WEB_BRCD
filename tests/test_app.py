@@ -2048,7 +2048,7 @@ def test_dynamic_report_history_records_loaded_result(monkeypatch) -> None:
         assert item["total"] == 1
 
 
-def test_dynamic_report_http_530_falls_back_to_sql_worker(monkeypatch) -> None:
+def test_dynamic_report_http_530_falls_back_to_sql_worker(monkeypatch, tmp_path) -> None:
     import httpx
 
     def raise_530(self, **kwargs):
@@ -2057,6 +2057,10 @@ def test_dynamic_report_http_530_falls_back_to_sql_worker(monkeypatch) -> None:
         raise httpx.HTTPStatusError("cloudflare tunnel error", request=request, response=response)
 
     monkeypatch.setattr(routes.InternalApiClient, "run_sql_report", raise_530)
+    monkeypatch.setattr(routes, "DYNAMIC_REPORT_EXPORT_DIR", tmp_path / "exports")
+    monkeypatch.setattr(routes, "DYNAMIC_REPORT_EXPORT_JOB_DIR", tmp_path / "exports" / "jobs")
+    with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+        routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
 
     with TestClient(app) as client:
         login(client)
@@ -2111,6 +2115,47 @@ def test_dynamic_report_http_530_falls_back_to_sql_worker(monkeypatch) -> None:
         assert completed["status"] == "complete"
         assert completed["rows"] == [{"MA_TB": "tb-local", "TEN_TB": "Local API"}]
         assert completed["pagination"]["total"] == 1
+
+
+def test_dynamic_report_direct_tunnel_endpoint_is_disabled(monkeypatch) -> None:
+    calls = []
+
+    def fake_run_sql_report(self, **kwargs):
+        calls.append(kwargs)
+        return {"ok": True, "columns": ["MA_TB"], "rows": [{"MA_TB": "should-not-run"}], "total": 1}
+
+    monkeypatch.setattr(routes.InternalApiClient, "run_sql_report", fake_run_sql_report)
+    monkeypatch.setattr(routes.get_settings(), "internal_api_url", "https://api.vnptcto.com/api/du-lieu-web")
+
+    with TestClient(app) as client:
+        login(client)
+        payload = {
+            "ten_bao_cao": "Bao cao worker only",
+            "ma_bao_cao": "BC_WORKER_ONLY",
+            "cau_lenh_sql": "SELECT ma_tb FROM css_cto.db_thuebao;",
+            "cac_tham_so": [],
+        }
+        assert client.post("/api/admin/sql-reports", json=payload).status_code == 200
+
+        direct = client.post(
+            "/api/reports/run",
+            json={"ma_bao_cao": "BC_WORKER_ONLY", "filters": {}, "page": 1, "page_size": 20},
+        )
+        assert direct.status_code == 200
+        direct_body = direct.json()
+        assert direct_body["ok"] is False
+        assert direct_body["status"] == "worker_only"
+        assert direct_body["details"]["use_endpoint"] == "/api/reports/export-jobs"
+
+        job = client.post(
+            "/api/reports/run-jobs",
+            json={"ma_bao_cao": "BC_WORKER_ONLY", "filters": {}, "page": 1, "page_size": 20},
+        )
+        assert job.status_code == 200
+        job_body = job.json()
+        assert job_body["status"] == "failed"
+        assert job_body["details"]["disabled_endpoint"] is True
+        assert calls == []
 
 
 def test_dynamic_report_search_and_excel_export_use_full_result_set(monkeypatch) -> None:
@@ -2511,10 +2556,6 @@ def test_dynamic_report_export_job_recovers_from_audit_history(monkeypatch, tmp_
         assert recovered.json()["status"] == "queued_worker"
         assert any("Da gui lenh lay du lieu" in step["message"] for step in recovered.json()["progress_steps"])
 
-        with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
-            routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
-        routes._dynamic_report_export_job_path(job_id).unlink(missing_ok=True)
-
         headers = {"Authorization": "Bearer test-worker-token"}
         claim = client.post("/api/sql-worker/tasks/claim", json={"worker_id": "ws-audit"}, headers=headers)
         assert claim.status_code == 200
@@ -2571,7 +2612,7 @@ def test_dynamic_report_drive_export_sends_compiled_sql_to_internal_api() -> Non
     assert result["ignored_filters"] == ["IGNORED"]
 
 
-def test_sql_worker_claim_formats_oracle_date_binds_for_report_mask(monkeypatch) -> None:
+def test_sql_worker_claim_formats_oracle_date_binds_for_report_mask(monkeypatch, tmp_path) -> None:
     import httpx
 
     def raise_530(self, **kwargs):
@@ -2580,8 +2621,12 @@ def test_sql_worker_claim_formats_oracle_date_binds_for_report_mask(monkeypatch)
         raise httpx.HTTPStatusError("cloudflare tunnel error", request=request, response=response)
 
     monkeypatch.setattr(routes.InternalApiClient, "run_sql_report", raise_530)
+    monkeypatch.setattr(routes, "DYNAMIC_REPORT_EXPORT_DIR", tmp_path / "exports")
+    monkeypatch.setattr(routes, "DYNAMIC_REPORT_EXPORT_JOB_DIR", tmp_path / "exports" / "jobs")
     with routes.DYNAMIC_REPORT_RUN_JOBS_LOCK:
         routes.DYNAMIC_REPORT_RUN_JOBS.clear()
+    with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+        routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
 
     try:
         with TestClient(app) as client:
@@ -2618,13 +2663,20 @@ def test_sql_worker_claim_formats_oracle_date_binds_for_report_mask(monkeypatch)
                     break
                 time.sleep(0.05)
             assert job["status"] == "queued_worker"
+            with routes.DYNAMIC_REPORT_RUN_JOBS_LOCK:
+                target_job = routes.DYNAMIC_REPORT_RUN_JOBS.get(job_id)
+                routes.DYNAMIC_REPORT_RUN_JOBS.clear()
+                if target_job:
+                    routes.DYNAMIC_REPORT_RUN_JOBS[job_id] = target_job
+            with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+                routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
 
             headers = {"Authorization": "Bearer test-worker-token"}
             claim = client.post("/api/sql-worker/tasks/claim", json={"worker_id": "ws-date"}, headers=headers)
             assert claim.status_code == 200
             task = claim.json()["task"]
-            assert task["query"]["tham_so"]["P_TUNGAY"] == "20260701"
-            assert task["query"]["tham_so"]["P_DENNGAY"] == "20260730"
+            assert task["query"]["tham_so"].get("P_TUNGAY") == "20260701", task
+            assert task["query"]["tham_so"].get("P_DENNGAY") == "20260730", task
     finally:
         with routes.DYNAMIC_REPORT_RUN_JOBS_LOCK:
             routes.DYNAMIC_REPORT_RUN_JOBS.clear()

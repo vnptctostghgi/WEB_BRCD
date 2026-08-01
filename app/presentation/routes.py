@@ -4694,7 +4694,46 @@ def _dynamic_report_sql_worker_message(result: dict[str, Any]) -> str:
     )
 
 
+def _dynamic_report_direct_query_disabled() -> bool:
+    internal_url = str(get_settings().internal_api_url or "").strip().lower()
+    return "api.vnptcto.com" in internal_url
+
+
+def _dynamic_report_direct_query_disabled_payload(payload: RunReportPayload) -> dict[str, Any]:
+    report_info = _dynamic_report_history_report(payload.ma_bao_cao)
+    return {
+        "ok": False,
+        "status": "worker_only",
+        "message": "Chuc nang xem du lieu truc tiep da tat. Hay dung Lay du lieu de may tram xuat Excel va tra link Drive.",
+        "details": {
+            "worker_required": True,
+            "disabled_endpoint": True,
+            "use_endpoint": "/api/reports/export-jobs",
+        },
+        "report": {
+            "ten_bao_cao": report_info["ten_bao_cao"],
+            "ma_bao_cao": report_info["ma_bao_cao"],
+            "cac_tham_so": [],
+        },
+        "columns": [],
+        "rows": [],
+        "pagination": {
+            "page": int(payload.page or 1),
+            "page_size": int(payload.page_size or 20),
+            "total": 0,
+        },
+    }
+
+
 def _run_dynamic_report_run_job(job_id: str, payload: RunReportPayload, actor: str) -> None:
+    if _dynamic_report_direct_query_disabled():
+        _set_dynamic_report_run_job(
+            job_id,
+            status="failed",
+            message="Chuc nang xem du lieu truc tiep da tat. Hay dung Lay du lieu de may tram xuat Excel va tra link Drive.",
+            details={"worker_required": True, "disabled_endpoint": True, "use_endpoint": "/api/reports/export-jobs"},
+        )
+        return
     _set_dynamic_report_run_job(job_id, status="running", message="Dang truy van SQL trong hang doi noi bo.")
     try:
         result = build_database_service().run_dynamic_report(
@@ -4797,6 +4836,22 @@ def start_dynamic_report_run_job(request: Request, payload: RunReportPayload) ->
     job_id = uuid.uuid4().hex
     now = time.time()
     report_info = _dynamic_report_history_report(payload.ma_bao_cao)
+    if _dynamic_report_direct_query_disabled():
+        job_snapshot = {
+            "job_id": job_id,
+            "status": "failed",
+            "message": "Chuc nang xem du lieu truc tiep da tat. Hay dung Lay du lieu de may tram xuat Excel va tra link Drive.",
+            "created_at": now,
+            "updated_at": now,
+            "created_by": actor["username"],
+            "report_code": report_info["ma_bao_cao"],
+            "report_name": report_info["ten_bao_cao"],
+            "payload": payload.model_dump(),
+            "details": {"worker_required": True, "disabled_endpoint": True, "use_endpoint": "/api/reports/export-jobs"},
+        }
+        with DYNAMIC_REPORT_RUN_JOBS_LOCK:
+            DYNAMIC_REPORT_RUN_JOBS[job_id] = dict(job_snapshot)
+        return _dynamic_report_run_job_response(job_id, job_snapshot)
     with DYNAMIC_REPORT_RUN_JOBS_LOCK:
         DYNAMIC_REPORT_RUN_JOBS[job_id] = {
             "job_id": job_id,
@@ -4869,7 +4924,9 @@ def _next_dynamic_report_sql_worker_job() -> tuple[str, dict[str, Any]] | None:
         ]
     if not candidates:
         return None
-    candidates.sort(key=lambda item: float(item[1].get("created_at") or 0))
+    # Legacy direct-view jobs are no longer the primary SQL path. Prefer the
+    # newest one so stale browser polling cannot block a fresh operator action.
+    candidates.sort(key=lambda item: float(item[1].get("created_at") or 0), reverse=True)
     return candidates[0]
 
 
@@ -4906,14 +4963,10 @@ def _next_dynamic_report_export_worker_job() -> tuple[str, dict[str, Any]] | Non
             if str(job.get("job_id") or job.get("run_id") or "")
         ]
     if not candidates:
-        recovered = _recover_dynamic_report_export_job_from_history(skip_job_ids=set(jobs_by_id))
-        if recovered and str(recovered.get("status") or "").lower() == "queued_worker":
-            recovered_id = str(recovered.get("job_id") or "").strip()
-            if recovered_id:
-                candidates.append((recovered_id, dict(recovered)))
-    if not candidates:
         return None
-    candidates.sort(key=lambda item: float(item[1].get("created_at") or 0))
+    # Prefer the newest operator request; stale queued exports should not keep a
+    # fresh SQL mining command stuck behind old browser/session state.
+    candidates.sort(key=lambda item: float(item[1].get("created_at") or 0), reverse=True)
     return candidates[0]
 
 
@@ -4922,20 +4975,20 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
     onebss_worker_token(request)
     _cleanup_dynamic_report_run_jobs()
     _cleanup_dynamic_report_export_jobs()
-    candidate = _next_dynamic_report_sql_worker_job()
-    if candidate:
-        job_id, job = candidate
-        task_kind = "load"
-        run_payload = _dynamic_report_payload_from_job(job)
-        drive_folder_id = ""
-    else:
-        export_candidate = _next_dynamic_report_export_worker_job()
-        if not export_candidate:
-            return {"ok": True, "task": None, "message": "Khong co task SQL dang cho may tram."}
+    export_candidate = _next_dynamic_report_export_worker_job()
+    if export_candidate:
         job_id, job = export_candidate
         task_kind = "export"
         run_payload = _dynamic_report_export_payload_from_job(job)
         drive_folder_id = str(job.get("drive_folder_id") or "").strip()
+    else:
+        candidate = _next_dynamic_report_sql_worker_job()
+        if not candidate:
+            return {"ok": True, "task": None, "message": "Khong co task SQL dang cho may tram."}
+        job_id, job = candidate
+        task_kind = "load"
+        run_payload = _dynamic_report_payload_from_job(job)
+        drive_folder_id = ""
     prepared = build_database_service().prepare_dynamic_report_query(
         ma_bao_cao=run_payload.ma_bao_cao.strip().upper(),
         filters=run_payload.filters,
@@ -5189,6 +5242,8 @@ def finish_sql_worker_task(request: Request, run_id: str, payload: SqlWorkerResu
 @router.post("/api/reports/run")
 def run_dynamic_report(request: Request, payload: RunReportPayload) -> dict:
     actor = admin_user(request)
+    if _dynamic_report_direct_query_disabled():
+        return _dynamic_report_direct_query_disabled_payload(payload)
     try:
         result = build_database_service().run_dynamic_report(
             ma_bao_cao=payload.ma_bao_cao.strip().upper(),

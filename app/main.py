@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
 import logging
 import mimetypes
+import threading
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -29,6 +31,13 @@ from app.settings import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+STARTUP_BOOTSTRAP_STATUS_LOCK = threading.Lock()
+STARTUP_BOOTSTRAP_STATUS = {
+    "status": "pending",
+    "started_at": "",
+    "finished_at": "",
+    "message": "",
+}
 mimetypes.add_type("image/webp", ".webp")
 try:
     settings.validate_for_startup()
@@ -45,24 +54,77 @@ SECURITY_HEADERS = {
 }
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    repository = build_repository(settings)
+def _set_startup_bootstrap_status(status: str, message: str = "") -> None:
+    now = datetime.now(UTC).isoformat(timespec="seconds")
+    with STARTUP_BOOTSTRAP_STATUS_LOCK:
+        STARTUP_BOOTSTRAP_STATUS["status"] = status
+        STARTUP_BOOTSTRAP_STATUS["message"] = message
+        if status in {"running", "skipped"} and not STARTUP_BOOTSTRAP_STATUS.get("started_at"):
+            STARTUP_BOOTSTRAP_STATUS["started_at"] = now
+        if status in {"complete", "failed", "skipped"}:
+            STARTUP_BOOTSTRAP_STATUS["finished_at"] = now
+
+
+def _startup_bootstrap_snapshot() -> dict[str, str]:
+    with STARTUP_BOOTSTRAP_STATUS_LOCK:
+        return dict(STARTUP_BOOTSTRAP_STATUS)
+
+
+def _bootstrap_repository(repository) -> None:
+    _set_startup_bootstrap_status("running", "Repository bootstrap is running.")
     repository.initialize(
         settings.initial_admin_username,
         settings.initial_admin_password.get_secret_value(),
     )
     ConnectionService(repository, settings).seed_current_connections()
-    work_task_scheduler.configure(repository, settings)
-    work_task_scheduler.start()
-    dashboard_chart_cache_scheduler.configure(repository, settings)
-    dashboard_chart_cache_scheduler.start()
-    zalo_auto_message_scheduler.configure(repository, settings)
-    zalo_auto_message_scheduler.start()
-    data_mining_scheduler.configure(repository, settings)
-    data_mining_scheduler.start()
-    internal_email_sync_scheduler.configure(repository, settings)
-    internal_email_sync_scheduler.start()
+    _set_startup_bootstrap_status("complete", "Repository bootstrap complete.")
+
+
+def _should_background_bootstrap() -> bool:
+    return (
+        settings.app_database_backend.strip().lower() == "supabase"
+        and bool(getattr(settings, "supabase_startup_background_enabled", True))
+    )
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    repository = build_repository(settings)
+    schedulers_started = False
+
+    def start_schedulers() -> None:
+        nonlocal schedulers_started
+        if schedulers_started:
+            return
+        work_task_scheduler.configure(repository, settings)
+        work_task_scheduler.start()
+        dashboard_chart_cache_scheduler.configure(repository, settings)
+        dashboard_chart_cache_scheduler.start()
+        zalo_auto_message_scheduler.configure(repository, settings)
+        zalo_auto_message_scheduler.start()
+        data_mining_scheduler.configure(repository, settings)
+        data_mining_scheduler.start()
+        internal_email_sync_scheduler.configure(repository, settings)
+        internal_email_sync_scheduler.start()
+        schedulers_started = True
+
+    if _should_background_bootstrap():
+        def bootstrap_in_background() -> None:
+            try:
+                _bootstrap_repository(repository)
+            except Exception as error:
+                logger.exception("Background startup bootstrap failed: %s", error)
+                _set_startup_bootstrap_status("failed", str(error))
+            finally:
+                try:
+                    start_schedulers()
+                except Exception as error:
+                    logger.exception("Cannot start schedulers after bootstrap: %s", error)
+
+        threading.Thread(target=bootstrap_in_background, name="startup-bootstrap", daemon=True).start()
+    else:
+        _bootstrap_repository(repository)
+        start_schedulers()
     try:
         yield
     finally:
@@ -109,6 +171,11 @@ async def add_response_headers(request: Request, call_next):
     if settings.is_production:
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
+
+
+@app.get("/api/ping", include_in_schema=False)
+def ping() -> dict:
+    return {"ok": True, "status": "alive", "bootstrap": _startup_bootstrap_snapshot()}
 
 
 @app.exception_handler(Exception)
