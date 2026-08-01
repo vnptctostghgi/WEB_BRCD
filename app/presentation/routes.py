@@ -131,8 +131,10 @@ ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
 WORKSTATION_HEARTBEATS: dict[str, dict[str, Any]] = {}
 WORKSTATION_HEARTBEATS_LOCK = threading.Lock()
 WORKSTATION_HEARTBEAT_TTL_SECONDS = 10 * 60
+WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_worker", "ftp_report_worker", "excel_export", "drive_upload"]
+WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260801-onebss-priority-v9"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260801-sql-heartbeat-v10"
 WORKSTATION_SETUP_INCLUDE_PATHS = (
     ".env.example",
     "README.md",
@@ -168,7 +170,7 @@ WORKSTATION_ROLE_PLAN = [
         "status": "ready",
     },
     {
-        "code": "sql_export_worker",
+        "code": "sql_report_worker",
         "title": "Worker SQL nặng / export Excel",
         "description": "Chạy API trung gian tại máy trạm để truy vấn Oracle, xuất Excel lớn và upload Google Drive ngoài Render.",
         "status": "ready",
@@ -2274,6 +2276,42 @@ def iso_datetime(value: datetime | None) -> str:
     return value.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z") if value else ""
 
 
+def _normalize_workstation_worker_id(worker_id: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", str(worker_id or "").strip())[:120] or "onebss-workstation"
+
+
+def _normalize_workstation_roles(roles: list[Any] | None) -> list[str]:
+    return [str(role).strip()[:80] for role in (roles or []) if str(role).strip()][:20]
+
+
+def _record_workstation_heartbeat(
+    worker_id: str,
+    status_value: str = "idle",
+    message: str = "",
+    *,
+    roles: list[Any] | None = None,
+    details: dict[str, Any] | None = None,
+    version: str = "",
+    local_time: str = "",
+) -> dict[str, Any]:
+    clean_worker_id = _normalize_workstation_worker_id(worker_id)
+    now = datetime.now(UTC)
+    heartbeat = {
+        "worker_id": clean_worker_id,
+        "status": str(status_value or "idle").strip().lower()[:40] or "idle",
+        "roles": _normalize_workstation_roles(WORKSTATION_DEFAULT_ROLES if roles is None else roles),
+        "version": str(version or "").strip()[:80],
+        "local_time": str(local_time or "").strip()[:80],
+        "message": str(message or "").strip()[:240],
+        "details": details if isinstance(details, dict) else {},
+        "received_at": iso_datetime(now),
+        "received_at_ts": time.time(),
+    }
+    with WORKSTATION_HEARTBEATS_LOCK:
+        WORKSTATION_HEARTBEATS[clean_worker_id] = heartbeat
+    return heartbeat
+
+
 def workstation_status_from_age(age_seconds: float | None) -> str:
     if age_seconds is None:
         return "unknown"
@@ -2467,14 +2505,13 @@ def workstation_workers_response(runs: list[dict[str, Any]]) -> list[dict[str, A
             "details": heartbeat.get("details") if isinstance(heartbeat.get("details"), dict) else {},
         }
     for worker_id, worker in run_overview["workers"].items():
-        fallback_roles = ["ftp_report_worker"] if str(worker.get("last_task_type") or "").lower() == "ftp" else ["onebss_worker"]
         item = by_worker.setdefault(
             worker_id,
             {
                 "worker_id": worker_id,
                 "status": "unknown",
                 "runtime_status": "unknown",
-                "roles": fallback_roles,
+                "roles": list(WORKSTATION_DEFAULT_ROLES),
                 "version": "",
                 "message": "",
                 "last_seen_at": "",
@@ -2504,12 +2541,23 @@ def _dynamic_report_sql_worker_state() -> dict[str, Any]:
     sql_workers = [
         worker
         for worker in online_workers
-        if "sql_report_worker" in {str(role or "").strip() for role in (worker.get("roles") if isinstance(worker.get("roles"), list) else [])}
+        if WORKSTATION_SQL_ROLE_CODES.intersection(
+            {str(role or "").strip() for role in (worker.get("roles") if isinstance(worker.get("roles"), list) else [])}
+        )
     ]
     latest_worker = online_workers[0] if online_workers else (workers[0] if workers else {})
     if sql_workers:
-        status_value = "ready"
-        message = f"Da thay {len(sql_workers)} may tram SQL online."
+        busy_workers = [
+            worker
+            for worker in sql_workers
+            if str(worker.get("runtime_status") or "").lower() == "busy" or int(worker.get("active_task_count") or 0) > 0
+        ]
+        if len(busy_workers) >= len(sql_workers):
+            status_value = "busy"
+            message = f"Da thay {len(sql_workers)} may tram SQL online nhung dang xu ly task khac. Lenh SQL se duoc nhan khi may tram ranh."
+        else:
+            status_value = "ready"
+            message = f"Da thay {len(sql_workers)} may tram SQL online."
     elif online_workers:
         status_value = "no_sql_worker"
         message = "Da thay health-check/may tram gan day nhung chua thay tien trinh worker SQL dang chay. Hay chay lai bo cai may tram moi nhat de tu khoi dong worker."
@@ -3129,22 +3177,16 @@ def storage_health(request: Request) -> dict:
 @router.post("/api/workstation/heartbeat")
 def workstation_heartbeat(request: Request, payload: WorkstationHeartbeatPayload) -> dict:
     onebss_worker_token(request)
-    worker_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", payload.worker_id.strip())[:120] or "onebss-workstation"
-    now = datetime.now(UTC)
-    heartbeat = {
-        "worker_id": worker_id,
-        "status": payload.status.strip().lower()[:40] or "idle",
-        "roles": [str(role).strip()[:80] for role in payload.roles if str(role).strip()][:20],
-        "version": payload.version.strip()[:80],
-        "local_time": payload.local_time.strip()[:80],
-        "message": payload.message.strip()[:240],
-        "details": payload.details if isinstance(payload.details, dict) else {},
-        "received_at": iso_datetime(now),
-        "received_at_ts": time.time(),
-    }
-    with WORKSTATION_HEARTBEATS_LOCK:
-        WORKSTATION_HEARTBEATS[worker_id] = heartbeat
-    return {"ok": True, "worker_id": worker_id, "received_at": heartbeat["received_at"]}
+    heartbeat = _record_workstation_heartbeat(
+        payload.worker_id,
+        payload.status,
+        payload.message,
+        roles=payload.roles,
+        details=payload.details,
+        version=payload.version,
+        local_time=payload.local_time,
+    )
+    return {"ok": True, "worker_id": heartbeat["worker_id"], "received_at": heartbeat["received_at"]}
 
 
 @router.get("/api/admin/workstation/overview")
@@ -5009,6 +5051,12 @@ def _next_dynamic_report_export_worker_job(*, recover_from_history: bool = True)
 @router.post("/api/sql-worker/tasks/claim")
 def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> dict:
     onebss_worker_token(request)
+    _record_workstation_heartbeat(
+        payload.worker_id,
+        "idle",
+        "May tram SQL dang cho lenh.",
+        details={"claim": "sql"},
+    )
     _cleanup_dynamic_report_run_jobs()
     _cleanup_dynamic_report_export_jobs()
     export_candidate = _next_dynamic_report_export_worker_job(recover_from_history=False)
@@ -5059,6 +5107,12 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
             message=f"May tram {payload.worker_id} da nhan lenh lay du lieu SQL va dang ket noi Oracle noi bo.",
             worker_id=payload.worker_id,
         )
+        _record_workstation_heartbeat(
+            payload.worker_id,
+            "busy",
+            f"May tram {payload.worker_id} da nhan lenh lay du lieu SQL va dang ket noi Oracle noi bo.",
+            details={"run_id": job_id, "report": prepared.get("ma_bao_cao") or "", "task_type": "sql_export"},
+        )
         updated = _get_dynamic_report_export_job(job_id) or job
         query = {
             "action": "export_sql_report_to_drive",
@@ -5079,6 +5133,12 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
             status="running_worker",
             message=f"May tram {payload.worker_id} da nhan task SQL va dang goi API local.",
             worker_id=payload.worker_id,
+        )
+        _record_workstation_heartbeat(
+            payload.worker_id,
+            "busy",
+            f"May tram {payload.worker_id} da nhan task SQL va dang goi API local.",
+            details={"run_id": job_id, "report": prepared.get("ma_bao_cao") or "", "task_type": "sql_load"},
         )
         query = {
             "action": "run_sql_report",
@@ -5113,22 +5173,36 @@ def update_sql_worker_task_status(request: Request, run_id: str, payload: SqlWor
     run_id = run_id.strip()
     job = _get_dynamic_report_run_job(run_id)
     if job:
+        worker_id = payload.worker_id or job.get("worker_id") or ""
+        _record_workstation_heartbeat(
+            worker_id,
+            "busy",
+            payload.message or "May tram dang truy van SQL bang API local.",
+            details={**(payload.details or {}), "run_id": run_id, "task_type": "sql_load"},
+        )
         updated = _set_dynamic_report_run_job(
             run_id,
             status=payload.status.strip().lower() or "running_worker",
             message=payload.message or "May tram dang truy van SQL bang API local.",
-            worker_id=payload.worker_id or job.get("worker_id") or "",
+            worker_id=worker_id,
             details=payload.details or job.get("details") or {},
         )
         return {"ok": True, "run": _dynamic_report_run_job_response(run_id, updated)}
     export_job = _get_dynamic_report_export_job(run_id)
     if not export_job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task SQL.")
+    worker_id = payload.worker_id or export_job.get("worker_id") or ""
+    _record_workstation_heartbeat(
+        worker_id,
+        "busy",
+        payload.message or "May tram dang lay du lieu SQL va upload Google Drive.",
+        details={**(payload.details or {}), "run_id": run_id, "task_type": "sql_export"},
+    )
     _set_dynamic_report_export_job(
         run_id,
         status=payload.status.strip().lower() or "running_worker",
         message=payload.message or "May tram dang lay du lieu SQL va upload Google Drive.",
-        worker_id=payload.worker_id or export_job.get("worker_id") or "",
+        worker_id=worker_id,
         details=payload.details or export_job.get("details") or {},
     )
     updated_export = _get_dynamic_report_export_job(run_id) or export_job
@@ -5215,6 +5289,12 @@ def finish_sql_worker_task(request: Request, run_id: str, payload: SqlWorkerResu
             worker_id=str(details.get("worker_id") or export_job.get("worker_id") or ""),
         )
         updated_export = _get_dynamic_report_export_job(run_id) or export_job
+        _record_workstation_heartbeat(
+            str(updated_export.get("worker_id") or export_job.get("worker_id") or ""),
+            "idle" if status_value == "complete" else "error",
+            message,
+            details={"run_id": run_id, "task_type": "sql_export", "status": status_value},
+        )
         try:
             _record_dynamic_report_history(
                 actor=export_job.get("created_by") or "sql-worker",
@@ -5259,6 +5339,12 @@ def finish_sql_worker_task(request: Request, run_id: str, payload: SqlWorkerResu
         rows=len(rows),
         total=(pagination.get("total") if isinstance(pagination, dict) else None) or len(rows),
         details=result["details"],
+    )
+    _record_workstation_heartbeat(
+        str(job.get("worker_id") or ""),
+        "idle" if status_value == "complete" else "error",
+        result["message"],
+        details={"run_id": run_id, "task_type": "sql_load", "status": status_value},
     )
     try:
         _record_dynamic_report_history(
@@ -6507,6 +6593,12 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
 @router.post("/api/onebss-worker/tasks/claim")
 def claim_onebss_worker_task(request: Request, payload: OneBssWorkerClaimPayload) -> dict:
     onebss_worker_token(request)
+    _record_workstation_heartbeat(
+        payload.worker_id,
+        "idle",
+        "May tram OneBSS dang cho lenh.",
+        details={"claim": "onebss"},
+    )
     repository = build_app_repository()
     try:
         _expire_stale_onebss_worker_runs(repository)
@@ -6515,6 +6607,12 @@ def claim_onebss_worker_task(request: Request, payload: OneBssWorkerClaimPayload
         raise_onebss_report_schema_error(error)
     if not run:
         return {"ok": True, "task": None, "message": "Khong co task OneBSS dang cho."}
+    _record_workstation_heartbeat(
+        payload.worker_id,
+        "busy",
+        f"May tram {payload.worker_id} da nhan task OneBSS.",
+        details={"run_id": run.get("run_id") or "", "report": run.get("ma_bao_cao") or "", "task_type": "onebss"},
+    )
     report = repository.get_onebss_report_by_code(str(run.get("ma_bao_cao") or ""))
     if not report:
         repository.update_onebss_report_run(
@@ -6558,6 +6656,13 @@ def update_onebss_worker_task_status(request: Request, run_id: str, payload: One
     report = repository.get_onebss_report_by_code(str(run.get("ma_bao_cao") or "")) or {}
     status_value = payload.status.strip().lower()
     worker_session_id = payload.worker_session_id.strip()
+    worker_id = payload.worker_id or run.get("worker_id") or ""
+    _record_workstation_heartbeat(
+        worker_id,
+        "busy",
+        payload.message or "May tram dang xu ly task OneBSS.",
+        details={"run_id": run_id.strip(), "report": run.get("ma_bao_cao") or "", "task_type": "onebss", **(payload.details or {})},
+    )
     if status_value in {"waiting_otp", "otp_required", "manual_otp_required"}:
         otp_info = ensure_onebss_task_otp_request(repository, run, report, worker_session_id)
         updated_run = otp_info.get("run") if isinstance(otp_info.get("run"), dict) else repository.get_onebss_report_run(run_id.strip())
@@ -6567,7 +6672,7 @@ def update_onebss_worker_task_status(request: Request, run_id: str, payload: One
         {
             "status": status_value or "running",
             "message": payload.message or "May tram dang xu ly task OneBSS.",
-            "worker_id": payload.worker_id or run.get("worker_id") or "",
+            "worker_id": worker_id,
             "worker_session_id": worker_session_id or run.get("worker_session_id") or "",
         },
     )
@@ -6583,6 +6688,12 @@ def get_onebss_worker_task_otp(request: Request, run_id: str) -> dict:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task OneBSS.")
     if _onebss_report_run_cancelled(run):
         return _onebss_worker_cancelled_response(run)
+    _record_workstation_heartbeat(
+        str(run.get("worker_id") or ""),
+        "busy",
+        "May tram dang doi OTP OneBSS.",
+        details={"run_id": run_id.strip(), "report": run.get("ma_bao_cao") or "", "task_type": "onebss"},
+    )
     request_id = str(run.get("otp_request_id") or "").strip()
     if not request_id:
         return {"ok": False, "status": "waiting", "message": "Task chua co OTP request.", "otp": ""}
@@ -6683,6 +6794,12 @@ def finish_onebss_worker_task(request: Request, run_id: str, payload: OneBssWork
             "duration_ms": payload.duration_ms,
             "finished_at": finished_at,
         },
+    )
+    _record_workstation_heartbeat(
+        str((updated or run).get("worker_id") or ""),
+        "idle" if payload.ok else "error",
+        payload.message or ("Da lay bao cao OneBSS tren may tram." if payload.ok else "May tram khong lay duoc bao cao OneBSS."),
+        details={"run_id": run_id.strip(), "report": run.get("ma_bao_cao") or "", "task_type": "onebss", "status": status_value},
     )
     try:
         repository.add_audit_log(

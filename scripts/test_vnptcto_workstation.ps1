@@ -122,7 +122,7 @@ if (-not [string]::IsNullOrWhiteSpace($token)) {
   try {
     $heartbeatRoles = @("health_check")
     if ($workerStart.Ok) {
-      $heartbeatRoles = @("health_check", "onebss_worker", "sql_report_worker", "ftp_report_worker", "excel_export", "drive_upload")
+      $heartbeatRoles = @("health_check", "onebss_worker", "sql_report_worker", "sql_export_worker", "ftp_report_worker", "excel_export", "drive_upload")
     }
     $body = @{
       worker_id = $WorkerId

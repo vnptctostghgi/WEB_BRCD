@@ -777,10 +777,14 @@ class DatabaseService:
     @staticmethod
     def _define_value(expression: str, filters: dict[str, Any]) -> str:
         value = expression.strip()
+        filters_by_upper = {str(key).strip().lstrip(":").upper(): item for key, item in filters.items()}
         if value.startswith(":"):
             filter_name = value[1:].strip().upper()
-            filters_by_upper = {str(key).strip().lstrip(":").upper(): item for key, item in filters.items()}
             value = str(filters_by_upper.get(filter_name, ""))
+        else:
+            bare_name = value.strip("'\"").strip().lstrip(":").upper()
+            if bare_name in filters_by_upper:
+                value = str(filters_by_upper.get(bare_name, ""))
         return value.strip().strip("'\"")
 
     @staticmethod
@@ -806,20 +810,37 @@ class DatabaseService:
     @staticmethod
     def _oracle_date_mask_for_bind(sql: str, name: str) -> str:
         pattern = re.compile(
-            rf"\bto_(?:date|timestamp)\s*\(\s*:{re.escape(name)}\b\s*,\s*'([^']+)'",
+            rf"\bto_(?:date|timestamp)\s*\(\s*(?P<expression>[^,]*:{re.escape(name)}\b[^,]*)\s*,\s*'(?P<mask>[^']+)'",
             re.IGNORECASE,
         )
         match = pattern.search(sql or "")
-        return str(match.group(1) or "").strip() if match else ""
+        if not match:
+            return ""
+        return DatabaseService._oracle_mask_for_value_expression(match.group("expression"), match.group("mask"))
 
     @staticmethod
     def _oracle_date_mask_for_define(sql: str, name: str) -> str:
         pattern = re.compile(
-            rf"\bto_(?:date|timestamp)\s*\(\s*'?\s*&{re.escape(name)}\b\s*'?\s*,\s*'([^']+)'",
+            rf"\bto_(?:date|timestamp)\s*\(\s*(?P<expression>[^,]*&{re.escape(name)}\b[^,]*)\s*,\s*'(?P<mask>[^']+)'",
             re.IGNORECASE,
         )
         match = pattern.search(sql or "")
-        return str(match.group(1) or "").strip() if match else ""
+        if not match:
+            return ""
+        return DatabaseService._oracle_mask_for_value_expression(match.group("expression"), match.group("mask"))
+
+    @staticmethod
+    def _oracle_mask_for_value_expression(expression: str, oracle_mask: str) -> str:
+        mask = str(oracle_mask or "").strip()
+        if not mask:
+            return ""
+        if re.search(r"\|\|\s*'\s*\d{1,2}:\d{2}(?::\d{2})?\s*'", str(expression or "")) and re.search(
+            r"\bHH(?:24)?\b|\bMI\b|\bSS\b",
+            mask,
+            re.IGNORECASE,
+        ):
+            return mask.split()[0]
+        return mask
 
     @classmethod
     def _format_oracle_date_value(cls, value: Any, oracle_mask: str) -> Any:

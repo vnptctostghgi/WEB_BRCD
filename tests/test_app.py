@@ -118,11 +118,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=201" in public_response.text
+        assert "/static/app.js?v=202" in public_response.text
         assert "/static/styles.css?v=125" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
-        public_js = client.get("/static/app.js?v=201")
+        public_js = client.get("/static/app.js?v=202")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -142,8 +142,8 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert 'data-inline-onebss-field="storage_link"' not in public_js.text
         assert "/static/workstation.js?v=5" in public_js.text
         assert "window.VNPTReportsRuntime?.fillOneBssRunSelect?.()" in public_js.text
-        assert "/static/reports-runtime.js?v=10" in public_js.text
-        reports_runtime_js = client.get("/static/reports-runtime.js?v=10")
+        assert "/static/reports-runtime.js?v=11" in public_js.text
+        reports_runtime_js = client.get("/static/reports-runtime.js?v=11")
         assert reports_runtime_js.status_code == 200
         assert "fillDynamicReportSelect, fillOneBssRunSelect }" in reports_runtime_js.text
         assert "fillOneBssRunSelect }" in reports_runtime_js.text
@@ -564,6 +564,36 @@ def test_workstation_heartbeat_uses_worker_token() -> None:
             routes.WORKSTATION_HEARTBEATS.clear()
 
 
+def test_sql_worker_state_accepts_legacy_role_and_busy_task_heartbeat() -> None:
+    with routes.WORKSTATION_HEARTBEATS_LOCK:
+        routes.WORKSTATION_HEARTBEATS.clear()
+    try:
+        routes._record_workstation_heartbeat(
+            "ws-legacy",
+            "idle",
+            "May tram cu van gui role SQL cu.",
+            roles=["onebss_worker", "sql_export_worker"],
+        )
+        sql_worker_state = routes._dynamic_report_sql_worker_state()
+        assert sql_worker_state["status"] == "ready"
+        assert sql_worker_state["sql_count"] == 1
+
+        with routes.WORKSTATION_HEARTBEATS_LOCK:
+            routes.WORKSTATION_HEARTBEATS.clear()
+        routes._record_workstation_heartbeat(
+            "ws-busy",
+            "busy",
+            "May tram dang xu ly OneBSS.",
+            details={"run_id": "RUN-BUSY", "task_type": "onebss"},
+        )
+        busy_state = routes._dynamic_report_sql_worker_state()
+        assert busy_state["status"] == "busy"
+        assert busy_state["sql_count"] == 1
+    finally:
+        with routes.WORKSTATION_HEARTBEATS_LOCK:
+            routes.WORKSTATION_HEARTBEATS.clear()
+
+
 def test_favicon_redirects_to_system_logo() -> None:
     with TestClient(app) as client:
         response = client.get("/favicon.ico", follow_redirects=False)
@@ -703,7 +733,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=201" in page.text
+        assert "/static/app.js?v=202" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -2814,6 +2844,47 @@ def test_dynamic_report_define_date_uses_oracle_mask() -> None:
     assert prepared["ok"] is True
     assert "TO_DATE('20260701', 'YYYYMMDD')" in prepared["cau_lenh_sql"]
     assert "01/07/2026" not in prepared["cau_lenh_sql"]
+
+
+def test_dynamic_report_define_date_accepts_bare_filter_name_and_time_suffix() -> None:
+    class FakeInternalApi:
+        settings = get_settings()
+
+    class FakeRepository:
+        def get_sql_report_by_code(self, code):
+            return {
+                "ten_bao_cao": "Bare date define",
+                "ma_bao_cao": "BARE_DATE_DEFINE",
+                "cau_lenh_sql": (
+                    "DEFINE p_tungay = :TUNGAY\n"
+                    "DEFINE p_denngay = DENNGAY\n"
+                    "SELECT * FROM dual "
+                    "WHERE ngay >= TO_DATE('&p_tungay' || ' 00:00:00', 'DD/MM/YYYY HH24:MI:SS') "
+                    "AND ngay < TO_DATE('&p_denngay' || ' 00:00:00', 'DD/MM/YYYY HH24:MI:SS');"
+                ),
+                "cac_tham_so": ["TUNGAY", "DENNGAY"],
+            }
+
+        def get_sql_report_by_id(self, report_id):
+            return None
+
+        def list_sql_reports(self):
+            return []
+
+    service = DatabaseService(FakeInternalApi(), FakeRepository())
+    prepared = service.prepare_dynamic_report_query(
+        ma_bao_cao="BARE_DATE_DEFINE",
+        filters={"TUNGAY": "2026-08-01", "DENNGAY": "2026-08-31"},
+        page=1,
+        page_size=20,
+    )
+
+    assert prepared["ok"] is True
+    assert "&p_tungay" not in prepared["cau_lenh_sql"].lower()
+    assert "&p_denngay" not in prepared["cau_lenh_sql"].lower()
+    assert "DENNGAY" not in prepared["cau_lenh_sql"]
+    assert "'01/08/2026' || ' 00:00:00'" in prepared["cau_lenh_sql"]
+    assert "'31/08/2026' || ' 00:00:00'" in prepared["cau_lenh_sql"]
 
 
 def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
@@ -5824,16 +5895,16 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         home = client.get("/")
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
-        assert "/static/shell.js?v=22" in home.text
-        assert "/static/app.js?v=201" not in home.text
-        shell_js = client.get("/static/shell.js?v=22")
+        assert "/static/shell.js?v=23" in home.text
+        assert "/static/app.js?v=202" not in home.text
+        shell_js = client.get("/static/shell.js?v=23")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
         assert "function dedupeFeaturesForDisplay" in shell_js.text
         assert "function readCachedNavigation" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=201" in shell_js.text
+        assert "/static/app.js?v=202" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -5846,8 +5917,8 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
-        assert "/static/shell.js?v=22" in dashboard.text
-        assert "/static/app.js?v=201" not in dashboard.text
+        assert "/static/shell.js?v=23" in dashboard.text
+        assert "/static/app.js?v=202" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -5867,49 +5938,49 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "dynamic-report-body" not in reports.text
         assert "dynamic-report-prev" not in reports.text
         assert "dynamic-report-next" not in reports.text
-        assert "/static/app.js?v=201" in reports.text
+        assert "/static/app.js?v=202" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=201" in workstation.text
+        assert "/static/app.js?v=202" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=201" in work_tasks.text
+        assert "/static/app.js?v=202" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=201" in report_links.text
+        assert "/static/app.js?v=202" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=201" in system.text
+        assert "/static/app.js?v=202" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=201" in onebss_mining.text
+        assert "/static/app.js?v=202" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 
         ftp_mining = client.get("/daodulieuftp")
         assert ftp_mining.status_code == 200
         assert "view-ftp-mining" in ftp_mining.text
-        assert "/static/app.js?v=201" in ftp_mining.text
+        assert "/static/app.js?v=202" in ftp_mining.text
         assert "/static/ftp-mining.js" not in ftp_mining.text
         assert ftp_mining.text.count('class="app-view') == 1
 

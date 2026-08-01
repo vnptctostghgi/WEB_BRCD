@@ -33,7 +33,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.07.30-synced-oracle-worker"
+WORKER_VERSION = "2026.08.01-sql-heartbeat-worker"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -88,7 +88,7 @@ def send_heartbeat(client: httpx.Client, worker_id: str, status: str = "idle", m
     payload = {
         "worker_id": worker_id,
         "status": status,
-        "roles": ["onebss_worker", "sql_report_worker", "ftp_report_worker", "excel_export", "drive_upload"],
+        "roles": ["onebss_worker", "sql_report_worker", "sql_export_worker", "ftp_report_worker", "excel_export", "drive_upload"],
         "version": WORKER_VERSION,
         "local_time": datetime.now().isoformat(timespec="seconds"),
         "message": message,
@@ -312,6 +312,7 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
     otp = ""
     started = time.monotonic()
     last_progress = {"message": "", "at": 0.0}
+    last_heartbeat = {"at": 0.0}
 
     def send_progress(message: str, status: str = "running") -> None:
         text = str(message or "").strip()
@@ -335,6 +336,15 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
         )
         if response_is_cancelled(data):
             raise OneBssTaskCancelled(str(data.get("message") or "Task OneBSS da bi huy."))
+        if now - float(last_heartbeat["at"] or 0) >= 25:
+            last_heartbeat["at"] = now
+            send_heartbeat(
+                client,
+                worker_id,
+                "busy",
+                text,
+                {"run_id": run_id, "report": report.get("ma_bao_cao") or "", "task_type": "onebss"},
+            )
 
     try:
         send_progress("May tram da nhan task OneBSS. Dang khoi tao phien chay.")

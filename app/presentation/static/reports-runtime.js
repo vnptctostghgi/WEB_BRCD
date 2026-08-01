@@ -191,6 +191,9 @@ function dynamicReportProgressHint(job, status) {
     const workerState = job?.worker_state && typeof job.worker_state === "object" ? job.worker_state : {};
     if (workerState.status === "ready") {
       text = `${workerState.message || "Đã thấy máy trạm online. Web đang chờ máy trạm nhận lệnh SQL."}${waitText ? ` · đã chờ ${waitText}` : ""}`;
+    } else if (workerState.status === "busy") {
+      kind = "admin";
+      text = `${workerState.message || "Máy trạm SQL online nhưng đang bận xử lý task khác."}${waitText ? ` · đã chờ ${waitText}` : ""}`;
     } else if (workerState.status === "no_sql_worker") {
       text = `${workerState.message || "Đã thấy health-check nhưng chưa thấy worker SQL đang chạy."}${waitText ? ` · đã chờ ${waitText}` : ""}`;
     } else if (workerState.status === "no_online_worker") {
