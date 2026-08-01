@@ -5,7 +5,9 @@ import base64
 import fnmatch
 import ftplib
 import mimetypes
+import multiprocessing as mp
 import os
+import queue
 import sys
 import threading
 import time
@@ -33,7 +35,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.08.01-sql-heartbeat-worker"
+WORKER_VERSION = "2026.08.02-onebss-timeout-worker"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -301,13 +303,165 @@ def attach_worker_file_if_needed(client: httpx.Client, run_id: str, result: dict
     return merged
 
 
+def onebss_task_timeout_seconds() -> float:
+    raw_value = os.getenv("ONEBSS_TASK_TIMEOUT_SECONDS", "").strip() or os.getenv("ONEBSS_WORKER_TASK_TIMEOUT_SECONDS", "").strip() or "1200"
+    try:
+        value = float(raw_value)
+    except ValueError:
+        value = 1200.0
+    return min(max(value, 120.0), 21600.0)
+
+
+def terminate_process(process: mp.Process) -> None:
+    if not process.is_alive():
+        return
+    process.terminate()
+    process.join(timeout=10)
+    if process.is_alive():
+        try:
+            process.kill()
+        except AttributeError:
+            process.terminate()
+        process.join(timeout=5)
+
+
+def _run_onebss_report_request_child(
+    result_queue: mp.Queue,
+    base_url: str,
+    token: str,
+    worker_id: str,
+    run_id: str,
+    report: dict[str, Any],
+    parameters: dict[str, Any],
+    otp: str,
+    session_id: str,
+) -> None:
+    headers = {"Authorization": f"Bearer {token}"}
+    with httpx.Client(base_url=base_url.rstrip("/"), headers=headers, timeout=httpx.Timeout(60.0, connect=20.0)) as child_client:
+        def child_progress(message: str, status: str = "running") -> None:
+            data = request_json(
+                child_client,
+                "POST",
+                f"/api/onebss-worker/tasks/{run_id}/status",
+                json={
+                    "status": status,
+                    "message": message,
+                    "worker_id": worker_id,
+                    "worker_session_id": session_id,
+                },
+                timeout=10.0,
+                _retry_forever=False,
+            )
+            if response_is_cancelled(data):
+                raise OneBssTaskCancelled(str(data.get("message") or "Task OneBSS da bi huy."))
+
+        try:
+            settings = get_settings().model_copy(update={"mobile_gateway_enabled": False, "google_drive_folder_id": ""})
+            result = run_onebss_report_request(
+                settings,
+                report,
+                parameters,
+                otp=otp,
+                session_id=session_id,
+                created_by=worker_id,
+                progress_callback=child_progress,
+            )
+            result_queue.put({"ok": True, "result": result})
+        except OneBssTaskCancelled as error:
+            result_queue.put({"ok": False, "cancelled": True, "message": str(error)})
+        except Exception as error:
+            result_queue.put({"ok": False, "error": str(error)[:1000], "error_type": error.__class__.__name__})
+
+
+def read_onebss_child_result(result_queue: mp.Queue) -> dict[str, Any]:
+    for _ in range(20):
+        try:
+            data = result_queue.get_nowait()
+            return data if isinstance(data, dict) else {}
+        except queue.Empty:
+            time.sleep(0.1)
+    return {}
+
+
+def run_onebss_report_request_guarded(
+    client: httpx.Client,
+    worker_id: str,
+    run_id: str,
+    report: dict[str, Any],
+    parameters: dict[str, Any],
+    *,
+    otp: str,
+    session_id: str,
+    progress_callback=None,
+) -> dict[str, Any]:
+    guard_disabled = str(os.getenv("ONEBSS_WORKER_DISABLE_TASK_GUARD", "") or "").strip().lower() in {"1", "true", "yes", "on"}
+    if guard_disabled or not hasattr(client, "base_url"):
+        settings = get_settings().model_copy(update={"mobile_gateway_enabled": False, "google_drive_folder_id": ""})
+        return run_onebss_report_request(
+            settings,
+            report,
+            parameters,
+            otp=otp,
+            session_id=session_id,
+            created_by=worker_id,
+            progress_callback=progress_callback,
+        )
+
+    timeout_seconds = onebss_task_timeout_seconds()
+    token = os.getenv("INTERNAL_API_TOKEN", "").strip()
+    if not token:
+        raise RuntimeError("Thieu INTERNAL_API_TOKEN de chay worker OneBSS.")
+    result_queue: mp.Queue = mp.Queue()
+    process = mp.Process(
+        target=_run_onebss_report_request_child,
+        args=(result_queue, str(client.base_url), token, worker_id, run_id, report, parameters, otp, session_id),
+        daemon=True,
+    )
+    started = time.monotonic()
+    last_notice = started
+    try:
+        process.start()
+        while process.is_alive():
+            process.join(timeout=1.0)
+            now = time.monotonic()
+            elapsed = now - started
+            if elapsed >= timeout_seconds:
+                terminate_process(process)
+                raise TimeoutError(
+                    f"Task OneBSS vuot qua {int(timeout_seconds / 60)} phut nen worker da tu dung de tranh treo may tram."
+                )
+            if progress_callback and now - last_notice >= 30:
+                last_notice = now
+                progress_callback(f"May tram van dang xu ly OneBSS ({int(elapsed / 60)} phut).")
+        payload = read_onebss_child_result(result_queue)
+        if payload.get("cancelled"):
+            raise OneBssTaskCancelled(str(payload.get("message") or "Task OneBSS da bi huy."))
+        if payload.get("ok"):
+            result = payload.get("result")
+            if isinstance(result, dict):
+                return result
+            return {"ok": False, "status": "failed", "message": "Worker OneBSS tra ket qua khong hop le."}
+        message = str(payload.get("error") or "").strip()
+        if not message:
+            message = f"Worker OneBSS dung bat thuong voi ma {process.exitcode}."
+        raise RuntimeError(message)
+    except Exception:
+        terminate_process(process)
+        raise
+    finally:
+        try:
+            result_queue.close()
+            result_queue.join_thread()
+        except Exception:
+            pass
+
+
 def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, poll_seconds: float) -> None:
     run_id = str(task.get("run_id") or "")
     report = task.get("report") if isinstance(task.get("report"), dict) else {}
     parameters = task.get("parameters") if isinstance(task.get("parameters"), dict) else {}
     drive_folder_id = str(task.get("drive_folder_id") or "").strip()
     report_for_worker = {**report, "storage_link": ""}
-    settings = get_settings().model_copy(update={"mobile_gateway_enabled": False, "google_drive_folder_id": ""})
     session_id = ""
     otp = ""
     started = time.monotonic()
@@ -349,13 +503,14 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
     try:
         send_progress("May tram da nhan task OneBSS. Dang khoi tao phien chay.")
         while True:
-            result = run_onebss_report_request(
-                settings,
+            result = run_onebss_report_request_guarded(
+                client,
+                worker_id,
+                run_id,
                 report_for_worker,
                 parameters,
                 otp=otp,
                 session_id=session_id,
-                created_by=worker_id,
                 progress_callback=send_progress,
             )
             status = str(result.get("status") or ("success" if result.get("ok") else "failed")).lower()

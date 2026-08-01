@@ -267,6 +267,7 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "OracleDbSid" in config_text
         assert "OracleDbUser = 'REPORT_USER'" in config_text
         assert "OracleDbPass = 'oracle-secret'" in config_text
+        assert "OneBssTaskTimeoutSeconds = '1200'" in config_text
         assert "SqlWorkerTimeoutSeconds = '1800'" in config_text
         assert "ExportPageSize = '20000'" in config_text
         assert "ExportMaxRows = '1000000'" in config_text
@@ -280,6 +281,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "WorkerDriveUploadApiUrl = 'http://127.0.0.1:8000/api/du-lieu-web'" in config_text
         assert "GoogleDriveOauthRefreshToken" in config_text
         assert 'Set-UserEnvironment "ONEBSS_DRIVE_UPLOAD_API_URL" $WorkerDriveUploadApiUrl' in setup_script
+        assert 'Set-UserEnvironment "ONEBSS_TASK_TIMEOUT_SECONDS" $onebssTaskTimeoutSeconds' in setup_script
+        assert "ONEBSS_TASK_TIMEOUT_SECONDS" in start_worker_script
         assert "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64" in setup_script
         assert "OracleDbDsn" in setup_script
         assert "OracleDbHost" in setup_script
@@ -4380,6 +4383,11 @@ def test_onebss_report_run_expires_stale_worker_task(monkeypatch) -> None:
         stale_at = (datetime.now(UTC) - timedelta(seconds=5)).isoformat(timespec="seconds").replace("+00:00", "Z")
         repository = routes.build_app_repository()
         repository.update_onebss_report_run(job_id, {"status": "running", "claimed_at": stale_at, "updated_at": stale_at})
+
+        job = client.get(f"/api/onebss-reports/jobs/{job_id}")
+        assert job.status_code == 200
+        assert job.json()["status"] == "failed"
+        assert "bi treo" in job.json()["message"]
 
         runs = client.get(f"/api/onebss-reports/runs?ma_bao_cao={code}").json()["runs"]
         assert len(runs) == 1

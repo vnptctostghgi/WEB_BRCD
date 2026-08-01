@@ -13,6 +13,7 @@ param(
   [string]$OracleDbSid = "",
   [string]$OracleDbUser = "",
   [string]$OracleDbPass = "",
+  [string]$OneBssTaskTimeoutSeconds = "1200",
   [string]$SqlWorkerTimeoutSeconds = "1800",
   [string]$ExportPageSize = "20000",
   [string]$ExportMaxRows = "1000000",
@@ -353,6 +354,7 @@ function Ensure-WorkstationEnvFile {
   Set-DotEnvValue $envFile "ONEBSS_WORKER_ID" $WorkerId
   Set-DotEnvValue $envFile "ONEBSS_LOGIN_URL" $onebssLoginUrl
   Set-DotEnvValue $envFile "ONEBSS_DOWNLOAD_TIMEOUT_SECONDS" $onebssDownloadTimeoutSeconds
+  Set-DotEnvValue $envFile "ONEBSS_TASK_TIMEOUT_SECONDS" $onebssTaskTimeoutSeconds
   Set-DotEnvValue $envFile "SQL_WORKER_TIMEOUT_SECONDS" $sqlWorkerTimeoutSeconds
   Set-DotEnvValue $envFile "EXPORT_PAGE_SIZE" $exportPageSize
   Set-DotEnvValue $envFile "EXPORT_MAX_ROWS" $exportMaxRows
@@ -720,6 +722,7 @@ $onebssUsername = Resolve-SetupValue $setupConfig "OneBssUsername" "" "" "ONEBSS
 $onebssPassword = Resolve-SetupValue $setupConfig "OneBssPassword" "" "" "ONEBSS_PASSWORD"
 $onebssLoginUrl = Resolve-SetupValue $setupConfig "OneBssLoginUrl" "" "https://onebss.vnpt.vn/" "ONEBSS_LOGIN_URL"
 $onebssDownloadTimeoutSeconds = Resolve-SetupValue $setupConfig "OneBssDownloadTimeoutSeconds" "" "180" "ONEBSS_DOWNLOAD_TIMEOUT_SECONDS"
+$onebssTaskTimeoutSeconds = Resolve-SetupValue $setupConfig "OneBssTaskTimeoutSeconds" $OneBssTaskTimeoutSeconds "1200" "ONEBSS_TASK_TIMEOUT_SECONDS"
 $googleDriveFolderId = Resolve-SetupValue $setupConfig "GoogleDriveFolderId" "" "" "GOOGLE_DRIVE_FOLDER_ID"
 $googleDriveOauthClientId = Resolve-SetupValue $setupConfig "GoogleDriveOauthClientId" "" "" "GOOGLE_DRIVE_OAUTH_CLIENT_ID"
 $googleDriveOauthClientSecret = Resolve-SetupValue $setupConfig "GoogleDriveOauthClientSecret" "" "" "GOOGLE_DRIVE_OAUTH_CLIENT_SECRET"
@@ -801,6 +804,7 @@ Set-UserEnvironment "ONEBSS_USERNAME" $onebssUsername
 Set-UserEnvironment "ONEBSS_PASSWORD" $onebssPassword
 Set-UserEnvironment "ONEBSS_LOGIN_URL" $onebssLoginUrl
 Set-UserEnvironment "ONEBSS_DOWNLOAD_TIMEOUT_SECONDS" $onebssDownloadTimeoutSeconds
+Set-UserEnvironment "ONEBSS_TASK_TIMEOUT_SECONDS" $onebssTaskTimeoutSeconds
 Set-UserEnvironment "GOOGLE_DRIVE_FOLDER_ID" $googleDriveFolderId
 Set-UserEnvironment "GOOGLE_DRIVE_OAUTH_CLIENT_ID" $googleDriveOauthClientId
 Set-UserEnvironment "GOOGLE_DRIVE_OAUTH_CLIENT_SECRET" $googleDriveOauthClientSecret

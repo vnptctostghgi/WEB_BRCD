@@ -134,7 +134,7 @@ WORKSTATION_HEARTBEAT_TTL_SECONDS = 10 * 60
 WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_worker", "ftp_report_worker", "excel_export", "drive_upload"]
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260801-sql-heartbeat-v10"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260802-onebss-timeout-v11"
 WORKSTATION_SETUP_INCLUDE_PATHS = (
     ".env.example",
     "README.md",
@@ -2726,6 +2726,7 @@ def workstation_setup_config_script(request: Request) -> str:
         ("OneBssUsername", settings.onebss_username, "OneBSS username from web settings."),
         ("OneBssPassword", secret_text(settings.onebss_password), "OneBSS password from web settings."),
         ("OneBssDownloadTimeoutSeconds", str(settings.onebss_download_timeout_seconds), "OneBSS download timeout."),
+        ("OneBssTaskTimeoutSeconds", "1200", "Maximum wall-clock seconds for one OneBSS worker task."),
         ("SqlWorkerTimeoutSeconds", str(settings.dynamic_report_export_timeout_seconds or 1800), "SQL/export timeout for long Oracle reports."),
         ("ExportPageSize", str(settings.dynamic_report_export_page_size or 20000), "Rows fetched per Oracle batch when exporting."),
         ("ExportMaxRows", str(settings.dynamic_report_export_max_rows or 1000000), "Maximum rows per export job."),
@@ -6461,8 +6462,12 @@ def get_onebss_otp_request(request: Request, otp_request_id: str) -> dict:
 @router.get("/api/onebss-reports/jobs/{job_id}")
 def get_onebss_report_job(request: Request, job_id: str) -> dict:
     admin_user(request)
+    repository = build_app_repository()
     try:
-        run = build_app_repository().get_onebss_report_run(job_id.strip())
+        run = repository.get_onebss_report_run(job_id.strip())
+        if run and str(run.get("status") or "").lower() in ONEBSS_REPORT_ACTIVE_STATUSES:
+            _expire_stale_onebss_worker_runs(repository, ma_bao_cao=str(run.get("ma_bao_cao") or ""))
+            run = repository.get_onebss_report_run(job_id.strip()) or run
     except (RuntimeError, sqlite3.Error, AttributeError) as error:
         raise_onebss_operation_error(error, "Khong kiem tra duoc task OneBSS")
     if not run:
