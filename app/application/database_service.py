@@ -1213,7 +1213,7 @@ class DatabaseService:
             "results": results,
         }
 
-    def run_dashboard_layout_tab(self, *, page_id: str, tab_id: str) -> dict[str, Any]:
+    def run_dashboard_layout_tab(self, *, page_id: str, tab_id: str, cache_only: bool = False, force_refresh: bool = False) -> dict[str, Any]:
         layout_row = self.app_repository.get_dashboard_layout(page_id)
         if not layout_row:
             return {
@@ -1282,11 +1282,28 @@ class DatabaseService:
                     "_cache_key": cache_key,
                 })
 
-        data_cache.update(self._dashboard_cache_results_by_key(query_cache_metadata))
+        if not force_refresh:
+            data_cache.update(self._dashboard_cache_results_by_key(query_cache_metadata))
         for cache_key in data_cache:
             query_jobs.pop(cache_key, None)
 
-        if query_jobs:
+        refresh_requests: list[dict[str, Any]] = []
+        if cache_only and query_jobs:
+            for cache_key, job in query_jobs.items():
+                refresh_requests.append({
+                    **job,
+                    "cache_key": cache_key,
+                    "dashboard_cache_metadata": query_cache_metadata.get(cache_key) or {},
+                })
+                data_cache[cache_key] = {
+                    "ok": False,
+                    "status": "refreshing",
+                    "message": "Da gui lenh lam moi cho may tram. Dashboard dang hien thi cache va se tu cap nhat.",
+                    "rows": [],
+                    "columns": [],
+                    "pagination": {"page": 1, "page_size": int(job.get("page_size") or 50), "total": 0},
+                }
+        elif query_jobs:
             configured_workers = getattr(self.internal_api.settings, "dashboard_tab_max_workers", 10)
             max_workers = min(max(1, int(configured_workers or 10)), 24, len(query_jobs))
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -1326,6 +1343,7 @@ class DatabaseService:
             "tab_id": tab_id,
             "widgets": widget_results,
             "failed_widgets": failed_widgets,
+            "refresh_requests": refresh_requests,
         }
 
     def run_dashboard_datcoc_test(self) -> dict[str, Any]:

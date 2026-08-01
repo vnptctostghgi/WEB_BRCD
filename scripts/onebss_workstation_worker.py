@@ -61,6 +61,7 @@ def transient_retry_delay_seconds(attempt: int) -> float:
 
 
 def request_json(client: httpx.Client, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+    retry_forever = bool(kwargs.pop("_retry_forever", True))
     attempt = 0
     while True:
         try:
@@ -72,6 +73,8 @@ def request_json(client: httpx.Client, method: str, path: str, **kwargs: Any) ->
             if not is_transient_request_error(error):
                 raise
             attempt += 1
+            if not retry_forever and attempt >= 3:
+                return {"ok": False, "task": None, "transient_error": describe_request_error(error)}
             delay_seconds = transient_retry_delay_seconds(attempt)
             print(
                 f"Ket noi web loi tam thoi ({describe_request_error(error)}). "
@@ -847,7 +850,9 @@ def process_ftp_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
 
 
 def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float) -> bool:
-    sql_claim = request_json(client, "POST", "/api/sql-worker/tasks/claim", json={"worker_id": worker_id})
+    sql_claim = request_json(client, "POST", "/api/sql-worker/tasks/claim", json={"worker_id": worker_id}, timeout=10.0, _retry_forever=False)
+    if sql_claim.get("transient_error"):
+        return False
     sql_task = sql_claim.get("task") if isinstance(sql_claim.get("task"), dict) else None
     if sql_task:
         send_heartbeat(
@@ -861,7 +866,9 @@ def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float) 
         send_heartbeat(client, worker_id, "idle", "May tram SQL da quay lai trang thai cho task.")
         return True
 
-    claim = request_json(client, "POST", "/api/onebss-worker/tasks/claim", json={"worker_id": worker_id})
+    claim = request_json(client, "POST", "/api/onebss-worker/tasks/claim", json={"worker_id": worker_id}, timeout=10.0, _retry_forever=False)
+    if claim.get("transient_error"):
+        return False
     task = claim.get("task") if isinstance(claim.get("task"), dict) else None
     if task:
         send_heartbeat(
@@ -875,7 +882,7 @@ def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float) 
         send_heartbeat(client, worker_id, "idle", "May tram OneBSS da quay lai trang thai cho task.")
         return True
 
-    ftp_claim = request_json(client, "POST", "/api/ftp-worker/tasks/claim", json={"worker_id": worker_id})
+    ftp_claim = request_json(client, "POST", "/api/ftp-worker/tasks/claim", json={"worker_id": worker_id}, timeout=10.0, _retry_forever=False)
     ftp_task = ftp_claim.get("task") if isinstance(ftp_claim.get("task"), dict) else None
     if ftp_task:
         send_heartbeat(

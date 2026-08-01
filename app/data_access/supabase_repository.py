@@ -1538,6 +1538,101 @@ class SupabaseRepository:
             self._delete("dashboard_chart_cache", {"sql_code": f"eq.{code}"})
         return 0
 
+    def save_report_run(self, entry: dict[str, Any]) -> None:
+        """Persist a workstation SQL/export job outside the web process memory."""
+        run_id = str(entry.get("run_id") or entry.get("job_id") or "").strip()
+        if not run_id:
+            raise ValueError("run_id is required")
+        now = self._now()
+        payload = {
+            "run_id": run_id,
+            "run_type": str(entry.get("run_type") or entry.get("event_type") or "load"),
+            "report_code": str(entry.get("report_code") or entry.get("ma_bao_cao") or ""),
+            "report_name": str(entry.get("report_name") or entry.get("ten_bao_cao") or ""),
+            "status": str(entry.get("status") or "queued"),
+            "message": str(entry.get("message") or ""),
+            "payload": entry.get("payload") if isinstance(entry.get("payload"), dict) else {},
+            "snapshot": entry,
+            "details": entry.get("details") if isinstance(entry.get("details"), dict) else {},
+            "worker_id": str(entry.get("worker_id") or ""),
+            "created_by": str(entry.get("created_by") or "system"),
+            "row_count": int(entry.get("rows") or entry.get("row_count") or 0),
+            "total_rows": int(entry.get("total") or entry.get("total_rows") or 0),
+            "file_name": str(entry.get("filename") or entry.get("file_name") or ""),
+            "storage_link": str(entry.get("drive_url") or entry.get("storage_link") or ""),
+            "updated_at": now,
+        }
+        self._upsert("report_runs", payload, "run_id")
+
+    def get_report_run(self, run_id: str) -> dict[str, Any] | None:
+        rows = self._get("report_runs", {"run_id": f"eq.{run_id}", "limit": "1"})
+        if not rows:
+            return None
+        row = rows[0]
+        snapshot = row.get("snapshot") if isinstance(row.get("snapshot"), dict) else {}
+        snapshot.update({
+            "job_id": row.get("run_id") or run_id,
+            "run_id": row.get("run_id") or run_id,
+            "run_type": row.get("run_type") or snapshot.get("run_type") or "load",
+            "report_code": row.get("report_code") or snapshot.get("report_code") or "",
+            "report_name": row.get("report_name") or snapshot.get("report_name") or "",
+            "status": row.get("status") or snapshot.get("status") or "queued",
+            "message": row.get("message") or snapshot.get("message") or "",
+            "payload": row.get("payload") if isinstance(row.get("payload"), dict) else snapshot.get("payload") or {},
+            "details": row.get("details") if isinstance(row.get("details"), dict) else snapshot.get("details") or {},
+            "worker_id": row.get("worker_id") or snapshot.get("worker_id") or "",
+            "created_by": row.get("created_by") or snapshot.get("created_by") or "system",
+            "rows": int(row.get("row_count") or snapshot.get("rows") or 0),
+            "total": int(row.get("total_rows") or snapshot.get("total") or 0),
+            "filename": row.get("file_name") or snapshot.get("filename") or "",
+            "drive_url": row.get("storage_link") or snapshot.get("drive_url") or "",
+        })
+        result_rows = self._get("report_results", {
+            "run_id": f"eq.{run_id}",
+            "order": "created_at.desc",
+            "limit": "1",
+        })
+        if result_rows and isinstance(result_rows[0].get("result"), dict):
+            snapshot["result"] = result_rows[0]["result"]
+        return snapshot
+
+    def list_report_runs(self, run_type: str = "", statuses: list[str] | None = None, limit: int = 200) -> list[dict[str, Any]]:
+        params: dict[str, str] = {"order": "created_at.asc", "limit": str(min(max(limit, 1), 500))}
+        if run_type:
+            params["run_type"] = f"eq.{run_type}"
+        if statuses:
+            params["status"] = self._in_filter([str(value) for value in statuses])
+        rows = self._get("report_runs", params)
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            run_id = str(row.get("run_id") or "")
+            snapshot = row.get("snapshot") if isinstance(row.get("snapshot"), dict) else {}
+            snapshot.update({
+                "job_id": run_id,
+                "run_id": run_id,
+                "run_type": row.get("run_type") or run_type or "load",
+                "status": row.get("status") or snapshot.get("status") or "queued",
+                "report_code": row.get("report_code") or snapshot.get("report_code") or "",
+                "report_name": row.get("report_name") or snapshot.get("report_name") or "",
+                "message": row.get("message") or snapshot.get("message") or "",
+                "payload": row.get("payload") if isinstance(row.get("payload"), dict) else snapshot.get("payload") or {},
+            })
+            items.append(snapshot)
+        return items
+
+    def save_report_result(self, run_id: str, result: dict[str, Any]) -> None:
+        pagination = result.get("pagination") if isinstance(result.get("pagination"), dict) else {}
+        rows = result.get("rows") if isinstance(result.get("rows"), list) else []
+        self._upsert("report_results", {
+            "run_id": run_id,
+            "result": result,
+            "columns": result.get("columns") if isinstance(result.get("columns"), list) else [],
+            "rows": rows,
+            "pagination": pagination,
+            "row_count": len(rows),
+            "created_at": self._now(),
+        }, "run_id")
+
     def _ensure_default_dashboard_layout(self) -> None:
         rows = self._get("dashboard_layouts", {"page_id": f"eq.{DEFAULT_DASHBOARD_PAGE_ID}", "select": "page_id", "limit": "1"})
         if rows:

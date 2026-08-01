@@ -1321,7 +1321,7 @@ async function loadDashboardViewerTab(tabId, { force = false } = {}) {
   const button = $("#refresh-dashboard-viewer-tab");
   if (button) setButtonLoading(button, true);
   try {
-    const response = await api(`/api/dashboard-layouts/${encodeURIComponent(pageId)}/tabs/${encodeURIComponent(tabId)}/data`);
+    const response = await api(`/api/dashboard-layouts/${encodeURIComponent(pageId)}/tabs/${encodeURIComponent(tabId)}/data${force ? "?refresh=true" : ""}`);
     dashboardViewerLoadedTabs[key] = { ...response, loaded_at: new Date().toISOString() };
     if (dashboardViewerLayout?.page_id === pageId && dashboardViewerActiveTabId === tabId) {
       renderDashboardViewer();
@@ -3655,7 +3655,7 @@ async function loadDashboardPreviewTab(tabId, { force = false } = {}) {
   const button = $("#refresh-dashboard-preview");
   if (button) setButtonLoading(button, true);
   try {
-    const response = await api(`/api/admin/dashboard-layouts/${encodeURIComponent(pageId)}/tabs/${encodeURIComponent(tabId)}/data`);
+    const response = await api(`/api/admin/dashboard-layouts/${encodeURIComponent(pageId)}/tabs/${encodeURIComponent(tabId)}/data${force ? "?refresh=true" : ""}`);
     dashboardBuilderLoadedTabs[key] = response;
     if (dashboardBuilderLayout?.page_id === pageId && dashboardBuilderActiveTabId === tabId) {
       renderDashboardPreview();

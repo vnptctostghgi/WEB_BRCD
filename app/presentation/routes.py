@@ -4,6 +4,7 @@ import binascii
 from concurrent.futures import ThreadPoolExecutor
 import hmac
 import json
+import hashlib
 import logging
 import os
 import shutil
@@ -3764,25 +3765,37 @@ def purge_unsaved_dashboard_layout_page(request: Request, feature_code: str) -> 
 
 
 @router.get("/api/admin/dashboard-layouts/{page_id}/tabs/{tab_id}/data")
-def load_dashboard_layout_tab_data(request: Request, page_id: str, tab_id: str) -> dict:
+def load_dashboard_layout_tab_data(request: Request, page_id: str, tab_id: str, refresh: bool = False) -> dict:
     admin_user(request)
     safe_page_id = normalize_dashboard_code(page_id, "Mã trang")
     safe_tab_id = normalize_dashboard_code(tab_id, "Mã Tab", uppercase=False)
     try:
-        return build_database_service().run_dashboard_layout_tab(page_id=safe_page_id, tab_id=safe_tab_id)
+        result = build_database_service().run_dashboard_layout_tab(
+            page_id=safe_page_id,
+            tab_id=safe_tab_id,
+            cache_only=not bool(get_settings().internal_api_mock_mode),
+            force_refresh=refresh,
+        )
+        return _queue_dashboard_refresh_requests(result, actor="dashboard-admin")
     except RuntimeError as error:
         raise_dashboard_layout_schema_error(error)
 
 
 @router.get("/api/dashboard-layouts/{page_id}/tabs/{tab_id}/data")
-def load_visible_dashboard_layout_tab_data(request: Request, page_id: str, tab_id: str) -> dict:
+def load_visible_dashboard_layout_tab_data(request: Request, page_id: str, tab_id: str, refresh: bool = False) -> dict:
     repository = build_app_repository()
     features = repository.list_features()
     safe_page_id = normalize_dashboard_code(page_id, "Mã trang")
     require_dashboard_page_access(request, safe_page_id, features)
     safe_tab_id = normalize_dashboard_code(tab_id, "Mã Tab", uppercase=False)
     try:
-        return build_database_service().run_dashboard_layout_tab(page_id=safe_page_id, tab_id=safe_tab_id)
+        result = build_database_service().run_dashboard_layout_tab(
+            page_id=safe_page_id,
+            tab_id=safe_tab_id,
+            cache_only=not bool(get_settings().internal_api_mock_mode),
+            force_refresh=refresh,
+        )
+        return _queue_dashboard_refresh_requests(result, actor=str(current_user(request).get("username") or "dashboard-user"))
     except RuntimeError as error:
         raise_dashboard_layout_schema_error(error)
 
@@ -3979,12 +3992,21 @@ def _persist_dynamic_report_export_job(job_id: str, job: dict[str, Any]) -> None
             )
     except Exception as error:
         logger.warning("Cannot persist dynamic report export job %s: %s", job_id, error)
+    try:
+        build_app_repository().save_report_run({**job, "job_id": job_id, "run_type": "export"})
+    except Exception as error:
+        logger.warning("Cannot persist dynamic report export job %s to Supabase: %s", job_id, error)
 
 
 def _load_dynamic_report_export_job(job_id: str) -> dict[str, Any] | None:
     path = _dynamic_report_export_job_path(job_id)
     if not path.exists():
-        return None
+        try:
+            loaded = build_app_repository().get_report_run(job_id)
+        except Exception as error:
+            logger.warning("Cannot load dynamic report export job %s from Supabase: %s", job_id, error)
+            return None
+        return loaded if isinstance(loaded, dict) and str(loaded.get("run_type") or "") == "export" else None
     try:
         loaded = json.loads(path.read_text(encoding="utf-8"))
     except Exception as error:
@@ -4546,13 +4568,68 @@ def _set_dynamic_report_run_job(job_id: str, **updates: Any) -> dict[str, Any]:
         job.update(updates)
         job["updated_at"] = now
         DYNAMIC_REPORT_RUN_JOBS[job_id] = job
-        return dict(job)
+        snapshot = dict(job)
+    try:
+        build_app_repository().save_report_run({**snapshot, "job_id": job_id, "run_type": "load"})
+        if str(snapshot.get("status") or "").lower() == "complete" and isinstance(snapshot.get("result"), dict):
+            build_app_repository().save_report_result(job_id, snapshot["result"])
+            payload = snapshot.get("payload") if isinstance(snapshot.get("payload"), dict) else {}
+            cache_metadata = payload.get("dashboard_cache_metadata") if isinstance(payload.get("dashboard_cache_metadata"), dict) else None
+            if cache_metadata:
+                build_database_service().save_dashboard_chart_cache(cache_metadata, snapshot["result"])
+    except Exception as error:
+        logger.warning("Cannot persist dynamic report run job %s to Supabase: %s", job_id, error)
+    return snapshot
+
+
+def _queue_dashboard_refresh_requests(result: dict[str, Any], actor: str) -> dict[str, Any]:
+    requests = result.pop("refresh_requests", []) if isinstance(result.get("refresh_requests"), list) else []
+    queued_ids: list[str] = []
+    for item in requests:
+        if not isinstance(item, dict):
+            continue
+        metadata = item.get("dashboard_cache_metadata") if isinstance(item.get("dashboard_cache_metadata"), dict) else {}
+        chart_key = str(metadata.get("chart_key") or item.get("cache_key") or uuid.uuid4().hex)
+        job_id = "dashboard_" + hashlib.sha256(chart_key.encode("utf-8")).hexdigest()[:24]
+        payload = {
+            "ma_bao_cao": str(item.get("ma_bao_cao") or ""),
+            "filters": item.get("filters") if isinstance(item.get("filters"), dict) else {},
+            "page": 1,
+            "page_size": int(item.get("page_size") or 50),
+            "search": "",
+            "search_columns": [],
+            "dashboard_cache_metadata": metadata,
+        }
+        _set_dynamic_report_run_job(
+            job_id,
+            status="queued_worker",
+            message="Da gui lenh lam moi cache dashboard cho may tram.",
+            created_by=actor,
+            report_code=str(item.get("ma_bao_cao") or ""),
+            report_name=str(item.get("report_name") or item.get("ma_bao_cao") or ""),
+            payload=payload,
+        )
+        queued_ids.append(job_id)
+    result["refresh_job_ids"] = queued_ids
+    result["refreshing"] = bool(queued_ids)
+    return result
 
 
 def _get_dynamic_report_run_job(job_id: str) -> dict[str, Any] | None:
     with DYNAMIC_REPORT_RUN_JOBS_LOCK:
         job = DYNAMIC_REPORT_RUN_JOBS.get(job_id)
-        return dict(job) if job else None
+        if job:
+            return dict(job)
+    try:
+        loaded = build_app_repository().get_report_run(job_id)
+    except Exception as error:
+        logger.warning("Cannot load dynamic report run job %s from Supabase: %s", job_id, error)
+        return None
+    if not isinstance(loaded, dict) or str(loaded.get("run_type") or "load") != "load":
+        return None
+    with DYNAMIC_REPORT_RUN_JOBS_LOCK:
+        DYNAMIC_REPORT_RUN_JOBS[job_id] = dict(loaded)
+    return dict(loaded)
 
 
 def _dynamic_report_run_queue_position(job_id: str, job: dict[str, Any]) -> int:
@@ -4733,6 +4810,7 @@ def start_dynamic_report_run_job(request: Request, payload: RunReportPayload) ->
             "payload": payload.model_dump(),
         }
         job_snapshot = dict(DYNAMIC_REPORT_RUN_JOBS[job_id])
+    _set_dynamic_report_run_job(job_id, **{key: value for key, value in job_snapshot.items() if key != "job_id"})
     DYNAMIC_REPORT_RUN_EXECUTOR.submit(_run_dynamic_report_run_job, job_id, payload, actor["username"])
     return _dynamic_report_run_job_response(job_id, job_snapshot)
 
@@ -4779,6 +4857,17 @@ def _next_dynamic_report_sql_worker_job() -> tuple[str, dict[str, Any]] | None:
             if str(job.get("status") or "").lower() == "queued_worker"
         ]
     if not candidates:
+        try:
+            persisted = build_app_repository().list_report_runs("load", ["queued_worker"], 200)
+        except Exception as error:
+            logger.warning("Cannot read queued SQL jobs from Supabase: %s", error)
+            persisted = []
+        candidates = [
+            (str(job.get("job_id") or job.get("run_id") or ""), dict(job))
+            for job in persisted
+            if str(job.get("job_id") or job.get("run_id") or "")
+        ]
+    if not candidates:
         return None
     candidates.sort(key=lambda item: float(item[1].get("created_at") or 0))
     return candidates[0]
@@ -4805,6 +4894,17 @@ def _next_dynamic_report_export_worker_job() -> tuple[str, dict[str, Any]] | Non
             if not current or float(loaded.get("updated_at") or 0) >= float(current.get("updated_at") or 0):
                 jobs_by_id[job_id] = loaded
     candidates = [(job_id, dict(job)) for job_id, job in jobs_by_id.items()]
+    if not candidates:
+        try:
+            persisted = build_app_repository().list_report_runs("export", ["queued_worker"], 200)
+        except Exception as error:
+            logger.warning("Cannot read queued export jobs from Supabase: %s", error)
+            persisted = []
+        candidates = [
+            (str(job.get("job_id") or job.get("run_id") or ""), dict(job))
+            for job in persisted
+            if str(job.get("job_id") or job.get("run_id") or "")
+        ]
     if not candidates:
         recovered = _recover_dynamic_report_export_job_from_history(skip_job_ids=set(jobs_by_id))
         if recovered and str(recovered.get("status") or "").lower() == "queued_worker":
