@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.application.google_drive_service import GoogleDriveConfigurationError, upload_file_to_google_drive
 from app.data_access.repository_factory import build_repository
@@ -109,7 +110,7 @@ async def authenticated_device(request: Request) -> dict[str, Any]:
     signature = request.headers.get("X-Signature", "").strip()
     if not all([device_id, timestamp, nonce, body_hash, signature]):
         raise security.generic_auth_error()
-    device = cached_device_record(repository, device_id)
+    device = await run_in_threadpool(cached_device_record, repository, device_id)
     if not device or not bool(device.get("is_active")):
         raise security.generic_auth_error()
     parsed_timestamp = security.parse_device_timestamp(timestamp)
@@ -122,12 +123,12 @@ async def authenticated_device(request: Request) -> dict[str, Any]:
     body = await security.read_request_body(request)
     if not security.verify_body_hash(body, body_hash):
         raise security.generic_auth_error()
-    secret = repository.device_secret(device)
+    secret = await run_in_threadpool(repository.device_secret, device)
     canonical = "\n".join([request.method.upper(), request.url.path, timestamp, nonce, body_hash])
     if not secret or not security.verify_signature(secret, canonical, signature):
         raise security.generic_auth_error()
     try:
-        repository.save_nonce(device_id, nonce, (now + timedelta(seconds=skew)).isoformat(timespec="seconds"))
+        await run_in_threadpool(repository.save_nonce, device_id, nonce, (now + timedelta(seconds=skew)).isoformat(timespec="seconds"))
     except sqlite3.IntegrityError as error:
         raise security.generic_auth_error() from error
     request.state.mobile_device_id = device_id
@@ -145,26 +146,29 @@ def pair_device(request: Request, payload: PairDevicePayload) -> dict[str, Any]:
 
 @router.post("/messages/sms/batch")
 async def sync_sms_batch(payload: SmsBatchPayload, context: dict[str, Any] = Depends(authenticated_device)) -> dict[str, Any]:
-    return SmsService(context["repository"]).save_batch(context["device_id"], payload.messages)
+    return await run_in_threadpool(SmsService(context["repository"]).save_batch, context["device_id"], payload.messages)
 
 
 @router.post("/messages/notifications/batch")
 async def sync_notifications_batch(payload: NotificationBatchPayload, context: dict[str, Any] = Depends(authenticated_device)) -> dict[str, Any]:
-    return NotificationService(context["repository"]).save_batch(context["device_id"], payload.notifications)
+    return await run_in_threadpool(NotificationService(context["repository"]).save_batch, context["device_id"], payload.notifications)
 
 
 @router.post("/device/heartbeat")
 async def device_heartbeat(request: Request, payload: HeartbeatPayload, context: dict[str, Any] = Depends(authenticated_device)) -> dict[str, Any]:
-    context["repository"].save_heartbeat(context["device_id"], payload, client_ip(request))
+    await run_in_threadpool(context["repository"].save_heartbeat, context["device_id"], payload, client_ip(request))
     return {"ok": True, "message": "Heartbeat accepted"}
 
 
 @router.get("/device/policy")
 async def device_policy(context: dict[str, Any] = Depends(authenticated_device)) -> dict[str, Any]:
     repository = context["repository"]
-    repository.ensure_defaults()
-    policy = repository.get_policy(context["device_id"])
-    filters = repository.list_otp_filters(enabled_only=True)
+
+    def load_policy() -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        repository.ensure_defaults()
+        return repository.get_policy(context["device_id"]), repository.list_otp_filters(enabled_only=True)
+
+    policy, filters = await run_in_threadpool(load_policy)
     return {
         "ok": True,
         "policy": {
@@ -198,7 +202,7 @@ async def device_policy(context: dict[str, Any] = Depends(authenticated_device))
 
 @router.get("/device/commands")
 async def device_commands(context: dict[str, Any] = Depends(authenticated_device)) -> dict[str, Any]:
-    commands = context["repository"].deliver_pending_commands(context["device_id"])
+    commands = await run_in_threadpool(context["repository"].deliver_pending_commands, context["device_id"])
     device_commands = [
         {
             "command_id": command.get("command_id"),
@@ -213,19 +217,19 @@ async def device_commands(context: dict[str, Any] = Depends(authenticated_device
 
 @router.post("/device/commands/{command_id}/result")
 async def device_command_result(command_id: str, payload: CommandResultPayload, context: dict[str, Any] = Depends(authenticated_device)) -> dict[str, Any]:
-    context["repository"].finish_command(command_id, context["device_id"], payload.status, payload.result, payload.sanitized_error)
+    await run_in_threadpool(context["repository"].finish_command, command_id, context["device_id"], payload.status, payload.result, payload.sanitized_error)
     return {"ok": True}
 
 
 @router.post("/device/diagnostics")
 async def device_diagnostics(payload: DiagnosticsPayload, context: dict[str, Any] = Depends(authenticated_device)) -> dict[str, Any]:
-    context["repository"].save_diagnostics(context["device_id"], payload.model_dump())
+    await run_in_threadpool(context["repository"].save_diagnostics, context["device_id"], payload.model_dump())
     return {"ok": True}
 
 
 @router.post("/clipboard")
 async def clipboard(payload: ClipboardPayload, context: dict[str, Any] = Depends(authenticated_device)) -> dict[str, Any]:
-    policy = context["repository"].get_policy(context["device_id"])
+    policy = await run_in_threadpool(context["repository"].get_policy, context["device_id"])
     return {"ok": True, "accepted": bool(policy.get("clipboard_enabled")), "message": "Clipboard sync is policy-controlled."}
 
 
@@ -263,54 +267,57 @@ async def upload_media(
                 if size_bytes > max_size:
                     raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File media vuot gioi han.")
                 handle.write(chunk)
-        try:
-            upload = upload_file_to_google_drive(get_settings(), temp_path, drive_name, MOBILE_MEDIA_DRIVE_FOLDER_ID, mime_type=content_type)
-            media = repository.save_media(
-                {
-                    "device_id": context["device_id"],
-                    "command_id": command_id,
-                    "media_type": normalized_type,
-                    "file_name": drive_name,
-                    "mime_type": content_type,
-                    "size_bytes": size_bytes,
-                    "captured_at": captured_at or None,
-                    "uploaded_at": repository.now(),
-                    "drive_file_id": upload.get("file_id") or "",
-                    "drive_url": upload.get("web_view_link") or upload.get("web_content_link") or "",
-                    "status": "uploaded",
-                    "error_message": "",
+        def persist_media() -> dict[str, Any]:
+            try:
+                upload = upload_file_to_google_drive(get_settings(), temp_path, drive_name, MOBILE_MEDIA_DRIVE_FOLDER_ID, mime_type=content_type)
+                media = repository.save_media(
+                    {
+                        "device_id": context["device_id"],
+                        "command_id": command_id,
+                        "media_type": normalized_type,
+                        "file_name": drive_name,
+                        "mime_type": content_type,
+                        "size_bytes": size_bytes,
+                        "captured_at": captured_at or None,
+                        "uploaded_at": repository.now(),
+                        "drive_file_id": upload.get("file_id") or "",
+                        "drive_url": upload.get("web_view_link") or upload.get("web_content_link") or "",
+                        "status": "uploaded",
+                        "error_message": "",
+                    }
+                )
+            except GoogleDriveConfigurationError as error:
+                media = repository.save_media(
+                    {
+                        "device_id": context["device_id"],
+                        "command_id": command_id,
+                        "media_type": normalized_type,
+                        "file_name": drive_name,
+                        "mime_type": content_type,
+                        "size_bytes": size_bytes,
+                        "captured_at": captured_at or None,
+                        "uploaded_at": repository.now(),
+                        "status": "upload_failed",
+                        "error_message": str(error),
+                    }
+                )
+                return {
+                    "ok": False,
+                    "media": media,
+                    "media_id": str(media.get("id") or ""),
+                    "drive_file_id": media.get("drive_file_id") or "",
+                    "drive_url": media.get("drive_url") or "",
+                    "message": "Google Drive chua san sang upload media.",
                 }
-            )
-        except GoogleDriveConfigurationError as error:
-            media = repository.save_media(
-                {
-                    "device_id": context["device_id"],
-                    "command_id": command_id,
-                    "media_type": normalized_type,
-                    "file_name": drive_name,
-                    "mime_type": content_type,
-                    "size_bytes": size_bytes,
-                    "captured_at": captured_at or None,
-                    "uploaded_at": repository.now(),
-                    "status": "upload_failed",
-                    "error_message": str(error),
-                }
-            )
             return {
-                "ok": False,
+                "ok": True,
                 "media": media,
                 "media_id": str(media.get("id") or ""),
                 "drive_file_id": media.get("drive_file_id") or "",
                 "drive_url": media.get("drive_url") or "",
-                "message": "Google Drive chua san sang upload media.",
             }
-        return {
-            "ok": True,
-            "media": media,
-            "media_id": str(media.get("id") or ""),
-            "drive_file_id": media.get("drive_file_id") or "",
-            "drive_url": media.get("drive_url") or "",
-        }
+
+        return await run_in_threadpool(persist_media)
     finally:
         try:
             temp_path.unlink(missing_ok=True)
