@@ -4979,6 +4979,28 @@ def test_supabase_onebss_run_uses_parameters_json_column(monkeypatch) -> None:
     assert run["parameters"] == {"P_TUNGAY": "01/07/2026"}
 
 
+def test_supabase_onebss_queued_run_keeps_finished_at_empty(monkeypatch) -> None:
+    captured = {}
+    repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
+
+    def fake_insert(table, payload):
+        captured["table"] = table
+        captured["payload"] = payload
+        return payload
+
+    monkeypatch.setattr(repository, "_insert", fake_insert)
+    run = repository.save_onebss_report_run({
+        "ma_bao_cao": "TEST",
+        "ten_bao_cao": "Test",
+        "status": "queued",
+        "parameters": {"P_TUNGAY": "01/07/2026"},
+    })
+
+    assert captured["table"] == "onebss_report_runs"
+    assert captured["payload"]["finished_at"] == ""
+    assert run["finished_at"] == ""
+
+
 def test_supabase_ftp_report_run_uses_ftp_table(monkeypatch) -> None:
     captured = {}
     repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")

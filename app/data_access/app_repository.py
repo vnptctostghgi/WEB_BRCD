@@ -1921,11 +1921,15 @@ class AppRepository:
         now = self._now()
         run_id = str(payload.get("run_id") or f"OBRUN{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}{secrets.token_hex(3).upper()}")
         parameters = payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {}
+        status_value = str(payload.get("status") or "failed")
+        finished_at = str(payload.get("finished_at") or "")
+        if not finished_at and status_value.lower() in {"success", "failed", "cancelled", "storage_failed", "google_drive_not_configured", "google_drive_upload_failed"}:
+            finished_at = now
         row = {
             "run_id": run_id,
             "ma_bao_cao": str(payload.get("ma_bao_cao") or ""),
             "ten_bao_cao": str(payload.get("ten_bao_cao") or ""),
-            "status": str(payload.get("status") or "failed"),
+            "status": status_value,
             "message": str(payload.get("message") or ""),
             "file_name": str(payload.get("file_name") or ""),
             "file_path": str(payload.get("file_path") or ""),
@@ -1933,7 +1937,7 @@ class AppRepository:
             "storage_status": str(payload.get("storage_status") or ""),
             "parameters_json": json.dumps(parameters, ensure_ascii=False),
             "started_at": str(payload.get("started_at") or now),
-            "finished_at": str(payload.get("finished_at") or now),
+            "finished_at": finished_at,
             "duration_ms": int(payload.get("duration_ms") or 0),
             "created_by": str(payload.get("created_by") or ""),
             "worker_id": str(payload.get("worker_id") or ""),
