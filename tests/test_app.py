@@ -4629,6 +4629,54 @@ def test_onebss_workstation_worker_retries_transient_web_errors(monkeypatch) -> 
     assert attempts["count"] == 2
 
 
+def test_onebss_workstation_worker_continues_when_progress_status_is_transient(monkeypatch) -> None:
+    import httpx
+    from scripts import onebss_workstation_worker as worker
+
+    calls = []
+    ran = {"onebss": False}
+    monkeypatch.setattr(worker.time, "sleep", lambda seconds: None)
+
+    class FakeResponse:
+        def __init__(self, status_code: int, payload: dict | None = None, path: str = "") -> None:
+            self.status_code = status_code
+            self.payload = payload or {"ok": True}
+            self.request = httpx.Request("POST", f"https://vnptcto.com{path}")
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                response = httpx.Response(self.status_code, request=self.request)
+                raise httpx.HTTPStatusError("temporary error", request=self.request, response=response)
+
+        def json(self) -> dict:
+            return self.payload
+
+    class FakeClient:
+        def request(self, method: str, path: str, **kwargs):
+            calls.append({"method": method, "path": path, "json": kwargs.get("json") or {}})
+            if path.endswith("/status"):
+                return FakeResponse(502, path=path)
+            return FakeResponse(200, {"ok": True}, path=path)
+
+    def fake_onebss(*args, **kwargs):
+        ran["onebss"] = True
+        return {"ok": True, "status": "success", "message": "done"}
+
+    monkeypatch.setattr(worker, "run_onebss_report_request", fake_onebss)
+
+    worker.process_task(
+        FakeClient(),
+        {"run_id": "RUN-PROGRESS-502", "report": {"ma_bao_cao": "ONEBSS"}, "parameters": {}},
+        "ws-progress-502",
+        0,
+    )
+
+    assert ran["onebss"] is True
+    result_calls = [call for call in calls if call["path"] == "/api/onebss-worker/tasks/RUN-PROGRESS-502/result"]
+    assert len(result_calls) == 1
+    assert result_calls[0]["json"]["ok"] is True
+
+
 def test_onebss_workstation_worker_reports_unexpected_failure(monkeypatch) -> None:
     from scripts import onebss_workstation_worker as worker
 
@@ -4779,6 +4827,7 @@ def test_workstation_worker_claims_onebss_before_sql(monkeypatch) -> None:
     assert worker.poll_worker_once(FakeClient(), "ws-priority", 0) is True
     assert processed == [("onebss", "ONEBSS-FIRST", "ws-priority")]
     assert calls[0]["path"] == "/api/onebss-worker/tasks/claim"
+    assert calls[0]["json"]["version"] == worker.WORKER_VERSION
     assert all(call["path"] != "/api/sql-worker/tasks/claim" for call in calls)
 
 

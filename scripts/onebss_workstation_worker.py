@@ -35,7 +35,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.08.02-onebss-timeout-worker"
+WORKER_VERSION = "2026.08.03-onebss-progress-worker"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -348,10 +348,18 @@ def _run_onebss_report_request_child(
                     "message": message,
                     "worker_id": worker_id,
                     "worker_session_id": session_id,
+                    "details": {
+                        "worker_version": WORKER_VERSION,
+                        "pid": os.getpid(),
+                        "task_type": "onebss",
+                        "process": "child",
+                    },
                 },
                 timeout=10.0,
                 _retry_forever=False,
             )
+            if data.get("transient_error"):
+                return
             if response_is_cancelled(data):
                 raise OneBssTaskCancelled(str(data.get("message") or "Task OneBSS da bi huy."))
 
@@ -481,13 +489,26 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
             client,
             "POST",
             f"/api/onebss-worker/tasks/{run_id}/status",
-            json={
-                "status": status,
-                "message": text,
-                "worker_id": worker_id,
-                "worker_session_id": session_id,
-            },
-        )
+                json={
+                    "status": status,
+                    "message": text,
+                    "worker_id": worker_id,
+                    "worker_session_id": session_id,
+                    "details": {
+                        "worker_version": WORKER_VERSION,
+                        "pid": os.getpid(),
+                        "task_type": "onebss",
+                    },
+                },
+                timeout=10.0,
+                _retry_forever=False,
+            )
+        if data.get("transient_error"):
+            print(
+                f"Khong cap nhat duoc tien trinh OneBSS ({data.get('transient_error')}); worker tiep tuc xu ly.",
+                file=sys.stderr,
+            )
+            return
         if response_is_cancelled(data):
             raise OneBssTaskCancelled(str(data.get("message") or "Task OneBSS da bi huy."))
         if now - float(last_heartbeat["at"] or 0) >= 25:
@@ -1015,7 +1036,18 @@ def process_ftp_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
 
 
 def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float) -> bool:
-    claim = request_json(client, "POST", "/api/onebss-worker/tasks/claim", json={"worker_id": worker_id}, timeout=10.0, _retry_forever=False)
+    claim = request_json(
+        client,
+        "POST",
+        "/api/onebss-worker/tasks/claim",
+        json={
+            "worker_id": worker_id,
+            "version": WORKER_VERSION,
+            "details": {"pid": os.getpid(), "python": sys.version.split()[0]},
+        },
+        timeout=10.0,
+        _retry_forever=False,
+    )
     if claim.get("transient_error"):
         return False
     task = claim.get("task") if isinstance(claim.get("task"), dict) else None

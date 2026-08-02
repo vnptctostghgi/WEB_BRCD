@@ -137,7 +137,7 @@ WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_w
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260802-onebss-timeout-v11"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260803-onebss-progress-v12"
 WORKSTATION_SETUP_INCLUDE_PATHS = (
     ".env.example",
     "README.md",
@@ -538,6 +538,8 @@ class OneBssTaskOtpPayload(BaseModel):
 
 class OneBssWorkerClaimPayload(BaseModel):
     worker_id: str = "onebss-workstation"
+    version: str = ""
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class OneBssWorkerStatusPayload(BaseModel):
@@ -6693,11 +6695,15 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
 @router.post("/api/onebss-worker/tasks/claim")
 def claim_onebss_worker_task(request: Request, payload: OneBssWorkerClaimPayload) -> dict:
     onebss_worker_token(request)
+    claim_details = {"claim": "onebss", **(payload.details or {})}
+    if payload.version.strip():
+        claim_details["worker_version"] = payload.version.strip()
     _record_workstation_heartbeat(
         payload.worker_id,
         "idle",
         "May tram OneBSS dang cho lenh.",
-        details={"claim": "onebss"},
+        details=claim_details,
+        version=payload.version,
     )
     repository = build_app_repository()
     try:
@@ -6711,7 +6717,8 @@ def claim_onebss_worker_task(request: Request, payload: OneBssWorkerClaimPayload
         payload.worker_id,
         "busy",
         f"May tram {payload.worker_id} da nhan task OneBSS.",
-        details={"run_id": run.get("run_id") or "", "report": run.get("ma_bao_cao") or "", "task_type": "onebss"},
+        details={"run_id": run.get("run_id") or "", "report": run.get("ma_bao_cao") or "", "task_type": "onebss", **claim_details},
+        version=payload.version,
     )
     report = repository.get_onebss_report_by_code(str(run.get("ma_bao_cao") or ""))
     if not report:
@@ -6762,6 +6769,7 @@ def update_onebss_worker_task_status(request: Request, run_id: str, payload: One
         "busy",
         payload.message or "May tram dang xu ly task OneBSS.",
         details={"run_id": run_id.strip(), "report": run.get("ma_bao_cao") or "", "task_type": "onebss", **(payload.details or {})},
+        version=str((payload.details or {}).get("worker_version") or ""),
     )
     if status_value in {"waiting_otp", "otp_required", "manual_otp_required"}:
         otp_info = ensure_onebss_task_otp_request(repository, run, report, worker_session_id)
