@@ -52,7 +52,7 @@ $RestartDelaySeconds = 10
 while ($true) {
   $processInfo = New-Object System.Diagnostics.ProcessStartInfo
   $processInfo.FileName = "powershell.exe"
-  $processInfo.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$StartWorkerScript`" -NoPause"
+  $processInfo.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$StartWorkerScript`" -NoPause"
   $processInfo.WorkingDirectory = $Root
   $processInfo.UseShellExecute = $false
   $processInfo.CreateNoWindow = $true
