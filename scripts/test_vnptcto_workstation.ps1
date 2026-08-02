@@ -128,7 +128,7 @@ if (-not [string]::IsNullOrWhiteSpace($token)) {
       worker_id = $WorkerId
       status = "health_check"
       roles = $heartbeatRoles
-      version = "health-check-2026.07.20"
+      version = "health-check-2026.08.03-background"
       local_time = (Get-Date).ToString("s")
       message = "Health check tu may tram."
       details = @{

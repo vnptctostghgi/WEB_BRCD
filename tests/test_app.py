@@ -331,6 +331,7 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "Stop-LocalApiProcesses" in api_task_script
         assert "config-status" in api_task_script
         assert "Bo qua vi chua cai cloudflared" in health_script
+        assert "health-check-2026.08.03-background" in health_script
         assert "Start-WorkerIfMissing" in health_script
         assert "Worker process" in health_script
         assert '$heartbeatRoles = @("health_check")' in health_script
@@ -607,12 +608,58 @@ def test_admin_can_test_save_and_delete_workstation_profile() -> None:
             body = tested.json()
             assert body["ok"] is True
             assert {check["code"] for check in body["checks"]} >= {"connection", "worker", "background", "priority"}
+            background_check = next(check for check in body["checks"] if check["code"] == "background")
+            assert background_check["status"] == "ok"
 
             deleted = client.delete(f"/api/admin/workstation/{worker_id}")
             assert deleted.status_code == 200
             assert deleted.json()["profile"]["deleted"] is True
             overview_after_delete = client.get("/api/admin/workstation/overview")
             assert all(worker["worker_id"] != worker_id for worker in overview_after_delete.json()["workers"])
+    finally:
+        with routes.WORKSTATION_HEARTBEATS_LOCK:
+            routes.WORKSTATION_HEARTBEATS.clear()
+
+
+def test_sql_claim_preserves_background_process_details() -> None:
+    worker_id = f"ws-bg-{uuid.uuid4().hex[:8]}"
+    with routes.WORKSTATION_HEARTBEATS_LOCK:
+        routes.WORKSTATION_HEARTBEATS.clear()
+    try:
+        with TestClient(app) as client:
+            heartbeat = client.post(
+                "/api/workstation/heartbeat",
+                json={
+                    "worker_id": worker_id,
+                    "status": "idle",
+                    "roles": ["onebss_worker", "sql_report_worker"],
+                    "version": "worker-test",
+                    "message": "Worker dang cho lenh.",
+                    "details": {
+                        "pid": 4321,
+                        "worker_process": "Dang chay PID: 4321",
+                        "python": "3.12",
+                    },
+                },
+                headers={"Authorization": "Bearer test-worker-token"},
+            )
+            assert heartbeat.status_code == 200
+
+            claim = client.post(
+                "/api/sql-worker/tasks/claim",
+                json={"worker_id": worker_id},
+                headers={"Authorization": "Bearer test-worker-token"},
+            )
+            assert claim.status_code == 200
+
+            login(client)
+            tested = client.post(f"/api/admin/workstation/{worker_id}/test")
+            assert tested.status_code == 200
+            body = tested.json()
+            assert body["ok"] is True
+            background_check = next(check for check in body["checks"] if check["code"] == "background")
+            assert background_check["status"] == "ok"
+            assert "4321" in background_check["message"]
     finally:
         with routes.WORKSTATION_HEARTBEATS_LOCK:
             routes.WORKSTATION_HEARTBEATS.clear()
@@ -4925,6 +4972,40 @@ def test_workstation_worker_claims_onebss_before_sql(monkeypatch) -> None:
     assert calls[0]["path"] == "/api/onebss-worker/tasks/claim"
     assert calls[0]["json"]["version"] == worker.WORKER_VERSION
     assert all(call["path"] != "/api/sql-worker/tasks/claim" for call in calls)
+
+
+def test_workstation_worker_idle_claims_include_process_details() -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    calls = []
+
+    class FakeClient:
+        def request(self, method: str, path: str, **kwargs):
+            calls.append({"method": method, "path": path, "json": kwargs.get("json") or {}})
+
+            class FakeResponse:
+                status_code = 200
+
+                def raise_for_status(self) -> None:
+                    return None
+
+                def json(self) -> dict:
+                    return {"ok": True, "task": None}
+
+            return FakeResponse()
+
+    assert worker.poll_worker_once(FakeClient(), "ws-idle", 0) is False
+    claim_calls = [call for call in calls if call["path"].endswith("/tasks/claim")]
+    assert [call["path"] for call in claim_calls] == [
+        "/api/onebss-worker/tasks/claim",
+        "/api/sql-worker/tasks/claim",
+        "/api/ftp-worker/tasks/claim",
+    ]
+    for call in claim_calls:
+        assert call["json"]["version"] == worker.WORKER_VERSION
+        assert call["json"]["details"]["pid"]
+        assert call["json"]["details"]["worker_version"] == worker.WORKER_VERSION
+        assert "dang chay nen" in call["json"]["details"]["worker_process"]
 
 
 def test_sql_worker_posts_drive_export_result_to_web(monkeypatch) -> None:

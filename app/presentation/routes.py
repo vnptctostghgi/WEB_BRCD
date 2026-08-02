@@ -137,7 +137,7 @@ WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_w
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260803-onebss-progress-v12"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260803-background-v13"
 WORKSTATION_CONNECTION_PREFIX = "workstation_"
 WORKSTATION_DEFAULT_PRIORITY = 100
 WORKSTATION_SETUP_INCLUDE_PATHS = (
@@ -497,6 +497,8 @@ class RunReportPayload(BaseModel):
 
 class SqlWorkerClaimPayload(BaseModel):
     worker_id: str = "onebss-workstation"
+    version: str = ""
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class SqlWorkerStatusPayload(BaseModel):
@@ -590,6 +592,8 @@ class RunFtpReportPayload(BaseModel):
 
 class FtpWorkerClaimPayload(BaseModel):
     worker_id: str = "onebss-workstation"
+    version: str = ""
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class FtpWorkerStatusPayload(BaseModel):
@@ -2310,6 +2314,7 @@ def _record_workstation_heartbeat(
 ) -> dict[str, Any]:
     clean_worker_id = _normalize_workstation_worker_id(worker_id)
     now = datetime.now(UTC)
+    incoming_details = details if isinstance(details, dict) else {}
     heartbeat = {
         "worker_id": clean_worker_id,
         "status": str(status_value or "idle").strip().lower()[:40] or "idle",
@@ -2317,11 +2322,16 @@ def _record_workstation_heartbeat(
         "version": str(version or "").strip()[:80],
         "local_time": str(local_time or "").strip()[:80],
         "message": str(message or "").strip()[:240],
-        "details": details if isinstance(details, dict) else {},
+        "details": dict(incoming_details),
         "received_at": iso_datetime(now),
         "received_at_ts": time.time(),
     }
     with WORKSTATION_HEARTBEATS_LOCK:
+        previous_details = WORKSTATION_HEARTBEATS.get(clean_worker_id, {}).get("details")
+        if isinstance(previous_details, dict):
+            for key in ("pid", "python", "worker_process", "computer", "worker_version"):
+                if key not in heartbeat["details"] and previous_details.get(key) not in (None, ""):
+                    heartbeat["details"][key] = previous_details.get(key)
         WORKSTATION_HEARTBEATS[clean_worker_id] = heartbeat
     return heartbeat
 
@@ -2834,6 +2844,21 @@ def workstation_diagnostic_response(worker: dict[str, Any]) -> dict[str, Any]:
     )
     process_detail = str(details.get("worker_process") or "").strip()
     pid_detail = str(details.get("pid") or "").strip()
+    background_has_process = bool(process_detail or pid_detail)
+    background_inferred = bool(
+        has_worker_role
+        and status_value in {"online", "recent"}
+        and str(worker.get("version") or details.get("worker_version") or "").strip()
+    )
+    background_message = (
+        process_detail
+        or (f"PID {pid_detail}" if pid_detail else "")
+        or (
+            "Worker dang gui heartbeat nen tien trinh nen dang chay; heartbeat cu chua co PID."
+            if background_inferred
+            else "Chua co thong tin process nen tu heartbeat."
+        )
+    )
     checks = [
         {
             "code": "connection",
@@ -2858,8 +2883,8 @@ def workstation_diagnostic_response(worker: dict[str, Any]) -> dict[str, Any]:
         {
             "code": "background",
             "label": "Chay ngam",
-            "status": "ok" if process_detail or pid_detail else ("warning" if status_value in {"online", "recent"} else "error"),
-            "message": process_detail or (f"PID {pid_detail}" if pid_detail else "Chua co thong tin process nen tu heartbeat."),
+            "status": "ok" if background_has_process else ("warning" if background_inferred else "error"),
+            "message": background_message,
         },
         {
             "code": "last_error",
@@ -5491,11 +5516,15 @@ def _next_dynamic_report_export_worker_job(*, recover_from_history: bool = True)
 def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> dict:
     onebss_worker_token(request)
     repository = build_app_repository()
+    claim_details = {"claim": "sql", **(payload.details or {})}
+    if payload.version.strip():
+        claim_details["worker_version"] = payload.version.strip()
     _record_workstation_heartbeat(
         payload.worker_id,
         "idle",
         "May tram SQL dang cho lenh.",
-        details={"claim": "sql"},
+        details=claim_details,
+        version=payload.version,
     )
     priority_block = workstation_claim_blocker(payload.worker_id, WORKSTATION_SQL_ROLE_CODES, repository)
     if priority_block:
@@ -6555,6 +6584,16 @@ def run_ftp_report(request: Request, payload: RunFtpReportPayload) -> dict:
 def claim_ftp_worker_task(request: Request, payload: FtpWorkerClaimPayload) -> dict:
     onebss_worker_token(request)
     repository = build_app_repository()
+    claim_details = {"claim": "ftp", **(payload.details or {})}
+    if payload.version.strip():
+        claim_details["worker_version"] = payload.version.strip()
+    _record_workstation_heartbeat(
+        payload.worker_id,
+        "idle",
+        "May tram FTP dang cho lenh.",
+        details=claim_details,
+        version=payload.version,
+    )
     try:
         priority_block = workstation_claim_blocker(payload.worker_id, {"ftp_report_worker"}, repository)
         if priority_block:

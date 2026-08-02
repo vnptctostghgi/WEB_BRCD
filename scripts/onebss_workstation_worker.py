@@ -35,10 +35,19 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.08.03-onebss-progress-worker"
+WORKER_VERSION = "2026.08.03-background-worker"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
+
+
+def worker_process_details() -> dict[str, Any]:
+    return {
+        "pid": os.getpid(),
+        "python": sys.version.split()[0],
+        "worker_version": WORKER_VERSION,
+        "worker_process": f"Worker PID {os.getpid()} dang chay nen.",
+    }
 
 
 def response_is_cancelled(data: dict[str, Any]) -> bool:
@@ -95,8 +104,7 @@ def send_heartbeat(client: httpx.Client, worker_id: str, status: str = "idle", m
         "local_time": datetime.now().isoformat(timespec="seconds"),
         "message": message,
         "details": {
-            "pid": os.getpid(),
-            "python": sys.version.split()[0],
+            **worker_process_details(),
             **(details or {}),
         },
     }
@@ -349,8 +357,7 @@ def _run_onebss_report_request_child(
                     "worker_id": worker_id,
                     "worker_session_id": session_id,
                     "details": {
-                        "worker_version": WORKER_VERSION,
-                        "pid": os.getpid(),
+                        **worker_process_details(),
                         "task_type": "onebss",
                         "process": "child",
                     },
@@ -495,8 +502,7 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
                     "worker_id": worker_id,
                     "worker_session_id": session_id,
                     "details": {
-                        "worker_version": WORKER_VERSION,
-                        "pid": os.getpid(),
+                        **worker_process_details(),
                         "task_type": "onebss",
                     },
                 },
@@ -648,7 +654,10 @@ def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
                 "status": status,
                 "message": message,
                 "worker_id": worker_id,
-                "details": details or {},
+                "details": {
+                    **worker_process_details(),
+                    **(details or {}),
+                },
             },
         )
 
@@ -978,6 +987,10 @@ def process_ftp_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
                 "message": text,
                 "worker_id": worker_id,
                 "resolved_file_name": resolved_file_name,
+                "details": {
+                    **worker_process_details(),
+                    "resolved_file_name": resolved_file_name,
+                },
             },
         )
         if response_is_cancelled(data):
@@ -1043,7 +1056,7 @@ def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float) 
         json={
             "worker_id": worker_id,
             "version": WORKER_VERSION,
-            "details": {"pid": os.getpid(), "python": sys.version.split()[0]},
+            "details": worker_process_details(),
         },
         timeout=10.0,
         _retry_forever=False,
@@ -1063,7 +1076,18 @@ def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float) 
         send_heartbeat(client, worker_id, "idle", "May tram OneBSS da quay lai trang thai cho task.")
         return True
 
-    sql_claim = request_json(client, "POST", "/api/sql-worker/tasks/claim", json={"worker_id": worker_id}, timeout=10.0, _retry_forever=False)
+    sql_claim = request_json(
+        client,
+        "POST",
+        "/api/sql-worker/tasks/claim",
+        json={
+            "worker_id": worker_id,
+            "version": WORKER_VERSION,
+            "details": worker_process_details(),
+        },
+        timeout=10.0,
+        _retry_forever=False,
+    )
     if sql_claim.get("transient_error"):
         return False
     sql_task = sql_claim.get("task") if isinstance(sql_claim.get("task"), dict) else None
@@ -1079,7 +1103,18 @@ def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float) 
         send_heartbeat(client, worker_id, "idle", "May tram SQL da quay lai trang thai cho task.")
         return True
 
-    ftp_claim = request_json(client, "POST", "/api/ftp-worker/tasks/claim", json={"worker_id": worker_id}, timeout=10.0, _retry_forever=False)
+    ftp_claim = request_json(
+        client,
+        "POST",
+        "/api/ftp-worker/tasks/claim",
+        json={
+            "worker_id": worker_id,
+            "version": WORKER_VERSION,
+            "details": worker_process_details(),
+        },
+        timeout=10.0,
+        _retry_forever=False,
+    )
     ftp_task = ftp_claim.get("task") if isinstance(ftp_claim.get("task"), dict) else None
     if ftp_task:
         send_heartbeat(
