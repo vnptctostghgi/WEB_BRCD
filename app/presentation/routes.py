@@ -133,11 +133,12 @@ ADMIN_ONLY_MESSAGE = "Bạn không có quyền truy cập chức năng này"
 WORKSTATION_HEARTBEATS: dict[str, dict[str, Any]] = {}
 WORKSTATION_HEARTBEATS_LOCK = threading.Lock()
 WORKSTATION_HEARTBEAT_TTL_SECONDS = 10 * 60
+WORKSTATION_READY_HEARTBEAT_SECONDS = 90
 WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_worker", "ftp_report_worker", "excel_export", "drive_upload"]
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260803-background-v13"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260803-failover-v14"
 WORKSTATION_CONNECTION_PREFIX = "workstation_"
 WORKSTATION_DEFAULT_PRIORITY = 100
 WORKSTATION_SETUP_INCLUDE_PATHS = (
@@ -2346,6 +2347,10 @@ def workstation_status_from_age(age_seconds: float | None) -> str:
     return "offline"
 
 
+def workstation_ready_from_age(age_seconds: float | None) -> bool:
+    return age_seconds is not None and age_seconds <= WORKSTATION_READY_HEARTBEAT_SECONDS
+
+
 def _workstation_priority(value: Any) -> int:
     try:
         priority = int(value)
@@ -2474,7 +2479,7 @@ def workstation_claim_blocker(worker_id: str, role_codes: set[str], repository: 
             continue
         received_at_ts = float(heartbeat.get("received_at_ts") or 0)
         age_seconds = max(0.0, now_ts - received_at_ts) if received_at_ts else None
-        if workstation_status_from_age(age_seconds) not in {"online", "recent"}:
+        if not workstation_ready_from_age(age_seconds):
             continue
         runtime_status = str(heartbeat.get("status") or "").strip().lower()
         if runtime_status in {"error", "stopped", "offline"}:
@@ -2483,7 +2488,7 @@ def workstation_claim_blocker(worker_id: str, role_codes: set[str], repository: 
             "status": "waiting_priority",
             "message": (
                 f"May tram uu tien #{other_profile.get('priority')} "
-                f"({other_profile.get('display_name') or other_id}) dang online, "
+                f"({other_profile.get('display_name') or other_id}) dang online moi {int(age_seconds or 0)} giay truoc, "
                 f"nen {current_profile.get('display_name') or worker_id} chua nhan task."
             ),
         }
@@ -2507,7 +2512,7 @@ def _onebss_worker_state() -> dict[str, Any]:
         received_at_ts = float(heartbeat.get("received_at_ts") or 0)
         age_seconds = max(0.0, now_ts - received_at_ts) if received_at_ts else None
         status_value = workstation_status_from_age(age_seconds)
-        if status_value not in {"online", "recent"}:
+        if not workstation_ready_from_age(age_seconds):
             continue
         workers.append(
             {
@@ -2921,11 +2926,12 @@ def workstation_diagnostic_response(worker: dict[str, Any]) -> dict[str, Any]:
 
 def _dynamic_report_sql_worker_state() -> dict[str, Any]:
     workers = workstation_workers_response([])
-    eligible_statuses = {"online", "recent"}
     online_workers = [
         worker
         for worker in workers
-        if str(worker.get("status") or "").lower() in eligible_statuses and worker.get("enabled", True)
+        if worker.get("enabled", True)
+        and str(worker.get("status") or "").lower() in {"online", "recent"}
+        and workstation_ready_from_age(float(worker.get("last_seen_age_seconds") or 0))
     ]
     sql_workers = [
         worker

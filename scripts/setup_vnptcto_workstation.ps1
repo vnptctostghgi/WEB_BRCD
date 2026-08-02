@@ -670,7 +670,7 @@ function Install-HealthCheckTask {
   $taskName = "VNPTCTO Workstation Health Check"
   $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$healthScript`" -NoPause" -WorkingDirectory $Root
   $startupTrigger = New-ScheduledTaskTrigger -AtLogOn
-  $intervalTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration (New-TimeSpan -Days 3650)
+  $intervalTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes 2) -RepetitionDuration (New-TimeSpan -Days 3650)
   $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -MultipleInstances IgnoreNew -StartWhenAvailable
   Register-VnptctoInteractiveTask -Name $taskName -Action $action -Trigger @($startupTrigger, $intervalTrigger) -Settings $settings -Description "Kiem tra web, worker, API trung gian VNPTCTO."
 }

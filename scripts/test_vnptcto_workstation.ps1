@@ -128,7 +128,7 @@ if (-not [string]::IsNullOrWhiteSpace($token)) {
       worker_id = $WorkerId
       status = "health_check"
       roles = $heartbeatRoles
-      version = "health-check-2026.08.03-background"
+      version = "health-check-2026.08.03-failover"
       local_time = (Get-Date).ToString("s")
       message = "Health check tu may tram."
       details = @{
@@ -145,12 +145,15 @@ if (-not [string]::IsNullOrWhiteSpace($token)) {
   $results.Add([pscustomobject]@{ Name = "Heartbeat web"; Ok = $false; Detail = "Chua co INTERNAL_API_TOKEN trong User environment." })
 }
 
+$optionalTaskNames = @("VNPTCTO API Trung Gian", "VNPTCTO API Watchdog")
 foreach ($taskName in @("VNPTCTO OneBSS Worker", "VNPTCTO API Trung Gian", "VNPTCTO API Watchdog", "VNPTCTO Workstation Health Check")) {
   $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
   if ($task) {
     $results.Add([pscustomobject]@{ Name = "Task $taskName"; Ok = $true; Detail = $task.State })
   } else {
-    $results.Add([pscustomobject]@{ Name = "Task $taskName"; Ok = $false; Detail = "Khong tim thay Scheduled Task." })
+    $optionalTask = $optionalTaskNames -contains $taskName
+    $detail = if ($optionalTask) { "Khong tim thay Scheduled Task; khong bat buoc neu Local API dang OK." } else { "Khong tim thay Scheduled Task." }
+    $results.Add([pscustomobject]@{ Name = "Task $taskName"; Ok = $optionalTask; Detail = $detail })
   }
 }
 

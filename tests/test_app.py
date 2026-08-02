@@ -321,6 +321,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "onebss-worker.log" in background_worker_script
         assert "onebss-worker-error.log" in background_worker_script
         assert "start_onebss_worker.ps1" in background_worker_script
+        assert "Tu khoi dong lai worker sau $RestartDelaySeconds giay." in background_worker_script
+        assert "RepetitionInterval (New-TimeSpan -Minutes 2)" in setup_script
         assert "[Security.Principal.WindowsIdentity]::GetCurrent().Name" in install_task_script
         assert "whoami.exe" in install_task_script
         assert "-UserId $env:USERNAME" not in setup_script
@@ -331,7 +333,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "Stop-LocalApiProcesses" in api_task_script
         assert "config-status" in api_task_script
         assert "Bo qua vi chua cai cloudflared" in health_script
-        assert "health-check-2026.08.03-background" in health_script
+        assert "health-check-2026.08.03-failover" in health_script
+        assert "Khong tim thay Scheduled Task; khong bat buoc neu Local API dang OK." in health_script
         assert "Start-WorkerIfMissing" in health_script
         assert "Worker process" in health_script
         assert '$heartbeatRoles = @("health_check")' in health_script
@@ -701,7 +704,9 @@ def test_workstation_priority_blocks_lower_priority_onebss_claim() -> None:
             assert lower_claim.json()["status"] == "waiting_priority"
 
             with routes.WORKSTATION_HEARTBEATS_LOCK:
-                routes.WORKSTATION_HEARTBEATS.pop(primary_id, None)
+                routes.WORKSTATION_HEARTBEATS[primary_id]["received_at_ts"] = (
+                    time.time() - routes.WORKSTATION_READY_HEARTBEAT_SECONDS - 5
+                )
             fallback_claim = client.post("/api/onebss-worker/tasks/claim", json={"worker_id": secondary_id}, headers=headers)
             assert fallback_claim.status_code == 200
             assert fallback_claim.json()["task"]["ma_bao_cao"] == code
