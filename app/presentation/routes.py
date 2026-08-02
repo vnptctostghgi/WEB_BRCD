@@ -138,6 +138,8 @@ WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
 WORKSTATION_SETUP_PACKAGE_VERSION = "20260803-onebss-progress-v12"
+WORKSTATION_CONNECTION_PREFIX = "workstation_"
+WORKSTATION_DEFAULT_PRIORITY = 100
 WORKSTATION_SETUP_INCLUDE_PATHS = (
     ".env.example",
     "README.md",
@@ -443,6 +445,13 @@ class SystemConnectionPayload(BaseModel):
     description: str = ""
     config: dict[str, Any] = Field(default_factory=dict)
     is_active: bool = False
+
+
+class WorkstationProfilePayload(BaseModel):
+    worker_id: str
+    display_name: str = ""
+    priority: int = WORKSTATION_DEFAULT_PRIORITY
+    enabled: bool = True
 
 
 class GoogleDriveFolderPayload(BaseModel):
@@ -2327,12 +2336,160 @@ def workstation_status_from_age(age_seconds: float | None) -> str:
     return "offline"
 
 
+def _workstation_priority(value: Any) -> int:
+    try:
+        priority = int(value)
+    except (TypeError, ValueError):
+        priority = WORKSTATION_DEFAULT_PRIORITY
+    return min(max(priority, 1), 999)
+
+
+def _workstation_connection_code(worker_id: str) -> str:
+    return f"{WORKSTATION_CONNECTION_PREFIX}{_normalize_workstation_worker_id(worker_id).lower()}"
+
+
+def _workstation_default_profile(worker_id: str) -> dict[str, Any]:
+    clean_worker_id = _normalize_workstation_worker_id(worker_id)
+    return {
+        "worker_id": clean_worker_id,
+        "display_name": clean_worker_id,
+        "priority": WORKSTATION_DEFAULT_PRIORITY,
+        "enabled": True,
+        "deleted": False,
+        "managed": False,
+        "connection_code": _workstation_connection_code(clean_worker_id),
+    }
+
+
+def _workstation_profile_from_connection(connection: dict[str, Any]) -> dict[str, Any]:
+    config = connection.get("config") if isinstance(connection.get("config"), dict) else {}
+    code = str(connection.get("code") or "")
+    code_worker_id = code[len(WORKSTATION_CONNECTION_PREFIX):] if code.startswith(WORKSTATION_CONNECTION_PREFIX) else code
+    worker_id = _normalize_workstation_worker_id(str(config.get("worker_id") or code_worker_id or connection.get("name") or ""))
+    display_name = str(config.get("display_name") or connection.get("name") or worker_id).strip()[:120] or worker_id
+    deleted = bool(config.get("deleted"))
+    enabled = bool(connection.get("is_active")) and not deleted and bool(config.get("enabled", True))
+    return {
+        "worker_id": worker_id,
+        "display_name": display_name,
+        "priority": _workstation_priority(config.get("priority")),
+        "enabled": enabled,
+        "deleted": deleted,
+        "managed": True,
+        "connection_code": code or _workstation_connection_code(worker_id),
+    }
+
+
+def workstation_registry_profiles(repository: Any | None = None) -> dict[str, dict[str, Any]]:
+    try:
+        repo = repository or build_app_repository()
+        connections = repo.list_system_connections()
+    except Exception:
+        logger.exception("Cannot load workstation registry")
+        return {}
+    profiles: dict[str, dict[str, Any]] = {}
+    for connection in connections:
+        if str(connection.get("connection_type") or "").strip().lower() != "workstation":
+            continue
+        profile = _workstation_profile_from_connection(connection)
+        profiles[profile["worker_id"]] = profile
+    return profiles
+
+
+def workstation_profile_for(worker_id: str, profiles: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    clean_worker_id = _normalize_workstation_worker_id(worker_id)
+    if profiles and clean_worker_id in profiles:
+        return dict(profiles[clean_worker_id])
+    return _workstation_default_profile(clean_worker_id)
+
+
+def upsert_workstation_profile(
+    repository: Any,
+    worker_id: str,
+    *,
+    display_name: str = "",
+    priority: int = WORKSTATION_DEFAULT_PRIORITY,
+    enabled: bool = True,
+    deleted: bool = False,
+) -> dict[str, Any]:
+    clean_worker_id = _normalize_workstation_worker_id(worker_id)
+    profile_name = str(display_name or clean_worker_id).strip()[:120] or clean_worker_id
+    safe_priority = _workstation_priority(priority)
+    config = {
+        "worker_id": clean_worker_id,
+        "display_name": profile_name,
+        "priority": safe_priority,
+        "enabled": bool(enabled) and not deleted,
+        "deleted": bool(deleted),
+        "updated_at": iso_datetime(datetime.now(UTC)),
+    }
+    repository.upsert_system_connection(
+        _workstation_connection_code(clean_worker_id),
+        profile_name,
+        "workstation",
+        "VNPTCTO workstation profile",
+        config,
+        bool(enabled) and not deleted,
+    )
+    return workstation_profile_for(clean_worker_id, workstation_registry_profiles(repository))
+
+
+def workstation_worker_has_role(worker: dict[str, Any], role_codes: set[str]) -> bool:
+    if not role_codes:
+        return True
+    roles = {str(role or "").strip() for role in (worker.get("roles") if isinstance(worker.get("roles"), list) else [])}
+    return bool(role_codes.intersection(roles))
+
+
+def workstation_claim_blocker(worker_id: str, role_codes: set[str], repository: Any) -> dict[str, str] | None:
+    profiles = workstation_registry_profiles(repository)
+    current_profile = workstation_profile_for(worker_id, profiles)
+    if current_profile.get("deleted") or not current_profile.get("enabled", True):
+        return {
+            "status": "disabled",
+            "message": f"May tram {current_profile.get('display_name') or worker_id} dang bi tat/xoa trong danh sach uu tien.",
+        }
+    current_priority = _workstation_priority(current_profile.get("priority"))
+    now_ts = time.time()
+    for heartbeat in workstation_heartbeat_records():
+        other_id = str(heartbeat.get("worker_id") or "").strip()
+        if not other_id or other_id == current_profile["worker_id"]:
+            continue
+        if not workstation_worker_has_role(heartbeat, role_codes):
+            continue
+        other_profile = workstation_profile_for(other_id, profiles)
+        if other_profile.get("deleted") or not other_profile.get("enabled", True):
+            continue
+        if _workstation_priority(other_profile.get("priority")) >= current_priority:
+            continue
+        received_at_ts = float(heartbeat.get("received_at_ts") or 0)
+        age_seconds = max(0.0, now_ts - received_at_ts) if received_at_ts else None
+        if workstation_status_from_age(age_seconds) not in {"online", "recent"}:
+            continue
+        runtime_status = str(heartbeat.get("status") or "").strip().lower()
+        if runtime_status in {"error", "stopped", "offline"}:
+            continue
+        return {
+            "status": "waiting_priority",
+            "message": (
+                f"May tram uu tien #{other_profile.get('priority')} "
+                f"({other_profile.get('display_name') or other_id}) dang online, "
+                f"nen {current_profile.get('display_name') or worker_id} chua nhan task."
+            ),
+        }
+    return None
+
+
 def _onebss_worker_state() -> dict[str, Any]:
     now_ts = time.time()
+    profiles = workstation_registry_profiles()
     workers: list[dict[str, Any]] = []
     for heartbeat in workstation_heartbeat_records():
         worker_id = str(heartbeat.get("worker_id") or "").strip()
         if not worker_id:
+            continue
+        profile = workstation_profile_for(worker_id, profiles)
+        if profile.get("deleted") or not profile.get("enabled", True):
             continue
         roles = {str(role or "").strip() for role in (heartbeat.get("roles") if isinstance(heartbeat.get("roles"), list) else [])}
         if not WORKSTATION_ONEBSS_ROLE_CODES.intersection(roles):
@@ -2345,6 +2502,8 @@ def _onebss_worker_state() -> dict[str, Any]:
         workers.append(
             {
                 "worker_id": worker_id,
+                "display_name": profile.get("display_name") or worker_id,
+                "priority": profile.get("priority") or WORKSTATION_DEFAULT_PRIORITY,
                 "status": status_value,
                 "runtime_status": heartbeat.get("status") or "idle",
                 "version": heartbeat.get("version") or "",
@@ -2570,18 +2729,26 @@ def workstation_heartbeat_records() -> list[dict[str, Any]]:
         return [dict(heartbeat) for heartbeat in WORKSTATION_HEARTBEATS.values()]
 
 
-def workstation_workers_response(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def workstation_workers_response(runs: list[dict[str, Any]], profiles: dict[str, dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     now_ts = time.time()
+    registry = profiles if profiles is not None else workstation_registry_profiles()
     run_overview = workstation_runs_overview(runs)
     by_worker: dict[str, dict[str, Any]] = {}
     for heartbeat in workstation_heartbeat_records():
         worker_id = str(heartbeat.get("worker_id") or "").strip()
         if not worker_id:
             continue
+        profile = workstation_profile_for(worker_id, registry)
+        if profile.get("deleted"):
+            continue
         received_at_ts = float(heartbeat.get("received_at_ts") or 0)
         age_seconds = max(0.0, now_ts - received_at_ts) if received_at_ts else None
         by_worker[worker_id] = {
             "worker_id": worker_id,
+            "display_name": profile.get("display_name") or worker_id,
+            "priority": profile.get("priority") or WORKSTATION_DEFAULT_PRIORITY,
+            "enabled": bool(profile.get("enabled", True)),
+            "managed": bool(profile.get("managed")),
             "status": workstation_status_from_age(age_seconds),
             "runtime_status": heartbeat.get("status") or "idle",
             "roles": heartbeat.get("roles") if isinstance(heartbeat.get("roles"), list) else [],
@@ -2593,10 +2760,17 @@ def workstation_workers_response(runs: list[dict[str, Any]]) -> list[dict[str, A
             "details": heartbeat.get("details") if isinstance(heartbeat.get("details"), dict) else {},
         }
     for worker_id, worker in run_overview["workers"].items():
+        profile = workstation_profile_for(worker_id, registry)
+        if profile.get("deleted"):
+            continue
         item = by_worker.setdefault(
             worker_id,
             {
                 "worker_id": worker_id,
+                "display_name": profile.get("display_name") or worker_id,
+                "priority": profile.get("priority") or WORKSTATION_DEFAULT_PRIORITY,
+                "enabled": bool(profile.get("enabled", True)),
+                "managed": bool(profile.get("managed")),
                 "status": "unknown",
                 "runtime_status": "unknown",
                 "roles": list(WORKSTATION_DEFAULT_ROLES),
@@ -2619,13 +2793,115 @@ def workstation_workers_response(runs: list[dict[str, Any]]) -> list[dict[str, A
         item["last_task_id"] = worker.get("last_task_id") or ""
         item["last_task_message"] = worker.get("last_task_message") or ""
         item["last_task_report"] = worker.get("last_task_report") or ""
-    return sorted(by_worker.values(), key=lambda item: (item.get("status") != "online", item.get("worker_id") or ""))
+    for worker_id, profile in registry.items():
+        if profile.get("deleted") or worker_id in by_worker:
+            continue
+        by_worker[worker_id] = {
+            "worker_id": worker_id,
+            "display_name": profile.get("display_name") or worker_id,
+            "priority": profile.get("priority") or WORKSTATION_DEFAULT_PRIORITY,
+            "enabled": bool(profile.get("enabled", True)),
+            "managed": bool(profile.get("managed")),
+            "status": "offline" if profile.get("enabled", True) else "disabled",
+            "runtime_status": "offline",
+            "roles": list(WORKSTATION_DEFAULT_ROLES),
+            "version": "",
+            "message": "Chua thay heartbeat gan day.",
+            "last_seen_at": "",
+            "last_seen_age_seconds": 0,
+            "source": "registry",
+            "details": {},
+        }
+    return sorted(
+        by_worker.values(),
+        key=lambda item: (
+            _workstation_priority(item.get("priority")),
+            item.get("status") != "online",
+            item.get("worker_id") or "",
+        ),
+    )
+
+
+def workstation_diagnostic_response(worker: dict[str, Any]) -> dict[str, Any]:
+    status_value = str(worker.get("status") or "").lower()
+    runtime_status = str(worker.get("runtime_status") or "").lower()
+    details = worker.get("details") if isinstance(worker.get("details"), dict) else {}
+    roles = worker.get("roles") if isinstance(worker.get("roles"), list) else []
+    last_task_status = str(worker.get("last_task_status") or "").lower()
+    last_task_message = str(worker.get("last_task_message") or worker.get("message") or "")
+    has_worker_role = bool(
+        set(WORKSTATION_DEFAULT_ROLES).intersection({str(role or "").strip() for role in roles})
+    )
+    process_detail = str(details.get("worker_process") or "").strip()
+    pid_detail = str(details.get("pid") or "").strip()
+    checks = [
+        {
+            "code": "connection",
+            "label": "Ket noi web",
+            "status": "ok" if status_value in {"online", "recent"} else "error",
+            "message": (
+                f"Heartbeat {worker.get('last_seen_age_seconds') or 0} giay truoc."
+                if status_value in {"online", "recent"}
+                else "Chua thay heartbeat gan day tu may tram."
+            ),
+        },
+        {
+            "code": "worker",
+            "label": "Worker",
+            "status": "ok" if has_worker_role and status_value in {"online", "recent"} else "error",
+            "message": (
+                f"Worker dang bao role: {', '.join(str(role) for role in roles) or 'khong ro'}."
+                if has_worker_role
+                else "Chua thay role worker OneBSS/SQL/FTP trong heartbeat."
+            ),
+        },
+        {
+            "code": "background",
+            "label": "Chay ngam",
+            "status": "ok" if process_detail or pid_detail else ("warning" if status_value in {"online", "recent"} else "error"),
+            "message": process_detail or (f"PID {pid_detail}" if pid_detail else "Chua co thong tin process nen tu heartbeat."),
+        },
+        {
+            "code": "last_error",
+            "label": "Loi gan nhat",
+            "status": (
+                "error"
+                if last_task_status in {"failed", "storage_failed", "google_drive_not_configured", "google_drive_upload_failed"}
+                or any(token in last_task_message.lower() for token in (" loi", "error", "failed", "not "))
+                else "ok"
+            ),
+            "message": last_task_message or "Chua ghi nhan loi task gan nhat.",
+        },
+        {
+            "code": "priority",
+            "label": "Uu tien",
+            "status": "ok" if worker.get("enabled", True) else "error",
+            "message": (
+                f"Uu tien #{_workstation_priority(worker.get('priority'))}."
+                if worker.get("enabled", True)
+                else "May tram dang bi tat trong danh sach uu tien."
+            ),
+        },
+    ]
+    has_error = any(check["status"] == "error" for check in checks)
+    has_warning = any(check["status"] == "warning" for check in checks)
+    return {
+        "ok": not has_error,
+        "status": "error" if has_error else ("warning" if has_warning else "ok"),
+        "worker": worker,
+        "checks": checks,
+        "message": "May tram co hang muc can kiem tra." if has_error else ("May tram co canh bao nho." if has_warning else "May tram san sang."),
+    }
 
 
 def _dynamic_report_sql_worker_state() -> dict[str, Any]:
     workers = workstation_workers_response([])
     eligible_statuses = {"online", "recent"}
-    online_workers = [worker for worker in workers if str(worker.get("status") or "").lower() in eligible_statuses]
+    online_workers = [
+        worker
+        for worker in workers
+        if str(worker.get("status") or "").lower() in eligible_statuses and worker.get("enabled", True)
+    ]
     sql_workers = [
         worker
         for worker in online_workers
@@ -3282,6 +3558,7 @@ def workstation_heartbeat(request: Request, payload: WorkstationHeartbeatPayload
 def workstation_overview(request: Request) -> dict:
     admin_user(request)
     repository = build_app_repository()
+    profiles = workstation_registry_profiles(repository)
     runs: list[dict[str, Any]] = []
     run_errors: list[str] = []
     try:
@@ -3314,7 +3591,7 @@ def workstation_overview(request: Request) -> dict:
             "latest_runs": run_overview["latest_runs"],
             "error": " | ".join(run_errors),
         },
-        "workers": workstation_workers_response(runs),
+        "workers": workstation_workers_response(runs, profiles),
         "config": workstation_public_config(request),
         "setup": {
             "package_url": f"/api/admin/workstation/setup-package?v={WORKSTATION_SETUP_PACKAGE_VERSION}",
@@ -3329,6 +3606,79 @@ def workstation_overview(request: Request) -> dict:
             ],
         },
     }
+
+
+@router.post("/api/admin/workstation/profile")
+def save_workstation_profile(request: Request, payload: WorkstationProfilePayload) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    profile = upsert_workstation_profile(
+        repository,
+        payload.worker_id,
+        display_name=payload.display_name,
+        priority=payload.priority,
+        enabled=payload.enabled,
+        deleted=False,
+    )
+    try:
+        repository.add_audit_log(actor["username"], "workstation_profile_saved", f"Luu may tram {profile.get('worker_id')}")
+    except Exception:
+        logger.exception("Cannot write workstation profile audit log")
+    return {"ok": True, "profile": profile}
+
+
+@router.post("/api/admin/workstation/{worker_id}/test")
+def test_workstation_worker(request: Request, worker_id: str) -> dict:
+    admin_user(request)
+    repository = build_app_repository()
+    profiles = workstation_registry_profiles(repository)
+    runs: list[dict[str, Any]] = []
+    try:
+        runs.extend({**run, "task_type": "onebss"} for run in repository.list_onebss_report_runs(limit=100))
+    except RuntimeError:
+        logger.exception("Cannot load OneBSS runs for workstation test")
+    try:
+        runs.extend({**run, "task_type": "ftp"} for run in repository.list_ftp_report_runs(limit=100))
+    except RuntimeError:
+        logger.exception("Cannot load FTP runs for workstation test")
+    workers = workstation_workers_response(runs, profiles)
+    clean_worker_id = _normalize_workstation_worker_id(worker_id)
+    worker = next((item for item in workers if item.get("worker_id") == clean_worker_id), None)
+    if not worker:
+        worker = _workstation_default_profile(clean_worker_id) | {
+            "status": "offline",
+            "runtime_status": "offline",
+            "roles": [],
+            "version": "",
+            "message": "",
+            "last_seen_at": "",
+            "last_seen_age_seconds": 0,
+            "source": "missing",
+            "details": {},
+        }
+    return workstation_diagnostic_response(worker)
+
+
+@router.delete("/api/admin/workstation/{worker_id}")
+def delete_workstation_worker(request: Request, worker_id: str) -> dict:
+    actor = admin_user(request)
+    repository = build_app_repository()
+    current = workstation_profile_for(worker_id, workstation_registry_profiles(repository))
+    profile = upsert_workstation_profile(
+        repository,
+        worker_id,
+        display_name=str(current.get("display_name") or worker_id),
+        priority=_workstation_priority(current.get("priority")),
+        enabled=False,
+        deleted=True,
+    )
+    with WORKSTATION_HEARTBEATS_LOCK:
+        WORKSTATION_HEARTBEATS.pop(_normalize_workstation_worker_id(worker_id), None)
+    try:
+        repository.add_audit_log(actor["username"], "workstation_deleted", f"Xoa may tram {worker_id}")
+    except Exception:
+        logger.exception("Cannot write workstation delete audit log")
+    return {"ok": True, "profile": profile}
 
 
 @router.get("/api/admin/workstation/setup-package")
@@ -5140,12 +5490,16 @@ def _next_dynamic_report_export_worker_job(*, recover_from_history: bool = True)
 @router.post("/api/sql-worker/tasks/claim")
 def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> dict:
     onebss_worker_token(request)
+    repository = build_app_repository()
     _record_workstation_heartbeat(
         payload.worker_id,
         "idle",
         "May tram SQL dang cho lenh.",
         details={"claim": "sql"},
     )
+    priority_block = workstation_claim_blocker(payload.worker_id, WORKSTATION_SQL_ROLE_CODES, repository)
+    if priority_block:
+        return {"ok": True, "task": None, **priority_block}
     _cleanup_dynamic_report_run_jobs()
     _cleanup_dynamic_report_export_jobs()
     export_candidate = _next_dynamic_report_export_worker_job(recover_from_history=False)
@@ -6202,6 +6556,9 @@ def claim_ftp_worker_task(request: Request, payload: FtpWorkerClaimPayload) -> d
     onebss_worker_token(request)
     repository = build_app_repository()
     try:
+        priority_block = workstation_claim_blocker(payload.worker_id, {"ftp_report_worker"}, repository)
+        if priority_block:
+            return {"ok": True, "task": None, **priority_block}
         run = repository.claim_next_ftp_report_run(payload.worker_id)
     except RuntimeError as error:
         raise_ftp_report_schema_error(error)
@@ -6708,6 +7065,9 @@ def claim_onebss_worker_task(request: Request, payload: OneBssWorkerClaimPayload
     repository = build_app_repository()
     try:
         _expire_stale_onebss_worker_runs(repository)
+        priority_block = workstation_claim_blocker(payload.worker_id, WORKSTATION_ONEBSS_ROLE_CODES, repository)
+        if priority_block:
+            return {"ok": True, "task": None, **priority_block}
         run = repository.claim_next_onebss_report_run(payload.worker_id)
     except RuntimeError as error:
         raise_onebss_report_schema_error(error)

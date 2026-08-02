@@ -6761,6 +6761,33 @@ body.view-loading::before {
   margin-top: 1rem;
 }
 
+.workstation-inline-input,
+.workstation-priority-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: .4rem .5rem;
+  font: inherit;
+  color: #0f172a;
+  background: #fff;
+}
+
+.workstation-priority-input {
+  max-width: 5.5rem;
+}
+
+.workstation-test-result {
+  margin-top: .45rem;
+}
+
+.workstation-test-result strong {
+  display: block;
+  margin-bottom: .25rem;
+  color: #0f172a;
+  font-size: .8rem;
+}
+
 /* Compact desktop rail: after opening a feature, keep only the logo and menu button visible. */
 @media (min-width: 1024px) {
   .app-shell {
