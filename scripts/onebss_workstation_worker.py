@@ -1165,6 +1165,8 @@ def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float) 
         timeout=10.0,
         _retry_forever=False,
     )
+    if ftp_claim.get("transient_error"):
+        return False
     ftp_task = ftp_claim.get("task") if isinstance(ftp_claim.get("task"), dict) else None
     if ftp_task:
         send_heartbeat(

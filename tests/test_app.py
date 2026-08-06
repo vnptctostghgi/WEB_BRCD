@@ -5032,6 +5032,25 @@ def test_workstation_worker_idle_claims_include_process_details() -> None:
         assert "dang chay nen" in call["json"]["details"]["worker_process"]
 
 
+def test_workstation_worker_ftp_claim_transient_returns_to_poll(monkeypatch) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    calls = []
+
+    def fake_request_json(client, method: str, path: str, **kwargs):
+        calls.append({"method": method, "path": path, "kwargs": dict(kwargs)})
+        if path == "/api/ftp-worker/tasks/claim":
+            return {"ok": False, "task": None, "transient_error": "read timeout"}
+        return {"ok": True, "task": None}
+
+    monkeypatch.setattr(worker, "request_json", fake_request_json)
+
+    assert worker.poll_worker_once(object(), "ws-idle", 0) is False
+    ftp_claim = [call for call in calls if call["path"] == "/api/ftp-worker/tasks/claim"][0]
+    assert ftp_claim["kwargs"]["timeout"] == 10.0
+    assert ftp_claim["kwargs"]["_retry_forever"] is False
+
+
 def test_sql_worker_posts_drive_export_result_to_web(monkeypatch) -> None:
     from scripts import onebss_workstation_worker as worker
 
