@@ -531,22 +531,38 @@ function Get-WorkstationWorkerProcesses {
   }
 }
 
+function Wait-WorkstationWorkerStable {
+  param(
+    [string]$Root,
+    [int]$Seconds = 15
+  )
+  $processes = @(Get-WorkstationWorkerProcesses $Root)
+  if ($processes.Count -eq 0) {
+    return @()
+  }
+  Start-Sleep -Seconds $Seconds
+  return @(Get-WorkstationWorkerProcesses $Root)
+}
+
 function Start-WorkstationWorkerNow {
   param([string]$Root)
   Write-Step "Khoi dong worker may tram nen"
   $running = @(Get-WorkstationWorkerProcesses $Root)
   if ($running.Count -gt 0) {
-    Write-Host "Worker dang chay PID: $($running.ProcessId -join ', ')" -ForegroundColor Green
-    return
+    $stable = @(Wait-WorkstationWorkerStable $Root 5)
+    if ($stable.Count -gt 0) {
+      Write-Host "Worker dang chay on dinh PID: $($stable.ProcessId -join ', ')" -ForegroundColor Green
+      return
+    }
   }
   try {
     Start-ScheduledTask -TaskName "VNPTCTO OneBSS Worker" -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 5
   } catch {
   }
-  $running = @(Get-WorkstationWorkerProcesses $Root)
-  if ($running.Count -gt 0) {
-    Write-Host "Worker da chay qua Scheduled Task PID: $($running.ProcessId -join ', ')" -ForegroundColor Green
+  $stable = @(Wait-WorkstationWorkerStable $Root 15)
+  if ($stable.Count -gt 0) {
+    Write-Host "Worker da chay qua Scheduled Task on dinh PID: $($stable.ProcessId -join ', ')" -ForegroundColor Green
     return
   }
   $workerScript = Join-Path $Root "scripts\start_onebss_worker.ps1"
@@ -558,9 +574,9 @@ function Start-WorkstationWorkerNow {
     $workerArg = "`"$workerScript`""
     Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $workerArg, "-NoPause") -WorkingDirectory $Root -WindowStyle Hidden | Out-Null
     Start-Sleep -Seconds 3
-    $running = @(Get-WorkstationWorkerProcesses $Root)
-    if ($running.Count -gt 0) {
-      Write-Host "Worker da chay nen fallback PID: $($running.ProcessId -join ', ')" -ForegroundColor Green
+    $stable = @(Wait-WorkstationWorkerStable $Root 10)
+    if ($stable.Count -gt 0) {
+      Write-Host "Worker da chay nen fallback on dinh PID: $($stable.ProcessId -join ', ')" -ForegroundColor Green
     } else {
       Write-Warning "Da goi khoi dong worker nhung chua thay process. Kiem tra logs\onebss-worker-error.log."
     }

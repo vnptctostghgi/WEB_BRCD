@@ -75,19 +75,32 @@ function Get-WorkerProcesses {
   }
 }
 
+function Wait-WorkerProcessesStable {
+  param([int]$Seconds = 15)
+  $processes = @(Get-WorkerProcesses)
+  if ($processes.Count -eq 0) {
+    return @()
+  }
+  Start-Sleep -Seconds $Seconds
+  return @(Get-WorkerProcesses)
+}
+
 function Start-WorkerIfMissing {
   $processes = @(Get-WorkerProcesses)
   if ($processes.Count -gt 0) {
-    return [pscustomobject]@{ Ok = $true; Detail = "Dang chay PID: $($processes.ProcessId -join ', ')" }
+    $stableProcesses = @(Wait-WorkerProcessesStable 5)
+    if ($stableProcesses.Count -gt 0) {
+      return [pscustomobject]@{ Ok = $true; Detail = "Dang chay PID: $($stableProcesses.ProcessId -join ', ')" }
+    }
   }
   try {
     Start-ScheduledTask -TaskName "VNPTCTO OneBSS Worker" -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 5
   } catch {
   }
-  $processes = @(Get-WorkerProcesses)
-  if ($processes.Count -gt 0) {
-    return [pscustomobject]@{ Ok = $true; Detail = "Da start Scheduled Task, PID: $($processes.ProcessId -join ', ')" }
+  $stableProcesses = @(Wait-WorkerProcessesStable 15)
+  if ($stableProcesses.Count -gt 0) {
+    return [pscustomobject]@{ Ok = $true; Detail = "Da start Scheduled Task on dinh, PID: $($stableProcesses.ProcessId -join ', ')" }
   }
   $root = [Environment]::GetEnvironmentVariable("VNPTCTO_WORKSTATION_ROOT", "User")
   if ([string]::IsNullOrWhiteSpace($root)) {
@@ -104,9 +117,9 @@ function Start-WorkerIfMissing {
   } catch {
     return [pscustomobject]@{ Ok = $false; Detail = $_.Exception.Message }
   }
-  $processes = @(Get-WorkerProcesses)
-  if ($processes.Count -gt 0) {
-    return [pscustomobject]@{ Ok = $true; Detail = "Da start worker fallback, PID: $($processes.ProcessId -join ', ')" }
+  $stableProcesses = @(Wait-WorkerProcessesStable 10)
+  if ($stableProcesses.Count -gt 0) {
+    return [pscustomobject]@{ Ok = $true; Detail = "Da start worker fallback on dinh, PID: $($stableProcesses.ProcessId -join ', ')" }
   }
   return [pscustomobject]@{ Ok = $false; Detail = "Da goi start worker nhung chua thay process. Xem onebss-worker-error.log." }
 }
