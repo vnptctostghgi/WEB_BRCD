@@ -315,7 +315,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "-RunLevel Limited" in install_task_script
         assert "Get-InteractiveTaskUserCandidates" in setup_script
         assert "Get-InteractiveTaskUserCandidates" in install_task_script
-        assert "run_onebss_worker_background.ps1" in install_task_script
+        assert "start_onebss_worker.ps1" in install_task_script
+        assert "run_onebss_worker_background.ps1" not in install_task_script
         assert "-WindowStyle Hidden" in install_task_script
         assert "-WindowStyle Hidden" in setup_script
         assert "onebss-worker.log" in background_worker_script
@@ -335,6 +336,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "Bo qua vi chua cai cloudflared" in health_script
         assert "health-check-2026.08.03-failover" in health_script
         assert "Khong tim thay Scheduled Task; khong bat buoc neu Local API dang OK." in health_script
+        assert "Da start worker fallback" in health_script
+        assert "Da start launcher" not in health_script
         assert "Start-WorkerIfMissing" in health_script
         assert "Worker process" in health_script
         assert '$heartbeatRoles = @("health_check")' in health_script
@@ -348,7 +351,19 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "-NoPause" in background_bat
         assert "-NoPause" in install_autostart_bat
         assert "-NoPause" in uninstall_autostart_bat
+        assert "Verb RunAs" in uninstall_autostart_bat
+        assert 'cd /d "%TEMP%"' in uninstall_autostart_bat
         assert "[switch]$NoPause" in uninstall_task_script
+        assert "[switch]$KeepInstallDir" in uninstall_task_script
+        assert "VNPTCTO Workstation Health Check" in uninstall_task_script
+        assert "VNPTCTO API Trung Gian" in uninstall_task_script
+        assert "VNPTCTO API Watchdog" in uninstall_task_script
+        assert "Stop-VnptctoProcesses" in uninstall_task_script
+        assert "Remove-UserEnvironment" in uninstall_task_script
+        assert "Remove-SafeDirectory" in uninstall_task_script
+        assert "VNPTCTO_WORKSTATION_ROOT" in uninstall_task_script
+        assert "C:\\VNPTCTO" in uninstall_task_script
+        assert "ONEBSS_DRIVE_UPLOAD_API_URL" in uninstall_task_script
         assert "timeout /t" not in setup_bat.lower()
         assert "\npause" not in setup_bat.lower()
 

@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$WorkerScript = Join-Path $Root "scripts\run_onebss_worker_background.ps1"
+$WorkerScript = Join-Path $Root "scripts\start_onebss_worker.ps1"
 
 if (-not (Test-Path $WorkerScript)) {
   throw "Khong tim thay worker script: $WorkerScript"

@@ -93,20 +93,20 @@ function Start-WorkerIfMissing {
   if ([string]::IsNullOrWhiteSpace($root)) {
     $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
   }
-  $launcher = Join-Path $root "scripts\run_onebss_worker_background.ps1"
-  if (-not (Test-Path -LiteralPath $launcher)) {
-    return [pscustomobject]@{ Ok = $false; Detail = "Khong tim thay launcher worker: $launcher" }
+  $workerScript = Join-Path $root "scripts\start_onebss_worker.ps1"
+  if (-not (Test-Path -LiteralPath $workerScript)) {
+    return [pscustomobject]@{ Ok = $false; Detail = "Khong tim thay worker script: $workerScript" }
   }
   try {
-    $launcherArg = "`"$launcher`""
-    Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $launcherArg, "-NoPause") -WorkingDirectory $root -WindowStyle Hidden | Out-Null
+    $workerArg = "`"$workerScript`""
+    Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $workerArg, "-NoPause") -WorkingDirectory $root -WindowStyle Hidden | Out-Null
     Start-Sleep -Seconds 3
   } catch {
     return [pscustomobject]@{ Ok = $false; Detail = $_.Exception.Message }
   }
   $processes = @(Get-WorkerProcesses)
   if ($processes.Count -gt 0) {
-    return [pscustomobject]@{ Ok = $true; Detail = "Da start launcher, PID: $($processes.ProcessId -join ', ')" }
+    return [pscustomobject]@{ Ok = $true; Detail = "Da start worker fallback, PID: $($processes.ProcessId -join ', ')" }
   }
   return [pscustomobject]@{ Ok = $false; Detail = "Da goi start worker nhung chua thay process. Xem onebss-worker-error.log." }
 }

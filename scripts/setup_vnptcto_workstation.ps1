@@ -549,18 +549,18 @@ function Start-WorkstationWorkerNow {
     Write-Host "Worker da chay qua Scheduled Task PID: $($running.ProcessId -join ', ')" -ForegroundColor Green
     return
   }
-  $launcher = Join-Path $Root "scripts\run_onebss_worker_background.ps1"
-  if (-not (Test-Path -LiteralPath $launcher)) {
-    Write-Warning "Khong tim thay launcher worker: $launcher"
+  $workerScript = Join-Path $Root "scripts\start_onebss_worker.ps1"
+  if (-not (Test-Path -LiteralPath $workerScript)) {
+    Write-Warning "Khong tim thay worker script: $workerScript"
     return
   }
   try {
-    $launcherArg = "`"$launcher`""
-    Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $launcherArg, "-NoPause") -WorkingDirectory $Root -WindowStyle Hidden | Out-Null
+    $workerArg = "`"$workerScript`""
+    Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $workerArg, "-NoPause") -WorkingDirectory $Root -WindowStyle Hidden | Out-Null
     Start-Sleep -Seconds 3
     $running = @(Get-WorkstationWorkerProcesses $Root)
     if ($running.Count -gt 0) {
-      Write-Host "Worker da chay nen PID: $($running.ProcessId -join ', ')" -ForegroundColor Green
+      Write-Host "Worker da chay nen fallback PID: $($running.ProcessId -join ', ')" -ForegroundColor Green
     } else {
       Write-Warning "Da goi khoi dong worker nhung chua thay process. Kiem tra logs\onebss-worker-error.log."
     }
