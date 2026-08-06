@@ -320,6 +320,19 @@ def onebss_task_timeout_seconds() -> float:
     return min(max(value, 120.0), 21600.0)
 
 
+def onebss_worker_max_otp_attempts() -> int:
+    """So lan thu OTP toi da truoc khi worker bao loi thay vi loop vo tan.
+
+    Mac dinh 3. Co the cau hinh qua ONEBSS_WORKER_MAX_OTP_ATTEMPTS. Gia tri toi thieu 1.
+    """
+    raw_value = os.getenv("ONEBSS_WORKER_MAX_OTP_ATTEMPTS", "").strip()
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return 3
+    return max(1, value)
+
+
 def terminate_process(process: mp.Process) -> None:
     if not process.is_alive():
         return
@@ -482,6 +495,8 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
     started = time.monotonic()
     last_progress = {"message": "", "at": 0.0}
     last_heartbeat = {"at": 0.0}
+    max_otp_attempts = onebss_worker_max_otp_attempts()
+    otp_attempts = 0
 
     def send_progress(message: str, status: str = "running") -> None:
         text = str(message or "").strip()
@@ -543,6 +558,37 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
             status = str(result.get("status") or ("success" if result.get("ok") else "failed")).lower()
             if status in {"otp_required", "otp_invalid", "manual_otp_required"} and result.get("session_id"):
                 session_id = str(result.get("session_id") or "")
+                otp_attempts += 1
+                if otp_attempts > max_otp_attempts:
+                    duration_ms = int((time.monotonic() - started) * 1000)
+                    failure_message = (
+                        f"May tram khong nhan duoc OTP OneBSS sau {max_otp_attempts} lan thu. "
+                        "Hay kiem tra Mobile Gateway / app Android dong bo SMS hoac nhap OTP thu cong."
+                    )
+                    print(failure_message, file=sys.stderr)
+                    try:
+                        request_json(
+                            client,
+                            "POST",
+                            f"/api/onebss-worker/tasks/{run_id}/result",
+                            json={
+                                "ok": False,
+                                "status": "failed",
+                                "message": failure_message,
+                                "duration_ms": duration_ms,
+                                "details": {
+                                    "error_type": "OtpExhausted",
+                                    "otp_attempts": otp_attempts,
+                                    "max_otp_attempts": max_otp_attempts,
+                                },
+                            },
+                        )
+                    except Exception as update_error:
+                        print(
+                            f"Khong cap nhat duoc ket qua OneBSS: {describe_request_error(update_error)}",
+                            file=sys.stderr,
+                        )
+                    return
                 status_response = request_json(
                     client,
                     "POST",
@@ -556,6 +602,10 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
                 )
                 if response_is_cancelled(status_response):
                     return
+                send_progress(
+                    f"Dang thu lay OTP OneBSS (lan thu {otp_attempts}/{max_otp_attempts}).",
+                    status,
+                )
                 otp = wait_for_otp(client, run_id, poll_seconds, lambda message: send_progress(message, status))
                 continue
 
