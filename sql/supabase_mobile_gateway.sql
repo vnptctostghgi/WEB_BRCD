@@ -332,7 +332,7 @@ insert into public.otp_configurations
  auto_fill_enabled, manual_fallback_enabled, priority, created_at, updated_at)
 values
 ('onebss', 'OneBSS', true, 'sms', 'VNPT', 'contains',
- '(?<!\d)(\d{4,8})(?!\d)', '', 4, 8, 120, 180, true, true, 10, now(), now())
+ '(?<!\d)(\d{4,8})(?!\d)', '', 4, 8, 120, 300, true, true, 10, now(), now())
 on conflict (service_code) do update
 set service_name = excluded.service_name,
     enabled = excluded.enabled,
@@ -352,7 +352,7 @@ insert into public.otp_filter_configurations
  start_prefix, validity_seconds, enabled, priority, created_at, updated_at)
 values
 ('onebss', 'OneBSS mac dinh', 'onebss', 'VNPT', 'contains', 6,
- '', 60, true, 10, now(), now())
+ '', 300, true, 10, now(), now())
 on conflict (filter_id) do update
 set rule_name = excluded.rule_name,
     service_code = excluded.service_code,
