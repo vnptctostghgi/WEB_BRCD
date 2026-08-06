@@ -85,6 +85,20 @@ function Wait-WorkerProcessesStable {
   return @(Get-WorkerProcesses)
 }
 
+function Test-OneBssWorkerTaskUsesDirectWorker {
+  $task = Get-ScheduledTask -TaskName "VNPTCTO OneBSS Worker" -ErrorAction SilentlyContinue
+  if (-not $task) {
+    return $false
+  }
+  foreach ($action in @($task.Actions)) {
+    $arguments = [string]$action.Arguments
+    if ($arguments -match [regex]::Escape("start_onebss_worker.ps1")) {
+      return $true
+    }
+  }
+  return $false
+}
+
 function Start-WorkerIfMissing {
   $processes = @(Get-WorkerProcesses)
   if ($processes.Count -gt 0) {
@@ -93,14 +107,16 @@ function Start-WorkerIfMissing {
       return [pscustomobject]@{ Ok = $true; Detail = "Dang chay PID: $($stableProcesses.ProcessId -join ', ')" }
     }
   }
-  try {
-    Start-ScheduledTask -TaskName "VNPTCTO OneBSS Worker" -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 5
-  } catch {
-  }
-  $stableProcesses = @(Wait-WorkerProcessesStable 15)
-  if ($stableProcesses.Count -gt 0) {
-    return [pscustomobject]@{ Ok = $true; Detail = "Da start Scheduled Task on dinh, PID: $($stableProcesses.ProcessId -join ', ')" }
+  if (Test-OneBssWorkerTaskUsesDirectWorker) {
+    try {
+      Start-ScheduledTask -TaskName "VNPTCTO OneBSS Worker" -ErrorAction SilentlyContinue
+      Start-Sleep -Seconds 5
+    } catch {
+    }
+    $stableProcesses = @(Wait-WorkerProcessesStable 15)
+    if ($stableProcesses.Count -gt 0) {
+      return [pscustomobject]@{ Ok = $true; Detail = "Da start Scheduled Task on dinh, PID: $($stableProcesses.ProcessId -join ', ')" }
+    }
   }
   $root = [Environment]::GetEnvironmentVariable("VNPTCTO_WORKSTATION_ROOT", "User")
   if ([string]::IsNullOrWhiteSpace($root)) {

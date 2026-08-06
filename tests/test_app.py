@@ -339,6 +339,7 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "health-check-2026.08.03-failover" in health_script
         assert "Khong tim thay Scheduled Task; khong bat buoc neu Local API dang OK." in health_script
         assert "Wait-WorkerProcessesStable" in health_script
+        assert "Test-OneBssWorkerTaskUsesDirectWorker" in health_script
         assert "Da start Scheduled Task on dinh" in health_script
         assert "Da start worker fallback" in health_script
         assert "Da start launcher" not in health_script
