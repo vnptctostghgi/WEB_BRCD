@@ -135,7 +135,7 @@ class MobileGatewayRepository:
                         "sender_match_type": "contains",
                         "otp_length": 6,
                         "start_prefix": "",
-                        "validity_seconds": 60,
+                        "validity_seconds": 300,
                         "enabled": True,
                         "device_id": "",
                         "sim_slot": None,
