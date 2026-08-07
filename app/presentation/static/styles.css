@@ -3512,18 +3512,19 @@ legend {
 }
 
 @media (max-width: 768px) {
-  .menu-admin-header {
+  #view-menu-admin > .menu-admin-header {
     align-items: stretch;
     justify-content: stretch;
   }
 
-  .menu-admin-toolbar {
+  #view-menu-admin .menu-admin-toolbar {
     grid-template-columns: 1fr;
+    justify-self: stretch;
     min-width: 0;
     width: 100%;
   }
 
-  .menu-admin-toolbar button {
+  #view-menu-admin .menu-admin-toolbar button {
     width: 100%;
   }
 
