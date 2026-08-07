@@ -506,6 +506,8 @@ class RunReportPayload(BaseModel):
     page_size: int = 20
     search: str = ""
     search_columns: list[str] = Field(default_factory=list)
+    report_id: int | None = None
+    report_name: str = ""
 
 
 class SqlWorkerClaimPayload(BaseModel):
@@ -5067,6 +5069,8 @@ def _run_dynamic_report_export_job(job_id: str, payload: RunReportPayload, creat
             filters=payload.filters,
             search=payload.search,
             search_columns=payload.search_columns,
+            report_id=payload.report_id,
+            report_name=payload.report_name,
             progress_callback=progress_callback,
             page_callback=writer.append_rows,
             collect_rows=False,
@@ -5364,8 +5368,10 @@ def _queue_dashboard_refresh_requests(result: dict[str, Any], actor: str) -> dic
             "filters": item.get("filters") if isinstance(item.get("filters"), dict) else {},
             "page": 1,
             "page_size": int(item.get("page_size") or 50),
-            "search": "",
-            "search_columns": [],
+            "search": str(item.get("search") or ""),
+            "search_columns": item.get("search_columns") if isinstance(item.get("search_columns"), list) else [],
+            "report_id": item.get("report_id") if item.get("report_id") not in (None, "") else None,
+            "report_name": str(item.get("report_name") or item.get("ten_bao_cao") or item.get("ma_bao_cao") or ""),
             "dashboard_cache_metadata": metadata,
         }
         current = _get_dashboard_refresh_job(job_id)
@@ -5516,6 +5522,8 @@ def _run_dynamic_report_run_job(job_id: str, payload: RunReportPayload, actor: s
             page_size=payload.page_size,
             search=payload.search,
             search_columns=payload.search_columns,
+            report_id=payload.report_id,
+            report_name=payload.report_name,
         )
         pagination = result.get("pagination") if isinstance(result.get("pagination"), dict) else {}
         rows = result.get("rows") if isinstance(result.get("rows"), list) else []
@@ -5662,6 +5670,8 @@ def _dynamic_report_payload_from_job(job: dict[str, Any]) -> RunReportPayload:
         page_size=int(payload.get("page_size") or 20),
         search=str(payload.get("search") or ""),
         search_columns=payload.get("search_columns") if isinstance(payload.get("search_columns"), list) else [],
+        report_id=payload.get("report_id") if payload.get("report_id") not in (None, "") else None,
+        report_name=str(payload.get("report_name") or job.get("report_name") or ""),
     )
 
 
@@ -5674,6 +5684,8 @@ def _dynamic_report_export_payload_from_job(job: dict[str, Any]) -> RunReportPay
         page_size=int(payload.get("page_size") or 20),
         search=str(payload.get("search") or ""),
         search_columns=payload.get("search_columns") if isinstance(payload.get("search_columns"), list) else [],
+        report_id=payload.get("report_id") if payload.get("report_id") not in (None, "") else None,
+        report_name=str(payload.get("report_name") or job.get("report_name") or ""),
     )
 
 
@@ -5818,6 +5830,8 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
         page_size=run_payload.page_size,
         search=run_payload.search,
         search_columns=run_payload.search_columns,
+        report_id=run_payload.report_id,
+        report_name=run_payload.report_name,
     )
     if not prepared.get("ok"):
         updates = {
@@ -6194,6 +6208,8 @@ def run_dynamic_report(request: Request, payload: RunReportPayload) -> dict:
             page_size=payload.page_size,
             search=payload.search,
             search_columns=payload.search_columns,
+            report_id=payload.report_id,
+            report_name=payload.report_name,
         )
     except RuntimeError as error:
         raise_sql_report_schema_error(error)
@@ -6231,6 +6247,8 @@ def export_dynamic_report(request: Request, payload: RunReportPayload) -> Respon
             filters=payload.filters,
             search=payload.search,
             search_columns=payload.search_columns,
+            report_id=payload.report_id,
+            report_name=payload.report_name,
         )
     except RuntimeError as error:
         raise_sql_report_schema_error(error)

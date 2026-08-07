@@ -6726,6 +6726,7 @@ def test_dashboard_refresh_uses_isolated_worker_queue(monkeypatch: pytest.Monkey
     worker_id = f"ws-dashboard-{uuid.uuid4().hex[:8]}"
     page_id = f"DASHBOARD_QUEUE_{uuid.uuid4().hex[:8].upper()}"
     report_code = f"DASH_REFRESH_{uuid.uuid4().hex[:8].upper()}"
+    widget_sql_code = f"{report_code}_ALIAS"
     legacy_job_id = "dashboard_legacy_" + uuid.uuid4().hex[:8]
     headers = {"Authorization": "Bearer test-worker-token"}
 
@@ -6777,7 +6778,7 @@ def test_dashboard_refresh_uses_isolated_worker_queue(monkeypatch: pytest.Monkey
                                                 "position": 1,
                                                 "type": "bar_chart",
                                                 "title": "Dashboard queue refresh",
-                                                "sql_code": report_code,
+                                                "sql_code": widget_sql_code,
                                                 "report_id": report_id,
                                                 "filters": {"P_NGAY": "2026-08-08"},
                                             }
@@ -6816,6 +6817,7 @@ def test_dashboard_refresh_uses_isolated_worker_queue(monkeypatch: pytest.Monkey
             assert task["run_id"] == job_id
             assert task["task_type"] == "dynamic_report_dashboard_refresh"
             assert task["query"]["action"] == "run_sql_report"
+            assert task["query"]["ma_bao_cao"] == report_code
             assert task["query"]["tham_so"] == {"P_NGAY": "2026-08-08"}
 
             finished = client.post(
