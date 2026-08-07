@@ -3514,11 +3514,13 @@ legend {
 @media (max-width: 768px) {
   .menu-admin-header {
     align-items: stretch;
+    justify-content: stretch;
   }
 
   .menu-admin-toolbar {
     grid-template-columns: 1fr;
     min-width: 0;
+    width: 100%;
   }
 
   .menu-admin-toolbar button {
