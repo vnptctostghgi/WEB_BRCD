@@ -35,6 +35,20 @@ function Pause-BeforeExit {
   }
 }
 
+function New-WorkerMutexName {
+  param([string]$Text)
+  $normalized = ([IO.Path]::GetFullPath($Text)).TrimEnd("\").ToLowerInvariant()
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = [Text.Encoding]::UTF8.GetBytes($normalized)
+    $hashBytes = $sha.ComputeHash($bytes)
+    $hash = -join ($hashBytes | ForEach-Object { $_.ToString("x2") })
+    return "Local\VNPTCTO-OneBSS-Worker-$hash"
+  } finally {
+    $sha.Dispose()
+  }
+}
+
 trap {
   $message = $_.Exception.Message
   Write-WorkerLog "Launcher loi: $message" $script:ErrorLogFile
@@ -47,35 +61,54 @@ Set-Location $Root
 Write-WorkerLog "Khoi dong OneBSS worker background. Root: $Root"
 Write-WorkerLog "Log loi: $script:ErrorLogFile"
 
+$createdNew = $false
+$mutexName = New-WorkerMutexName $Root
+$script:WorkerMutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
+if (-not $createdNew) {
+  Write-WorkerLog "Da co wrapper worker dang chay cho thu muc nay. Thoat wrapper moi."
+  Pause-BeforeExit
+  exit 0
+}
+
 $RestartDelaySeconds = 10
 
-while ($true) {
-  try {
-    $safeWorkerScript = $StartWorkerScript.Replace("'", "''")
-    $safeLogFile = $script:LogFile.Replace("'", "''")
-    $command = "& '$safeWorkerScript' -NoPause 2>&1 | ForEach-Object { if (`$_ -ne `$null) { ('{0} {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), [string]`$_) | Add-Content -Path '$safeLogFile' -Encoding UTF8 } }"
-    $process = Start-Process `
-      -FilePath "powershell.exe" `
-      -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $command) `
-      -WorkingDirectory $Root `
-      -WindowStyle Hidden `
-      -PassThru
-    Write-WorkerLog "Worker process da chay. PID: $($process.Id)"
-    $process.WaitForExit()
-    if ($process.ExitCode -ne 0) {
-      Write-WorkerLog "Worker dung voi ma loi: $($process.ExitCode)" $script:ErrorLogFile
-      Write-WorkerLog "Worker dung voi ma loi: $($process.ExitCode)"
-    } else {
-      Write-WorkerLog "Worker da dung binh thuong."
+try {
+  while ($true) {
+    try {
+      $safeWorkerScript = $StartWorkerScript.Replace("'", "''")
+      $safeLogFile = $script:LogFile.Replace("'", "''")
+      $command = "`$ErrorActionPreference = 'Continue'; try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}; & '$safeWorkerScript' -NoPause 2>&1 | Out-File -FilePath '$safeLogFile' -Append -Encoding UTF8"
+      $process = Start-Process `
+        -FilePath "powershell.exe" `
+        -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $command) `
+        -WorkingDirectory $Root `
+        -WindowStyle Hidden `
+        -PassThru
+      Write-WorkerLog "Worker process da chay. PID: $($process.Id)"
+      $process.WaitForExit()
+      if ($process.ExitCode -ne 0) {
+        Write-WorkerLog "Worker dung voi ma loi: $($process.ExitCode)" $script:ErrorLogFile
+        Write-WorkerLog "Worker dung voi ma loi: $($process.ExitCode)"
+      } else {
+        Write-WorkerLog "Worker da dung binh thuong."
+      }
+    } catch {
+      $message = $_.Exception.Message
+      Write-WorkerLog "Khong chay duoc worker: $message" $script:ErrorLogFile
+      Write-WorkerLog "Khong chay duoc worker: $message"
     }
-  } catch {
-    $message = $_.Exception.Message
-    Write-WorkerLog "Khong chay duoc worker: $message" $script:ErrorLogFile
-    Write-WorkerLog "Khong chay duoc worker: $message"
-  }
 
-  Write-WorkerLog "Tu khoi dong lai worker sau $RestartDelaySeconds giay."
-  Start-Sleep -Seconds $RestartDelaySeconds
+    Write-WorkerLog "Tu khoi dong lai worker sau $RestartDelaySeconds giay."
+    Start-Sleep -Seconds $RestartDelaySeconds
+  }
+} finally {
+  if ($script:WorkerMutex) {
+    try {
+      $script:WorkerMutex.ReleaseMutex()
+    } catch {
+    }
+    $script:WorkerMutex.Dispose()
+  }
 }
 
 Pause-BeforeExit

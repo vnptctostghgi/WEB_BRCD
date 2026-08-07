@@ -81,6 +81,12 @@ function Get-WorkerPythonProcesses {
   }
 }
 
+function Get-WorkerWrapperProcesses {
+  @(Get-WorkerProcesses) | Where-Object {
+    ([string]$_.CommandLine) -match [regex]::Escape("run_onebss_worker_background.ps1")
+  }
+}
+
 function Wait-WorkerProcessesStable {
   param([int]$Seconds = 15)
   $processes = @(Get-WorkerPythonProcesses)
@@ -109,6 +115,10 @@ function Start-WorkerIfMissing {
   $processes = @(Get-WorkerPythonProcesses)
   if ($processes.Count -gt 0) {
     $stableProcesses = @(Wait-WorkerProcessesStable 5)
+    $wrappers = @(Get-WorkerWrapperProcesses)
+    if ($wrappers.Count -gt 1) {
+      return [pscustomobject]@{ Ok = $false; Detail = "Dang co nhieu worker chay trung. Wrapper PID: $($wrappers.ProcessId -join ', '); Python PID: $($stableProcesses.ProcessId -join ', ')" }
+    }
     if ($stableProcesses.Count -gt 0) {
       return [pscustomobject]@{ Ok = $true; Detail = "Python worker dang chay PID: $($stableProcesses.ProcessId -join ', ')" }
     }
@@ -120,6 +130,10 @@ function Start-WorkerIfMissing {
     } catch {
     }
     $stableProcesses = @(Wait-WorkerProcessesStable 20)
+    $wrappers = @(Get-WorkerWrapperProcesses)
+    if ($wrappers.Count -gt 1) {
+      return [pscustomobject]@{ Ok = $false; Detail = "Da start Scheduled Task nhung co nhieu worker chay trung. Wrapper PID: $($wrappers.ProcessId -join ', '); Python PID: $($stableProcesses.ProcessId -join ', ')" }
+    }
     if ($stableProcesses.Count -gt 0) {
       return [pscustomobject]@{ Ok = $true; Detail = "Da start Scheduled Task, Python worker PID: $($stableProcesses.ProcessId -join ', ')" }
     }
@@ -140,6 +154,10 @@ function Start-WorkerIfMissing {
     return [pscustomobject]@{ Ok = $false; Detail = $_.Exception.Message }
   }
   $stableProcesses = @(Wait-WorkerProcessesStable 20)
+  $wrappers = @(Get-WorkerWrapperProcesses)
+  if ($wrappers.Count -gt 1) {
+    return [pscustomobject]@{ Ok = $false; Detail = "Da start worker fallback nhung co nhieu worker chay trung. Wrapper PID: $($wrappers.ProcessId -join ', '); Python PID: $($stableProcesses.ProcessId -join ', ')" }
+  }
   if ($stableProcesses.Count -gt 0) {
     return [pscustomobject]@{ Ok = $true; Detail = "Da start worker fallback, Python worker PID: $($stableProcesses.ProcessId -join ', ')" }
   }

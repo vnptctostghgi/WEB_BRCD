@@ -19,8 +19,19 @@ function Invoke-External {
     [Parameter(Mandatory = $true)][string]$FilePath,
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments
   )
-
-  & $FilePath @Arguments
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & $FilePath @Arguments 2>&1 | ForEach-Object {
+      if ($_ -is [System.Management.Automation.ErrorRecord]) {
+        Write-Output ([string]$_.Exception.Message)
+      } else {
+        Write-Output ([string]$_)
+      }
+    }
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
   if ($LASTEXITCODE -ne 0) {
     throw "Lenh that bai ($LASTEXITCODE): $FilePath $($Arguments -join ' ')"
   }
@@ -161,6 +172,9 @@ foreach ($name in @(
   "ONEBSS_LOGIN_URL",
   "ONEBSS_DOWNLOAD_TIMEOUT_SECONDS",
   "ONEBSS_TASK_TIMEOUT_SECONDS",
+  "ONEBSS_WORKER_OTP_WAIT_SECONDS",
+  "ONEBSS_WORKER_DISABLE_TASK_GUARD",
+  "ONEBSS_WORKER_ENABLE_TASK_GUARD",
   "GOOGLE_DRIVE_FOLDER_ID",
   "GOOGLE_DRIVE_OAUTH_CLIENT_ID",
   "GOOGLE_DRIVE_OAUTH_CLIENT_SECRET",
@@ -172,6 +186,13 @@ foreach ($name in @(
   if (-not [string]::IsNullOrWhiteSpace($value)) {
     Set-Item -Path "Env:$name" -Value $value
   }
+}
+
+if ([string]::IsNullOrWhiteSpace($env:ONEBSS_WORKER_DISABLE_TASK_GUARD)) {
+  $env:ONEBSS_WORKER_DISABLE_TASK_GUARD = "1"
+}
+if ([string]::IsNullOrWhiteSpace($env:ONEBSS_WORKER_OTP_WAIT_SECONDS)) {
+  $env:ONEBSS_WORKER_OTP_WAIT_SECONDS = "180"
 }
 
 $missingRuntimeConfig = New-Object System.Collections.Generic.List[string]

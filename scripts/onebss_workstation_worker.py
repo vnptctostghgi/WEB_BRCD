@@ -36,7 +36,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.08.03-background-worker"
+WORKER_VERSION = "2026.08.07-onebss-otp-inline-v26"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -118,10 +118,36 @@ def send_heartbeat(client: httpx.Client, worker_id: str, status: str = "idle", m
         print(f"Khong gui duoc heartbeat may tram: {describe_request_error(error)}", file=sys.stderr)
 
 
-def wait_for_otp(client: httpx.Client, run_id: str, poll_seconds: float, progress_callback=None) -> str:
+def onebss_worker_otp_wait_seconds() -> float:
+    raw_value = str(os.getenv("ONEBSS_WORKER_OTP_WAIT_SECONDS", "180") or "180").strip()
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        value = 180.0
+    return max(30.0, min(value, 900.0))
+
+
+def onebss_task_guard_enabled() -> bool:
+    disabled = str(os.getenv("ONEBSS_WORKER_DISABLE_TASK_GUARD", "") or "").strip().lower() in {"1", "true", "yes", "on"}
+    if disabled:
+        return False
+    enabled = str(os.getenv("ONEBSS_WORKER_ENABLE_TASK_GUARD", "") or "").strip().lower() in {"1", "true", "yes", "on"}
+    return enabled
+
+
+def wait_for_otp(
+    client: httpx.Client,
+    run_id: str,
+    poll_seconds: float,
+    progress_callback=None,
+    *,
+    timeout_seconds: float | None = None,
+) -> str:
     if progress_callback:
         progress_callback("Dang doi OTP tu tin nhan/Mobile Gateway.")
+    started = time.monotonic()
     last_notice = time.monotonic()
+    max_wait = onebss_worker_otp_wait_seconds() if timeout_seconds is None else max(30.0, float(timeout_seconds))
     while True:
         data = request_json(client, "GET", f"/api/onebss-worker/tasks/{run_id}/otp")
         if response_is_cancelled(data):
@@ -130,9 +156,17 @@ def wait_for_otp(client: httpx.Client, run_id: str, poll_seconds: float, progres
             if progress_callback:
                 progress_callback("Da nhan duoc OTP tu Mobile Gateway.")
             return str(data["otp"])
-        if progress_callback and time.monotonic() - last_notice >= 30:
-            progress_callback(str(data.get("message") or "Dang doi OTP tu tin nhan/Mobile Gateway."))
-            last_notice = time.monotonic()
+        now = time.monotonic()
+        elapsed = now - started
+        if elapsed >= max_wait:
+            raise TimeoutError(
+                "Khong nhan duoc OTP OneBSS trong "
+                f"{int(max_wait)} giay. Hay kiem tra Mobile Gateway/SMS OTP roi bam lay bao cao lai."
+            )
+        if progress_callback and now - last_notice >= 15:
+            base_message = str(data.get("message") or "Dang doi OTP tu tin nhan/Mobile Gateway.")
+            progress_callback(f"{base_message} Da cho {int(elapsed)} giay.")
+            last_notice = now
         time.sleep(poll_seconds)
 
 
@@ -423,8 +457,7 @@ def run_onebss_report_request_guarded(
     session_id: str,
     progress_callback=None,
 ) -> dict[str, Any]:
-    guard_disabled = str(os.getenv("ONEBSS_WORKER_DISABLE_TASK_GUARD", "") or "").strip().lower() in {"1", "true", "yes", "on"}
-    if guard_disabled or not hasattr(client, "base_url"):
+    if not onebss_task_guard_enabled() or not hasattr(client, "base_url"):
         settings = get_settings().model_copy(update={"mobile_gateway_enabled": False, "google_drive_folder_id": ""})
         return run_onebss_report_request(
             settings,
@@ -1236,6 +1269,12 @@ def main() -> int:
     args = parser.parse_args()
     if not args.token:
         raise SystemExit("Missing INTERNAL_API_TOKEN or --token.")
+    print(
+        "Worker version "
+        f"{WORKER_VERSION}; task_guard={'on' if onebss_task_guard_enabled() else 'off'}; "
+        f"otp_wait={int(onebss_worker_otp_wait_seconds())}s.",
+        flush=True,
+    )
 
     headers = {"Authorization": f"Bearer {args.token}"}
     sql_poll_seconds = max(float(os.getenv("SQL_WORKER_POLL_SECONDS", "10") or "10"), args.poll_seconds)

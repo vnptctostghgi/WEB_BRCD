@@ -144,7 +144,7 @@ WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_w
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260803-worker-traceback-v25"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260807-onebss-otp-inline-v26"
 WORKSTATION_CONNECTION_PREFIX = "workstation_"
 WORKSTATION_DEFAULT_PRIORITY = 100
 WORKSTATION_SETUP_INCLUDE_PATHS = (
@@ -3193,6 +3193,7 @@ def workstation_setup_config_script(request: Request) -> str:
         ("OneBssPassword", secret_text(settings.onebss_password), "OneBSS password from web settings."),
         ("OneBssDownloadTimeoutSeconds", str(settings.onebss_download_timeout_seconds), "OneBSS download timeout."),
         ("OneBssTaskTimeoutSeconds", "1200", "Maximum wall-clock seconds for one OneBSS worker task."),
+        ("OneBssOtpWaitSeconds", "180", "Maximum seconds to wait for OneBSS OTP from Mobile Gateway."),
         ("SqlWorkerTimeoutSeconds", str(settings.dynamic_report_export_timeout_seconds or 1800), "SQL/export timeout for long Oracle reports."),
         ("ExportPageSize", str(settings.dynamic_report_export_page_size or 20000), "Rows fetched per Oracle batch when exporting."),
         ("ExportMaxRows", str(settings.dynamic_report_export_max_rows or 1000000), "Maximum rows per export job."),

@@ -270,6 +270,7 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "OracleDbUser = 'REPORT_USER'" in config_text
         assert "OracleDbPass = 'oracle-secret'" in config_text
         assert "OneBssTaskTimeoutSeconds = '1200'" in config_text
+        assert "OneBssOtpWaitSeconds = '180'" in config_text
         assert "SqlWorkerTimeoutSeconds = '1800'" in config_text
         assert "ExportPageSize = '20000'" in config_text
         assert "ExportMaxRows = '1000000'" in config_text
@@ -284,9 +285,14 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "GoogleDriveOauthRefreshToken" in config_text
         assert 'Set-UserEnvironment "ONEBSS_DRIVE_UPLOAD_API_URL" $WorkerDriveUploadApiUrl' in setup_script
         assert 'Set-UserEnvironment "ONEBSS_TASK_TIMEOUT_SECONDS" $onebssTaskTimeoutSeconds' in setup_script
+        assert 'Set-UserEnvironment "ONEBSS_WORKER_OTP_WAIT_SECONDS" $onebssOtpWaitSeconds' in setup_script
+        assert 'Set-UserEnvironment "ONEBSS_WORKER_DISABLE_TASK_GUARD" "1"' in setup_script
         assert 'Set-UserEnvironment "SQL_WORKER_POLL_SECONDS" "10"' in setup_script
         assert 'Set-UserEnvironment "FTP_WORKER_POLL_SECONDS" "30"' in setup_script
         assert "ONEBSS_TASK_TIMEOUT_SECONDS" in start_worker_script
+        assert "ONEBSS_WORKER_OTP_WAIT_SECONDS" in start_worker_script
+        assert "ONEBSS_WORKER_DISABLE_TASK_GUARD" in start_worker_script
+        assert '$env:ONEBSS_WORKER_DISABLE_TASK_GUARD = "1"' in start_worker_script
         assert "SQL_WORKER_POLL_SECONDS" in start_worker_script
         assert "FTP_WORKER_POLL_SECONDS" in start_worker_script
         assert "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64" in setup_script
@@ -328,7 +334,14 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "onebss-worker.log" in background_worker_script
         assert "onebss-worker-error.log" in background_worker_script
         assert "start_onebss_worker.ps1" in background_worker_script
+        assert "Out-File -FilePath '$safeLogFile' -Append -Encoding UTF8" in background_worker_script
+        assert '$ErrorActionPreference = "Continue"' in start_worker_script
+        assert '$ErrorActionPreference = "Continue"' in setup_script
+        assert "System.Management.Automation.ErrorRecord" in start_worker_script
+        assert "System.Management.Automation.ErrorRecord" in setup_script
         assert "Tu khoi dong lai worker sau $RestartDelaySeconds giay." in background_worker_script
+        assert "New-WorkerMutexName" in background_worker_script
+        assert "Da co wrapper worker dang chay" in background_worker_script
         assert "RepetitionInterval (New-TimeSpan -Minutes 2)" in setup_script
         assert "[Security.Principal.WindowsIdentity]::GetCurrent().Name" in install_task_script
         assert "whoami.exe" in install_task_script
@@ -344,6 +357,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "Khong tim thay Scheduled Task; khong bat buoc neu Local API dang OK." in health_script
         assert "Wait-WorkerProcessesStable" in health_script
         assert "Get-WorkerPythonProcesses" in health_script
+        assert "Get-WorkerWrapperProcesses" in health_script
+        assert "Dang co nhieu worker chay trung" in health_script
         assert "Test-OneBssWorkerTaskUsesBackgroundWorker" in health_script
         assert "run_onebss_worker_background.ps1" in health_script
         assert "Da start Scheduled Task, Python worker PID" in health_script
@@ -358,6 +373,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "Local API config" in health_script
         assert "config-status" in health_script
         assert "workstation-setup-error.log" in setup_script
+        assert "ONEBSS_WORKER_DISABLE_TASK_GUARD" in uninstall_task_script
+        assert "ONEBSS_WORKER_OTP_WAIT_SECONDS" in uninstall_task_script
         assert "-NoPause" in setup_bat
         assert "-NoPause" in background_bat
         assert "-NoPause" in install_autostart_bat
@@ -4949,6 +4966,49 @@ def test_onebss_workstation_worker_reports_unexpected_failure(monkeypatch) -> No
     assert payload["status"] == "failed"
     assert "selenium timeout" in payload["message"]
     assert payload["details"]["error_type"] == "RuntimeError"
+
+
+def test_onebss_worker_task_guard_is_disabled_by_default(monkeypatch) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    monkeypatch.delenv("ONEBSS_WORKER_DISABLE_TASK_GUARD", raising=False)
+    monkeypatch.delenv("ONEBSS_WORKER_ENABLE_TASK_GUARD", raising=False)
+
+    class FakeClient:
+        base_url = "https://vnptcto.com"
+
+    def fail_process(*args, **kwargs):
+        raise AssertionError("OneBSS OTP flow must not use multiprocessing guard by default")
+
+    monkeypatch.setattr(worker.mp, "Process", fail_process)
+    monkeypatch.setattr(worker, "run_onebss_report_request", lambda *args, **kwargs: {"ok": True, "status": "success"})
+
+    result = worker.run_onebss_report_request_guarded(
+        FakeClient(),
+        "ws-otp",
+        "RUN-OTP",
+        {"ma_bao_cao": "OTP"},
+        {},
+        otp="123456",
+        session_id="SESSION-1",
+    )
+
+    assert result == {"ok": True, "status": "success"}
+
+
+def test_onebss_worker_wait_for_otp_times_out(monkeypatch) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    times = iter([0.0, 0.0, 31.0])
+    monkeypatch.setenv("ONEBSS_WORKER_OTP_WAIT_SECONDS", "30")
+    monkeypatch.setattr(worker.time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(worker.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(worker, "request_json", lambda *args, **kwargs: {"ok": False, "message": "Chua thay OTP."})
+
+    with pytest.raises(TimeoutError) as error:
+        worker.wait_for_otp(object(), "RUN-OTP", 0)
+
+    assert "Khong nhan duoc OTP OneBSS" in str(error.value)
 
 
 def test_onebss_worker_prefers_local_drive_upload_api_when_public_is_configured(monkeypatch) -> None:

@@ -14,6 +14,7 @@ param(
   [string]$OracleDbUser = "",
   [string]$OracleDbPass = "",
   [string]$OneBssTaskTimeoutSeconds = "1200",
+  [string]$OneBssOtpWaitSeconds = "180",
   [string]$SqlWorkerTimeoutSeconds = "1800",
   [string]$ExportPageSize = "20000",
   [string]$ExportMaxRows = "1000000",
@@ -53,7 +54,19 @@ function Invoke-External {
     [Parameter(Mandatory = $true)][string]$FilePath,
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments
   )
-  & $FilePath @Arguments
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & $FilePath @Arguments 2>&1 | ForEach-Object {
+      if ($_ -is [System.Management.Automation.ErrorRecord]) {
+        Write-Output ([string]$_.Exception.Message)
+      } else {
+        Write-Output ([string]$_)
+      }
+    }
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
   if ($LASTEXITCODE -ne 0) {
     throw "Lenh that bai ($LASTEXITCODE): $FilePath $($Arguments -join ' ')"
   }
@@ -746,6 +759,7 @@ $onebssPassword = Resolve-SetupValue $setupConfig "OneBssPassword" "" "" "ONEBSS
 $onebssLoginUrl = Resolve-SetupValue $setupConfig "OneBssLoginUrl" "" "https://onebss.vnpt.vn/" "ONEBSS_LOGIN_URL"
 $onebssDownloadTimeoutSeconds = Resolve-SetupValue $setupConfig "OneBssDownloadTimeoutSeconds" "" "180" "ONEBSS_DOWNLOAD_TIMEOUT_SECONDS"
 $onebssTaskTimeoutSeconds = Resolve-SetupValue $setupConfig "OneBssTaskTimeoutSeconds" $OneBssTaskTimeoutSeconds "1200" "ONEBSS_TASK_TIMEOUT_SECONDS"
+$onebssOtpWaitSeconds = Resolve-SetupValue $setupConfig "OneBssOtpWaitSeconds" $OneBssOtpWaitSeconds "180" "ONEBSS_WORKER_OTP_WAIT_SECONDS"
 $googleDriveFolderId = Resolve-SetupValue $setupConfig "GoogleDriveFolderId" "" "" "GOOGLE_DRIVE_FOLDER_ID"
 $googleDriveOauthClientId = Resolve-SetupValue $setupConfig "GoogleDriveOauthClientId" "" "" "GOOGLE_DRIVE_OAUTH_CLIENT_ID"
 $googleDriveOauthClientSecret = Resolve-SetupValue $setupConfig "GoogleDriveOauthClientSecret" "" "" "GOOGLE_DRIVE_OAUTH_CLIENT_SECRET"
@@ -830,6 +844,8 @@ Set-UserEnvironment "ONEBSS_PASSWORD" $onebssPassword
 Set-UserEnvironment "ONEBSS_LOGIN_URL" $onebssLoginUrl
 Set-UserEnvironment "ONEBSS_DOWNLOAD_TIMEOUT_SECONDS" $onebssDownloadTimeoutSeconds
 Set-UserEnvironment "ONEBSS_TASK_TIMEOUT_SECONDS" $onebssTaskTimeoutSeconds
+Set-UserEnvironment "ONEBSS_WORKER_OTP_WAIT_SECONDS" $onebssOtpWaitSeconds
+Set-UserEnvironment "ONEBSS_WORKER_DISABLE_TASK_GUARD" "1"
 Set-UserEnvironment "GOOGLE_DRIVE_FOLDER_ID" $googleDriveFolderId
 Set-UserEnvironment "GOOGLE_DRIVE_OAUTH_CLIENT_ID" $googleDriveOauthClientId
 Set-UserEnvironment "GOOGLE_DRIVE_OAUTH_CLIENT_SECRET" $googleDriveOauthClientSecret
