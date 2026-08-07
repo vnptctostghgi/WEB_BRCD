@@ -556,16 +556,22 @@ def admin_diagnostics(request: Request, limit: int = ADMIN_TABLE_PAGE_SIZE) -> d
 def admin_otp_configurations(request: Request) -> dict[str, Any]:
     require_mobile_permission(request, "mobile_gateway.otp.view")
     repository = mobile_repository()
-    repository.ensure_defaults()
-    return {"ok": True, "configurations": repository.list_otp_configurations()}
+    configurations = repository.list_otp_configurations()
+    if not configurations:
+        repository.ensure_defaults()
+        configurations = repository.list_otp_configurations()
+    return {"ok": True, "configurations": configurations}
 
 
 @admin_router.get("/otp/filters")
 def admin_otp_filters(request: Request) -> dict[str, Any]:
     require_mobile_permission(request, "mobile_gateway.otp.view")
     repository = mobile_repository()
-    repository.ensure_defaults()
-    return {"ok": True, "filters": repository.list_otp_filters()}
+    filters = repository.list_otp_filters()
+    if not filters:
+        repository.ensure_defaults()
+        filters = repository.list_otp_filters()
+    return {"ok": True, "filters": filters}
 
 
 @admin_router.post("/otp/filters")
@@ -582,11 +588,14 @@ def admin_save_otp_filter(request: Request, payload: OtpFilterPayload) -> dict[s
 def admin_otp_latest(request: Request, limit: int = ADMIN_TABLE_PAGE_SIZE) -> dict[str, Any]:
     require_mobile_permission(request, "mobile_gateway.otp.view")
     repository = mobile_repository()
-    repository.ensure_defaults()
     safe_limit = admin_table_limit(limit)
     items = repository.list_otp_latest_values(safe_limit)
+    otp_filters = repository.list_otp_filters()
+    if not otp_filters:
+        repository.ensure_defaults()
+        otp_filters = repository.list_otp_filters()
     seen_filter_ids = {str(item.get("filter_id") or item.get("service_code") or "") for item in items}
-    for otp_filter in repository.list_otp_filters():
+    for otp_filter in otp_filters:
         filter_id = str(otp_filter.get("filter_id") or otp_filter.get("service_code") or "")
         if filter_id and filter_id not in seen_filter_ids:
             items.append(

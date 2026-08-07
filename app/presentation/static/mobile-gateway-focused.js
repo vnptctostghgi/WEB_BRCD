@@ -1,6 +1,24 @@
 // Focused Mobile Gateway UI for SMS + OTP. Loaded after app.js on purpose.
 const MOBILE_GATEWAY_TABLE_PAGE_SIZE = window.TABLE_PAGE_SIZE || 20;
+const MOBILE_GATEWAY_READ_TIMEOUT_MS = 8000;
 let mobilePublicSmsRules = [];
+
+async function mobileGatewayApi(url, options = {}) {
+  const method = String(options.method || "GET").toUpperCase();
+  if (method !== "GET" || options.signal) return api(url, options);
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), MOBILE_GATEWAY_READ_TIMEOUT_MS);
+  try {
+    return await api(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("Máy chủ phản hồi Mobile Gateway quá chậm. Dữ liệu khác vẫn được hiển thị.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
 
 function mobileFormatTime(value) {
   if (!value) return "-";
@@ -241,36 +259,40 @@ function bindMobileGatewayFocusedEvents() {
 async function loadMobileGateway({ force = false } = {}) {
   normalizeMobileGatewayUi();
   const message = $("#mobile-gateway-message");
-  try {
-    await Promise.all([
-      loadMobileGatewayOverview(),
-      loadMobileGatewayDevices(),
-      loadMobilePairingCodes(),
-      loadMobileGatewaySms({ force: true }),
-      loadMobilePublicSmsRules(),
-      loadMobileOtpData(),
-      loadMobileSendCommands(),
-    ]);
-    mobileGatewayLoaded = true;
-    renderMobileGatewayOverview();
-    startMobileOtpTicker();
-    startMobileGatewayEvents();
-    startMobileSmsAutoRefresh();
-    startMobileSendStatusRefresh();
+  const tasks = [
+    ["Tổng quan", loadMobileGatewayOverview()],
+    ["Thiết bị", loadMobileGatewayDevices()],
+    ["Mã ghép nối", loadMobilePairingCodes()],
+    ["SMS", loadMobileGatewaySms({ force: true })],
+    ["Cấu hình public SMS", loadMobilePublicSmsRules()],
+    ["OTP", loadMobileOtpData()],
+    ["Tin nhắn gửi", loadMobileSendCommands()],
+  ];
+  const results = await Promise.allSettled(tasks.map(([, promise]) => promise));
+  mobileGatewayLoaded = true;
+  renderMobileGatewayOverview();
+  startMobileOtpTicker();
+  startMobileGatewayEvents();
+  startMobileSmsAutoRefresh();
+  startMobileSendStatusRefresh();
+  const failedLabels = results
+    .map((result, index) => result.status === "rejected" ? tasks[index][0] : "")
+    .filter(Boolean);
+  if (failedLabels.length) {
+    showMessage(message, `Chưa tải được: ${failedLabels.join(", ")}. Các dữ liệu còn lại vẫn sử dụng được.`, "error");
+  } else {
     if (message) message.className = "result hidden mb-4";
-  } catch (error) {
-    showMessage(message, error.message, "error");
   }
 }
 
 async function loadMobileGatewayOverview() {
-  const data = await api("/api/admin/mobile-gateway/overview");
+  const data = await mobileGatewayApi("/api/admin/mobile-gateway/overview");
   mobileGatewayOverview = data.overview || {};
   renderMobileGatewayOverview();
 }
 
 async function loadMobileGatewayDevices() {
-  const data = await api("/api/admin/mobile-gateway/devices");
+  const data = await mobileGatewayApi("/api/admin/mobile-gateway/devices");
   mobileGatewayDevices = data.devices || [];
   renderMobileGatewayDevices();
   renderMobileGatewayDeviceOptions();
@@ -379,7 +401,7 @@ async function toggleMobileDeviceActive(deviceId) {
   const device = mobileGatewayDevices.find((item) => item.device_id === deviceId);
   if (!device) return;
   const action = device.is_active ? "revoke" : "reactivate";
-  await api(`/api/admin/mobile-gateway/devices/${encodeURIComponent(deviceId)}/${action}`, { method: "POST" });
+  await mobileGatewayApi(`/api/admin/mobile-gateway/devices/${encodeURIComponent(deviceId)}/${action}`, { method: "POST" });
   await loadMobileGatewayDevices();
 }
 
@@ -388,7 +410,7 @@ async function deleteMobileDevice(deviceId) {
   const device = mobileGatewayDevices.find((item) => item.device_id === deviceId);
   const label = device?.name || deviceId;
   if (!confirm(`Xóa thiết bị đã ngừng kết nối: ${label}? SMS đã đồng bộ vẫn được giữ lại.`)) return;
-  await api(`/api/admin/mobile-gateway/devices/${encodeURIComponent(deviceId)}/delete`, { method: "POST" });
+  await mobileGatewayApi(`/api/admin/mobile-gateway/devices/${encodeURIComponent(deviceId)}/delete`, { method: "POST" });
   showToast("Đã xóa thiết bị khỏi danh sách.");
   await loadMobileGateway({ force: true });
 }
@@ -420,7 +442,7 @@ async function createMobilePairingCode() {
     clipboard_enabled: false,
     camera_enabled: false,
   };
-  const result = await api("/api/admin/mobile-gateway/pairing-codes", { method: "POST", body: JSON.stringify(payload) });
+  const result = await mobileGatewayApi("/api/admin/mobile-gateway/pairing-codes", { method: "POST", body: JSON.stringify(payload) });
   mobileGatewayActivePairingId = result.id;
   mobileGatewayActivePairingExpiresAt = result.expires_at || "";
   const box = $("#mobile-pairing-result");
@@ -435,7 +457,7 @@ async function createMobilePairingCode() {
 }
 
 async function loadMobilePairingCodes() {
-  const data = await api("/api/admin/mobile-gateway/pairing-codes");
+  const data = await mobileGatewayApi("/api/admin/mobile-gateway/pairing-codes");
   const codes = data.codes || [];
   const active = codes.find((code) => String(code.id) === String(mobileGatewayActivePairingId));
   if (active && (active.used_at || active.status === "used")) {
@@ -528,7 +550,7 @@ async function loadMobileGatewaySms({ force = false, markNew = false, silent = f
   const dateTo = mobileGatewayDateEnd($("#mobile-sms-date-to")?.value || "");
   const simSlot = $("#mobile-sms-sim-filter")?.value || "";
   if (force && !silent) setTableLoading("#mobile-sms-table", 5, "Đang tải SMS...");
-  const data = await api(`/api/admin/mobile-gateway/sms?page=${mobileGatewaySmsPage}&page_size=${MOBILE_GATEWAY_TABLE_PAGE_SIZE}&device_id=${encodeURIComponent(deviceId)}&sender=${encodeURIComponent(sender)}&query=${encodeURIComponent(query)}&date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}&sim_slot=${encodeURIComponent(simSlot)}`);
+  const data = await mobileGatewayApi(`/api/admin/mobile-gateway/sms?page=${mobileGatewaySmsPage}&page_size=${MOBILE_GATEWAY_TABLE_PAGE_SIZE}&device_id=${encodeURIComponent(deviceId)}&sender=${encodeURIComponent(sender)}&query=${encodeURIComponent(query)}&date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}&sim_slot=${encodeURIComponent(simSlot)}`);
   mobileGatewaySmsHasMore = Boolean(data.has_more);
   renderMobileSmsTable(data.items || [], markNew);
   const pageInfo = $("#mobile-sms-page-info");
@@ -628,7 +650,7 @@ function startMobileGatewayEvents() {
 async function loadMobileSendCommands({ force = false } = {}) {
   const table = $("#mobile-send-history-table");
   if (force && table) setTableLoading("#mobile-send-history-table", 6, "Đang tải lệnh gửi SMS...");
-  const data = await api(`/api/admin/mobile-gateway/commands?limit=${MOBILE_GATEWAY_TABLE_PAGE_SIZE}`);
+  const data = await mobileGatewayApi(`/api/admin/mobile-gateway/commands?limit=${MOBILE_GATEWAY_TABLE_PAGE_SIZE}`);
   window.mobileGatewaySendCommands = (data.commands || []).filter((command) => command.command_type === "send_sms");
   renderMobileSendHistory();
   renderMobileGatewayOverview();
@@ -687,7 +709,7 @@ async function sendMobileSms() {
   if (!body) return showMessage(result, "Hãy nhập nội dung tin nhắn.", "error");
   if (submit) submit.disabled = true;
   try {
-    await api("/api/admin/mobile-gateway/commands", {
+    await mobileGatewayApi("/api/admin/mobile-gateway/commands", {
       method: "POST",
       body: JSON.stringify({
         device_id: deviceId,
@@ -717,15 +739,21 @@ function startMobileSendStatusRefresh() {
 }
 
 async function loadMobileOtpData() {
-  const [filters, latest] = await Promise.all([
-    api("/api/admin/mobile-gateway/otp/filters"),
-    api(`/api/admin/mobile-gateway/otp/latest?limit=${MOBILE_GATEWAY_TABLE_PAGE_SIZE}`),
+  const [filtersResult, latestResult] = await Promise.allSettled([
+    mobileGatewayApi("/api/admin/mobile-gateway/otp/filters"),
+    mobileGatewayApi(`/api/admin/mobile-gateway/otp/latest?limit=${MOBILE_GATEWAY_TABLE_PAGE_SIZE}`),
   ]);
-  mobileGatewayOtpFilters = filters.filters || [];
-  mobileGatewayOtpLatest = latest.items || [];
-  renderMobileOtpFilterForm();
-  renderMobileOtpFilters();
-  renderMobileOtpLatest();
+  if (filtersResult.status === "fulfilled") {
+    mobileGatewayOtpFilters = filtersResult.value.filters || [];
+    renderMobileOtpFilterForm();
+    renderMobileOtpFilters();
+  }
+  if (latestResult.status === "fulfilled") {
+    mobileGatewayOtpLatest = latestResult.value.items || [];
+    renderMobileOtpLatest();
+  }
+  const failure = [filtersResult, latestResult].find((result) => result.status === "rejected");
+  if (failure) throw failure.reason;
 }
 
 function startMobileOtpTicker() {
@@ -786,7 +814,7 @@ async function saveMobileOtpFilter() {
     sim_slot: null,
     priority: 10,
   };
-  const response = await api("/api/admin/mobile-gateway/otp/filters", { method: "POST", body: JSON.stringify(payload) });
+  const response = await mobileGatewayApi("/api/admin/mobile-gateway/otp/filters", { method: "POST", body: JSON.stringify(payload) });
   form.dataset.loaded = "";
   showToast(response.latest ? `Đã lưu và tìm thấy OTP ${response.latest.code}` : "Đã lưu quy tắc OTP, kết quả hiện là null.");
   await loadMobileOtpData();

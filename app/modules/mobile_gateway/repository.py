@@ -88,30 +88,31 @@ class MobileGatewayRepository:
             return
         now = self.now()
         try:
-            self._upsert(
-                "otp_configurations",
-                {
-                    "service_code": "onebss",
-                    "service_name": "OneBSS",
-                    "enabled": True,
-                    "source_type": "sms",
-                    "sender_pattern": "VNPT",
-                    "sender_match_type": "contains",
-                    "otp_regex": r"(?<!\d)(\d{4,8})(?!\d)",
-                    "otp_keyword": "",
-                    "otp_length_min": 4,
-                    "otp_length_max": 8,
-                    "wait_timeout_seconds": 120,
-                    "validity_seconds": 180,
-                    "device_id": "",
-                    "auto_fill_enabled": True,
-                    "manual_fallback_enabled": True,
-                    "priority": 10,
-                    "created_at": now,
-                    "updated_at": now,
-                },
-                "service_code",
-            )
+            if not self.get_otp_configuration("onebss"):
+                self._upsert(
+                    "otp_configurations",
+                    {
+                        "service_code": "onebss",
+                        "service_name": "OneBSS",
+                        "enabled": True,
+                        "source_type": "sms",
+                        "sender_pattern": "VNPT",
+                        "sender_match_type": "contains",
+                        "otp_regex": r"(?<!\d)(\d{4,8})(?!\d)",
+                        "otp_keyword": "",
+                        "otp_length_min": 4,
+                        "otp_length_max": 8,
+                        "wait_timeout_seconds": 120,
+                        "validity_seconds": 180,
+                        "device_id": "",
+                        "auto_fill_enabled": True,
+                        "manual_fallback_enabled": True,
+                        "priority": 10,
+                        "created_at": now,
+                        "updated_at": now,
+                    },
+                    "service_code",
+                )
         except RuntimeError:
             pass
         try:
@@ -1271,10 +1272,12 @@ class MobileGatewayRepository:
             with self.base.connect() as connection:
                 cursor = connection.execute("UPDATE otp_latest_values SET status='expired', updated_at=? WHERE status='valid' AND expires_at<?", (now, now))
                 return int(cursor.rowcount or 0)
-        rows = self._get("otp_latest_values", {"status": "eq.valid", "expires_at": f"lt.{now}", "select": "id"})
-        for row in rows:
-            self._patch("otp_latest_values", {"id": f"eq.{row['id']}"}, {"status": "expired", "updated_at": now})
-        return len(rows)
+        self._patch(
+            "otp_latest_values",
+            {"status": "eq.valid", "expires_at": f"lt.{now}"},
+            {"status": "expired", "updated_at": now},
+        )
+        return 0
 
     def list_otp_latest_values(self, limit: int = 100) -> list[dict[str, Any]]:
         self.expire_otp_latest_values()

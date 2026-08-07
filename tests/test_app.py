@@ -118,11 +118,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=204" in public_response.text
+        assert "/static/app.js?v=205" in public_response.text
         assert "/static/styles.css?v=126" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
-        public_js = client.get("/static/app.js?v=204")
+        public_js = client.get("/static/app.js?v=205")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -989,7 +989,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=204" in page.text
+        assert "/static/app.js?v=205" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -3587,6 +3587,28 @@ def test_onebss_mobile_gateway_default_filter_matches_vnpt_sms() -> None:
         matched = service.match_incoming_sms(inserted[0])
         assert matched is not None
         assert service.consume_code(request["request_id"]) == "654321"
+
+
+def test_mobile_gateway_expires_latest_otp_with_one_bulk_update() -> None:
+    from app.modules.mobile_gateway.repository import MobileGatewayRepository
+
+    class FakeSupabaseRepository:
+        def __init__(self) -> None:
+            self.patches = []
+
+        def _patch(self, table, params, payload):
+            self.patches.append((table, params, payload))
+
+    base_repository = FakeSupabaseRepository()
+    repository = MobileGatewayRepository(base_repository, get_settings())
+
+    assert repository.expire_otp_latest_values() == 0
+    assert len(base_repository.patches) == 1
+    table, params, payload = base_repository.patches[0]
+    assert table == "otp_latest_values"
+    assert params["status"] == "eq.valid"
+    assert params["expires_at"].startswith("lt.")
+    assert payload["status"] == "expired"
 
 
 def test_onebss_mobile_gateway_request_uses_latest_otp_received_before_request() -> None:
@@ -6505,7 +6527,7 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
         assert "/static/shell.js?v=24" in home.text
-        assert "/static/app.js?v=204" not in home.text
+        assert "/static/app.js?v=205" not in home.text
         shell_js = client.get("/static/shell.js?v=24")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
@@ -6513,7 +6535,7 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "function readCachedNavigation" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=204" in shell_js.text
+        assert "/static/app.js?v=205" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -6527,7 +6549,7 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
         assert "/static/shell.js?v=24" in dashboard.text
-        assert "/static/app.js?v=204" not in dashboard.text
+        assert "/static/app.js?v=205" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -6547,49 +6569,49 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "dynamic-report-body" not in reports.text
         assert "dynamic-report-prev" not in reports.text
         assert "dynamic-report-next" not in reports.text
-        assert "/static/app.js?v=204" in reports.text
+        assert "/static/app.js?v=205" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=204" in workstation.text
+        assert "/static/app.js?v=205" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=204" in work_tasks.text
+        assert "/static/app.js?v=205" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=204" in report_links.text
+        assert "/static/app.js?v=205" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=204" in system.text
+        assert "/static/app.js?v=205" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=204" in onebss_mining.text
+        assert "/static/app.js?v=205" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 
         ftp_mining = client.get("/daodulieuftp")
         assert ftp_mining.status_code == 200
         assert "view-ftp-mining" in ftp_mining.text
-        assert "/static/app.js?v=204" in ftp_mining.text
+        assert "/static/app.js?v=205" in ftp_mining.text
         assert "/static/ftp-mining.js" not in ftp_mining.text
         assert ftp_mining.text.count('class="app-view') == 1
 

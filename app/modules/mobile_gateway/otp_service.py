@@ -184,7 +184,6 @@ class OtpService:
         service_code = str(request.get("service_code") or "").strip().lower()
         if not request_id or not service_code or request.get("status") != "waiting":
             return None
-        self.repository.expire_otp_latest_values()
         for latest in self.repository.list_otp_latest_values(limit=100):
             if str(latest.get("service_code") or "").strip().lower() != service_code:
                 continue
