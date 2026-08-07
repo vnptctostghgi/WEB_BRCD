@@ -53,7 +53,7 @@ while ($true) {
   try {
     $safeWorkerScript = $StartWorkerScript.Replace("'", "''")
     $safeLogFile = $script:LogFile.Replace("'", "''")
-    $command = "& '$safeWorkerScript' -NoPause *>> '$safeLogFile'"
+    $command = "& '$safeWorkerScript' -NoPause 2>&1 | ForEach-Object { if (`$_ -ne `$null) { ('{0} {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), [string]`$_) | Add-Content -Path '$safeLogFile' -Encoding UTF8 } }"
     $process = Start-Process `
       -FilePath "powershell.exe" `
       -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $command) `
