@@ -271,6 +271,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "OracleDbPass = 'oracle-secret'" in config_text
         assert "OneBssTaskTimeoutSeconds = '1200'" in config_text
         assert "OneBssOtpWaitSeconds = '180'" in config_text
+        assert "OneBssProcessingTimeoutRetryAttempts = '3'" in config_text
+        assert "OneBssProcessingTimeoutRetryDelaySeconds = '8'" in config_text
         assert "SqlWorkerTimeoutSeconds = '1800'" in config_text
         assert "ExportPageSize = '20000'" in config_text
         assert "ExportMaxRows = '1000000'" in config_text
@@ -285,11 +287,15 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "GoogleDriveOauthRefreshToken" in config_text
         assert 'Set-UserEnvironment "ONEBSS_DRIVE_UPLOAD_API_URL" $WorkerDriveUploadApiUrl' in setup_script
         assert 'Set-UserEnvironment "ONEBSS_TASK_TIMEOUT_SECONDS" $onebssTaskTimeoutSeconds' in setup_script
+        assert 'Set-UserEnvironment "ONEBSS_PROCESSING_TIMEOUT_RETRY_ATTEMPTS" $onebssProcessingTimeoutRetryAttempts' in setup_script
+        assert 'Set-UserEnvironment "ONEBSS_PROCESSING_TIMEOUT_RETRY_DELAY_SECONDS" $onebssProcessingTimeoutRetryDelaySeconds' in setup_script
         assert 'Set-UserEnvironment "ONEBSS_WORKER_OTP_WAIT_SECONDS" $onebssOtpWaitSeconds' in setup_script
         assert 'Set-UserEnvironment "ONEBSS_WORKER_DISABLE_TASK_GUARD" "1"' in setup_script
         assert 'Set-UserEnvironment "SQL_WORKER_POLL_SECONDS" "10"' in setup_script
         assert 'Set-UserEnvironment "FTP_WORKER_POLL_SECONDS" "30"' in setup_script
         assert "ONEBSS_TASK_TIMEOUT_SECONDS" in start_worker_script
+        assert "ONEBSS_PROCESSING_TIMEOUT_RETRY_ATTEMPTS" in start_worker_script
+        assert "ONEBSS_PROCESSING_TIMEOUT_RETRY_DELAY_SECONDS" in start_worker_script
         assert "ONEBSS_WORKER_OTP_WAIT_SECONDS" in start_worker_script
         assert "ONEBSS_WORKER_DISABLE_TASK_GUARD" in start_worker_script
         assert '$env:ONEBSS_WORKER_DISABLE_TASK_GUARD = "1"' in start_worker_script
@@ -4392,6 +4398,50 @@ def test_onebss_download_falls_back_when_grid_has_no_rows(monkeypatch, tmp_path)
     assert result.suggested_filename == "fallback.xlsx"
 
 
+def test_onebss_download_falls_back_when_grid_processing_timeout_persists(monkeypatch, tmp_path) -> None:
+    from app.application import onebss_report_service as service
+    from app.application.onebss_report_service import OneBssDownloadError, OneBssDownloadedFile, OneBssApiToken
+
+    events = []
+    token = OneBssApiToken(
+        access_token="token",
+        token_type="Bearer",
+        username="test@vnpt.vn",
+        mobile_id="mobile",
+        device_id="device",
+        expires_at=9999999999,
+    )
+
+    def fake_grid(*args, **kwargs):
+        events.append("grid")
+        raise OneBssDownloadError("Quá thời gian xử lý")
+
+    def fake_export(settings, token, report, parameters, **kwargs):
+        events.append("export")
+        target = kwargs.get("target_file") or tmp_path / "fallback.xlsx"
+        target.write_bytes(b"PK\x03\x04")
+        return OneBssDownloadedFile(
+            file_path=target,
+            suggested_filename="fallback.xlsx",
+            export_info={"params": parameters},
+            parameters=parameters,
+            source_values=kwargs.get("source_values") or {},
+        )
+
+    monkeypatch.setattr(service, "download_onebss_grid_file_api", fake_grid)
+    monkeypatch.setattr(service, "download_onebss_export_file_api", fake_export)
+
+    result = service.download_onebss_report_file_api(
+        get_settings(),
+        token,
+        {"report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST&name=Test"},
+        {"P_PHANVUNG_ID": "13", "$download_source": "grid"},
+    )
+
+    assert events == ["grid", "export"]
+    assert result.suggested_filename == "fallback.xlsx"
+
+
 def test_onebss_download_uses_grid_by_default(monkeypatch, tmp_path) -> None:
     from app.application import onebss_report_service as service
     from app.application.onebss_report_service import OneBssDownloadedFile, OneBssApiToken
@@ -4434,6 +4484,62 @@ def test_onebss_download_uses_grid_by_default(monkeypatch, tmp_path) -> None:
 
     assert events == ["grid"]
     assert result.suggested_filename == "grid.xlsx"
+
+
+def test_onebss_grid_processing_timeout_retries_same_token(monkeypatch, tmp_path) -> None:
+    from app.application import onebss_report_service as service
+    from app.application.onebss_report_service import OneBssDownloadError, OneBssDownloadedFile, OneBssApiToken
+
+    calls = []
+    progress = []
+    sleeps = []
+    settings = get_settings().model_copy(
+        update={
+            "onebss_processing_timeout_retry_attempts": 3,
+            "onebss_processing_timeout_retry_delay_seconds": 0,
+        }
+    )
+    token = OneBssApiToken(
+        access_token="token",
+        token_type="Bearer",
+        username="test@vnpt.vn",
+        mobile_id="mobile",
+        device_id="device",
+        expires_at=9999999999,
+    )
+
+    def fake_grid_once(settings_arg, token_arg, report, parameters, **kwargs):
+        calls.append({"token": token_arg, "parameters": dict(parameters)})
+        if len(calls) == 1:
+            raise OneBssDownloadError("Quá thời gian xử lý")
+        target = kwargs.get("target_file") or tmp_path / "grid.xlsx"
+        target.write_bytes(b"PK\x03\x04")
+        return OneBssDownloadedFile(
+            file_path=target,
+            suggested_filename="grid.xlsx",
+            export_info={"params": parameters},
+            parameters=parameters,
+            source_values=kwargs.get("source_values") or {},
+        )
+
+    monkeypatch.setattr(service, "_download_onebss_grid_file_api_once", fake_grid_once)
+    monkeypatch.setattr(service.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    result = service.download_onebss_grid_file_api(
+        settings,
+        token,
+        {"report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST&name=Test"},
+        {"P_PHANVUNG_ID": "13"},
+        progress_callback=progress.append,
+    )
+
+    assert result.suggested_filename == "grid.xlsx"
+    assert len(calls) == 2
+    assert calls[0]["token"] is token
+    assert calls[1]["token"] is token
+    assert calls[0]["parameters"] == calls[1]["parameters"] == {"P_PHANVUNG_ID": "13"}
+    assert sleeps == [0.0]
+    assert any("cung phien dang nhap" in message for message in progress)
 
 
 def test_onebss_excel_export_405_falls_back_to_grid(monkeypatch, tmp_path) -> None:
@@ -4515,8 +4621,11 @@ def test_onebss_finish_api_splits_regions_and_merges_excel(monkeypatch, tmp_path
         expires_at=9999999999,
     )
     regions = []
+    progress = []
+    expected_token = token
 
-    def fake_download(settings, token, report, parameters, **kwargs):
+    def fake_download(settings, token_arg, report, parameters, **kwargs):
+        assert token_arg is expected_token
         region = str(parameters["P_PHANVUNG_ID"])
         regions.append(region)
         target = kwargs.get("target_file") or tmp_path / f"part_{region}.xlsx"
@@ -4553,11 +4662,13 @@ def test_onebss_finish_api_splits_regions_and_merges_excel(monkeypatch, tmp_path
             "P_DENNGAY": "14/07/2026",
             "$merge_excel": {"sheet": "DATA", "source_column": "P_PHANVUNG_ID"},
         },
+        progress_callback=progress.append,
     )
 
     assert result["ok"] is True
     assert result["merged_file_count"] == 3
     assert regions == ["13", "14", "15"]
+    assert any("dung chung phien dang nhap" in message for message in progress)
 
     workbook = load_workbook(result["file_path"], data_only=True)
     try:

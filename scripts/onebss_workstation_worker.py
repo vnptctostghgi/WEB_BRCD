@@ -36,7 +36,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.08.07-onebss-otp-fast-cancel-v27"
+WORKER_VERSION = "2026.08.07-onebss-processing-timeout-v28"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"

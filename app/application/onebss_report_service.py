@@ -7,6 +7,7 @@ import logging
 import re
 import threading
 import time
+import unicodedata
 import uuid
 import zipfile
 from dataclasses import dataclass
@@ -47,6 +48,8 @@ ONEBSS_API_CLIENT_ID = "clientapp"
 ONEBSS_API_CLIENT_SECRET = "password"
 ONEBSS_API_META_KEYS = {"baocao_id"}
 ONEBSS_EXPORT_TIMEOUT_SECONDS = 900
+ONEBSS_PROCESSING_TIMEOUT_RETRY_ATTEMPTS = 3
+ONEBSS_PROCESSING_TIMEOUT_RETRY_DELAY_SECONDS = 8
 KNOWN_ONEBSS_REPORT_IDS = {
     "PHATTRIENTHUEBAO/BIENDONGPHATTRIENTHUEBAO/RP_BSS_28429": 41668,
 }
@@ -765,6 +768,7 @@ def finish_onebss_report_download_api(
     parameter_runs, merge_config, each_keys = build_onebss_parameter_runs(parameters)
     if len(parameter_runs) > 1:
         emit_onebss_progress(progress_callback, f"Da tach tham so thanh {len(parameter_runs)} luot chay.")
+        emit_onebss_progress(progress_callback, "May tram se dung chung phien dang nhap OneBSS de chay lan luot cac site/phan vung.")
     else:
         emit_onebss_progress(progress_callback, f"Da truyen tham so: {onebss_parameter_progress_label(parameter_runs[0].parameters)}.")
     downloaded_files: list[OneBssDownloadedFile] = []
@@ -950,6 +954,40 @@ def download_onebss_grid_file_api(
     source_values: dict[str, Any] | None = None,
     progress_callback: OneBssProgressCallback | None = None,
 ) -> OneBssDownloadedFile:
+    attempts = onebss_processing_timeout_retry_attempts(settings)
+    retry_delay_seconds = onebss_processing_timeout_retry_delay_seconds(settings)
+    for attempt in range(1, attempts + 1):
+        try:
+            return _download_onebss_grid_file_api_once(
+                settings,
+                token,
+                report,
+                parameters,
+                target_file=target_file,
+                source_values=source_values,
+                progress_callback=progress_callback,
+            )
+        except OneBssDownloadError as error:
+            if not onebss_error_looks_processing_timeout(error) or attempt >= attempts:
+                raise
+            emit_onebss_progress(
+                progress_callback,
+                f"OneBSS bao qua thoi gian xu ly cho luot nay. Thu lai lan {attempt + 1}/{attempts} bang cung phien dang nhap.",
+            )
+            time.sleep(retry_delay_seconds)
+    raise OneBssDownloadError("OneBSS qua thoi gian xu ly.")
+
+
+def _download_onebss_grid_file_api_once(
+    settings: Settings,
+    token: OneBssApiToken,
+    report: dict[str, Any],
+    parameters: dict[str, Any],
+    *,
+    target_file: Path | None = None,
+    source_values: dict[str, Any] | None = None,
+    progress_callback: OneBssProgressCallback | None = None,
+) -> OneBssDownloadedFile:
     report_url = normalize_onebss_report_url(report.get("report_url"))
     report_id = onebss_report_id(report, parameters, token)
     export_params = onebss_export_parameters(parameters)
@@ -1100,6 +1138,7 @@ def finish_onebss_report_download(
     parameter_runs, merge_config, each_keys = build_onebss_parameter_runs(parameters)
     if len(parameter_runs) > 1:
         emit_onebss_progress(progress_callback, f"Da tach tham so thanh {len(parameter_runs)} luot chay.")
+        emit_onebss_progress(progress_callback, "May tram se dung chung phien dang nhap OneBSS de chay lan luot cac site/phan vung.")
     else:
         emit_onebss_progress(progress_callback, f"Da truyen tham so: {onebss_parameter_progress_label(parameter_runs[0].parameters)}.")
     downloaded_files: list[OneBssDownloadedFile] = []
@@ -1249,6 +1288,28 @@ def onebss_api_timeout(settings: Settings, *, minimum_seconds: int = 30) -> http
     configured = int(getattr(settings, "onebss_download_timeout_seconds", 180) or 180)
     total = max(minimum_seconds, configured, 30)
     return httpx.Timeout(float(total), connect=20.0)
+
+
+def onebss_processing_timeout_retry_attempts(settings: Settings) -> int:
+    configured = getattr(settings, "onebss_processing_timeout_retry_attempts", ONEBSS_PROCESSING_TIMEOUT_RETRY_ATTEMPTS)
+    if configured in {None, ""}:
+        configured = ONEBSS_PROCESSING_TIMEOUT_RETRY_ATTEMPTS
+    try:
+        value = int(configured)
+    except (TypeError, ValueError):
+        value = ONEBSS_PROCESSING_TIMEOUT_RETRY_ATTEMPTS
+    return max(1, min(value, 6))
+
+
+def onebss_processing_timeout_retry_delay_seconds(settings: Settings) -> float:
+    configured = getattr(settings, "onebss_processing_timeout_retry_delay_seconds", ONEBSS_PROCESSING_TIMEOUT_RETRY_DELAY_SECONDS)
+    if configured in {None, ""}:
+        configured = ONEBSS_PROCESSING_TIMEOUT_RETRY_DELAY_SECONDS
+    try:
+        value = float(configured)
+    except (TypeError, ValueError):
+        value = float(ONEBSS_PROCESSING_TIMEOUT_RETRY_DELAY_SECONDS)
+    return max(0.0, min(value, 60.0))
 
 
 def onebss_api_base_headers() -> dict[str, str]:
@@ -1594,9 +1655,23 @@ def excel_cell_value(value: Any) -> Any:
 
 
 def should_fallback_to_onebss_excel_export(error: Exception) -> bool:
+    if onebss_error_looks_processing_timeout(error):
+        return True
     text = str(error).lower()
     fallback_needles = ("chưa hỗ trợ", "chua ho tro", "header", "run_v7", "404", "not found", "khong co du lieu", "no data")
     return any(needle in text for needle in fallback_needles)
+
+
+def onebss_search_text(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    normalized = unicodedata.normalize("NFD", text)
+    without_marks = "".join(char for char in normalized if unicodedata.category(char) != "Mn")
+    return without_marks.replace("đ", "d")
+
+
+def onebss_error_looks_processing_timeout(error: Exception | str) -> bool:
+    text = onebss_search_text(error)
+    return "thoi gian xu ly" in text or "processing timeout" in text or "process timeout" in text
 
 
 def build_onebss_temp_file_path(settings: Settings, index: int) -> Path:
