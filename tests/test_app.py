@@ -124,7 +124,7 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
         assert "/static/app.js?v=208" in public_response.text
-        assert "/static/styles.css?v=127" in public_response.text
+        assert "/static/styles.css?v=128" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
         public_js = client.get("/static/app.js?v=208")
@@ -188,7 +188,7 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert "/api/admin/public-messages/feed?limit=100" not in public_js.text
         assert "const PUBLIC_MESSAGES_LIMIT = 10" in public_js.text
         assert 'params.set("after", publicMessagesCursor)' in public_js.text
-        public_css = client.get("/static/styles.css?v=127")
+        public_css = client.get("/static/styles.css?v=128")
         assert public_css.status_code == 200
         assert ".sql-progress-hint" in public_css.text
         assert "Compact desktop rail" in public_css.text
