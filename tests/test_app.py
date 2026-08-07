@@ -696,6 +696,66 @@ def test_sql_claim_preserves_background_process_details() -> None:
             routes.WORKSTATION_HEARTBEATS.clear()
 
 
+def test_empty_onebss_worker_claim_cache_skips_repeated_repository_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    worker_id = f"ws-empty-{uuid.uuid4().hex[:8]}"
+    calls = {"claim": 0}
+
+    class EmptyRepository:
+        def list_system_connections(self) -> list[dict]:
+            return []
+
+        def claim_next_onebss_report_run(self, worker_id: str) -> None:
+            calls["claim"] += 1
+            return None
+
+    routes.invalidate_worker_claim_empty_cache()
+    with routes.WORKSTATION_HEARTBEATS_LOCK:
+        routes.WORKSTATION_HEARTBEATS.clear()
+    monkeypatch.setattr(routes, "build_app_repository", lambda: EmptyRepository())
+    monkeypatch.setattr(routes, "_expire_stale_onebss_worker_runs", lambda *args, **kwargs: None)
+    try:
+        with TestClient(app) as client:
+            headers = {"Authorization": "Bearer test-worker-token"}
+            first = client.post("/api/onebss-worker/tasks/claim", json={"worker_id": worker_id}, headers=headers)
+            second = client.post("/api/onebss-worker/tasks/claim", json={"worker_id": worker_id}, headers=headers)
+
+        assert first.status_code == 200
+        assert first.json()["task"] is None
+        assert second.status_code == 200
+        assert second.json()["cached_empty"] is True
+        assert calls["claim"] == 1
+    finally:
+        routes.invalidate_worker_claim_empty_cache()
+        with routes.WORKSTATION_HEARTBEATS_LOCK:
+            routes.WORKSTATION_HEARTBEATS.clear()
+
+
+def test_sql_worker_queue_invalidates_empty_claim_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    class PersistOnlyRepository:
+        def save_report_run(self, payload: dict) -> None:
+            return None
+
+    job_id = f"sql-cache-{uuid.uuid4().hex}"
+    routes.invalidate_worker_claim_empty_cache()
+    routes.mark_worker_claim_empty("sql")
+    assert routes.worker_claim_empty_cached("sql") is True
+    monkeypatch.setattr(routes, "build_app_repository", lambda: PersistOnlyRepository())
+    try:
+        routes._set_dynamic_report_run_job(
+            job_id,
+            status="queued_worker",
+            message="Da gui lenh SQL cho may tram.",
+            payload={"ma_bao_cao": "CACHE_TEST"},
+            report_code="CACHE_TEST",
+            report_name="Cache test",
+        )
+        assert routes.worker_claim_empty_cached("sql") is False
+    finally:
+        with routes.DYNAMIC_REPORT_RUN_JOBS_LOCK:
+            routes.DYNAMIC_REPORT_RUN_JOBS.pop(job_id, None)
+        routes.invalidate_worker_claim_empty_cache()
+
+
 def test_workstation_priority_blocks_lower_priority_onebss_claim() -> None:
     primary_id = f"ws-primary-{uuid.uuid4().hex[:8]}"
     secondary_id = f"ws-secondary-{uuid.uuid4().hex[:8]}"

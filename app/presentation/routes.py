@@ -137,11 +137,14 @@ WORKSTATION_READY_HEARTBEAT_SECONDS = 90
 WORKSTATION_PROFILE_CACHE_TTL_SECONDS = 60
 WORKSTATION_PROFILE_CACHE_LOCK = threading.Lock()
 WORKSTATION_PROFILE_CACHE: dict[str, Any] = {"expires_at": 0.0, "profiles": {}}
+WORKER_CLAIM_EMPTY_CACHE_TTL_SECONDS = {"onebss": 12.0, "sql": 18.0, "ftp": 45.0}
+WORKER_CLAIM_EMPTY_CACHE_LOCK = threading.Lock()
+WORKER_CLAIM_EMPTY_CACHE: dict[str, float] = {}
 WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_worker", "ftp_report_worker", "excel_export", "drive_upload"]
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260803-python-worker-health-v20"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260803-fast-empty-worker-claim-v21"
 WORKSTATION_CONNECTION_PREFIX = "workstation_"
 WORKSTATION_DEFAULT_PRIORITY = 100
 WORKSTATION_SETUP_INCLUDE_PATHS = (
@@ -2404,6 +2407,44 @@ def invalidate_workstation_profile_cache() -> None:
         WORKSTATION_PROFILE_CACHE["profiles"] = {}
 
 
+def _normalize_worker_claim_queue(queue: str) -> str:
+    normalized = str(queue or "").strip().lower()
+    return normalized if normalized in WORKER_CLAIM_EMPTY_CACHE_TTL_SECONDS else ""
+
+
+def worker_claim_empty_cached(queue: str) -> bool:
+    normalized = _normalize_worker_claim_queue(queue)
+    if not normalized:
+        return False
+    now_monotonic = time.monotonic()
+    with WORKER_CLAIM_EMPTY_CACHE_LOCK:
+        expires_at = float(WORKER_CLAIM_EMPTY_CACHE.get(normalized) or 0.0)
+        if expires_at > now_monotonic:
+            return True
+        WORKER_CLAIM_EMPTY_CACHE.pop(normalized, None)
+    return False
+
+
+def mark_worker_claim_empty(queue: str) -> None:
+    normalized = _normalize_worker_claim_queue(queue)
+    if not normalized:
+        return
+    ttl_seconds = float(WORKER_CLAIM_EMPTY_CACHE_TTL_SECONDS.get(normalized) or 0.0)
+    if ttl_seconds <= 0:
+        return
+    with WORKER_CLAIM_EMPTY_CACHE_LOCK:
+        WORKER_CLAIM_EMPTY_CACHE[normalized] = time.monotonic() + ttl_seconds
+
+
+def invalidate_worker_claim_empty_cache(queue: str = "") -> None:
+    normalized = _normalize_worker_claim_queue(queue)
+    with WORKER_CLAIM_EMPTY_CACHE_LOCK:
+        if normalized:
+            WORKER_CLAIM_EMPTY_CACHE.pop(normalized, None)
+        else:
+            WORKER_CLAIM_EMPTY_CACHE.clear()
+
+
 def _copy_workstation_profiles(profiles: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {worker_id: dict(profile) for worker_id, profile in profiles.items()}
 
@@ -2475,6 +2516,7 @@ def upsert_workstation_profile(
         bool(enabled) and not deleted,
     )
     invalidate_workstation_profile_cache()
+    invalidate_worker_claim_empty_cache()
     return workstation_profile_for(clean_worker_id, workstation_registry_profiles(repository, use_cache=False))
 
 
@@ -4781,6 +4823,8 @@ def _set_dynamic_report_export_job(job_id: str, **updates: Any) -> None:
         job["updated_at"] = time.time()
         snapshot = dict(job)
     if snapshot:
+        if str(snapshot.get("status") or "").lower() == "queued_worker":
+            invalidate_worker_claim_empty_cache("sql")
         _persist_dynamic_report_export_job(job_id, snapshot)
 
 
@@ -5125,6 +5169,8 @@ def _set_dynamic_report_run_job(job_id: str, **updates: Any) -> dict[str, Any]:
         job["updated_at"] = now
         DYNAMIC_REPORT_RUN_JOBS[job_id] = job
         snapshot = dict(job)
+    if str(snapshot.get("status") or "").lower() == "queued_worker":
+        invalidate_worker_claim_empty_cache("sql")
     try:
         repository = build_app_repository()
         save_report_run = getattr(repository, "save_report_run", None)
@@ -5550,7 +5596,6 @@ def _next_dynamic_report_export_worker_job(*, recover_from_history: bool = True)
 @router.post("/api/sql-worker/tasks/claim")
 def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> dict:
     onebss_worker_token(request)
-    repository = build_app_repository()
     claim_details = {"claim": "sql", **(payload.details or {})}
     if payload.version.strip():
         claim_details["worker_version"] = payload.version.strip()
@@ -5561,6 +5606,9 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
         details=claim_details,
         version=payload.version,
     )
+    if worker_claim_empty_cached("sql"):
+        return {"ok": True, "task": None, "message": "Khong co task SQL dang cho may tram.", "cached_empty": True}
+    repository = build_app_repository()
     priority_block = workstation_claim_blocker(payload.worker_id, WORKSTATION_SQL_ROLE_CODES, repository)
     if priority_block:
         return {"ok": True, "task": None, **priority_block}
@@ -5577,6 +5625,7 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
         if not candidate:
             export_candidate = _next_dynamic_report_export_worker_job(recover_from_history=True)
             if not export_candidate:
+                mark_worker_claim_empty("sql")
                 return {"ok": True, "task": None, "message": "Khong co task SQL dang cho may tram."}
             job_id, job = export_candidate
             task_kind = "export"
@@ -5972,6 +6021,7 @@ def start_dynamic_report_export_job(request: Request, payload: RunReportPayload)
         }
         job_snapshot = dict(DYNAMIC_REPORT_EXPORT_JOBS[job_id])
     _persist_dynamic_report_export_job(job_id, job_snapshot)
+    invalidate_worker_claim_empty_cache("sql")
     _record_dynamic_report_history(
         actor=actor["username"],
         event_type="export",
@@ -6608,6 +6658,7 @@ def run_ftp_report(request: Request, payload: RunFtpReportPayload) -> dict:
         })
     except RuntimeError as error:
         raise_ftp_report_schema_error(error)
+    invalidate_worker_claim_empty_cache("ftp")
     try:
         repository.add_audit_log(actor["username"], "ftp_report_job_queued", f"Dua bao cao FTP {ma_bao_cao} vao hang doi: {job_id}")
     except Exception:
@@ -6618,7 +6669,6 @@ def run_ftp_report(request: Request, payload: RunFtpReportPayload) -> dict:
 @router.post("/api/ftp-worker/tasks/claim")
 def claim_ftp_worker_task(request: Request, payload: FtpWorkerClaimPayload) -> dict:
     onebss_worker_token(request)
-    repository = build_app_repository()
     claim_details = {"claim": "ftp", **(payload.details or {})}
     if payload.version.strip():
         claim_details["worker_version"] = payload.version.strip()
@@ -6629,6 +6679,9 @@ def claim_ftp_worker_task(request: Request, payload: FtpWorkerClaimPayload) -> d
         details=claim_details,
         version=payload.version,
     )
+    if worker_claim_empty_cached("ftp"):
+        return {"ok": True, "task": None, "message": "Khong co task FTP dang cho.", "cached_empty": True}
+    repository = build_app_repository()
     try:
         priority_block = workstation_claim_blocker(payload.worker_id, {"ftp_report_worker"}, repository)
         if priority_block:
@@ -6637,6 +6690,7 @@ def claim_ftp_worker_task(request: Request, payload: FtpWorkerClaimPayload) -> d
     except RuntimeError as error:
         raise_ftp_report_schema_error(error)
     if not run:
+        mark_worker_claim_empty("ftp")
         return {"ok": True, "task": None, "message": "Khong co task FTP dang cho."}
     report = repository.get_ftp_report_by_code(str(run.get("ma_bao_cao") or ""))
     if not report:
@@ -7116,6 +7170,7 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
         })
     except (RuntimeError, sqlite3.Error, AttributeError) as error:
         raise_onebss_operation_error(error, "Khong tao duoc task lay bao cao OneBSS")
+    invalidate_worker_claim_empty_cache("onebss")
     try:
         repository.add_audit_log(actor["username"], "onebss_report_job_queued", f"Dua bao cao OneBSS {ma_bao_cao} vao hang doi: {job_id}")
     except Exception:
@@ -7136,6 +7191,8 @@ def claim_onebss_worker_task(request: Request, payload: OneBssWorkerClaimPayload
         details=claim_details,
         version=payload.version,
     )
+    if worker_claim_empty_cached("onebss"):
+        return {"ok": True, "task": None, "message": "Khong co task OneBSS dang cho.", "cached_empty": True}
     repository = build_app_repository()
     try:
         _expire_stale_onebss_worker_runs(repository)
@@ -7146,6 +7203,7 @@ def claim_onebss_worker_task(request: Request, payload: OneBssWorkerClaimPayload
     except RuntimeError as error:
         raise_onebss_report_schema_error(error)
     if not run:
+        mark_worker_claim_empty("onebss")
         return {"ok": True, "task": None, "message": "Khong co task OneBSS dang cho."}
     _record_workstation_heartbeat(
         payload.worker_id,
