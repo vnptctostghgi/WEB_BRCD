@@ -531,27 +531,34 @@ function Get-WorkstationWorkerProcesses {
   }
 }
 
+function Get-WorkstationWorkerPythonProcesses {
+  param([string]$Root)
+  @(Get-WorkstationWorkerProcesses $Root) | Where-Object {
+    ([string]$_.Name) -match "python" -and ([string]$_.CommandLine) -match [regex]::Escape("onebss_workstation_worker.py")
+  }
+}
+
 function Wait-WorkstationWorkerStable {
   param(
     [string]$Root,
     [int]$Seconds = 15
   )
-  $processes = @(Get-WorkstationWorkerProcesses $Root)
+  $processes = @(Get-WorkstationWorkerPythonProcesses $Root)
   if ($processes.Count -eq 0) {
     return @()
   }
   Start-Sleep -Seconds $Seconds
-  return @(Get-WorkstationWorkerProcesses $Root)
+  return @(Get-WorkstationWorkerPythonProcesses $Root)
 }
 
 function Start-WorkstationWorkerNow {
   param([string]$Root)
   Write-Step "Khoi dong worker may tram nen"
-  $running = @(Get-WorkstationWorkerProcesses $Root)
+  $running = @(Get-WorkstationWorkerPythonProcesses $Root)
   if ($running.Count -gt 0) {
     $stable = @(Wait-WorkstationWorkerStable $Root 5)
     if ($stable.Count -gt 0) {
-      Write-Host "Worker dang chay on dinh PID: $($stable.ProcessId -join ', ')" -ForegroundColor Green
+      Write-Host "Python worker dang chay on dinh PID: $($stable.ProcessId -join ', ')" -ForegroundColor Green
       return
     }
   }
@@ -562,7 +569,7 @@ function Start-WorkstationWorkerNow {
   }
   $stable = @(Wait-WorkstationWorkerStable $Root 15)
   if ($stable.Count -gt 0) {
-    Write-Host "Worker da chay qua Scheduled Task on dinh PID: $($stable.ProcessId -join ', ')" -ForegroundColor Green
+    Write-Host "Worker da chay qua Scheduled Task, Python worker PID: $($stable.ProcessId -join ', ')" -ForegroundColor Green
     return
   }
   $workerScript = Join-Path $Root "scripts\start_onebss_worker.ps1"
@@ -576,7 +583,7 @@ function Start-WorkstationWorkerNow {
     Start-Sleep -Seconds 3
     $stable = @(Wait-WorkstationWorkerStable $Root 10)
     if ($stable.Count -gt 0) {
-      Write-Host "Worker da chay nen fallback on dinh PID: $($stable.ProcessId -join ', ')" -ForegroundColor Green
+      Write-Host "Worker da chay nen fallback, Python worker PID: $($stable.ProcessId -join ', ')" -ForegroundColor Green
     } else {
       Write-Warning "Da goi khoi dong worker nhung chua thay process. Kiem tra logs\onebss-worker-error.log."
     }

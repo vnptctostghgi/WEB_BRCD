@@ -297,7 +297,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "Start-WorkstationWorkerNow" in setup_script
         assert "Get-WorkstationWorkerProcesses" in setup_script
         assert "Wait-WorkstationWorkerStable" in setup_script
-        assert "Worker da chay qua Scheduled Task on dinh" in setup_script
+        assert "Get-WorkstationWorkerPythonProcesses" in setup_script
+        assert "Worker da chay qua Scheduled Task, Python worker PID" in setup_script
         assert "onebss_workstation_worker.py" in setup_script
         assert "Stop-ScheduledTask -TaskName \"VNPTCTO OneBSS Worker\"" in setup_script
         assert "Start-Process -FilePath \"powershell.exe\"" in setup_script
@@ -343,8 +344,9 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "health-check-2026.08.03-failover" in health_script
         assert "Khong tim thay Scheduled Task; khong bat buoc neu Local API dang OK." in health_script
         assert "Wait-WorkerProcessesStable" in health_script
+        assert "Get-WorkerPythonProcesses" in health_script
         assert "Test-OneBssWorkerTaskUsesDirectWorker" in health_script
-        assert "Da start Scheduled Task on dinh" in health_script
+        assert "Da start Scheduled Task, Python worker PID" in health_script
         assert "Da start worker fallback" in health_script
         assert "Da start launcher" not in health_script
         assert "Start-WorkerIfMissing" in health_script

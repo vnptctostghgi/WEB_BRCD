@@ -75,14 +75,20 @@ function Get-WorkerProcesses {
   }
 }
 
+function Get-WorkerPythonProcesses {
+  @(Get-WorkerProcesses) | Where-Object {
+    ([string]$_.Name) -match "python" -and ([string]$_.CommandLine) -match [regex]::Escape("onebss_workstation_worker.py")
+  }
+}
+
 function Wait-WorkerProcessesStable {
   param([int]$Seconds = 15)
-  $processes = @(Get-WorkerProcesses)
+  $processes = @(Get-WorkerPythonProcesses)
   if ($processes.Count -eq 0) {
     return @()
   }
   Start-Sleep -Seconds $Seconds
-  return @(Get-WorkerProcesses)
+  return @(Get-WorkerPythonProcesses)
 }
 
 function Test-OneBssWorkerTaskUsesDirectWorker {
@@ -100,11 +106,11 @@ function Test-OneBssWorkerTaskUsesDirectWorker {
 }
 
 function Start-WorkerIfMissing {
-  $processes = @(Get-WorkerProcesses)
+  $processes = @(Get-WorkerPythonProcesses)
   if ($processes.Count -gt 0) {
     $stableProcesses = @(Wait-WorkerProcessesStable 5)
     if ($stableProcesses.Count -gt 0) {
-      return [pscustomobject]@{ Ok = $true; Detail = "Dang chay PID: $($stableProcesses.ProcessId -join ', ')" }
+      return [pscustomobject]@{ Ok = $true; Detail = "Python worker dang chay PID: $($stableProcesses.ProcessId -join ', ')" }
     }
   }
   if (Test-OneBssWorkerTaskUsesDirectWorker) {
@@ -113,9 +119,9 @@ function Start-WorkerIfMissing {
       Start-Sleep -Seconds 5
     } catch {
     }
-    $stableProcesses = @(Wait-WorkerProcessesStable 15)
+    $stableProcesses = @(Wait-WorkerProcessesStable 20)
     if ($stableProcesses.Count -gt 0) {
-      return [pscustomobject]@{ Ok = $true; Detail = "Da start Scheduled Task on dinh, PID: $($stableProcesses.ProcessId -join ', ')" }
+      return [pscustomobject]@{ Ok = $true; Detail = "Da start Scheduled Task, Python worker PID: $($stableProcesses.ProcessId -join ', ')" }
     }
   }
   $root = [Environment]::GetEnvironmentVariable("VNPTCTO_WORKSTATION_ROOT", "User")
@@ -133,9 +139,9 @@ function Start-WorkerIfMissing {
   } catch {
     return [pscustomobject]@{ Ok = $false; Detail = $_.Exception.Message }
   }
-  $stableProcesses = @(Wait-WorkerProcessesStable 10)
+  $stableProcesses = @(Wait-WorkerProcessesStable 20)
   if ($stableProcesses.Count -gt 0) {
-    return [pscustomobject]@{ Ok = $true; Detail = "Da start worker fallback on dinh, PID: $($stableProcesses.ProcessId -join ', ')" }
+    return [pscustomobject]@{ Ok = $true; Detail = "Da start worker fallback, Python worker PID: $($stableProcesses.ProcessId -join ', ')" }
   }
   return [pscustomobject]@{ Ok = $false; Detail = "Da goi start worker nhung chua thay process. Xem onebss-worker-error.log." }
 }
