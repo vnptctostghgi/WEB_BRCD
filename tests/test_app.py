@@ -118,11 +118,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=205" in public_response.text
+        assert "/static/app.js?v=206" in public_response.text
         assert "/static/styles.css?v=126" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
-        public_js = client.get("/static/app.js?v=205")
+        public_js = client.get("/static/app.js?v=206")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -989,7 +989,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=205" in page.text
+        assert "/static/app.js?v=206" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -5659,6 +5659,37 @@ def test_onebss_run_derives_drive_link_from_storage_status() -> None:
         assert runs[0]["file_url"] == "https://drive.google.com/file/d/driveFile_003-ABC/view"
 
 
+def test_supabase_requests_reuse_shared_http_client(monkeypatch) -> None:
+    from app.data_access import supabase_repository as supabase_module
+
+    class FakeResponse:
+        status_code = 200
+        text = "[]"
+
+        @staticmethod
+        def json():
+            return []
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def request(self, method, url, **kwargs):
+            self.calls.append((method, url, kwargs))
+            return FakeResponse()
+
+    client = FakeClient()
+    monkeypatch.setattr(supabase_module, "SUPABASE_HTTP_CLIENT", client)
+    repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
+
+    repository._request("GET", "mobile_devices")
+    repository._request("GET", "mobile_sms_messages")
+
+    assert len(client.calls) == 2
+    assert client.calls[0][1].endswith("/mobile_devices")
+    assert client.calls[1][1].endswith("/mobile_sms_messages")
+
+
 def test_supabase_onebss_run_uses_parameters_json_column(monkeypatch) -> None:
     captured = {}
     repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
@@ -6527,7 +6558,7 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
         assert "/static/shell.js?v=24" in home.text
-        assert "/static/app.js?v=205" not in home.text
+        assert "/static/app.js?v=206" not in home.text
         shell_js = client.get("/static/shell.js?v=24")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
@@ -6535,7 +6566,7 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "function readCachedNavigation" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=205" in shell_js.text
+        assert "/static/app.js?v=206" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -6549,7 +6580,7 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
         assert "/static/shell.js?v=24" in dashboard.text
-        assert "/static/app.js?v=205" not in dashboard.text
+        assert "/static/app.js?v=206" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -6569,49 +6600,49 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "dynamic-report-body" not in reports.text
         assert "dynamic-report-prev" not in reports.text
         assert "dynamic-report-next" not in reports.text
-        assert "/static/app.js?v=205" in reports.text
+        assert "/static/app.js?v=206" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=205" in workstation.text
+        assert "/static/app.js?v=206" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=205" in work_tasks.text
+        assert "/static/app.js?v=206" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=205" in report_links.text
+        assert "/static/app.js?v=206" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=205" in system.text
+        assert "/static/app.js?v=206" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=205" in onebss_mining.text
+        assert "/static/app.js?v=206" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 
         ftp_mining = client.get("/daodulieuftp")
         assert ftp_mining.status_code == 200
         assert "view-ftp-mining" in ftp_mining.text
-        assert "/static/app.js?v=205" in ftp_mining.text
+        assert "/static/app.js?v=206" in ftp_mining.text
         assert "/static/ftp-mining.js" not in ftp_mining.text
         assert ftp_mining.text.count('class="app-view') == 1
 

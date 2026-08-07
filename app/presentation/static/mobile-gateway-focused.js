@@ -1,6 +1,6 @@
 // Focused Mobile Gateway UI for SMS + OTP. Loaded after app.js on purpose.
 const MOBILE_GATEWAY_TABLE_PAGE_SIZE = window.TABLE_PAGE_SIZE || 20;
-const MOBILE_GATEWAY_READ_TIMEOUT_MS = 8000;
+const MOBILE_GATEWAY_READ_TIMEOUT_MS = 12000;
 let mobilePublicSmsRules = [];
 
 async function mobileGatewayApi(url, options = {}) {

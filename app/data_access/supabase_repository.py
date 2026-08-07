@@ -33,6 +33,12 @@ from app.modules.mobile_gateway.migrations import MOBILE_GATEWAY_FEATURE_ROWS
 from app.modules.public_messages.migrations import PUBLIC_MESSAGES_FEATURE_ROWS
 
 
+SUPABASE_HTTP_CLIENT = httpx.Client(
+    timeout=httpx.Timeout(20.0, connect=10.0),
+    limits=httpx.Limits(max_connections=50, max_keepalive_connections=20, keepalive_expiry=30.0),
+)
+
+
 FEATURE_ROWS = [
     {"code": "dashboard", "name": "Tổng quan", "parent_code": None, "sort_order": 10},
     {"code": "quantriweb", "name": "Quản trị hệ thống", "parent_code": None, "sort_order": 20},
@@ -2232,8 +2238,7 @@ class SupabaseRepository:
 
     def _request(self, method: str, table: str, *, params: dict[str, str] | None = None, json: Any = None, headers: dict[str, str] | None = None) -> Any:
         url = f"{self.rest_url}/{table}"
-        with httpx.Client(timeout=20) as client:
-            response = client.request(method, url, params=params, json=json, headers=self._headers(headers))
+        response = SUPABASE_HTTP_CLIENT.request(method, url, params=params, json=json, headers=self._headers(headers))
         if response.status_code == 409:
             raise sqlite3.IntegrityError(response.text)
         if response.status_code >= 400:
