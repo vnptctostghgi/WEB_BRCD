@@ -6850,6 +6850,68 @@ def test_dashboard_refresh_uses_isolated_worker_queue(monkeypatch: pytest.Monkey
         routes.invalidate_worker_claim_empty_cache("sql")
 
 
+def test_dashboard_refresh_queue_persists_and_recovers(monkeypatch: pytest.MonkeyPatch) -> None:
+    class DurableDashboardRepository:
+        def __init__(self) -> None:
+            self.saved: dict[str, dict] = {}
+
+        def save_report_run(self, payload: dict) -> None:
+            run_id = str(payload.get("run_id") or payload.get("job_id") or "")
+            self.saved[run_id] = dict(payload)
+
+        def get_report_run(self, run_id: str) -> dict | None:
+            return dict(self.saved.get(run_id) or {}) or None
+
+        def list_report_runs(self, run_type: str = "", statuses: list[str] | None = None, limit: int = 200) -> list[dict]:
+            status_set = set(statuses or [])
+            rows = []
+            for payload in self.saved.values():
+                if run_type and payload.get("run_type") != run_type:
+                    continue
+                if status_set and payload.get("status") not in status_set:
+                    continue
+                rows.append(dict(payload))
+            return rows[:limit]
+
+    repository = DurableDashboardRepository()
+    job_id = "dashboard_" + uuid.uuid4().hex[:24]
+    monkeypatch.setattr(routes, "build_app_repository", lambda: repository)
+    with routes.DASHBOARD_REFRESH_JOBS_LOCK:
+        routes.DASHBOARD_REFRESH_JOBS.clear()
+    routes.invalidate_worker_claim_empty_cache("sql")
+
+    try:
+        routes._set_dashboard_refresh_job(
+            job_id,
+            status="queued_worker",
+            message="Da gui lenh lam moi cache dashboard cho may tram.",
+            report_code="DASHBOARD_QUEUE_TEST",
+            report_name="Dashboard queue test",
+            payload={
+                "ma_bao_cao": "DASHBOARD_QUEUE_TEST",
+                "filters": {},
+                "page": 1,
+                "page_size": 50,
+                "dashboard_cache_metadata": {"chart_key": "chart:test"},
+            },
+        )
+        assert repository.saved[job_id]["run_type"] == "dashboard_refresh"
+        assert routes.worker_claim_empty_cached("sql") is False
+
+        with routes.DASHBOARD_REFRESH_JOBS_LOCK:
+            routes.DASHBOARD_REFRESH_JOBS.clear()
+        recovered = routes._next_dashboard_refresh_worker_job()
+        assert recovered is not None
+        recovered_id, recovered_job = recovered
+        assert recovered_id == job_id
+        assert recovered_job["run_type"] == "dashboard_refresh"
+        assert recovered_job["payload"]["ma_bao_cao"] == "DASHBOARD_QUEUE_TEST"
+    finally:
+        with routes.DASHBOARD_REFRESH_JOBS_LOCK:
+            routes.DASHBOARD_REFRESH_JOBS.clear()
+        routes.invalidate_worker_claim_empty_cache("sql")
+
+
 def test_dashboard_layout_tab_uses_bulk_chart_cache_for_cached_widgets() -> None:
     class FakeSettings:
         dashboard_chart_cache_enabled = True

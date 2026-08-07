@@ -5186,6 +5186,27 @@ def _is_dashboard_refresh_job_id(job_id: str) -> bool:
     return str(job_id or "").startswith("dashboard_")
 
 
+def _dashboard_refresh_job_age_seconds(job: dict[str, Any]) -> float:
+    value = job.get("updated_at") or job.get("created_at") or 0
+    if isinstance(value, (int, float)):
+        timestamp = float(value)
+    else:
+        try:
+            timestamp = datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+        except (TypeError, ValueError):
+            timestamp = 0.0
+    return max(0.0, time.time() - timestamp) if timestamp else 0.0
+
+
+def _dashboard_refresh_job_is_active(job: dict[str, Any] | None) -> bool:
+    if not job:
+        return False
+    status_value = str(job.get("status") or "").lower()
+    if status_value not in DASHBOARD_REFRESH_ACTIVE_STATUSES:
+        return False
+    return _dashboard_refresh_job_age_seconds(job) <= DASHBOARD_REFRESH_JOB_TTL_SECONDS
+
+
 def _cleanup_dashboard_refresh_jobs() -> None:
     now = time.time()
     with DASHBOARD_REFRESH_JOBS_LOCK:
@@ -5199,6 +5220,24 @@ def _cleanup_dashboard_refresh_jobs() -> None:
             DASHBOARD_REFRESH_JOBS.pop(job_id, None)
 
 
+def _persist_dashboard_refresh_job(job_id: str, snapshot: dict[str, Any]) -> None:
+    try:
+        repository = build_app_repository()
+        save_report_run = getattr(repository, "save_report_run", None)
+        if callable(save_report_run):
+            save_report_run({**snapshot, "job_id": job_id, "run_id": job_id, "run_type": "dashboard_refresh"})
+        if str(snapshot.get("status") or "").lower() == "complete" and isinstance(snapshot.get("result"), dict):
+            save_report_result = getattr(repository, "save_report_result", None)
+            if callable(save_report_result):
+                save_report_result(job_id, snapshot["result"])
+            payload = snapshot.get("payload") if isinstance(snapshot.get("payload"), dict) else {}
+            cache_metadata = payload.get("dashboard_cache_metadata") if isinstance(payload.get("dashboard_cache_metadata"), dict) else None
+            if cache_metadata:
+                build_database_service().save_dashboard_chart_cache(cache_metadata, snapshot["result"])
+    except Exception as error:
+        logger.warning("Cannot persist dashboard refresh job %s: %s", job_id, error)
+
+
 def _set_dashboard_refresh_job(job_id: str, **updates: Any) -> dict[str, Any]:
     now = time.time()
     with DASHBOARD_REFRESH_JOBS_LOCK:
@@ -5209,13 +5248,25 @@ def _set_dashboard_refresh_job(job_id: str, **updates: Any) -> dict[str, Any]:
         snapshot = dict(job)
     if str(snapshot.get("status") or "").lower() == "queued_worker":
         invalidate_worker_claim_empty_cache("sql")
+    _persist_dashboard_refresh_job(job_id, snapshot)
     return snapshot
 
 
 def _get_dashboard_refresh_job(job_id: str) -> dict[str, Any] | None:
     with DASHBOARD_REFRESH_JOBS_LOCK:
         job = DASHBOARD_REFRESH_JOBS.get(job_id)
-        return dict(job) if job else None
+        if job:
+            return dict(job)
+    try:
+        loaded = build_app_repository().get_report_run(job_id)
+    except Exception as error:
+        logger.warning("Cannot load dashboard refresh job %s from Supabase: %s", job_id, error)
+        return None
+    if not isinstance(loaded, dict) or str(loaded.get("run_type") or "") != "dashboard_refresh":
+        return None
+    with DASHBOARD_REFRESH_JOBS_LOCK:
+        DASHBOARD_REFRESH_JOBS[job_id] = dict(loaded)
+    return dict(loaded)
 
 
 def _next_dashboard_refresh_worker_job() -> tuple[str, dict[str, Any]] | None:
@@ -5227,8 +5278,22 @@ def _next_dashboard_refresh_worker_job() -> tuple[str, dict[str, Any]] | None:
             if str(job.get("status") or "").lower() == "queued_worker"
         ]
     if not candidates:
+        try:
+            persisted = build_app_repository().list_report_runs("dashboard_refresh", ["queued_worker"], 200)
+        except Exception as error:
+            logger.warning("Cannot read queued dashboard refresh jobs from Supabase: %s", error)
+            persisted = []
+        candidates = [
+            (str(job.get("job_id") or job.get("run_id") or ""), dict(job))
+            for job in persisted
+            if str(job.get("job_id") or job.get("run_id") or "")
+        ]
+    if not candidates:
         return None
     candidates.sort(key=lambda item: _dynamic_report_job_sort_value(item[1]), reverse=True)
+    with DASHBOARD_REFRESH_JOBS_LOCK:
+        for job_id, job in candidates:
+            DASHBOARD_REFRESH_JOBS[job_id] = dict(job)
     return candidates[0]
 
 
@@ -5304,11 +5369,11 @@ def _queue_dashboard_refresh_requests(result: dict[str, Any], actor: str) -> dic
             "dashboard_cache_metadata": metadata,
         }
         current = _get_dashboard_refresh_job(job_id)
-        if not current or str(current.get("status") or "").lower() not in DASHBOARD_REFRESH_ACTIVE_STATUSES:
+        if not _dashboard_refresh_job_is_active(current):
             _set_dashboard_refresh_job(
                 job_id,
                 status="queued_worker",
-                message="Da gui lenh lam moi cache dashboard cho may tram.",
+                message="Dang tai du lieu dashboard qua may tram.",
                 created_by=actor,
                 report_code=str(item.get("ma_bao_cao") or ""),
                 report_name=str(item.get("report_name") or item.get("ma_bao_cao") or ""),

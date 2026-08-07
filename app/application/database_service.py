@@ -1353,7 +1353,7 @@ class DatabaseService:
                 data_cache.setdefault(cache_key, {
                     "ok": False,
                     "status": "refreshing",
-                    "message": "Da gui lenh lam moi dashboard cho may tram. Du lieu se tu cap nhat khi cache moi san sang.",
+                    "message": "Dang tai du lieu dashboard qua may tram. Ket qua se hien truc tiep tren bieu do khi hoan tat.",
                     "rows": [],
                     "columns": [],
                     "pagination": {"page": 1, "page_size": int(job.get("page_size") or 50), "total": 0},
