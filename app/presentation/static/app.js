@@ -38,6 +38,7 @@ let sqlReports = [];
 let sqlReportDrafts = [];
 let menuLayoutState = [];
 let menuLayoutPage = 1;
+let menuLayoutSearchQuery = "";
 let auditLogs = [];
 let dashboardFiberLoaded = false;
 let dashboardViewerLayouts = [];
@@ -974,6 +975,13 @@ $("#new-menu-name")?.addEventListener("keydown", async (event) => {
   if (event.key !== "Enter") return;
   event.preventDefault();
   await createMenu($("#create-menu"));
+});
+
+$("#menu-layout-search")?.addEventListener("input", (event) => {
+  collectMenuLayoutStateFromDom();
+  menuLayoutSearchQuery = event.currentTarget.value || "";
+  menuLayoutPage = 1;
+  renderMenuLayout();
 });
 
 function filterNavigation(keyword) {
@@ -2571,6 +2579,37 @@ function menuLayoutDisplayFeatures() {
   return dedupeFeaturesForDisplay(menuLayoutState).filter((feature) => !isTechnicalPermissionFeature(feature));
 }
 
+function normalizeMenuSearchText(value) {
+  return repairTextEncoding(String(value || ""))
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function menuLayoutSearchHaystack(feature, displayFeatures) {
+  const parent = displayFeatures.find((item) => item.code === feature.parent_code);
+  return normalizeMenuSearchText([
+    feature.name,
+    feature.code,
+    parent?.name || "",
+    parent?.code || "",
+  ].join(" "));
+}
+
+function filterMenuLayoutRows(rows, displayFeatures) {
+  const searchInput = $("#menu-layout-search");
+  const rawQuery = searchInput ? searchInput.value : menuLayoutSearchQuery;
+  menuLayoutSearchQuery = rawQuery || "";
+  const terms = normalizeMenuSearchText(menuLayoutSearchQuery).split(" ").filter(Boolean);
+  if (!terms.length) return rows;
+  return rows.filter(({ feature }) => {
+    const haystack = menuLayoutSearchHaystack(feature, displayFeatures);
+    return terms.every((term) => haystack.includes(term));
+  });
+}
+
 function renderParentOptions(feature) {
   const descendants = descendantCodesForFeature(feature.code);
   return [`<option value="">Không thuộc nhóm</option>`]
@@ -2586,7 +2625,7 @@ function renderMenuLayout() {
   const table = $("#menu-layout-table");
   if (!table) return;
   const displayFeatures = menuLayoutDisplayFeatures();
-  const rows = flattenFeatureTree(buildFeatureTree(displayFeatures));
+  const rows = filterMenuLayoutRows(flattenFeatureTree(buildFeatureTree(displayFeatures)), displayFeatures);
   renderMenuLayoutPager(rows.length);
   const start = (menuLayoutPage - 1) * TABLE_PAGE_SIZE;
   const visibleRows = rows.slice(start, start + TABLE_PAGE_SIZE);
@@ -2613,7 +2652,11 @@ function renderMenuLayout() {
         </td>
       </tr>
     `;
-  }).join("") : emptyRow(3, "Chưa có chức năng", "Danh mục chức năng chưa có dữ liệu.");
+  }).join("") : emptyRow(
+    3,
+    menuLayoutSearchQuery.trim() ? "Không tìm thấy menu" : "Chưa có chức năng",
+    menuLayoutSearchQuery.trim() ? "Thử tìm bằng tên, mã chức năng hoặc nhóm cha khác." : "Danh mục chức năng chưa có dữ liệu.",
+  );
 
   document.querySelectorAll("#menu-layout-table select[name='parent_code']").forEach((select) => {
     select.addEventListener("change", () => changeMenuParent(select.closest("tr").dataset.featureRow, select.value));
@@ -2663,6 +2706,9 @@ async function createMenu(button = null) {
     const response = await api("/api/admin/features/menu", { method: "POST", body: JSON.stringify({ name: cleanedName }) });
     clearCachedNavigation();
     if (menuNameInput) menuNameInput.value = "";
+    const searchInput = $("#menu-layout-search");
+    if (searchInput) searchInput.value = "";
+    menuLayoutSearchQuery = "";
     await loadMenuLayout({ focusCode: response.feature?.code || "" });
     await syncNavigationFromFeatures();
     showMessage($("#menu-layout-message"), "Đã tạo menu. Có thể đổi nhóm/thứ tự rồi bấm Lưu menu nếu cần.", "success");

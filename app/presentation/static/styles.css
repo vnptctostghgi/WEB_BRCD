@@ -3391,10 +3391,10 @@ legend {
 
 .menu-admin-toolbar {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) auto auto;
+  grid-template-columns: minmax(210px, .85fr) minmax(260px, 1fr) auto auto;
   align-items: center;
   gap: .65rem;
-  min-width: min(100%, 760px);
+  min-width: min(100%, 980px);
 }
 
 .menu-admin-toolbar .form-control {
