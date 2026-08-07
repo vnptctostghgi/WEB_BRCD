@@ -5144,6 +5144,22 @@ def test_workstation_worker_ftp_claim_transient_returns_to_poll(monkeypatch) -> 
     assert ftp_claim["kwargs"]["_retry_forever"] is False
 
 
+def test_workstation_worker_main_continues_after_poll_exception(monkeypatch, capsys) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    monkeypatch.setattr(worker.sys, "argv", ["onebss_workstation_worker.py", "--token", "token", "--once"])
+    monkeypatch.setattr(worker, "send_heartbeat", lambda *args, **kwargs: None)
+    monkeypatch.setattr(worker.time, "sleep", lambda seconds: None)
+
+    def fail_poll(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(worker, "poll_worker_once", fail_poll)
+
+    assert worker.main() == 0
+    assert "Vong lap worker loi" in capsys.readouterr().err
+
+
 def test_sql_worker_posts_drive_export_result_to_web(monkeypatch) -> None:
     from scripts import onebss_workstation_worker as worker
 

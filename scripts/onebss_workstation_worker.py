@@ -11,6 +11,7 @@ import queue
 import sys
 import threading
 import time
+import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -639,6 +640,7 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
         duration_ms = int((time.monotonic() - started) * 1000)
         error_message = str(error)[:500] or error.__class__.__name__
         print(f"Task OneBSS loi: {error_message}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         try:
             request_json(
                 client,
@@ -857,6 +859,7 @@ def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
     except Exception as error:
         message = str(error)[:500] or error.__class__.__name__
         print(f"Task SQL loi: {message}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         try:
             request_json(
                 client,
@@ -1081,6 +1084,7 @@ def process_ftp_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
     except Exception as error:
         message = str(error)[:500] or error.__class__.__name__
         print(f"Task FTP loi: {message}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         try:
             request_json(
                 client,
@@ -1248,7 +1252,17 @@ def main() -> int:
                 last_heartbeat = now
             include_sql = now >= next_sql_poll
             include_ftp = now >= next_ftp_poll
-            processed = poll_worker_once(client, args.worker_id, args.poll_seconds, include_sql=include_sql, include_ftp=include_ftp)
+            try:
+                processed = poll_worker_once(client, args.worker_id, args.poll_seconds, include_sql=include_sql, include_ftp=include_ftp)
+            except Exception as error:
+                processed = False
+                print(
+                    f"Vong lap worker loi: {describe_request_error(error)}. Worker se tiep tuc thu lai.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                traceback.print_exc(file=sys.stderr)
+                time.sleep(max(5.0, args.poll_seconds))
             if include_sql:
                 next_sql_poll = time.monotonic() + sql_poll_seconds
             if include_ftp:
@@ -1261,4 +1275,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except Exception as error:
+        print(f"Worker dung do loi khong mong muon: {describe_request_error(error)}", file=sys.stderr, flush=True)
+        traceback.print_exc(file=sys.stderr)
+        raise SystemExit(1)
