@@ -606,6 +606,15 @@ function writeCachedNavigation(data) {
   }
 }
 
+function clearCachedNavigation() {
+  navigationPreloadPromise = null;
+  try {
+    localStorage.removeItem(navigationClientCacheKey());
+  } catch {
+    // Best effort only; navigation will still be refreshed from the API.
+  }
+}
+
 async function fetchNavigation() {
   const cached = readCachedNavigation();
   if (cached) return cached;
@@ -952,6 +961,19 @@ document.addEventListener("click", async (event) => {
   if (!button) return;
   event.preventDefault();
   await saveMenuLayout(button);
+});
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("#create-menu");
+  if (!button) return;
+  event.preventDefault();
+  await createMenu(button);
+});
+
+$("#new-menu-name")?.addEventListener("keydown", async (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  await createMenu($("#create-menu"));
 });
 
 function filterNavigation(keyword) {
@@ -2573,18 +2595,25 @@ function renderMenuLayout() {
     const siblingIndex = siblings.findIndex((item) => item.code === feature.code);
     return `
       <tr data-feature-row="${escapeHtml(feature.code)}">
+        <td>
+          <div class="menu-feature-cell" style="--menu-level:${level}">
+            <input class="form-control menu-name-input" name="name" value="${escapeHtml(feature.name)}" />
+            <div class="menu-feature-meta">
+              <code class="menu-code-badge">${escapeHtml(feature.code)}</code>
+              <span class="menu-level-badge">Cấp ${level + 1}</span>
+            </div>
+          </div>
+        </td>
+        <td><select class="form-control" name="parent_code">${renderParentOptions(feature)}</select></td>
         <td class="table-action-cell">
           <div class="action-group menu-move-actions">
             <button class="table-action" data-menu-move="up" data-menu-code="${escapeHtml(feature.code)}" type="button" ${siblingIndex <= 0 ? "disabled" : ""}>Lên</button>
             <button class="table-action" data-menu-move="down" data-menu-code="${escapeHtml(feature.code)}" type="button" ${siblingIndex >= siblings.length - 1 ? "disabled" : ""}>Xuống</button>
           </div>
         </td>
-        <td><div class="menu-feature-cell" style="--menu-level:${level}"><strong>${escapeHtml(feature.code)}</strong><small>Cấp ${level + 1}</small></div></td>
-        <td><input class="form-control" name="name" value="${escapeHtml(feature.name)}" /></td>
-        <td><select class="form-control" name="parent_code">${renderParentOptions(feature)}</select></td>
       </tr>
     `;
-  }).join("") : emptyRow(4, "Chưa có chức năng", "Danh mục chức năng chưa có dữ liệu.");
+  }).join("") : emptyRow(3, "Chưa có chức năng", "Danh mục chức năng chưa có dữ liệu.");
 
   document.querySelectorAll("#menu-layout-table select[name='parent_code']").forEach((select) => {
     select.addEventListener("change", () => changeMenuParent(select.closest("tr").dataset.featureRow, select.value));
@@ -2620,7 +2649,7 @@ function moveMenuItem(code, direction) {
   renderMenuLayout();
 }
 
-async function createMenu() {
+async function createMenu(button = null) {
   const menuNameInput = $("#new-menu-name");
   const cleanedName = menuNameInput?.value.trim() || "";
   if (!cleanedName) {
@@ -2628,35 +2657,40 @@ async function createMenu() {
     menuNameInput?.focus();
     return;
   }
-  const button = $("#create-menu");
-  if (button) button.disabled = true;
+  const createButton = button || $("#create-menu");
+  if (createButton) setButtonLoading(createButton, true);
   try {
-    await api("/api/admin/features/menu", { method: "POST", body: JSON.stringify({ name: cleanedName }) });
+    const response = await api("/api/admin/features/menu", { method: "POST", body: JSON.stringify({ name: cleanedName }) });
+    clearCachedNavigation();
     if (menuNameInput) menuNameInput.value = "";
-    await loadMenuLayout();
-    showMessage($("#menu-layout-message"), "\u0110\u00e3 t\u1ea1o menu. B\u1ea5m L\u01b0u c\u1ea5u tr\u00fac menu \u0111\u1ec3 ch\u1ed1t c\u00e2y menu.");
+    await loadMenuLayout({ focusCode: response.feature?.code || "" });
+    await syncNavigationFromFeatures();
+    showMessage($("#menu-layout-message"), "Đã tạo menu. Có thể đổi nhóm/thứ tự rồi bấm Lưu menu nếu cần.", "success");
   } catch (error) {
     showMessage($("#menu-layout-message"), error.message, "error");
   } finally {
-    if (button) button.disabled = false;
+    if (createButton) setButtonLoading(createButton, false);
   }
 }
 
-async function loadMenuLayout() {
+async function loadMenuLayout(options = {}) {
   features = (await api("/api/admin/features")).features;
   markDataFresh("features");
   menuLayoutState = features.map((feature) => ({ ...feature }));
-  menuLayoutPage = 1;
+  const focusCode = String(options.focusCode || "");
+  if (focusCode) {
+    const rows = flattenFeatureTree(buildFeatureTree(menuLayoutDisplayFeatures()));
+    const index = rows.findIndex(({ feature }) => feature.code === focusCode);
+    menuLayoutPage = index >= 0 ? Math.floor(index / TABLE_PAGE_SIZE) + 1 : 1;
+  } else if (!options.keepPage) {
+    menuLayoutPage = 1;
+  }
   renderMenuLayout();
 }
 
 async function saveMenuLayout(button = null) {
   const saveButton = button || $("#save-menu-layout");
-  const originalLabel = saveButton?.textContent;
-  if (saveButton) {
-    saveButton.disabled = true;
-    saveButton.textContent = "Đang lưu...";
-  }
+  if (saveButton) setButtonLoading(saveButton, true);
   try {
     collectMenuLayoutStateFromDom();
     if (!menuLayoutState.length) {
@@ -2671,14 +2705,12 @@ async function saveMenuLayout(button = null) {
       sort_order: Number(feature.sort_order || 0),
     }));
     await api("/api/admin/features/layout", { method: "PUT", body: JSON.stringify({ features: payload }) });
-    showMessage($("#menu-layout-message"), "Đã lưu cấu trúc menu. Trang sẽ tải lại để hiển thị cây menu mới.");
+    clearCachedNavigation();
+    showMessage($("#menu-layout-message"), "Đã lưu menu. Trang sẽ tải lại để hiển thị cây menu mới.", "success");
     window.setTimeout(() => window.location.reload(), 600);
   } catch (error) {
     showMessage($("#menu-layout-message"), error.message, "error");
-    if (saveButton) {
-      saveButton.disabled = false;
-      saveButton.textContent = originalLabel || "Lưu cấu trúc menu";
-    }
+    if (saveButton) setButtonLoading(saveButton, false);
   }
 }
 
