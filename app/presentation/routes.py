@@ -145,7 +145,7 @@ WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_w
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260807-onebss-token-dedupe-time-v29"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260807-onebss-otp-relogin-grid-timeout-v30"
 WORKSTATION_CONNECTION_PREFIX = "workstation_"
 WORKSTATION_DEFAULT_PRIORITY = 100
 WORKSTATION_SETUP_INCLUDE_PATHS = (
@@ -3194,6 +3194,7 @@ def workstation_setup_config_script(request: Request) -> str:
         ("OneBssUsername", settings.onebss_username, "OneBSS username from web settings."),
         ("OneBssPassword", secret_text(settings.onebss_password), "OneBSS password from web settings."),
         ("OneBssDownloadTimeoutSeconds", str(settings.onebss_download_timeout_seconds), "OneBSS download timeout."),
+        ("OneBssGridTimeoutSeconds", str(settings.onebss_grid_timeout_seconds or 90), "Fast timeout for OneBSS grid API before Excel fallback."),
         ("OneBssProcessingTimeoutRetryAttempts", str(settings.onebss_processing_timeout_retry_attempts or 3), "Retry count when OneBSS reports processing timeout."),
         ("OneBssProcessingTimeoutRetryDelaySeconds", str(settings.onebss_processing_timeout_retry_delay_seconds or 8), "Seconds between OneBSS processing-timeout retries."),
         ("OneBssTaskTimeoutSeconds", "1200", "Maximum wall-clock seconds for one OneBSS worker task."),

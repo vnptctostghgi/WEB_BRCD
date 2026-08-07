@@ -48,6 +48,7 @@ ONEBSS_API_CLIENT_ID = "clientapp"
 ONEBSS_API_CLIENT_SECRET = "password"
 ONEBSS_API_META_KEYS = {"baocao_id"}
 ONEBSS_EXPORT_TIMEOUT_SECONDS = 900
+ONEBSS_GRID_TIMEOUT_SECONDS = 90
 ONEBSS_PROCESSING_TIMEOUT_RETRY_ATTEMPTS = 3
 ONEBSS_PROCESSING_TIMEOUT_RETRY_DELAY_SECONDS = 8
 KNOWN_ONEBSS_REPORT_IDS = {
@@ -978,6 +979,8 @@ def download_onebss_grid_file_api(
                 progress_callback=progress_callback,
             )
         except OneBssDownloadError as error:
+            if onebss_error_looks_grid_wait_timeout(error):
+                raise
             if not onebss_error_looks_processing_timeout(error) or attempt >= attempts:
                 raise
             emit_onebss_progress(
@@ -1004,10 +1007,11 @@ def _download_onebss_grid_file_api_once(
     request_id = datetime.now(LOCAL_TIMEZONE).strftime("%d%m%y%H%M%S") + str(int(time.time() * 1000) % 1000).zfill(3)
     headers = {**onebss_api_auth_headers(token), "apiKey": "x"}
     payload = {"baocao_id": report_id, "params": export_params}
-    timeout = onebss_api_timeout(settings, minimum_seconds=ONEBSS_EXPORT_TIMEOUT_SECONDS)
+    timeout_seconds = onebss_grid_timeout_seconds(settings)
+    timeout = httpx.Timeout(float(timeout_seconds), connect=20.0)
     try:
         emit_onebss_progress(progress_callback, f"Da truyen tham so len OneBSS: {onebss_parameter_progress_label(export_params)}.")
-        emit_onebss_progress(progress_callback, "Dang cho OneBSS tra du lieu bao cao.")
+        emit_onebss_progress(progress_callback, f"Dang cho OneBSS tra du lieu bao cao toi da {timeout_seconds} giay.")
         with httpx.Client(timeout=timeout) as client:
             response = client.post(
                 f"{ONEBSS_API_BASE_URL}/web-report/report/bi/run_v7",
@@ -1018,7 +1022,7 @@ def _download_onebss_grid_file_api_once(
             response = poll_onebss_json_if_needed(client, response, headers, payload, settings)
     except httpx.TimeoutException as error:
         raise OneBssDownloadError(
-            f"OneBSS tra du lieu luoi qua lau va bi het thoi gian cho sau {ONEBSS_EXPORT_TIMEOUT_SECONDS} giay."
+            f"grid_timeout: OneBSS tra du lieu luoi qua lau va bi het thoi gian cho sau {timeout_seconds} giay."
         ) from error
     except httpx.HTTPError as error:
         raise OneBssDownloadError(f"Khong goi duoc API du lieu luoi OneBSS: {error}") from error
@@ -1320,6 +1324,17 @@ def onebss_processing_timeout_retry_delay_seconds(settings: Settings) -> float:
     except (TypeError, ValueError):
         value = float(ONEBSS_PROCESSING_TIMEOUT_RETRY_DELAY_SECONDS)
     return max(0.0, min(value, 60.0))
+
+
+def onebss_grid_timeout_seconds(settings: Settings) -> int:
+    configured = getattr(settings, "onebss_grid_timeout_seconds", ONEBSS_GRID_TIMEOUT_SECONDS)
+    if configured in {None, ""}:
+        configured = ONEBSS_GRID_TIMEOUT_SECONDS
+    try:
+        value = int(configured)
+    except (TypeError, ValueError):
+        value = ONEBSS_GRID_TIMEOUT_SECONDS
+    return max(30, min(value, 240))
 
 
 def onebss_api_base_headers() -> dict[str, str]:
@@ -1693,7 +1708,7 @@ def excel_cell_value(value: Any) -> Any:
 
 
 def should_fallback_to_onebss_excel_export(error: Exception) -> bool:
-    if onebss_error_looks_processing_timeout(error):
+    if onebss_error_looks_processing_timeout(error) or onebss_error_looks_grid_wait_timeout(error):
         return True
     text = str(error).lower()
     fallback_needles = ("chưa hỗ trợ", "chua ho tro", "header", "run_v7", "404", "not found", "khong co du lieu", "no data")
@@ -1710,6 +1725,11 @@ def onebss_search_text(value: Any) -> str:
 def onebss_error_looks_processing_timeout(error: Exception | str) -> bool:
     text = onebss_search_text(error)
     return "thoi gian xu ly" in text or "processing timeout" in text or "process timeout" in text
+
+
+def onebss_error_looks_grid_wait_timeout(error: Exception | str) -> bool:
+    text = onebss_search_text(error)
+    return "grid_timeout" in text or "tra du lieu luoi qua lau" in text or "het thoi gian cho" in text
 
 
 def build_onebss_temp_file_path(settings: Settings, index: int) -> Path:

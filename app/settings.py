@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     onebss_username: str = ""
     onebss_password: SecretStr = Field(default=SecretStr(""))
     onebss_download_timeout_seconds: int = 180
+    onebss_grid_timeout_seconds: int = 90
     onebss_processing_timeout_retry_attempts: int = 3
     onebss_processing_timeout_retry_delay_seconds: int = 8
     data_mining_download_dir: str = "data/data_mining_downloads"

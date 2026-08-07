@@ -274,6 +274,7 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "OracleDbPass = 'oracle-secret'" in config_text
         assert "OneBssTaskTimeoutSeconds = '1200'" in config_text
         assert "OneBssOtpWaitSeconds = '180'" in config_text
+        assert "OneBssGridTimeoutSeconds = '90'" in config_text
         assert "OneBssProcessingTimeoutRetryAttempts = '3'" in config_text
         assert "OneBssProcessingTimeoutRetryDelaySeconds = '8'" in config_text
         assert "SqlWorkerTimeoutSeconds = '1800'" in config_text
@@ -290,6 +291,7 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "GoogleDriveOauthRefreshToken" in config_text
         assert 'Set-UserEnvironment "ONEBSS_DRIVE_UPLOAD_API_URL" $WorkerDriveUploadApiUrl' in setup_script
         assert 'Set-UserEnvironment "ONEBSS_TASK_TIMEOUT_SECONDS" $onebssTaskTimeoutSeconds' in setup_script
+        assert 'Set-UserEnvironment "ONEBSS_GRID_TIMEOUT_SECONDS" $onebssGridTimeoutSeconds' in setup_script
         assert 'Set-UserEnvironment "ONEBSS_PROCESSING_TIMEOUT_RETRY_ATTEMPTS" $onebssProcessingTimeoutRetryAttempts' in setup_script
         assert 'Set-UserEnvironment "ONEBSS_PROCESSING_TIMEOUT_RETRY_DELAY_SECONDS" $onebssProcessingTimeoutRetryDelaySeconds' in setup_script
         assert 'Set-UserEnvironment "ONEBSS_WORKER_OTP_WAIT_SECONDS" $onebssOtpWaitSeconds' in setup_script
@@ -297,6 +299,7 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert 'Set-UserEnvironment "SQL_WORKER_POLL_SECONDS" "10"' in setup_script
         assert 'Set-UserEnvironment "FTP_WORKER_POLL_SECONDS" "30"' in setup_script
         assert "ONEBSS_TASK_TIMEOUT_SECONDS" in start_worker_script
+        assert "ONEBSS_GRID_TIMEOUT_SECONDS" in start_worker_script
         assert "ONEBSS_PROCESSING_TIMEOUT_RETRY_ATTEMPTS" in start_worker_script
         assert "ONEBSS_PROCESSING_TIMEOUT_RETRY_DELAY_SECONDS" in start_worker_script
         assert "ONEBSS_WORKER_OTP_WAIT_SECONDS" in start_worker_script
@@ -384,6 +387,7 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "config-status" in health_script
         assert "workstation-setup-error.log" in setup_script
         assert "ONEBSS_WORKER_DISABLE_TASK_GUARD" in uninstall_task_script
+        assert "ONEBSS_GRID_TIMEOUT_SECONDS" in uninstall_task_script
         assert "ONEBSS_WORKER_OTP_WAIT_SECONDS" in uninstall_task_script
         assert "-NoPause" in setup_bat
         assert "-NoPause" in background_bat
@@ -4546,6 +4550,39 @@ def test_onebss_grid_processing_timeout_retries_same_token(monkeypatch, tmp_path
     assert any("cung phien dang nhap" in message for message in progress)
 
 
+def test_onebss_grid_wait_timeout_falls_back_without_retry(monkeypatch) -> None:
+    from app.application import onebss_report_service as service
+    from app.application.onebss_report_service import OneBssDownloadError, OneBssDownloadedFile, OneBssApiToken
+
+    calls = []
+    token = OneBssApiToken(
+        access_token="token",
+        token_type="Bearer",
+        username="test@vnpt.vn",
+        mobile_id="mobile",
+        device_id="device",
+        expires_at=9999999999,
+    )
+    settings = get_settings().model_copy(update={"onebss_processing_timeout_retry_attempts": 3})
+
+    def fake_grid_once(*args, **kwargs):
+        calls.append("grid")
+        raise OneBssDownloadError("grid_timeout: OneBSS tra du lieu luoi qua lau")
+
+    monkeypatch.setattr(service, "_download_onebss_grid_file_api_once", fake_grid_once)
+
+    with pytest.raises(OneBssDownloadError) as error:
+        service.download_onebss_grid_file_api(
+            settings,
+            token,
+            {"report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST&name=Test"},
+            {"P_PHANVUNG_ID": "13"},
+        )
+
+    assert calls == ["grid"]
+    assert service.should_fallback_to_onebss_excel_export(error.value) is True
+
+
 def test_onebss_start_uses_valid_cached_token_without_otp(monkeypatch) -> None:
     from app.application import onebss_report_service as service
     from app.application.onebss_report_service import OneBssApiToken
@@ -5242,6 +5279,55 @@ def test_onebss_workstation_worker_continues_when_progress_status_is_transient(m
     result_calls = [call for call in calls if call["path"] == "/api/onebss-worker/tasks/RUN-PROGRESS-502/result"]
     assert len(result_calls) == 1
     assert result_calls[0]["json"]["ok"] is True
+
+
+def test_onebss_workstation_worker_relogs_when_otp_session_expired(monkeypatch) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    calls = []
+    run_calls = []
+    otp_values = iter(["111111", "222222"])
+    results = iter(
+        [
+            {"ok": False, "status": "otp_required", "session_id": "api-old", "message": "Can OTP"},
+            {"ok": False, "status": "otp_session_expired", "message": "Phien OTP OneBSS da het han"},
+            {"ok": False, "status": "otp_required", "session_id": "api-new", "message": "Can OTP moi"},
+            {"ok": True, "status": "success", "message": "done"},
+        ]
+    )
+
+    def fake_request_json(client, method: str, path: str, **kwargs):
+        calls.append({"method": method, "path": path, "json": kwargs.get("json") or {}})
+        return {"ok": True}
+
+    def fake_run(client, worker_id, run_id, report, parameters, **kwargs):
+        run_calls.append({"session_id": kwargs.get("session_id") or "", "otp": kwargs.get("otp") or ""})
+        return next(results)
+
+    monkeypatch.setattr(worker, "request_json", fake_request_json)
+    monkeypatch.setattr(worker, "run_onebss_report_request_guarded", fake_run)
+    monkeypatch.setattr(worker, "wait_for_otp", lambda *args, **kwargs: next(otp_values))
+    monkeypatch.setattr(worker, "attach_worker_file_if_needed", lambda client, run_id, result, drive_folder_id, progress: result)
+    monkeypatch.setattr(worker, "send_heartbeat", lambda *args, **kwargs: None)
+
+    worker.process_task(
+        object(),
+        {"run_id": "RUN-OTP-EXPIRED", "report": {"ma_bao_cao": "ONEBSS_OTP"}, "parameters": {}},
+        "ws-otp",
+        0,
+    )
+
+    assert run_calls == [
+        {"session_id": "", "otp": ""},
+        {"session_id": "api-old", "otp": "111111"},
+        {"session_id": "", "otp": ""},
+        {"session_id": "api-new", "otp": "222222"},
+    ]
+    result_calls = [call for call in calls if call["path"] == "/api/onebss-worker/tasks/RUN-OTP-EXPIRED/result"]
+    assert len(result_calls) == 1
+    assert result_calls[0]["json"]["ok"] is True
+    status_messages = [call["json"].get("message", "") for call in calls if call["path"].endswith("/status")]
+    assert any("dang nhap lai" in message for message in status_messages)
 
 
 def test_onebss_workstation_worker_reports_unexpected_failure(monkeypatch) -> None:

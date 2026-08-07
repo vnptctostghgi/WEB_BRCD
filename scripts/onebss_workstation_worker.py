@@ -36,7 +36,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.08.07-onebss-token-dedupe-time-v29"
+WORKER_VERSION = "2026.08.07-onebss-otp-relogin-grid-timeout-v30"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -600,6 +600,40 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
                 progress_callback=send_progress,
             )
             status = str(result.get("status") or ("success" if result.get("ok") else "failed")).lower()
+            if status == "otp_session_expired":
+                if otp_attempts >= max_otp_attempts:
+                    duration_ms = int((time.monotonic() - started) * 1000)
+                    failure_message = (
+                        f"Phien OTP OneBSS da het han sau {max_otp_attempts} lan thu. "
+                        "Hay kiem tra OTP/Mobile Gateway roi bam lay bao cao lai."
+                    )
+                    try:
+                        request_json(
+                            client,
+                            "POST",
+                            f"/api/onebss-worker/tasks/{run_id}/result",
+                            json={
+                                "ok": False,
+                                "status": "failed",
+                                "message": failure_message,
+                                "duration_ms": duration_ms,
+                                "details": {
+                                    "error_type": "OtpSessionExpired",
+                                    "otp_attempts": otp_attempts,
+                                    "max_otp_attempts": max_otp_attempts,
+                                },
+                            },
+                        )
+                    except Exception as update_error:
+                        print(
+                            f"Khong cap nhat duoc ket qua OneBSS: {describe_request_error(update_error)}",
+                            file=sys.stderr,
+                        )
+                    return
+                send_progress("Phien OTP OneBSS da het han. May tram dang dang nhap lai de lay OTP moi.")
+                session_id = ""
+                otp = ""
+                continue
             if status in {"otp_required", "otp_invalid", "manual_otp_required"} and result.get("session_id"):
                 session_id = str(result.get("session_id") or "")
                 otp_attempts += 1

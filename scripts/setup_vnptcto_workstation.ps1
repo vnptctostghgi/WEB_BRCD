@@ -367,6 +367,7 @@ function Ensure-WorkstationEnvFile {
   Set-DotEnvValue $envFile "ONEBSS_WORKER_ID" $WorkerId
   Set-DotEnvValue $envFile "ONEBSS_LOGIN_URL" $onebssLoginUrl
   Set-DotEnvValue $envFile "ONEBSS_DOWNLOAD_TIMEOUT_SECONDS" $onebssDownloadTimeoutSeconds
+  Set-DotEnvValue $envFile "ONEBSS_GRID_TIMEOUT_SECONDS" $onebssGridTimeoutSeconds
   Set-DotEnvValue $envFile "ONEBSS_PROCESSING_TIMEOUT_RETRY_ATTEMPTS" $onebssProcessingTimeoutRetryAttempts
   Set-DotEnvValue $envFile "ONEBSS_PROCESSING_TIMEOUT_RETRY_DELAY_SECONDS" $onebssProcessingTimeoutRetryDelaySeconds
   Set-DotEnvValue $envFile "ONEBSS_TASK_TIMEOUT_SECONDS" $onebssTaskTimeoutSeconds
@@ -760,6 +761,7 @@ $onebssUsername = Resolve-SetupValue $setupConfig "OneBssUsername" "" "" "ONEBSS
 $onebssPassword = Resolve-SetupValue $setupConfig "OneBssPassword" "" "" "ONEBSS_PASSWORD"
 $onebssLoginUrl = Resolve-SetupValue $setupConfig "OneBssLoginUrl" "" "https://onebss.vnpt.vn/" "ONEBSS_LOGIN_URL"
 $onebssDownloadTimeoutSeconds = Resolve-SetupValue $setupConfig "OneBssDownloadTimeoutSeconds" "" "180" "ONEBSS_DOWNLOAD_TIMEOUT_SECONDS"
+$onebssGridTimeoutSeconds = Resolve-SetupValue $setupConfig "OneBssGridTimeoutSeconds" "" "90" "ONEBSS_GRID_TIMEOUT_SECONDS"
 $onebssProcessingTimeoutRetryAttempts = Resolve-SetupValue $setupConfig "OneBssProcessingTimeoutRetryAttempts" "" "3" "ONEBSS_PROCESSING_TIMEOUT_RETRY_ATTEMPTS"
 $onebssProcessingTimeoutRetryDelaySeconds = Resolve-SetupValue $setupConfig "OneBssProcessingTimeoutRetryDelaySeconds" "" "8" "ONEBSS_PROCESSING_TIMEOUT_RETRY_DELAY_SECONDS"
 $onebssTaskTimeoutSeconds = Resolve-SetupValue $setupConfig "OneBssTaskTimeoutSeconds" $OneBssTaskTimeoutSeconds "1200" "ONEBSS_TASK_TIMEOUT_SECONDS"
@@ -847,6 +849,7 @@ Set-UserEnvironment "ONEBSS_USERNAME" $onebssUsername
 Set-UserEnvironment "ONEBSS_PASSWORD" $onebssPassword
 Set-UserEnvironment "ONEBSS_LOGIN_URL" $onebssLoginUrl
 Set-UserEnvironment "ONEBSS_DOWNLOAD_TIMEOUT_SECONDS" $onebssDownloadTimeoutSeconds
+Set-UserEnvironment "ONEBSS_GRID_TIMEOUT_SECONDS" $onebssGridTimeoutSeconds
 Set-UserEnvironment "ONEBSS_PROCESSING_TIMEOUT_RETRY_ATTEMPTS" $onebssProcessingTimeoutRetryAttempts
 Set-UserEnvironment "ONEBSS_PROCESSING_TIMEOUT_RETRY_DELAY_SECONDS" $onebssProcessingTimeoutRetryDelaySeconds
 Set-UserEnvironment "ONEBSS_TASK_TIMEOUT_SECONDS" $onebssTaskTimeoutSeconds
