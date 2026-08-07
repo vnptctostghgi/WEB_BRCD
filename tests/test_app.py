@@ -322,8 +322,7 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "-RunLevel Limited" in install_task_script
         assert "Get-InteractiveTaskUserCandidates" in setup_script
         assert "Get-InteractiveTaskUserCandidates" in install_task_script
-        assert "start_onebss_worker.ps1" in install_task_script
-        assert "run_onebss_worker_background.ps1" not in install_task_script
+        assert "run_onebss_worker_background.ps1" in install_task_script
         assert "-WindowStyle Hidden" in install_task_script
         assert "-WindowStyle Hidden" in setup_script
         assert "onebss-worker.log" in background_worker_script
@@ -345,7 +344,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "Khong tim thay Scheduled Task; khong bat buoc neu Local API dang OK." in health_script
         assert "Wait-WorkerProcessesStable" in health_script
         assert "Get-WorkerPythonProcesses" in health_script
-        assert "Test-OneBssWorkerTaskUsesDirectWorker" in health_script
+        assert "Test-OneBssWorkerTaskUsesBackgroundWorker" in health_script
+        assert "run_onebss_worker_background.ps1" in health_script
         assert "Da start Scheduled Task, Python worker PID" in health_script
         assert "Da start worker fallback" in health_script
         assert "Da start launcher" not in health_script

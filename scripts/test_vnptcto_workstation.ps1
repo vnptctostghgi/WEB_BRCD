@@ -91,14 +91,14 @@ function Wait-WorkerProcessesStable {
   return @(Get-WorkerPythonProcesses)
 }
 
-function Test-OneBssWorkerTaskUsesDirectWorker {
+function Test-OneBssWorkerTaskUsesBackgroundWorker {
   $task = Get-ScheduledTask -TaskName "VNPTCTO OneBSS Worker" -ErrorAction SilentlyContinue
   if (-not $task) {
     return $false
   }
   foreach ($action in @($task.Actions)) {
     $arguments = [string]$action.Arguments
-    if ($arguments -match [regex]::Escape("start_onebss_worker.ps1")) {
+    if ($arguments -match [regex]::Escape("run_onebss_worker_background.ps1")) {
       return $true
     }
   }
@@ -113,7 +113,7 @@ function Start-WorkerIfMissing {
       return [pscustomobject]@{ Ok = $true; Detail = "Python worker dang chay PID: $($stableProcesses.ProcessId -join ', ')" }
     }
   }
-  if (Test-OneBssWorkerTaskUsesDirectWorker) {
+  if (Test-OneBssWorkerTaskUsesBackgroundWorker) {
     try {
       Start-ScheduledTask -TaskName "VNPTCTO OneBSS Worker" -ErrorAction SilentlyContinue
       Start-Sleep -Seconds 5
@@ -128,7 +128,7 @@ function Start-WorkerIfMissing {
   if ([string]::IsNullOrWhiteSpace($root)) {
     $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
   }
-  $workerScript = Join-Path $root "scripts\start_onebss_worker.ps1"
+  $workerScript = Join-Path $root "scripts\run_onebss_worker_background.ps1"
   if (-not (Test-Path -LiteralPath $workerScript)) {
     return [pscustomobject]@{ Ok = $false; Detail = "Khong tim thay worker script: $workerScript" }
   }

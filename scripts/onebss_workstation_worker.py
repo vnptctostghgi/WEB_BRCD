@@ -1115,6 +1115,42 @@ def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float, 
         return False
     task = claim.get("task") if isinstance(claim.get("task"), dict) else None
     if task:
+        run_id = str(task.get("run_id") or "")
+        report_code = ""
+        if isinstance(task.get("report"), dict):
+            report_code = str((task.get("report") or {}).get("ma_bao_cao") or "")
+        print(f"Nhan task OneBSS {run_id} ({report_code}).", flush=True)
+        try:
+            status_response = request_json(
+                client,
+                "POST",
+                f"/api/onebss-worker/tasks/{run_id}/status",
+                json={
+                    "status": "running",
+                    "message": "May tram da nhan task OneBSS va dang chuan bi phien chay.",
+                    "worker_id": worker_id,
+                    "worker_session_id": "",
+                    "details": {
+                        **worker_process_details(),
+                        "task_type": "onebss",
+                        "process": "parent",
+                        "stage": "task_claimed",
+                    },
+                },
+                timeout=10.0,
+                _retry_forever=False,
+            )
+            if response_is_cancelled(status_response):
+                print(f"Task OneBSS {run_id} da bi huy truoc khi xu ly.", flush=True)
+                return True
+            if status_response.get("transient_error"):
+                print(
+                    f"Khong cap nhat duoc trang thai nhan task OneBSS {run_id}: {status_response.get('transient_error')}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        except Exception as error:
+            print(f"Khong cap nhat duoc trang thai nhan task OneBSS {run_id}: {describe_request_error(error)}", file=sys.stderr, flush=True)
         send_heartbeat(
             client,
             worker_id,

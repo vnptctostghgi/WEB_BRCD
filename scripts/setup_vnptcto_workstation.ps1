@@ -572,7 +572,7 @@ function Start-WorkstationWorkerNow {
     Write-Host "Worker da chay qua Scheduled Task, Python worker PID: $($stable.ProcessId -join ', ')" -ForegroundColor Green
     return
   }
-  $workerScript = Join-Path $Root "scripts\start_onebss_worker.ps1"
+  $workerScript = Join-Path $Root "scripts\run_onebss_worker_background.ps1"
   if (-not (Test-Path -LiteralPath $workerScript)) {
     Write-Warning "Khong tim thay worker script: $workerScript"
     return
