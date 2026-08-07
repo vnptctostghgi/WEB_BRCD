@@ -124,11 +124,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=210" in public_response.text
+        assert "/static/app.js?v=211" in public_response.text
         assert "/static/styles.css?v=130" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
-        public_js = client.get("/static/app.js?v=210")
+        public_js = client.get("/static/app.js?v=211")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -1019,7 +1019,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=210" in page.text
+        assert "/static/app.js?v=211" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -6719,6 +6719,137 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data(monkeypatch) -
         assert result.json()["rows"][0]["THAM_SO"] == "LOAIHINH=58, SYSDATE=SYSDATE, DONVI=VNPT%"
 
 
+def test_dashboard_refresh_uses_isolated_worker_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = routes.get_settings().model_copy(update={"internal_api_mock_mode": False})
+    monkeypatch.setattr(routes, "get_settings", lambda: settings)
+    monkeypatch.setattr(routes, "_next_dynamic_report_export_worker_job", lambda *args, **kwargs: None)
+    worker_id = f"ws-dashboard-{uuid.uuid4().hex[:8]}"
+    page_id = f"DASHBOARD_QUEUE_{uuid.uuid4().hex[:8].upper()}"
+    report_code = f"DASH_REFRESH_{uuid.uuid4().hex[:8].upper()}"
+    legacy_job_id = "dashboard_legacy_" + uuid.uuid4().hex[:8]
+    headers = {"Authorization": "Bearer test-worker-token"}
+
+    with routes.DYNAMIC_REPORT_RUN_JOBS_LOCK:
+        routes.DYNAMIC_REPORT_RUN_JOBS.clear()
+        routes.DYNAMIC_REPORT_RUN_JOBS[legacy_job_id] = {
+            "job_id": legacy_job_id,
+            "status": "queued_worker",
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "payload": {"ma_bao_cao": "LEGACY_DASHBOARD", "filters": {}, "page": 1, "page_size": 20},
+        }
+    with routes.DASHBOARD_REFRESH_JOBS_LOCK:
+        routes.DASHBOARD_REFRESH_JOBS.clear()
+    routes.invalidate_worker_claim_empty_cache("sql")
+
+    try:
+        with TestClient(app) as client:
+            login(client)
+            created = client.post(
+                "/api/admin/sql-reports",
+                json={
+                    "ten_bao_cao": "Dashboard queue refresh",
+                    "ma_bao_cao": report_code,
+                    "cau_lenh_sql": "SELECT :P_NGAY AS P_NGAY FROM dual;",
+                    "cac_tham_so": ["P_NGAY"],
+                },
+            )
+            assert created.status_code == 200
+            report_id = created.json()["id"]
+            saved = client.post(
+                "/api/admin/dashboard-layouts",
+                json={
+                    "page_id": page_id,
+                    "page_name": "Dashboard queue",
+                    "layout": {
+                        "page_id": page_id,
+                        "tabs": [
+                            {
+                                "tab_id": "tab_queue",
+                                "tab_name": "Queue",
+                                "order": 1,
+                                "grid_layout": [
+                                    {
+                                        "row_id": 1,
+                                        "layout_type": "1_column",
+                                        "widgets": [
+                                            {
+                                                "position": 1,
+                                                "type": "bar_chart",
+                                                "title": "Dashboard queue refresh",
+                                                "sql_code": report_code,
+                                                "report_id": report_id,
+                                                "filters": {"P_NGAY": "2026-08-08"},
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                },
+            )
+            assert saved.status_code == 200
+
+            queued = client.get(f"/api/admin/dashboard-layouts/{page_id}/tabs/tab_queue/data")
+            assert queued.status_code == 200
+            queued_body = queued.json()
+            assert queued_body["refreshing"] is True
+            assert queued_body["refresh_job_ids"]
+            job_id = queued_body["refresh_job_ids"][0]
+            assert job_id.startswith("dashboard_")
+            assert queued_body["widgets"][0]["data"]["status"] == "refreshing"
+
+            with routes.DYNAMIC_REPORT_RUN_JOBS_LOCK:
+                assert job_id not in routes.DYNAMIC_REPORT_RUN_JOBS
+                assert legacy_job_id in routes.DYNAMIC_REPORT_RUN_JOBS
+            with routes.DASHBOARD_REFRESH_JOBS_LOCK:
+                assert job_id in routes.DASHBOARD_REFRESH_JOBS
+
+            claim = client.post(
+                "/api/sql-worker/tasks/claim",
+                json={"worker_id": worker_id, "version": "test-dashboard-worker"},
+                headers=headers,
+            )
+            assert claim.status_code == 200
+            task = claim.json()["task"]
+            assert task["run_id"] == job_id
+            assert task["task_type"] == "dynamic_report_dashboard_refresh"
+            assert task["query"]["action"] == "run_sql_report"
+            assert task["query"]["tham_so"] == {"P_NGAY": "2026-08-08"}
+
+            finished = client.post(
+                f"/api/sql-worker/tasks/{job_id}/result",
+                json={
+                    "ok": True,
+                    "status": "success",
+                    "message": "Dashboard cache updated.",
+                    "columns": ["P_NGAY"],
+                    "rows": [{"P_NGAY": "2026-08-08"}],
+                    "pagination": {"page": 1, "page_size": 50, "total": 1},
+                    "details": {"worker_id": worker_id},
+                },
+                headers=headers,
+            )
+            assert finished.status_code == 200
+            assert finished.json()["run"]["status"] == "complete"
+
+            cached = client.get(f"/api/admin/dashboard-layouts/{page_id}/tabs/tab_queue/data")
+            assert cached.status_code == 200
+            cached_body = cached.json()
+            assert cached_body["refreshing"] is False
+            data = cached_body["widgets"][0]["data"]
+            assert data["ok"] is True
+            assert data["rows"] == [{"P_NGAY": "2026-08-08"}]
+            assert data["details"]["dashboard_cache"]["hit"] is True
+    finally:
+        with routes.DYNAMIC_REPORT_RUN_JOBS_LOCK:
+            routes.DYNAMIC_REPORT_RUN_JOBS.clear()
+        with routes.DASHBOARD_REFRESH_JOBS_LOCK:
+            routes.DASHBOARD_REFRESH_JOBS.clear()
+        routes.invalidate_worker_claim_empty_cache("sql")
+
+
 def test_dashboard_layout_tab_uses_bulk_chart_cache_for_cached_widgets() -> None:
     class FakeSettings:
         dashboard_chart_cache_enabled = True
@@ -6999,16 +7130,16 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         home = client.get("/")
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
-        assert "/static/shell.js?v=27" in home.text
-        assert "/static/app.js?v=210" not in home.text
-        shell_js = client.get("/static/shell.js?v=27")
+        assert "/static/shell.js?v=28" in home.text
+        assert "/static/app.js?v=211" not in home.text
+        shell_js = client.get("/static/shell.js?v=28")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
         assert "function dedupeFeaturesForDisplay" in shell_js.text
         assert "function readCachedNavigation" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=210" in shell_js.text
+        assert "/static/app.js?v=211" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -7021,8 +7152,8 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
-        assert "/static/shell.js?v=27" in dashboard.text
-        assert "/static/app.js?v=210" not in dashboard.text
+        assert "/static/shell.js?v=28" in dashboard.text
+        assert "/static/app.js?v=211" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -7042,49 +7173,49 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "dynamic-report-body" not in reports.text
         assert "dynamic-report-prev" not in reports.text
         assert "dynamic-report-next" not in reports.text
-        assert "/static/app.js?v=210" in reports.text
+        assert "/static/app.js?v=211" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=210" in workstation.text
+        assert "/static/app.js?v=211" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=210" in work_tasks.text
+        assert "/static/app.js?v=211" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=210" in report_links.text
+        assert "/static/app.js?v=211" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=210" in system.text
+        assert "/static/app.js?v=211" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=210" in onebss_mining.text
+        assert "/static/app.js?v=211" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 
         ftp_mining = client.get("/daodulieuftp")
         assert ftp_mining.status_code == 200
         assert "view-ftp-mining" in ftp_mining.text
-        assert "/static/app.js?v=210" in ftp_mining.text
+        assert "/static/app.js?v=211" in ftp_mining.text
         assert "/static/ftp-mining.js" not in ftp_mining.text
         assert ftp_mining.text.count('class="app-view') == 1
 

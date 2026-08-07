@@ -99,6 +99,11 @@ DYNAMIC_REPORT_RUN_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_pref
 DYNAMIC_REPORT_RUN_JOB_TTL_SECONDS = 30 * 60
 DYNAMIC_REPORT_RUN_ACTIVE_STATUSES = {"queued", "queued_worker", "running", "running_worker"}
 DYNAMIC_REPORT_RUN_FINAL_STATUSES = {"complete", "failed", "cancelled"}
+DASHBOARD_REFRESH_JOBS: dict[str, dict[str, Any]] = {}
+DASHBOARD_REFRESH_JOBS_LOCK = threading.Lock()
+DASHBOARD_REFRESH_JOB_TTL_SECONDS = 30 * 60
+DASHBOARD_REFRESH_ACTIVE_STATUSES = {"queued_worker", "running_worker"}
+DASHBOARD_REFRESH_FINAL_STATUSES = {"complete", "failed", "cancelled"}
 DYNAMIC_REPORT_EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 DYNAMIC_REPORT_EXPORT_JOBS_LOCK = threading.Lock()
 DYNAMIC_REPORT_EXPORT_JOB_FILE_LOCK = threading.Lock()
@@ -5173,6 +5178,84 @@ def _cleanup_dynamic_report_run_jobs() -> None:
             DYNAMIC_REPORT_RUN_JOBS.pop(job_id, None)
 
 
+def _dashboard_refresh_job_id(chart_key: str) -> str:
+    return "dashboard_" + hashlib.sha256(chart_key.encode("utf-8")).hexdigest()[:24]
+
+
+def _is_dashboard_refresh_job_id(job_id: str) -> bool:
+    return str(job_id or "").startswith("dashboard_")
+
+
+def _cleanup_dashboard_refresh_jobs() -> None:
+    now = time.time()
+    with DASHBOARD_REFRESH_JOBS_LOCK:
+        expired_ids = [
+            job_id
+            for job_id, job in DASHBOARD_REFRESH_JOBS.items()
+            if str(job.get("status") or "").lower() not in DASHBOARD_REFRESH_ACTIVE_STATUSES
+            and now - float(job.get("updated_at") or job.get("created_at") or now) > DASHBOARD_REFRESH_JOB_TTL_SECONDS
+        ]
+        for job_id in expired_ids:
+            DASHBOARD_REFRESH_JOBS.pop(job_id, None)
+
+
+def _set_dashboard_refresh_job(job_id: str, **updates: Any) -> dict[str, Any]:
+    now = time.time()
+    with DASHBOARD_REFRESH_JOBS_LOCK:
+        job = DASHBOARD_REFRESH_JOBS.get(job_id) or {"job_id": job_id, "created_at": now}
+        job.update(updates)
+        job["updated_at"] = now
+        DASHBOARD_REFRESH_JOBS[job_id] = job
+        snapshot = dict(job)
+    if str(snapshot.get("status") or "").lower() == "queued_worker":
+        invalidate_worker_claim_empty_cache("sql")
+    return snapshot
+
+
+def _get_dashboard_refresh_job(job_id: str) -> dict[str, Any] | None:
+    with DASHBOARD_REFRESH_JOBS_LOCK:
+        job = DASHBOARD_REFRESH_JOBS.get(job_id)
+        return dict(job) if job else None
+
+
+def _next_dashboard_refresh_worker_job() -> tuple[str, dict[str, Any]] | None:
+    _cleanup_dashboard_refresh_jobs()
+    with DASHBOARD_REFRESH_JOBS_LOCK:
+        candidates = [
+            (job_id, dict(job))
+            for job_id, job in DASHBOARD_REFRESH_JOBS.items()
+            if str(job.get("status") or "").lower() == "queued_worker"
+        ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: _dynamic_report_job_sort_value(item[1]), reverse=True)
+    return candidates[0]
+
+
+def _dashboard_refresh_job_response(job_id: str, job: dict[str, Any]) -> dict[str, Any]:
+    status_value = str(job.get("status") or "queued_worker").lower()
+    result = job.get("result") if isinstance(job.get("result"), dict) else None
+    response: dict[str, Any] = {
+        "ok": status_value != "failed",
+        "job_id": job_id,
+        "history_id": job_id,
+        "event_type": "dashboard_refresh",
+        "status": status_value,
+        "message": job.get("message") or "",
+        "report_code": job.get("report_code") or "",
+        "report_name": job.get("report_name") or "",
+        "ma_bao_cao": job.get("report_code") or "",
+        "rows": int(job.get("rows") or 0),
+        "total": int(job.get("total") or job.get("rows") or 0),
+        "updated_at": job.get("updated_at"),
+        "created_at": job.get("created_at"),
+        "worker_id": job.get("worker_id") or "",
+    }
+    if result is not None:
+        response["result"] = result
+    return response
+
+
 def _set_dynamic_report_run_job(job_id: str, **updates: Any) -> dict[str, Any]:
     now = time.time()
     with DYNAMIC_REPORT_RUN_JOBS_LOCK:
@@ -5204,12 +5287,13 @@ def _set_dynamic_report_run_job(job_id: str, **updates: Any) -> dict[str, Any]:
 def _queue_dashboard_refresh_requests(result: dict[str, Any], actor: str) -> dict[str, Any]:
     requests = result.pop("refresh_requests", []) if isinstance(result.get("refresh_requests"), list) else []
     queued_ids: list[str] = []
+    _cleanup_dashboard_refresh_jobs()
     for item in requests:
         if not isinstance(item, dict):
             continue
         metadata = item.get("dashboard_cache_metadata") if isinstance(item.get("dashboard_cache_metadata"), dict) else {}
         chart_key = str(metadata.get("chart_key") or item.get("cache_key") or uuid.uuid4().hex)
-        job_id = "dashboard_" + hashlib.sha256(chart_key.encode("utf-8")).hexdigest()[:24]
+        job_id = _dashboard_refresh_job_id(chart_key)
         payload = {
             "ma_bao_cao": str(item.get("ma_bao_cao") or ""),
             "filters": item.get("filters") if isinstance(item.get("filters"), dict) else {},
@@ -5219,15 +5303,18 @@ def _queue_dashboard_refresh_requests(result: dict[str, Any], actor: str) -> dic
             "search_columns": [],
             "dashboard_cache_metadata": metadata,
         }
-        _set_dynamic_report_run_job(
-            job_id,
-            status="queued_worker",
-            message="Da gui lenh lam moi cache dashboard cho may tram.",
-            created_by=actor,
-            report_code=str(item.get("ma_bao_cao") or ""),
-            report_name=str(item.get("report_name") or item.get("ma_bao_cao") or ""),
-            payload=payload,
-        )
+        current = _get_dashboard_refresh_job(job_id)
+        if not current or str(current.get("status") or "").lower() not in DASHBOARD_REFRESH_ACTIVE_STATUSES:
+            _set_dashboard_refresh_job(
+                job_id,
+                status="queued_worker",
+                message="Da gui lenh lam moi cache dashboard cho may tram.",
+                created_by=actor,
+                report_code=str(item.get("ma_bao_cao") or ""),
+                report_name=str(item.get("report_name") or item.get("ma_bao_cao") or ""),
+                payload=payload,
+                chart_key=chart_key,
+            )
         queued_ids.append(job_id)
     result["refresh_job_ids"] = queued_ids
     result["refreshing"] = bool(queued_ids)
@@ -5235,6 +5322,8 @@ def _queue_dashboard_refresh_requests(result: dict[str, Any], actor: str) -> dic
 
 
 def _get_dynamic_report_run_job(job_id: str) -> dict[str, Any] | None:
+    if _is_dashboard_refresh_job_id(job_id):
+        return None
     with DYNAMIC_REPORT_RUN_JOBS_LOCK:
         job = DYNAMIC_REPORT_RUN_JOBS.get(job_id)
         if job:
@@ -5529,6 +5618,7 @@ def _next_dynamic_report_sql_worker_job() -> tuple[str, dict[str, Any]] | None:
             (job_id, dict(job))
             for job_id, job in DYNAMIC_REPORT_RUN_JOBS.items()
             if str(job.get("status") or "").lower() == "queued_worker"
+            and not _is_dashboard_refresh_job_id(job_id)
         ]
     if not candidates:
         try:
@@ -5540,6 +5630,7 @@ def _next_dynamic_report_sql_worker_job() -> tuple[str, dict[str, Any]] | None:
             (str(job.get("job_id") or job.get("run_id") or ""), dict(job))
             for job in persisted
             if str(job.get("job_id") or job.get("run_id") or "")
+            and not _is_dashboard_refresh_job_id(str(job.get("job_id") or job.get("run_id") or ""))
         ]
     if not candidates:
         return None
@@ -5637,12 +5728,19 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
         if not candidate:
             export_candidate = _next_dynamic_report_export_worker_job(recover_from_history=True)
             if not export_candidate:
-                mark_worker_claim_empty("sql")
-                return {"ok": True, "task": None, "message": "Khong co task SQL dang cho may tram."}
-            job_id, job = export_candidate
-            task_kind = "export"
-            run_payload = _dynamic_report_export_payload_from_job(job)
-            drive_folder_id = str(job.get("drive_folder_id") or "").strip()
+                dashboard_candidate = _next_dashboard_refresh_worker_job()
+                if not dashboard_candidate:
+                    mark_worker_claim_empty("sql")
+                    return {"ok": True, "task": None, "message": "Khong co task SQL dang cho may tram."}
+                job_id, job = dashboard_candidate
+                task_kind = "dashboard_refresh"
+                run_payload = _dynamic_report_payload_from_job(job)
+                drive_folder_id = ""
+            else:
+                job_id, job = export_candidate
+                task_kind = "export"
+                run_payload = _dynamic_report_export_payload_from_job(job)
+                drive_folder_id = str(job.get("drive_folder_id") or "").strip()
         else:
             job_id, job = candidate
             task_kind = "load"
@@ -5664,8 +5762,10 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
         }
         if task_kind == "export":
             _set_dynamic_report_export_job(job_id, **updates)
-        else:
+        elif task_kind == "load":
             _set_dynamic_report_run_job(job_id, **updates)
+        else:
+            _set_dashboard_refresh_job(job_id, **updates)
         return {"ok": False, "task": None, "message": prepared.get("message") or "Khong chuan bi duoc truy van SQL."}
     if task_kind == "export":
         filename = _dynamic_report_export_filename({"report": {"ma_bao_cao": prepared.get("ma_bao_cao") or run_payload.ma_bao_cao}})
@@ -5695,7 +5795,7 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
                 "max_rows": int(get_settings().dynamic_report_export_max_rows or 1000000),
             },
         }
-    else:
+    elif task_kind == "load":
         updated = _set_dynamic_report_run_job(
             job_id,
             status="running_worker",
@@ -5719,12 +5819,36 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
                 "page_size": int(prepared.get("page_size") or 20),
             },
         }
+    else:
+        updated = _set_dashboard_refresh_job(
+            job_id,
+            status="running_worker",
+            message=f"May tram {payload.worker_id} da nhan task dashboard va dang goi API local.",
+            worker_id=payload.worker_id,
+        )
+        _record_workstation_heartbeat(
+            payload.worker_id,
+            "busy",
+            f"May tram {payload.worker_id} da nhan task dashboard va dang goi API local.",
+            details={"run_id": job_id, "report": prepared.get("ma_bao_cao") or "", "task_type": "dashboard_refresh"},
+        )
+        query = {
+            "action": "run_sql_report",
+            "ten_bao_cao": prepared.get("ten_bao_cao") or "",
+            "ma_bao_cao": prepared.get("ma_bao_cao") or "",
+            "cau_lenh_sql": prepared.get("cau_lenh_sql") or "",
+            "tham_so": prepared.get("tham_so") if isinstance(prepared.get("tham_so"), dict) else {},
+            "pagination": {
+                "page": int(prepared.get("page") or 1),
+                "page_size": int(prepared.get("page_size") or 20),
+            },
+        }
     return {
         "ok": True,
         "task": {
             "run_id": job_id,
             "job_id": job_id,
-            "task_type": f"dynamic_report_{task_kind}",
+            "task_type": "dynamic_report_dashboard_refresh" if task_kind == "dashboard_refresh" else f"dynamic_report_{task_kind}",
             "report_code": prepared.get("ma_bao_cao") or "",
             "report_name": prepared.get("ten_bao_cao") or "",
             "query": query,
@@ -5756,6 +5880,23 @@ def update_sql_worker_task_status(request: Request, run_id: str, payload: SqlWor
             details=payload.details or job.get("details") or {},
         )
         return {"ok": True, "run": _dynamic_report_run_job_response(run_id, updated)}
+    dashboard_job = _get_dashboard_refresh_job(run_id)
+    if dashboard_job:
+        worker_id = payload.worker_id or dashboard_job.get("worker_id") or ""
+        _record_workstation_heartbeat(
+            worker_id,
+            "busy",
+            payload.message or "May tram dang lam moi du lieu dashboard.",
+            details={**(payload.details or {}), "run_id": run_id, "task_type": "dashboard_refresh"},
+        )
+        updated = _set_dashboard_refresh_job(
+            run_id,
+            status=payload.status.strip().lower() or "running_worker",
+            message=payload.message or "May tram dang lam moi du lieu dashboard.",
+            worker_id=worker_id,
+            details=payload.details or dashboard_job.get("details") or {},
+        )
+        return {"ok": True, "run": _dashboard_refresh_job_response(run_id, updated)}
     export_job = _get_dynamic_report_export_job(run_id)
     if not export_job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task SQL.")
@@ -5782,8 +5923,9 @@ def finish_sql_worker_task(request: Request, run_id: str, payload: SqlWorkerResu
     onebss_worker_token(request)
     run_id = run_id.strip()
     job = _get_dynamic_report_run_job(run_id)
-    export_job = _get_dynamic_report_export_job(run_id) if not job else None
-    if not job and not export_job:
+    dashboard_job = _get_dashboard_refresh_job(run_id) if not job else None
+    export_job = _get_dynamic_report_export_job(run_id) if not job and not dashboard_job else None
+    if not job and not dashboard_job and not export_job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task SQL.")
     rows = payload.rows if isinstance(payload.rows, list) else []
     pagination = payload.pagination if isinstance(payload.pagination, dict) else {}
@@ -5885,6 +6027,44 @@ def finish_sql_worker_task(request: Request, run_id: str, payload: SqlWorkerResu
         except Exception:
             logger.exception("Cannot write SQL worker export history")
         return {"ok": status_value == "complete", "run": _dynamic_report_export_job_response(run_id, updated_export)}
+
+    if dashboard_job:
+        run_payload = _dynamic_report_payload_from_job(dashboard_job)
+        if not report:
+            report = {
+                "ma_bao_cao": dashboard_job.get("report_code") or run_payload.ma_bao_cao,
+                "ten_bao_cao": dashboard_job.get("report_name") or "",
+            }
+        result = {
+            "ok": bool(payload.ok),
+            "message": payload.message or ("Da lam moi du lieu dashboard tren may tram." if payload.ok else "May tram khong lam moi duoc dashboard."),
+            "details": payload.details if isinstance(payload.details, dict) else {},
+            "report": report,
+            "columns": payload.columns,
+            "rows": rows,
+            "pagination": pagination or {"page": run_payload.page, "page_size": run_payload.page_size, "total": len(rows)},
+        }
+        status_value = "complete" if payload.ok and str(payload.status or "").lower() not in {"failed", "error"} else "failed"
+        if status_value == "complete":
+            payload_data = dashboard_job.get("payload") if isinstance(dashboard_job.get("payload"), dict) else {}
+            metadata = payload_data.get("dashboard_cache_metadata") if isinstance(payload_data.get("dashboard_cache_metadata"), dict) else {}
+            build_database_service().save_dashboard_chart_cache(metadata, result)
+        updated = _set_dashboard_refresh_job(
+            run_id,
+            status=status_value,
+            message=result["message"],
+            result=result,
+            rows=len(rows),
+            total=(pagination.get("total") if isinstance(pagination, dict) else None) or len(rows),
+            details=result["details"],
+        )
+        _record_workstation_heartbeat(
+            str(dashboard_job.get("worker_id") or ""),
+            "idle" if status_value == "complete" else "error",
+            result["message"],
+            details={"run_id": run_id, "task_type": "dashboard_refresh", "status": status_value},
+        )
+        return {"ok": status_value == "complete", "run": _dashboard_refresh_job_response(run_id, updated)}
 
     run_payload = _dynamic_report_payload_from_job(job)
     if not report:

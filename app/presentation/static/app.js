@@ -46,6 +46,7 @@ let dashboardViewerLayoutsLoaded = false;
 let dashboardViewerLayout = null;
 let dashboardViewerActiveTabId = "";
 let dashboardViewerLoadedTabs = {};
+let dashboardViewerRefreshTimers = {};
 let dashboardFeatureCodes = new Set();
 let dashboardLayouts = [];
 let dashboardBuilderLayout = null;
@@ -160,6 +161,7 @@ let reportsRuntimeScriptPromise = null;
 const dataCacheTimestamps = new Map();
 const dashboardViewerLayoutCache = new Map();
 const dashboardBuilderLayoutCache = new Map();
+const DASHBOARD_VIEWER_REFRESH_POLL_MS = 4000;
 const DATA_CACHE_TTL_MS = 2 * 60 * 1000;
 const NAVIGATION_CLIENT_CACHE_TTL_MS = 60 * 1000;
 const NAVIGATION_CLIENT_CACHE_VERSION = "2026-08-07-ftp-templates";
@@ -1101,7 +1103,7 @@ async function loadNotifications() {
 async function ensureDashboardViewerLoaded() {
   if (dashboardViewerLayout) {
     renderDashboardViewer();
-    await loadDashboardViewerTab(dashboardViewerActiveTabId);
+    await loadDashboardViewerTab(dashboardViewerActiveTabId, { skipLocalCache: true });
     return;
   }
   await loadDashboardViewer();
@@ -1259,7 +1261,7 @@ async function openDashboardViewerLayout(pageId) {
   }
   dashboardViewerLayoutCache.set(normalizedPageId, cloneDashboardLayout(dashboardViewerLayout));
   renderDashboardViewer();
-  await loadDashboardViewerTab(dashboardViewerActiveTabId);
+  await loadDashboardViewerTab(dashboardViewerActiveTabId, { skipLocalCache: true });
 }
 
 function renderDashboardViewerPageOptions() {
@@ -1340,19 +1342,54 @@ function dashboardViewerTabCacheKey(tabId) {
   return `${dashboardViewerLayout?.page_id || ""}:${tabId}`;
 }
 
-async function loadDashboardViewerTab(tabId, { force = false } = {}) {
+function clearDashboardViewerRefreshTimer(key) {
+  const timer = dashboardViewerRefreshTimers[key];
+  if (timer) window.clearTimeout(timer);
+  delete dashboardViewerRefreshTimers[key];
+}
+
+function clearDashboardViewerRefreshTimersForPage(pageId) {
+  Object.keys(dashboardViewerRefreshTimers).forEach((key) => {
+    if (key.startsWith(`${pageId}:`)) clearDashboardViewerRefreshTimer(key);
+  });
+}
+
+function clearDashboardViewerTabCacheForPage(pageId) {
+  Object.keys(dashboardViewerLoadedTabs).forEach((key) => {
+    if (key.startsWith(`${pageId}:`)) delete dashboardViewerLoadedTabs[key];
+  });
+  clearDashboardViewerRefreshTimersForPage(pageId);
+}
+
+function scheduleDashboardViewerRefreshPoll(pageId, tabId, payload) {
+  const key = `${pageId}:${tabId}`;
+  if (!payload?.refreshing) {
+    clearDashboardViewerRefreshTimer(key);
+    return;
+  }
+  if (dashboardViewerRefreshTimers[key]) return;
+  dashboardViewerRefreshTimers[key] = window.setTimeout(() => {
+    delete dashboardViewerRefreshTimers[key];
+    if (dashboardViewerLayout?.page_id === pageId && dashboardViewerActiveTabId === tabId) {
+      loadDashboardViewerTab(tabId, { skipLocalCache: true, silent: true });
+    }
+  }, DASHBOARD_VIEWER_REFRESH_POLL_MS);
+}
+
+async function loadDashboardViewerTab(tabId, { force = false, skipLocalCache = false, silent = false } = {}) {
   if (!dashboardViewerLayout || !tabId) return;
   const pageId = dashboardViewerLayout.page_id;
   const key = dashboardViewerTabCacheKey(tabId);
-  if (dashboardViewerLoadedTabs[key] && !force) {
+  if (dashboardViewerLoadedTabs[key] && !force && !skipLocalCache) {
     renderDashboardViewer();
     return;
   }
   const button = $("#refresh-dashboard-viewer-tab");
-  if (button) setButtonLoading(button, true);
+  if (button && !silent) setButtonLoading(button, true);
   try {
     const response = await api(`/api/dashboard-layouts/${encodeURIComponent(pageId)}/tabs/${encodeURIComponent(tabId)}/data${force ? "?refresh=true" : ""}`);
     dashboardViewerLoadedTabs[key] = { ...response, loaded_at: new Date().toISOString() };
+    scheduleDashboardViewerRefreshPoll(pageId, tabId, response);
     if (dashboardViewerLayout?.page_id === pageId && dashboardViewerActiveTabId === tabId) {
       renderDashboardViewer();
       $("#dashboard-viewer-message")?.classList.add("hidden");
@@ -1362,7 +1399,7 @@ async function loadDashboardViewerTab(tabId, { force = false } = {}) {
       showMessage($("#dashboard-viewer-message"), error.message, "error");
     }
   } finally {
-    if (button) setButtonLoading(button, false);
+    if (button && !silent) setButtonLoading(button, false);
   }
 }
 
@@ -1380,8 +1417,9 @@ function renderDashboardViewer() {
   if (title) title.textContent = dashboardViewerLayout.page_name || "Dashboard";
   const loadedPayload = dashboardViewerLoadedTabs[dashboardViewerTabCacheKey(tab.tab_id)];
   if (loadedAt) {
+    const refreshState = loadedPayload?.refreshing ? " - Đang làm mới dữ liệu" : "";
     loadedAt.textContent = loadedPayload?.loaded_at
-      ? `Dữ liệu được lấy vào lúc: ${new Date(loadedPayload.loaded_at).toLocaleString("vi-VN")}`
+      ? `Dữ liệu được lấy vào lúc: ${new Date(loadedPayload.loaded_at).toLocaleString("vi-VN")}${refreshState}`
       : "Dữ liệu được lấy vào lúc: Chưa tải";
   }
   tabs.innerHTML = dashboardViewerLayout.tabs.map((item) => `
@@ -3205,9 +3243,7 @@ async function deleteDashboardPage(pageId) {
     Object.keys(dashboardBuilderLoadedTabs).forEach((key) => {
       if (key.startsWith(`${pageId}:`)) delete dashboardBuilderLoadedTabs[key];
     });
-    Object.keys(dashboardViewerLoadedTabs).forEach((key) => {
-      if (key.startsWith(`${pageId}:`)) delete dashboardViewerLoadedTabs[key];
-    });
+    clearDashboardViewerTabCacheForPage(pageId);
     markDataStale("dashboardBuilder", "dashboardLayoutPages", "dashboardViewerLayouts");
     showMessage($("#dashboard-builder-message"), "Đã xóa trang báo cáo.");
     await loadDashboardLayoutPages();
@@ -3685,9 +3721,7 @@ async function saveDashboardLayout(button = null) {
     dashboardBuilderLayout.parent_code = response.parent_code || parentCode;
     dashboardBuilderLayoutCache.set(dashboardBuilderLayout.page_id, cloneDashboardLayout(dashboardBuilderLayout));
     dashboardViewerLayoutCache.delete(dashboardBuilderLayout.page_id);
-    Object.keys(dashboardViewerLoadedTabs).forEach((key) => {
-      if (key.startsWith(`${dashboardBuilderLayout.page_id}:`)) delete dashboardViewerLoadedTabs[key];
-    });
+    clearDashboardViewerTabCacheForPage(dashboardBuilderLayout.page_id);
     markDataStale("dashboardViewerLayouts");
     await loadDashboardLayoutPages();
     features = [];

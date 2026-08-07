@@ -1334,10 +1334,13 @@ class DatabaseService:
                     "_cache_key": cache_key,
                 })
 
+        cached_results = self._dashboard_cache_results_by_key(query_cache_metadata)
         if not force_refresh:
-            data_cache.update(self._dashboard_cache_results_by_key(query_cache_metadata))
-        for cache_key in data_cache:
-            query_jobs.pop(cache_key, None)
+            data_cache.update(cached_results)
+            for cache_key in data_cache:
+                query_jobs.pop(cache_key, None)
+        elif cache_only:
+            data_cache.update(cached_results)
 
         refresh_requests: list[dict[str, Any]] = []
         if cache_only and query_jobs:
@@ -1347,14 +1350,14 @@ class DatabaseService:
                     "cache_key": cache_key,
                     "dashboard_cache_metadata": query_cache_metadata.get(cache_key) or {},
                 })
-                data_cache[cache_key] = {
+                data_cache.setdefault(cache_key, {
                     "ok": False,
                     "status": "refreshing",
-                    "message": "Da gui lenh lam moi cho may tram. Dashboard dang hien thi cache va se tu cap nhat.",
+                    "message": "Da gui lenh lam moi dashboard cho may tram. Du lieu se tu cap nhat khi cache moi san sang.",
                     "rows": [],
                     "columns": [],
                     "pagination": {"page": 1, "page_size": int(job.get("page_size") or 50), "total": 0},
-                }
+                })
         elif query_jobs:
             configured_workers = getattr(self.internal_api.settings, "dashboard_tab_max_workers", 10)
             max_workers = min(max(1, int(configured_workers or 10)), 24, len(query_jobs))
