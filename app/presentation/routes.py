@@ -144,7 +144,7 @@ WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_w
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260807-onebss-otp-inline-v26"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260807-onebss-otp-fast-cancel-v27"
 WORKSTATION_CONNECTION_PREFIX = "workstation_"
 WORKSTATION_DEFAULT_PRIORITY = 100
 WORKSTATION_SETUP_INCLUDE_PATHS = (
@@ -7019,6 +7019,7 @@ def cancel_onebss_report_run(request: Request, run_id: str) -> dict:
         repository.add_audit_log(actor["username"], "onebss_report_run_cancelled", f"Huy task OneBSS {run_id}")
     except Exception:
         logger.exception("Cannot write OneBSS cancel audit log")
+    invalidate_worker_claim_empty_cache("onebss")
     response = _onebss_report_job_response(run_id, {**updated, "job_id": run_id})
     response["run"] = _decorate_onebss_report_run(updated)
     return response
@@ -7148,6 +7149,8 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
         raise_onebss_operation_error(error, "Khong kiem tra duoc task OneBSS dang ton tai")
     if existing_run and str(existing_run.get("status") or "").lower() in ONEBSS_REPORT_ACTIVE_STATUSES:
         return _onebss_report_job_response(job_id, {**existing_run, "job_id": job_id})
+    if existing_run and payload.job_id.strip():
+        job_id = uuid.uuid4().hex
     worker_state = _onebss_worker_state()
     queued_message = (
         "Da dua yeu cau lay du lieu OneBSS vao hang doi may tram."
@@ -7296,6 +7299,12 @@ def get_onebss_worker_task_otp(request: Request, run_id: str) -> dict:
         details={"run_id": run_id.strip(), "report": run.get("ma_bao_cao") or "", "task_type": "onebss"},
     )
     request_id = str(run.get("otp_request_id") or "").strip()
+    if not request_id:
+        report = repository.get_onebss_report_by_code(str(run.get("ma_bao_cao") or "")) or {}
+        ensured = ensure_onebss_task_otp_request(repository, run, report, str(run.get("worker_session_id") or ""))
+        updated_run = ensured.get("run") if isinstance(ensured.get("run"), dict) else repository.get_onebss_report_run(run_id.strip())
+        run = updated_run or run
+        request_id = str((updated_run or {}).get("otp_request_id") or ensured.get("otp_request_id") or "").strip()
     if not request_id:
         return {"ok": False, "status": "waiting", "message": "Task chua co OTP request.", "otp": ""}
     result = consume_onebss_mobile_gateway_otp(get_settings(), request_id)

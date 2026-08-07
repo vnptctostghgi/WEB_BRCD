@@ -36,7 +36,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.08.07-onebss-otp-inline-v26"
+WORKER_VERSION = "2026.08.07-onebss-otp-fast-cancel-v27"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -74,6 +74,7 @@ def transient_retry_delay_seconds(attempt: int) -> float:
 
 def request_json(client: httpx.Client, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
     retry_forever = bool(kwargs.pop("_retry_forever", True))
+    max_attempts = max(1, int(kwargs.pop("_max_attempts", 3) or 3))
     attempt = 0
     while True:
         try:
@@ -85,7 +86,7 @@ def request_json(client: httpx.Client, method: str, path: str, **kwargs: Any) ->
             if not is_transient_request_error(error):
                 raise
             attempt += 1
-            if not retry_forever and attempt >= 3:
+            if not retry_forever and attempt >= max_attempts:
                 return {"ok": False, "task": None, "transient_error": describe_request_error(error)}
             delay_seconds = transient_retry_delay_seconds(attempt)
             print(
@@ -148,8 +149,16 @@ def wait_for_otp(
     started = time.monotonic()
     last_notice = time.monotonic()
     max_wait = onebss_worker_otp_wait_seconds() if timeout_seconds is None else max(30.0, float(timeout_seconds))
+    sleep_seconds = min(max(float(poll_seconds or 1.0), 1.0), 2.0)
     while True:
-        data = request_json(client, "GET", f"/api/onebss-worker/tasks/{run_id}/otp")
+        data = request_json(
+            client,
+            "GET",
+            f"/api/onebss-worker/tasks/{run_id}/otp",
+            timeout=6.0,
+            _retry_forever=False,
+            _max_attempts=1,
+        )
         if response_is_cancelled(data):
             raise OneBssTaskCancelled(str(data.get("message") or "Task OneBSS da bi huy."))
         if data.get("ok") and data.get("otp"):
@@ -164,10 +173,10 @@ def wait_for_otp(
                 f"{int(max_wait)} giay. Hay kiem tra Mobile Gateway/SMS OTP roi bam lay bao cao lai."
             )
         if progress_callback and now - last_notice >= 15:
-            base_message = str(data.get("message") or "Dang doi OTP tu tin nhan/Mobile Gateway.")
+            base_message = str(data.get("transient_error") or data.get("message") or "Dang doi OTP tu tin nhan/Mobile Gateway.")
             progress_callback(f"{base_message} Da cho {int(elapsed)} giay.")
             last_notice = now
-        time.sleep(poll_seconds)
+        time.sleep(sleep_seconds)
 
 
 def _unique_urls(urls: list[str]) -> list[str]:
@@ -545,19 +554,20 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
             client,
             "POST",
             f"/api/onebss-worker/tasks/{run_id}/status",
-                json={
-                    "status": status,
-                    "message": text,
-                    "worker_id": worker_id,
-                    "worker_session_id": session_id,
-                    "details": {
-                        **worker_process_details(),
-                        "task_type": "onebss",
-                    },
+            json={
+                "status": status,
+                "message": text,
+                "worker_id": worker_id,
+                "worker_session_id": session_id,
+                "details": {
+                    **worker_process_details(),
+                    "task_type": "onebss",
                 },
-                timeout=10.0,
-                _retry_forever=False,
-            )
+            },
+            timeout=8.0,
+            _retry_forever=False,
+            _max_attempts=1,
+        )
         if data.get("transient_error"):
             print(
                 f"Khong cap nhat duoc tien trinh OneBSS ({data.get('transient_error')}); worker tiep tuc xu ly.",
@@ -744,6 +754,9 @@ def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
                     **(details or {}),
                 },
             },
+            timeout=8.0,
+            _retry_forever=False,
+            _max_attempts=1,
         )
 
     def start_export_heartbeat(report_code: str) -> threading.Event:

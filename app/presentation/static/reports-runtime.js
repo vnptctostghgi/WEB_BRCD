@@ -758,16 +758,19 @@ async function runOneBssReport(otp = "", options = {}) {
   oneBssRunInProgress = true;
   setButtonLoading(button, true);
   try {
+    const requestedOtp = String(otp || "").trim();
+    const requestedJobId = requestedOtp ? (options.jobId || oneBssPendingJobId) : "";
+    const requestedOtpRequestId = requestedOtp ? (options.otpRequestId || oneBssPendingOtpRequestId) : "";
     const response = await api("/api/onebss-reports/run", {
       method: "POST",
       body: JSON.stringify({
         ma_bao_cao: select.value,
         parameters,
-        otp,
+        otp: requestedOtp,
         session_id: oneBssPendingSessionId,
-        otp_request_id: options.otpRequestId || oneBssPendingOtpRequestId,
+        otp_request_id: requestedOtpRequestId,
         otp_source: options.otpSource || "",
-        job_id: options.jobId || oneBssPendingJobId,
+        job_id: requestedJobId,
       }),
     });
     if (response.job_id) {
@@ -956,13 +959,11 @@ async function cancelOneBssRun(runId, button = null) {
     if (button) button.disabled = true;
     const response = repairDataEncoding(await api(`/api/onebss-reports/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" }));
     upsertOneBssRun(response.run || response);
-    if (oneBssPendingJobId === id) {
-      oneBssPendingSessionId = "";
-      oneBssPendingOtpRequestId = "";
-      oneBssPendingJobId = "";
-      stopOneBssJobPolling();
-      resetOneBssOtpState();
-    }
+    oneBssPendingSessionId = "";
+    oneBssPendingOtpRequestId = "";
+    oneBssPendingJobId = "";
+    stopOneBssJobPolling();
+    resetOneBssOtpState();
     renderOneBssRunHistory();
     showMessage(message, response.message || "Đã hủy task OneBSS.");
     await refreshOneBssRunHistory($("#onebss-run-report-select")?.value || "");

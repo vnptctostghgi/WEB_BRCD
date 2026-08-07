@@ -118,11 +118,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=203" in public_response.text
+        assert "/static/app.js?v=204" in public_response.text
         assert "/static/styles.css?v=126" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
-        public_js = client.get("/static/app.js?v=203")
+        public_js = client.get("/static/app.js?v=204")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -142,8 +142,8 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert 'data-inline-onebss-field="storage_link"' not in public_js.text
         assert "/static/workstation.js?v=6" in public_js.text
         assert "window.VNPTReportsRuntime?.fillOneBssRunSelect?.()" in public_js.text
-        assert "/static/reports-runtime.js?v=11" in public_js.text
-        reports_runtime_js = client.get("/static/reports-runtime.js?v=11")
+        assert "/static/reports-runtime.js?v=12" in public_js.text
+        reports_runtime_js = client.get("/static/reports-runtime.js?v=12")
         assert reports_runtime_js.status_code == 200
         assert "fillDynamicReportSelect, fillOneBssRunSelect }" in reports_runtime_js.text
         assert "fillOneBssRunSelect }" in reports_runtime_js.text
@@ -989,7 +989,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=203" in page.text
+        assert "/static/app.js?v=204" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -3244,6 +3244,76 @@ def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
         assert post_clear.json()["deleted"] == 0
 
 
+def test_onebss_worker_get_otp_creates_request_when_status_update_timed_out(monkeypatch) -> None:
+    started_requests: list[dict[str, str]] = []
+    consumed_requests: list[str] = []
+
+    def fake_start_otp(settings, session_label, parameters, **kwargs):
+        started_requests.append(
+            {
+                "session_label": session_label,
+                "otp_service_code": kwargs.get("otp_service_code") or "",
+                "report_url": kwargs.get("report_url") or "",
+            }
+        )
+        return {
+            "ok": False,
+            "status": "otp_required",
+            "message": "May tram dang doi OTP.",
+            "otp_request_id": "OTP-AUTO-GET-001",
+        }
+
+    def fake_consume_otp(settings, otp_request_id):
+        consumed_requests.append(otp_request_id)
+        return {"ok": True, "status": "matched", "otp": "654321"}
+
+    monkeypatch.setattr(routes, "start_onebss_otp_mobile_gateway_request", fake_start_otp)
+    monkeypatch.setattr(routes, "consume_onebss_mobile_gateway_otp", fake_consume_otp)
+
+    with TestClient(app) as client:
+        login(client)
+        client.delete("/api/onebss-reports/runs")
+        created = client.post(
+            "/api/admin/onebss-reports",
+            json={
+                "ten_bao_cao": "OneBSS OTP auto ensure",
+                "danh_sach_bien": ["P_TUNGAY"],
+                "parameters": {"P_TUNGAY": "01/07/2026"},
+                "otp_service_code": "otp_onebss_auto",
+                "report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST_OTP_AUTO&name=Test",
+                "storage_link": "",
+            },
+        )
+        assert created.status_code == 200
+        code = created.json()["ma_bao_cao"]
+
+        queued = client.post("/api/onebss-reports/run", json={"ma_bao_cao": code})
+        assert queued.status_code == 200
+        job_id = queued.json()["job_id"]
+
+        headers = {"Authorization": "Bearer test-worker-token"}
+        claim = client.post("/api/onebss-worker/tasks/claim", json={"worker_id": "ws-otp-auto"}, headers=headers)
+        assert claim.status_code == 200
+        assert claim.json()["task"]["run_id"] == job_id
+
+        worker_otp = client.get(f"/api/onebss-worker/tasks/{job_id}/otp", headers=headers)
+        assert worker_otp.status_code == 200
+        assert worker_otp.json()["status"] == "matched"
+        assert worker_otp.json()["otp"] == "654321"
+        assert started_requests == [
+            {
+                "session_label": job_id,
+                "otp_service_code": "otp_onebss_auto",
+                "report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST_OTP_AUTO&name=Test",
+            }
+        ]
+        assert consumed_requests == ["OTP-AUTO-GET-001"]
+
+        job = client.get(f"/api/onebss-reports/jobs/{job_id}")
+        assert job.status_code == 200
+        assert job.json()["otp_request_id"] == "OTP-AUTO-GET-001"
+
+
 def test_admin_can_manage_and_run_ftp_report() -> None:
     with TestClient(app) as client:
         login(client)
@@ -4779,6 +4849,18 @@ def test_onebss_report_run_can_be_cancelled_without_worker_overwrite() -> None:
         assert len(runs) == 1
         assert runs[0]["status"] == "cancelled"
         assert runs[0]["can_cancel"] is False
+
+        rerun = client.post(
+            "/api/onebss-reports/run",
+            json={"ma_bao_cao": code, "parameters": {"P_TUNGAY": "02/07/2026"}, "job_id": job_id},
+        )
+        assert rerun.status_code == 200
+        assert rerun.json()["status"] == "queued"
+        assert rerun.json()["job_id"] != job_id
+
+        runs_after_rerun = client.get(f"/api/onebss-reports/runs?ma_bao_cao={code}").json()["runs"]
+        assert len(runs_after_rerun) == 2
+        assert {run["status"] for run in runs_after_rerun} == {"cancelled", "queued"}
 
 
 def test_onebss_workstation_worker_updates_existing_status_message(monkeypatch) -> None:
@@ -6423,7 +6505,7 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
         assert "/static/shell.js?v=24" in home.text
-        assert "/static/app.js?v=203" not in home.text
+        assert "/static/app.js?v=204" not in home.text
         shell_js = client.get("/static/shell.js?v=24")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
@@ -6431,7 +6513,7 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "function readCachedNavigation" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=203" in shell_js.text
+        assert "/static/app.js?v=204" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -6445,7 +6527,7 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
         assert "/static/shell.js?v=24" in dashboard.text
-        assert "/static/app.js?v=203" not in dashboard.text
+        assert "/static/app.js?v=204" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -6465,49 +6547,49 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "dynamic-report-body" not in reports.text
         assert "dynamic-report-prev" not in reports.text
         assert "dynamic-report-next" not in reports.text
-        assert "/static/app.js?v=203" in reports.text
+        assert "/static/app.js?v=204" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=203" in workstation.text
+        assert "/static/app.js?v=204" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=203" in work_tasks.text
+        assert "/static/app.js?v=204" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=203" in report_links.text
+        assert "/static/app.js?v=204" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=203" in system.text
+        assert "/static/app.js?v=204" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=203" in onebss_mining.text
+        assert "/static/app.js?v=204" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 
         ftp_mining = client.get("/daodulieuftp")
         assert ftp_mining.status_code == 200
         assert "view-ftp-mining" in ftp_mining.text
-        assert "/static/app.js?v=203" in ftp_mining.text
+        assert "/static/app.js?v=204" in ftp_mining.text
         assert "/static/ftp-mining.js" not in ftp_mining.text
         assert ftp_mining.text.count('class="app-view') == 1
 
