@@ -465,13 +465,24 @@ def start_onebss_api_session(
     mobile_id, device_id = onebss_api_device_ids(username)
     cached_token = get_valid_onebss_api_token(username)
     if cached_token:
-        try:
-            emit_onebss_progress(progress_callback, "Da co phien dang nhap OneBSS con han.")
-            return finish_onebss_report_download_api(settings, cached_token, report, parameters, progress_callback=progress_callback)
-        except OneBssDownloadError as error:
-            if onebss_error_looks_auth_related(error):
-                forget_onebss_api_token(username)
-            return {"ok": False, "status": "failed", "message": str(error)[:1000], "parameters": parameters}
+        emit_onebss_progress(progress_callback, "Dang kiem tra phien dang nhap OneBSS con hieu luc.")
+        token_usable = onebss_validate_api_token(settings, cached_token)
+        if token_usable is False:
+            forget_onebss_api_token(username)
+            emit_onebss_progress(progress_callback, "Phien dang nhap OneBSS da het han. Dang dang nhap lai.")
+        else:
+            if token_usable is True:
+                emit_onebss_progress(progress_callback, "Phien dang nhap OneBSS con dung duoc, khong can OTP.")
+            else:
+                emit_onebss_progress(progress_callback, "Chua kiem tra duoc phien OneBSS, thu dung phien hien co truoc.")
+            try:
+                return finish_onebss_report_download_api(settings, cached_token, report, parameters, progress_callback=progress_callback)
+            except OneBssDownloadError as error:
+                if onebss_error_looks_auth_related(error):
+                    forget_onebss_api_token(username)
+                    emit_onebss_progress(progress_callback, "Phien OneBSS bi tu choi. Dang dang nhap lai.")
+                else:
+                    return {"ok": False, "status": "failed", "message": str(error)[:1000], "parameters": parameters}
 
     try:
         emit_onebss_progress(progress_callback, "Da dien tai khoan OneBSS.")
@@ -514,7 +525,6 @@ def start_onebss_api_session(
         "parameters": parameters,
         "report_url": report_url,
     }
-
 
 def continue_onebss_api_session(
     settings: Settings,
@@ -1383,6 +1393,34 @@ def onebss_api_error_message(data: dict[str, Any], response: httpx.Response, *, 
 def onebss_error_looks_auth_related(error: Exception) -> bool:
     text = str(error).lower()
     return any(needle in text for needle in ("401", "403", "token", "unauthorized", "forbidden", "het han", "dang nhap"))
+
+
+def onebss_validate_api_token(settings: Settings, token: OneBssApiToken) -> bool | None:
+    try:
+        with httpx.Client(timeout=onebss_api_timeout(settings, minimum_seconds=20)) as client:
+            response = client.post(
+                f"{ONEBSS_API_BASE_URL}/web-quantri/nguoidung/report_list",
+                headers=onebss_api_auth_headers(token),
+                json={},
+            )
+    except httpx.HTTPError as error:
+        logger.warning("Cannot validate cached OneBSS token: %s", error)
+        return None
+    if response.status_code in {401, 403}:
+        return False
+    data = parse_onebss_json_response(response)
+    if response.status_code >= 400:
+        message = onebss_api_error_message(data, response, fallback="OneBSS khong chap nhan phien dang nhap.")
+        if onebss_error_looks_auth_related(Exception(message)):
+            return False
+        return None
+    if isinstance(data, dict):
+        error_code = str(data.get("error_code") or "")
+        if error_code and error_code != "BSS-00000000":
+            message = str(data.get("message") or data.get("error") or "")
+            if onebss_error_looks_auth_related(Exception(message)):
+                return False
+    return True
 
 
 def remember_onebss_api_token(

@@ -31,6 +31,11 @@
   const dynamicReportHistoryPollingJobs = new Set();
   let reportsRuntimeEventsBound = false;
 
+function newOneBssRunId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID().replace(/-/g, "");
+  return `onebss${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
 async function loadDynamicReports() {
   if (!sqlReports.length) {
     try {
@@ -740,6 +745,7 @@ function resumeOneBssActiveJobPolling() {
 }
 
 async function runOneBssReport(otp = "", options = {}) {
+  if (oneBssRunInProgress) return;
   const select = $("#onebss-run-report-select");
   const button = $("#run-onebss-report");
   const message = $("#onebss-run-message");
@@ -759,7 +765,8 @@ async function runOneBssReport(otp = "", options = {}) {
   setButtonLoading(button, true);
   try {
     const requestedOtp = String(otp || "").trim();
-    const requestedJobId = requestedOtp ? (options.jobId || oneBssPendingJobId) : "";
+    const requestedJobId = requestedOtp ? (options.jobId || oneBssPendingJobId) : (options.jobId || "");
+    const clientRequestId = options.clientRequestId || requestedJobId || "";
     const requestedOtpRequestId = requestedOtp ? (options.otpRequestId || oneBssPendingOtpRequestId) : "";
     const response = await api("/api/onebss-reports/run", {
       method: "POST",
@@ -771,6 +778,7 @@ async function runOneBssReport(otp = "", options = {}) {
         otp_request_id: requestedOtpRequestId,
         otp_source: options.otpSource || "",
         job_id: requestedJobId,
+        client_request_id: clientRequestId,
       }),
     });
     if (response.job_id) {
@@ -817,7 +825,7 @@ function renderOneBssRunHistory() {
 
 function renderOneBssRunRow(run) {
   run = repairDataEncoding(run);
-  const startedAt = run.started_at ? new Date(run.started_at).toLocaleString("vi-VN") : "-";
+  const startedAt = run.started_at_label || formatOneBssRunTime(run.started_at) || "-";
   const ok = run.status === "success";
   const storageStatus = run.storage_status || "";
   const isUploadedDriveFile = /^uploaded_google_drive:/i.test(storageStatus);
@@ -916,7 +924,7 @@ function renderOneBssRunHistory() {
 
 function renderOneBssRunRow(run) {
   run = repairDataEncoding(run);
-  const startedAt = run.started_at ? new Date(run.started_at).toLocaleString("vi-VN") : "-";
+  const startedAt = run.started_at_label || formatOneBssRunTime(run.started_at) || "-";
   const statusValue = String(run.status || "").toLowerCase();
   const storageStatus = run.storage_status || "";
   const fileUrl = String(run.file_url || run.storage_link || run.download_url || "").trim();
@@ -943,6 +951,14 @@ function renderOneBssRunRow(run) {
       <td><span title="${escapeHtml(run.message || "")}">${escapeHtml(message)}</span></td>
       <td class="table-action-cell"><div class="action-group onebss-row-actions">${actions}</div></td>
     </tr>`;
+}
+
+function formatOneBssRunTime(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime()) || parsed.getFullYear() < 2020) return text;
+  return parsed.toLocaleString("vi-VN", { hour12: false });
 }
 
 function truncateText(value, maxLength = 120) {
@@ -1015,11 +1031,19 @@ function bindReportsRuntimeEvents() {
   reportsRuntimeEventsBound = true;
   $("#onebss-run-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    oneBssPendingSessionId = "";
-    oneBssPendingJobId = "";
-    stopOneBssJobPolling();
-    resetOneBssOtpState();
-    await runOneBssReport();
+    const form = event.currentTarget;
+    if (form?.dataset.onebssSubmitting === "1") return;
+    const submitId = newOneBssRunId();
+    if (form) form.dataset.onebssSubmitting = "1";
+    try {
+      oneBssPendingSessionId = "";
+      oneBssPendingJobId = submitId;
+      stopOneBssJobPolling();
+      resetOneBssOtpState();
+      await runOneBssReport("", { jobId: submitId, clientRequestId: submitId });
+    } finally {
+      if (form?.dataset.onebssSubmitting === "1") delete form.dataset.onebssSubmitting;
+    }
   });
   $("#toggle-onebss-param-edit")?.addEventListener("click", toggleOneBssRunParameterEditing);
   $("#clear-onebss-run-history")?.addEventListener("click", clearOneBssRunHistory);

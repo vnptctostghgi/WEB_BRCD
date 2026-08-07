@@ -51,6 +51,7 @@ from app.application.vault_service import VaultService
 from app.application.connection_service import ConnectionService
 from app.application.telegram_notifier import TelegramNotifier
 from app.application.onebss_data_mining_service import (
+    LOCAL_TIMEZONE,
     OneBssDownloadError,
     normalize_onebss_report_url,
     run_data_mining_schedule,
@@ -144,7 +145,7 @@ WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_w
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260807-onebss-processing-timeout-v28"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260807-onebss-token-dedupe-time-v29"
 WORKSTATION_CONNECTION_PREFIX = "workstation_"
 WORKSTATION_DEFAULT_PRIORITY = 100
 WORKSTATION_SETUP_INCLUDE_PATHS = (
@@ -546,6 +547,7 @@ class RunOneBssReportPayload(BaseModel):
     otp_request_id: str = ""
     otp_source: str = ""
     job_id: str = ""
+    client_request_id: str = ""
 
 
 class OneBssTaskOtpPayload(BaseModel):
@@ -6397,8 +6399,17 @@ def _onebss_report_file_url(run: dict[str, Any]) -> str:
     return _onebss_report_download_url(run)
 
 
+def _onebss_run_time_label(value: Any) -> str:
+    parsed = parse_datetime_value(value)
+    if not parsed:
+        return ""
+    return parsed.astimezone(LOCAL_TIMEZONE).strftime("%H:%M:%S %d/%m/%Y")
+
+
 def _decorate_onebss_report_run(run: dict[str, Any]) -> dict[str, Any]:
     decorated = dict(run)
+    decorated["started_at_label"] = _onebss_run_time_label(decorated.get("started_at"))
+    decorated["finished_at_label"] = _onebss_run_time_label(decorated.get("finished_at"))
     status_value = str(decorated.get("status") or "").lower()
     decorated["can_cancel"] = status_value in ONEBSS_REPORT_ACTIVE_STATUSES
     file_url = _onebss_report_file_url(decorated)
@@ -6454,7 +6465,9 @@ def _onebss_report_job_response(job_id: str, job: dict[str, Any]) -> dict[str, A
         "ten_bao_cao": job.get("ten_bao_cao") or "",
         "parameters": job.get("parameters") if isinstance(job.get("parameters"), dict) else {},
         "started_at": job.get("started_at") or "",
+        "started_at_label": _onebss_run_time_label(job.get("started_at")),
         "finished_at": job.get("finished_at") or "",
+        "finished_at_label": _onebss_run_time_label(job.get("finished_at")),
         "created_by": job.get("created_by") or "",
         "session_id": job.get("session_id") or job.get("worker_session_id") or "",
         "worker_session_id": job.get("worker_session_id") or "",
@@ -7136,9 +7149,10 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
         raise_onebss_operation_error(error, "Khong doc duoc cau hinh bao cao OneBSS")
     if not report:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay cau hinh bao cao OneBSS.")
-    started_at = datetime.now().isoformat(timespec="seconds")
+    started_at = datetime.now(LOCAL_TIMEZONE).isoformat(timespec="seconds")
     run_parameters = payload.parameters if isinstance(payload.parameters, dict) and payload.parameters else report.get("parameters") or {}
-    job_id = re.sub(r"[^A-Za-z0-9_-]+", "", payload.job_id.strip()) or uuid.uuid4().hex
+    requested_job_id = payload.job_id.strip() or payload.client_request_id.strip()
+    job_id = re.sub(r"[^A-Za-z0-9_-]+", "", requested_job_id) or uuid.uuid4().hex
     if payload.job_id.strip() and (payload.otp.strip() or payload.otp_request_id.strip()):
         return submit_onebss_report_job_otp(
             request,
@@ -7151,7 +7165,7 @@ def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict
         raise_onebss_operation_error(error, "Khong kiem tra duoc task OneBSS dang ton tai")
     if existing_run and str(existing_run.get("status") or "").lower() in ONEBSS_REPORT_ACTIVE_STATUSES:
         return _onebss_report_job_response(job_id, {**existing_run, "job_id": job_id})
-    if existing_run and payload.job_id.strip():
+    if existing_run and requested_job_id:
         job_id = uuid.uuid4().hex
     worker_state = _onebss_worker_state()
     queued_message = (

@@ -81,6 +81,18 @@ function Get-WorkerPythonProcesses {
   }
 }
 
+function Get-WorkerPythonInstances {
+  $processes = @(Get-WorkerPythonProcesses)
+  if ($processes.Count -le 1) {
+    return $processes
+  }
+  $processIds = @{}
+  foreach ($process in $processes) {
+    $processIds[[int]$process.ProcessId] = $true
+  }
+  @($processes | Where-Object { -not $processIds.ContainsKey([int]$_.ParentProcessId) })
+}
+
 function Get-WorkerWrapperProcesses {
   @(Get-WorkerProcesses) | Where-Object {
     ([string]$_.CommandLine) -match [regex]::Escape("run_onebss_worker_background.ps1")
@@ -89,12 +101,12 @@ function Get-WorkerWrapperProcesses {
 
 function Wait-WorkerProcessesStable {
   param([int]$Seconds = 15)
-  $processes = @(Get-WorkerPythonProcesses)
+  $processes = @(Get-WorkerPythonInstances)
   if ($processes.Count -eq 0) {
     return @()
   }
   Start-Sleep -Seconds $Seconds
-  return @(Get-WorkerPythonProcesses)
+  return @(Get-WorkerPythonInstances)
 }
 
 function Test-OneBssWorkerTaskUsesBackgroundWorker {
@@ -112,7 +124,7 @@ function Test-OneBssWorkerTaskUsesBackgroundWorker {
 }
 
 function Start-WorkerIfMissing {
-  $processes = @(Get-WorkerPythonProcesses)
+  $processes = @(Get-WorkerPythonInstances)
   if ($processes.Count -gt 0) {
     $stableProcesses = @(Wait-WorkerProcessesStable 5)
     $wrappers = @(Get-WorkerWrapperProcesses)
