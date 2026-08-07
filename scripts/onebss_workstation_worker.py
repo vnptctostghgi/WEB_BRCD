@@ -1098,7 +1098,7 @@ def process_ftp_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
             print(f"Khong cap nhat duoc ket qua FTP: {describe_request_error(update_error)}", file=sys.stderr)
 
 
-def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float) -> bool:
+def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float, *, include_sql: bool = True, include_ftp: bool = True) -> bool:
     claim = request_json(
         client,
         "POST",
@@ -1126,59 +1126,61 @@ def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float) 
         send_heartbeat(client, worker_id, "idle", "May tram OneBSS da quay lai trang thai cho task.")
         return True
 
-    sql_claim = request_json(
-        client,
-        "POST",
-        "/api/sql-worker/tasks/claim",
-        json={
-            "worker_id": worker_id,
-            "version": WORKER_VERSION,
-            "details": worker_process_details(),
-        },
-        timeout=10.0,
-        _retry_forever=False,
-    )
-    if sql_claim.get("transient_error"):
-        return False
-    sql_task = sql_claim.get("task") if isinstance(sql_claim.get("task"), dict) else None
-    if sql_task:
-        send_heartbeat(
+    if include_sql:
+        sql_claim = request_json(
             client,
-            worker_id,
-            "busy",
-            f"Dang xu ly task SQL {sql_task.get('run_id') or ''}.",
-            {"run_id": sql_task.get("run_id") or "", "report": sql_task.get("report_code") or "", "task_type": "sql"},
+            "POST",
+            "/api/sql-worker/tasks/claim",
+            json={
+                "worker_id": worker_id,
+                "version": WORKER_VERSION,
+                "details": worker_process_details(),
+            },
+            timeout=10.0,
+            _retry_forever=False,
         )
-        process_sql_task(client, sql_task, worker_id)
-        send_heartbeat(client, worker_id, "idle", "May tram SQL da quay lai trang thai cho task.")
-        return True
+        if sql_claim.get("transient_error"):
+            return False
+        sql_task = sql_claim.get("task") if isinstance(sql_claim.get("task"), dict) else None
+        if sql_task:
+            send_heartbeat(
+                client,
+                worker_id,
+                "busy",
+                f"Dang xu ly task SQL {sql_task.get('run_id') or ''}.",
+                {"run_id": sql_task.get("run_id") or "", "report": sql_task.get("report_code") or "", "task_type": "sql"},
+            )
+            process_sql_task(client, sql_task, worker_id)
+            send_heartbeat(client, worker_id, "idle", "May tram SQL da quay lai trang thai cho task.")
+            return True
 
-    ftp_claim = request_json(
-        client,
-        "POST",
-        "/api/ftp-worker/tasks/claim",
-        json={
-            "worker_id": worker_id,
-            "version": WORKER_VERSION,
-            "details": worker_process_details(),
-        },
-        timeout=10.0,
-        _retry_forever=False,
-    )
-    if ftp_claim.get("transient_error"):
-        return False
-    ftp_task = ftp_claim.get("task") if isinstance(ftp_claim.get("task"), dict) else None
-    if ftp_task:
-        send_heartbeat(
+    if include_ftp:
+        ftp_claim = request_json(
             client,
-            worker_id,
-            "busy",
-            f"Dang xu ly task FTP {ftp_task.get('run_id') or ''}.",
-            {"run_id": ftp_task.get("run_id") or "", "report": ftp_task.get("ma_bao_cao") or "", "task_type": "ftp"},
+            "POST",
+            "/api/ftp-worker/tasks/claim",
+            json={
+                "worker_id": worker_id,
+                "version": WORKER_VERSION,
+                "details": worker_process_details(),
+            },
+            timeout=10.0,
+            _retry_forever=False,
         )
-        process_ftp_task(client, ftp_task, worker_id)
-        send_heartbeat(client, worker_id, "idle", "May tram FTP da quay lai trang thai cho task.")
-        return True
+        if ftp_claim.get("transient_error"):
+            return False
+        ftp_task = ftp_claim.get("task") if isinstance(ftp_claim.get("task"), dict) else None
+        if ftp_task:
+            send_heartbeat(
+                client,
+                worker_id,
+                "busy",
+                f"Dang xu ly task FTP {ftp_task.get('run_id') or ''}.",
+                {"run_id": ftp_task.get("run_id") or "", "report": ftp_task.get("ma_bao_cao") or "", "task_type": "ftp"},
+            )
+            process_ftp_task(client, ftp_task, worker_id)
+            send_heartbeat(client, worker_id, "idle", "May tram FTP da quay lai trang thai cho task.")
+            return True
 
     return False
 
@@ -1196,6 +1198,10 @@ def main() -> int:
         raise SystemExit("Missing INTERNAL_API_TOKEN or --token.")
 
     headers = {"Authorization": f"Bearer {args.token}"}
+    sql_poll_seconds = max(float(os.getenv("SQL_WORKER_POLL_SECONDS", "10") or "10"), args.poll_seconds)
+    ftp_poll_seconds = max(float(os.getenv("FTP_WORKER_POLL_SECONDS", "30") or "30"), args.poll_seconds)
+    next_sql_poll = 0.0
+    next_ftp_poll = 0.0
     with httpx.Client(base_url=args.base_url.rstrip("/"), headers=headers, timeout=httpx.Timeout(60.0, connect=20.0)) as client:
         send_heartbeat(client, args.worker_id, "starting", "May tram OneBSS dang khoi dong.")
         last_heartbeat = time.monotonic()
@@ -1204,7 +1210,13 @@ def main() -> int:
             if now - last_heartbeat >= max(15.0, args.heartbeat_seconds):
                 send_heartbeat(client, args.worker_id, "idle", "May tram OneBSS dang cho task.")
                 last_heartbeat = now
-            processed = poll_worker_once(client, args.worker_id, args.poll_seconds)
+            include_sql = now >= next_sql_poll
+            include_ftp = now >= next_ftp_poll
+            processed = poll_worker_once(client, args.worker_id, args.poll_seconds, include_sql=include_sql, include_ftp=include_ftp)
+            if include_sql:
+                next_sql_poll = time.monotonic() + sql_poll_seconds
+            if include_ftp:
+                next_ftp_poll = time.monotonic() + ftp_poll_seconds
             if processed:
                 last_heartbeat = time.monotonic()
             if args.once:

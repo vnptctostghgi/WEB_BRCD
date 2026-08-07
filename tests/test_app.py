@@ -284,7 +284,11 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "GoogleDriveOauthRefreshToken" in config_text
         assert 'Set-UserEnvironment "ONEBSS_DRIVE_UPLOAD_API_URL" $WorkerDriveUploadApiUrl' in setup_script
         assert 'Set-UserEnvironment "ONEBSS_TASK_TIMEOUT_SECONDS" $onebssTaskTimeoutSeconds' in setup_script
+        assert 'Set-UserEnvironment "SQL_WORKER_POLL_SECONDS" "10"' in setup_script
+        assert 'Set-UserEnvironment "FTP_WORKER_POLL_SECONDS" "30"' in setup_script
         assert "ONEBSS_TASK_TIMEOUT_SECONDS" in start_worker_script
+        assert "SQL_WORKER_POLL_SECONDS" in start_worker_script
+        assert "FTP_WORKER_POLL_SECONDS" in start_worker_script
         assert "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64" in setup_script
         assert "OracleDbDsn" in setup_script
         assert "OracleDbHost" in setup_script
@@ -369,6 +373,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "VNPTCTO_WORKSTATION_ROOT" in uninstall_task_script
         assert "C:\\VNPTCTO" in uninstall_task_script
         assert "ONEBSS_DRIVE_UPLOAD_API_URL" in uninstall_task_script
+        assert "SQL_WORKER_POLL_SECONDS" in uninstall_task_script
+        assert "FTP_WORKER_POLL_SECONDS" in uninstall_task_script
         assert "timeout /t" not in setup_bat.lower()
         assert "\npause" not in setup_bat.lower()
 
@@ -5031,6 +5037,30 @@ def test_workstation_worker_idle_claims_include_process_details() -> None:
         assert call["json"]["details"]["pid"]
         assert call["json"]["details"]["worker_version"] == worker.WORKER_VERSION
         assert "dang chay nen" in call["json"]["details"]["worker_process"]
+
+
+def test_workstation_worker_can_skip_slow_secondary_claims() -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    calls = []
+
+    class FakeClient:
+        def request(self, method: str, path: str, **kwargs):
+            calls.append(path)
+
+            class FakeResponse:
+                status_code = 200
+
+                def raise_for_status(self) -> None:
+                    return None
+
+                def json(self) -> dict:
+                    return {"ok": True, "task": None}
+
+            return FakeResponse()
+
+    assert worker.poll_worker_once(FakeClient(), "ws-idle", 0, include_sql=False, include_ftp=False) is False
+    assert calls == ["/api/onebss-worker/tasks/claim"]
 
 
 def test_workstation_worker_ftp_claim_transient_returns_to_poll(monkeypatch) -> None:

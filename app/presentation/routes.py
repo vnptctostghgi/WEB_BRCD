@@ -134,11 +134,14 @@ WORKSTATION_HEARTBEATS: dict[str, dict[str, Any]] = {}
 WORKSTATION_HEARTBEATS_LOCK = threading.Lock()
 WORKSTATION_HEARTBEAT_TTL_SECONDS = 10 * 60
 WORKSTATION_READY_HEARTBEAT_SECONDS = 90
+WORKSTATION_PROFILE_CACHE_TTL_SECONDS = 60
+WORKSTATION_PROFILE_CACHE_LOCK = threading.Lock()
+WORKSTATION_PROFILE_CACHE: dict[str, Any] = {"expires_at": 0.0, "profiles": {}}
 WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_worker", "ftp_report_worker", "excel_export", "drive_upload"]
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260803-direct-health-fallback-v18"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260803-speed-cache-poll-v19"
 WORKSTATION_CONNECTION_PREFIX = "workstation_"
 WORKSTATION_DEFAULT_PRIORITY = 100
 WORKSTATION_SETUP_INCLUDE_PATHS = (
@@ -2395,12 +2398,33 @@ def _workstation_profile_from_connection(connection: dict[str, Any]) -> dict[str
     }
 
 
-def workstation_registry_profiles(repository: Any | None = None) -> dict[str, dict[str, Any]]:
+def invalidate_workstation_profile_cache() -> None:
+    with WORKSTATION_PROFILE_CACHE_LOCK:
+        WORKSTATION_PROFILE_CACHE["expires_at"] = 0.0
+        WORKSTATION_PROFILE_CACHE["profiles"] = {}
+
+
+def _copy_workstation_profiles(profiles: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {worker_id: dict(profile) for worker_id, profile in profiles.items()}
+
+
+def workstation_registry_profiles(repository: Any | None = None, *, use_cache: bool = True) -> dict[str, dict[str, Any]]:
+    now_monotonic = time.monotonic()
+    if use_cache:
+        with WORKSTATION_PROFILE_CACHE_LOCK:
+            cached_profiles = WORKSTATION_PROFILE_CACHE.get("profiles")
+            expires_at = float(WORKSTATION_PROFILE_CACHE.get("expires_at") or 0.0)
+            if isinstance(cached_profiles, dict) and cached_profiles and now_monotonic < expires_at:
+                return _copy_workstation_profiles(cached_profiles)
     try:
         repo = repository or build_app_repository()
         connections = repo.list_system_connections()
     except Exception:
         logger.exception("Cannot load workstation registry")
+        with WORKSTATION_PROFILE_CACHE_LOCK:
+            cached_profiles = WORKSTATION_PROFILE_CACHE.get("profiles")
+            if isinstance(cached_profiles, dict) and cached_profiles:
+                return _copy_workstation_profiles(cached_profiles)
         return {}
     profiles: dict[str, dict[str, Any]] = {}
     for connection in connections:
@@ -2408,6 +2432,10 @@ def workstation_registry_profiles(repository: Any | None = None) -> dict[str, di
             continue
         profile = _workstation_profile_from_connection(connection)
         profiles[profile["worker_id"]] = profile
+    if use_cache:
+        with WORKSTATION_PROFILE_CACHE_LOCK:
+            WORKSTATION_PROFILE_CACHE["profiles"] = _copy_workstation_profiles(profiles)
+            WORKSTATION_PROFILE_CACHE["expires_at"] = now_monotonic + WORKSTATION_PROFILE_CACHE_TTL_SECONDS
     return profiles
 
 
@@ -2446,7 +2474,8 @@ def upsert_workstation_profile(
         config,
         bool(enabled) and not deleted,
     )
-    return workstation_profile_for(clean_worker_id, workstation_registry_profiles(repository))
+    invalidate_workstation_profile_cache()
+    return workstation_profile_for(clean_worker_id, workstation_registry_profiles(repository, use_cache=False))
 
 
 def workstation_worker_has_role(worker: dict[str, Any], role_codes: set[str]) -> bool:

@@ -813,6 +813,8 @@ Set-UserEnvironment "ONEBSS_DRIVE_UPLOAD_API_URL" $WorkerDriveUploadApiUrl
 Set-UserEnvironment "ONEBSS_WORKER_ID" $WorkerId
 Set-UserEnvironment "ONEBSS_WORKER_POLL_SECONDS" "5"
 Set-UserEnvironment "ONEBSS_WORKER_HEARTBEAT_SECONDS" "60"
+Set-UserEnvironment "SQL_WORKER_POLL_SECONDS" "10"
+Set-UserEnvironment "FTP_WORKER_POLL_SECONDS" "30"
 Set-UserEnvironment "SQL_WORKER_TIMEOUT_SECONDS" $sqlWorkerTimeoutSeconds
 Set-UserEnvironment "EXPORT_PAGE_SIZE" $exportPageSize
 Set-UserEnvironment "EXPORT_MAX_ROWS" $exportMaxRows
