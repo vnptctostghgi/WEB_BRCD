@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import calendar
+import csv
 import base64
 import fnmatch
 import ftplib
+import json
 import mimetypes
 import multiprocessing as mp
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -36,7 +40,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.08.07-onebss-otp-relogin-grid-timeout-v30"
+WORKER_VERSION = "2026.08.07-ftp-template-merge-v31"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -963,10 +967,65 @@ def safe_local_filename(value: str, fallback: str = "ftp_result") -> str:
     return text or fallback
 
 
-def render_ftp_file_template(template: str, now: datetime | None = None) -> str:
+def normalize_ftp_variables(value: Any) -> dict[str, str]:
+    if isinstance(value, dict):
+        return {
+            str(key).strip(): str(item).strip()
+            for key, item in value.items()
+            if str(key).strip()
+        }
+    if not isinstance(value, str):
+        return {}
+    variables: dict[str, str] = {}
+    for raw_line in value.replace("\r", "\n").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        separator = "=" if "=" in line else ":" if ":" in line else ""
+        if not separator:
+            continue
+        key, item = line.split(separator, 1)
+        key = key.strip()
+        if key:
+            variables[key] = item.strip()
+    return variables
+
+
+def _replace_ftp_template_tokens(template: str, values: dict[str, str]) -> str:
+    output = str(template or "")
+    for key in sorted(values, key=len, reverse=True):
+        value = str(values.get(key) or "")
+        output = output.replace(f"{{{{{key}}}}}", value).replace(f"{{{key}}}", value)
+    return output
+
+
+def _ftp_month_values(year: int, month: int, prefix: str = "") -> dict[str, str]:
+    last_day = calendar.monthrange(year, month)[1]
+    base = f"{year:04d}{month:02d}"
+    return {
+        f"{prefix}yyyy": f"{year:04d}",
+        f"{prefix}yy": f"{year % 100:02d}",
+        f"{prefix}mm": f"{month:02d}",
+        f"{prefix}m": str(month),
+        f"{prefix}yyyyMM": base,
+        f"{prefix}yyyymm": base,
+        f"{prefix}YYYYMM": base,
+        f"{prefix}yyyymm01": f"{base}01",
+        f"{prefix}yyyyMM01": f"{base}01",
+        f"{prefix}firstday": f"{base}01",
+        f"{prefix}first_day": f"{base}01",
+        f"{prefix}lastday": f"{base}{last_day:02d}",
+        f"{prefix}last_day": f"{base}{last_day:02d}",
+        f"{prefix}last_dd": f"{last_day:02d}",
+        f"{prefix}lastd": str(last_day),
+    }
+
+
+def ftp_template_values(now: datetime | None = None, variables: Any = None) -> dict[str, str]:
     current = now or datetime.now()
     yesterday = current - timedelta(days=1)
     values = {
+        **_ftp_month_values(current.year, current.month),
         "yyyy": f"{current:%Y}",
         "YYYY": f"{current:%Y}",
         "yy": f"{current:%y}",
@@ -978,6 +1037,7 @@ def render_ftp_file_template(template: str, now: datetime | None = None) -> str:
         "DD": f"{current:%d}",
         "d": str(current.day),
         "yyyymmdd": f"{current:%Y%m%d}",
+        "yyyyMMdd": f"{current:%Y%m%d}",
         "YYYYMMDD": f"{current:%Y%m%d}",
         "ddmmyyyy": f"{current:%d%m%Y}",
         "DDMMYYYY": f"{current:%d%m%Y}",
@@ -986,10 +1046,70 @@ def render_ftp_file_template(template: str, now: datetime | None = None) -> str:
         "yesterday": f"{yesterday:%Y%m%d}",
         "yesterday_ddmmyyyy": f"{yesterday:%d%m%Y}",
     }
-    output = str(template or "").strip()
-    for key, value in values.items():
-        output = output.replace(f"{{{{{key}}}}}", value).replace(f"{{{key}}}", value)
-    return output
+    raw_variables = normalize_ftp_variables(variables)
+    for _ in range(4):
+        changed = False
+        for key, raw_value in raw_variables.items():
+            rendered = _replace_ftp_template_tokens(raw_value, values)
+            if values.get(key) != rendered:
+                values[key] = rendered
+                changed = True
+        if not changed:
+            break
+    thang = values.get("thang") or raw_variables.get("thang")
+    if re.fullmatch(r"\d{6}", str(thang or "")):
+        year = int(str(thang)[:4])
+        month = int(str(thang)[4:6])
+        if 1 <= month <= 12:
+            values.update(_ftp_month_values(year, month, "thang_"))
+            values["lastday"] = values["thang_lastday"]
+            values["last_day"] = values["thang_last_day"]
+            values["last_dd"] = values["thang_last_dd"]
+    return values
+
+
+def render_ftp_file_template(template: str, now: datetime | None = None, variables: Any = None) -> str:
+    return _replace_ftp_template_tokens(str(template or "").strip(), ftp_template_values(now, variables)).strip()
+
+
+def decode_ftp_template_config(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    text = str(value or "").strip()
+    if not text.startswith("{"):
+        return {}
+    try:
+        config = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(config, dict):
+        return {}
+    if not any(key in config for key in ("sources", "variables", "file_name_template", "output_file_name_template")):
+        return {}
+    return config
+
+
+def _parse_ftp_location(base_config: dict[str, Any], folder_path: str, file_template: str) -> tuple[dict[str, Any], str, str]:
+    ftp_config = dict(base_config)
+    folder_value = str(folder_path or "").strip()
+    template_value = str(file_template or "").strip()
+    parsed = urlparse(folder_value)
+    if parsed.scheme.lower() == "ftp":
+        if parsed.hostname:
+            ftp_config["host"] = parsed.hostname
+        if parsed.port:
+            ftp_config["port"] = parsed.port
+        if parsed.username and not str(ftp_config.get("username") or "").strip():
+            ftp_config["username"] = unquote(parsed.username)
+        if parsed.password and not str(ftp_config.get("password") or "").strip():
+            ftp_config["password"] = unquote(parsed.password)
+        path = unquote(parsed.path or "/")
+        if not template_value and path and not path.endswith("/"):
+            template_value = Path(path).name
+            folder_value = str(Path(path).parent).replace("\\", "/")
+        else:
+            folder_value = path or "/"
+    return ftp_config, folder_value or "/", template_value
 
 
 def ftp_modified_sort_key(ftp: ftplib.FTP, name: str) -> tuple[str, str]:
@@ -1004,26 +1124,263 @@ def ftp_modified_sort_key(ftp: ftplib.FTP, name: str) -> tuple[str, str]:
 def parse_ftp_task(task: dict[str, Any]) -> tuple[dict[str, Any], str, str]:
     connection = task.get("connection") if isinstance(task.get("connection"), dict) else {}
     config = connection.get("config") if isinstance(connection.get("config"), dict) else {}
-    ftp_config = dict(config)
+    template_config = decode_ftp_template_config(task.get("file_name_template"))
     folder_path = str(task.get("folder_path") or "").strip()
-    file_template = str(task.get("file_name_template") or "").strip()
-    parsed = urlparse(folder_path)
-    if parsed.scheme.lower() == "ftp":
-        if parsed.hostname:
-            ftp_config["host"] = parsed.hostname
-        if parsed.port:
-            ftp_config["port"] = parsed.port
-        if parsed.username and not str(ftp_config.get("username") or "").strip():
-            ftp_config["username"] = unquote(parsed.username)
-        if parsed.password and not str(ftp_config.get("password") or "").strip():
-            ftp_config["password"] = unquote(parsed.password)
-        path = unquote(parsed.path or "/")
-        if not file_template and path and not path.endswith("/"):
-            file_template = Path(path).name
-            folder_path = str(Path(path).parent).replace("\\", "/")
+    file_template = str(
+        template_config.get("file_name_template")
+        or template_config.get("output_file_name_template")
+        or task.get("file_name_template")
+        or ""
+    ).strip()
+    return _parse_ftp_location(dict(config), folder_path, file_template)
+
+
+def ftp_task_variables(task: dict[str, Any]) -> dict[str, str]:
+    template_config = decode_ftp_template_config(task.get("file_name_template"))
+    variables = normalize_ftp_variables(template_config.get("variables"))
+    report = task.get("report") if isinstance(task.get("report"), dict) else {}
+    report_config = decode_ftp_template_config(report.get("file_name_template"))
+    for key, value in normalize_ftp_variables(report_config.get("variables")).items():
+        variables.setdefault(key, value)
+    variables.update(normalize_ftp_variables(task.get("variables")))
+    return variables
+
+
+def build_ftp_download_plan(task: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
+    connection = task.get("connection") if isinstance(task.get("connection"), dict) else {}
+    base_config = connection.get("config") if isinstance(connection.get("config"), dict) else {}
+    template_config = decode_ftp_template_config(task.get("file_name_template"))
+    report = task.get("report") if isinstance(task.get("report"), dict) else {}
+    report_config = decode_ftp_template_config(report.get("file_name_template"))
+    config = template_config or report_config
+    variables = ftp_task_variables(task)
+    sources_config = config.get("sources") if isinstance(config.get("sources"), list) else []
+    source_items: list[dict[str, Any]] = []
+    if sources_config:
+        for index, source in enumerate(sources_config, start=1):
+            if not isinstance(source, dict):
+                continue
+            label = str(source.get("name") or source.get("label") or source.get("source") or f"Nguon {index}").strip()
+            folder_path = render_ftp_file_template(str(source.get("folder_path") or ""), now, variables)
+            file_template = render_ftp_file_template(str(source.get("file_name_template") or source.get("file") or ""), now, variables)
+            source_config, folder_path, file_template = _parse_ftp_location(dict(base_config), folder_path, file_template)
+            source_items.append({
+                "name": label or f"Nguon {index}",
+                "folder_path": folder_path,
+                "file_name_template": file_template,
+                "config": source_config,
+            })
+    else:
+        source_config, folder_path, file_template = parse_ftp_task(task)
+        folder_path = render_ftp_file_template(folder_path, now, variables)
+        file_template = render_ftp_file_template(file_template, now, variables)
+        source_items.append({
+            "name": str(task.get("ma_bao_cao") or task.get("ten_bao_cao") or "FTP").strip() or "FTP",
+            "folder_path": folder_path,
+            "file_name_template": file_template,
+            "config": source_config,
+        })
+    output_template = str(
+        config.get("output_file_name_template")
+        or config.get("output")
+        or task.get("output_file_name_template")
+        or f"{task.get('ma_bao_cao') or 'ftp'}_{{yyyyMMdd}}.xlsx"
+    ).strip()
+    output_name = render_ftp_file_template(output_template, now, variables) or f"ftp_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
+    if sources_config and not Path(output_name).suffix:
+        output_name = f"{output_name}.xlsx"
+    return {
+        "variables": variables,
+        "sources": source_items,
+        "output_file_name": safe_local_filename(output_name, "ftp_merged.xlsx"),
+        "is_multi_source": len(source_items) > 1 or bool(sources_config),
+    }
+
+
+def _download_ftp_source_file(source: dict[str, Any], local_dir: Path, progress_callback=None) -> dict[str, Any]:
+    config = source.get("config") if isinstance(source.get("config"), dict) else {}
+    folder_path = str(source.get("folder_path") or "/").strip() or "/"
+    resolved_name = str(source.get("file_name_template") or "").strip()
+    host = str(config.get("host") or "").strip()
+    username = str(config.get("username") or "").strip()
+    password = str(config.get("password") or "")
+    port = int(config.get("port") or 21)
+    timeout = float(config.get("timeout_seconds") or 60)
+    passive = config.get("passive", True) is not False
+    if not host or not username or not password:
+        raise RuntimeError("FTP thieu host, username hoac password.")
+    if not resolved_name:
+        raise RuntimeError("Ten file FTP sau khi render dang rong.")
+    label = str(source.get("name") or "FTP")
+    if progress_callback:
+        progress_callback(f"Dang ket noi FTP {host}:{port} cho {label}.", "running", resolved_name)
+    ftp = ftplib.FTP()
+    try:
+        ftp.connect(host=host, port=port, timeout=timeout)
+        ftp.login(user=username, passwd=password)
+        ftp.set_pasv(passive)
+        if folder_path and folder_path not in {".", "/"}:
+            ftp.cwd(folder_path)
+        if progress_callback:
+            progress_callback(f"Dang tim file {label}: {resolved_name}.", "running", resolved_name)
+        wildcard = any(character in resolved_name for character in "*?[")
+        names = ftp.nlst()
+        if wildcard:
+            matches = [name for name in names if fnmatch.fnmatch(Path(name).name, resolved_name)]
         else:
-            folder_path = path or "/"
-    return ftp_config, folder_path or "/", file_template
+            matches = [name for name in names if Path(name).name.lower() == resolved_name.lower()]
+            if not matches:
+                matches = [resolved_name]
+        if not matches:
+            raise FileNotFoundError(f"Khong tim thay file FTP {label}: {resolved_name}")
+        remote_name = sorted(matches, key=lambda item: ftp_modified_sort_key(ftp, item), reverse=True)[0]
+        safe_label = safe_local_filename(label, "nguon")
+        local_name = safe_local_filename(Path(remote_name).name or resolved_name, "ftp_result")
+        local_path = (local_dir / f"{datetime.now():%Y%m%d_%H%M%S}_{safe_label}_{local_name}").resolve()
+        if progress_callback:
+            progress_callback(f"Dang tai file {label}: {Path(remote_name).name}.", "running", Path(remote_name).name)
+        with local_path.open("wb") as handle:
+            ftp.retrbinary(f"RETR {remote_name}", handle.write)
+        if local_path.stat().st_size <= 0:
+            local_path.unlink(missing_ok=True)
+            raise RuntimeError(f"File FTP {label} tai ve rong.")
+        return {
+            "source": label,
+            "folder_path": folder_path,
+            "resolved_file_name": Path(remote_name).name,
+            "file_name": local_path.name,
+            "file_path": str(local_path),
+        }
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            try:
+                ftp.close()
+            except Exception:
+                pass
+
+
+def _read_ftp_csv_rows(path: Path) -> list[list[Any]]:
+    for encoding in ("utf-8-sig", "cp1258", "latin-1"):
+        try:
+            text = path.read_text(encoding=encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    sample = text[:4096]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+    except csv.Error:
+        dialect = csv.excel
+    return [row for row in csv.reader(text.splitlines(), dialect)]
+
+
+def _read_ftp_xlsx_rows(path: Path) -> list[list[Any]]:
+    try:
+        from openpyxl import load_workbook
+    except ImportError as error:
+        raise RuntimeError("May tram chua cai openpyxl de gop file Excel FTP.") from error
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        sheet = workbook.active
+        return [[cell for cell in row] for row in sheet.iter_rows(values_only=True)]
+    finally:
+        workbook.close()
+
+
+def _read_ftp_tabular_rows(path: Path) -> list[list[Any]]:
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        return _read_ftp_csv_rows(path)
+    if suffix == ".xlsx":
+        return _read_ftp_xlsx_rows(path)
+    raise RuntimeError(f"Chuc nang gop nhieu file FTP chi ho tro CSV hoac XLSX, chua ho tro {suffix or 'file nay'}.")
+
+
+def _merge_ftp_downloaded_files(downloads: list[dict[str, Any]], target_path: Path, progress_callback=None) -> None:
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
+    except ImportError as error:
+        raise RuntimeError("May tram chua cai openpyxl de xuat file tong hop FTP.") from error
+    parsed: list[dict[str, Any]] = []
+    headers: list[str] = []
+    for item in downloads:
+        source = str(item.get("source") or "FTP")
+        rows = _read_ftp_tabular_rows(Path(str(item.get("file_path") or "")))
+        rows = [row for row in rows if any(str(cell or "").strip() for cell in row)]
+        if not rows:
+            continue
+        source_headers = [str(cell or "").strip() or f"Col{index}" for index, cell in enumerate(rows[0], start=1)]
+        for header in source_headers:
+            if header not in headers:
+                headers.append(header)
+        parsed.append({"source": source, "headers": source_headers, "rows": rows[1:], "file": item.get("resolved_file_name") or ""})
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "TongHop"
+    output_headers = ["Nguon", *headers]
+    sheet.append(output_headers)
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    row_count = 0
+    for item in parsed:
+        source_headers = item["headers"]
+        for row in item["rows"]:
+            mapped = {source_headers[index]: value for index, value in enumerate(row) if index < len(source_headers)}
+            sheet.append([item["source"], *[mapped.get(header, "") for header in headers]])
+            row_count += 1
+    if not row_count:
+        sheet.append(["", *["" for _ in headers]])
+    meta = workbook.create_sheet("Nguon")
+    meta.append(["Nguon", "File"])
+    for item in parsed:
+        meta.append([item["source"], item["file"]])
+    if progress_callback:
+        progress_callback(f"Da gop {len(downloads)} file FTP thanh {target_path.name}.", "running", target_path.name)
+    workbook.save(target_path)
+
+
+def download_ftp_report_file(task: dict[str, Any], progress_callback=None) -> dict[str, Any]:
+    started = time.monotonic()
+    plan = build_ftp_download_plan(task)
+    sources = plan["sources"]
+    if not sources:
+        raise RuntimeError("Chua co nguon FTP nao de tai.")
+    local_dir = Path(str(get_settings().data_mining_download_dir or "data/data_mining_downloads")) / "ftp"
+    local_dir.mkdir(parents=True, exist_ok=True)
+    downloaded = [_download_ftp_source_file(source, local_dir, progress_callback) for source in sources]
+    if not plan["is_multi_source"]:
+        result = downloaded[0]
+        duration_ms = int((time.monotonic() - started) * 1000)
+        return {
+            "ok": True,
+            "status": "success",
+            "message": "Da tai file FTP tren may tram.",
+            "resolved_file_name": result["resolved_file_name"],
+            "file_name": result["file_name"],
+            "file_path": result["file_path"],
+            "duration_ms": duration_ms,
+        }
+    output_path = (local_dir / f"{datetime.now():%Y%m%d_%H%M%S}_{plan['output_file_name']}").resolve()
+    _merge_ftp_downloaded_files(downloaded, output_path, progress_callback)
+    if output_path.stat().st_size <= 0:
+        output_path.unlink(missing_ok=True)
+        raise RuntimeError("File tong hop FTP rong.")
+    duration_ms = int((time.monotonic() - started) * 1000)
+    return {
+        "ok": True,
+        "status": "success",
+        "message": f"Da tai va gop {len(downloaded)} file FTP tren may tram.",
+        "resolved_file_name": plan["output_file_name"],
+        "file_name": output_path.name,
+        "file_path": str(output_path),
+        "duration_ms": duration_ms,
+        "sources": downloaded,
+    }
 
 
 def download_ftp_report_file(task: dict[str, Any], progress_callback=None) -> dict[str, Any]:

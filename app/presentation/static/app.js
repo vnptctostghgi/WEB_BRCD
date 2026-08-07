@@ -162,7 +162,7 @@ const dashboardViewerLayoutCache = new Map();
 const dashboardBuilderLayoutCache = new Map();
 const DATA_CACHE_TTL_MS = 2 * 60 * 1000;
 const NAVIGATION_CLIENT_CACHE_TTL_MS = 60 * 1000;
-const NAVIGATION_CLIENT_CACHE_VERSION = "2026-07-28-3";
+const NAVIGATION_CLIENT_CACHE_VERSION = "2026-08-07-ftp-templates";
 const TABLE_PAGE_SIZE = 20;
 const PUBLIC_MESSAGES_LIMIT = 10;
 const TABLE_SHORT_PAGE_SIZE = 10;
@@ -335,7 +335,7 @@ function ensureFtpMiningScriptLoaded() {
   if (ftpMiningScriptPromise) return ftpMiningScriptPromise;
   ftpMiningScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/ftp-mining.js?v=2";
+    script.src = "/static/ftp-mining.js?v=3";
     script.defer = true;
     script.dataset.ftpMining = "true";
     script.addEventListener("load", () => {

@@ -7,7 +7,6 @@
   const isDataFresh = app.isDataFresh || (() => false);
   const markDataFresh = app.markDataFresh || (() => {});
   const markDataStale = app.markDataStale || (() => {});
-  const renderCompactCode = app.renderCompactCode || ((value) => `<code>${escapeHtml(value)}</code>`);
   const setButtonLoading = app.setButtonLoading || (() => {});
   const setTableLoading = app.setTableLoading || (() => {});
   const showMessage = app.showMessage || (() => {});
@@ -21,6 +20,118 @@
 
   function activeStatuses() {
     return new Set(["queued", "running"]);
+  }
+
+  function parseFtpVariablesText(text) {
+    const variables = {};
+    String(text || "").replace(/\r/g, "\n").split("\n").forEach((rawLine) => {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) return;
+      const separatorIndex = line.includes("=") ? line.indexOf("=") : line.indexOf(":");
+      if (separatorIndex <= 0) return;
+      const key = line.slice(0, separatorIndex).trim();
+      if (!key) return;
+      variables[key] = line.slice(separatorIndex + 1).trim();
+    });
+    return variables;
+  }
+
+  function variablesToText(variables) {
+    if (!variables || typeof variables !== "object") return "";
+    return Object.entries(variables).map(([key, value]) => `${key}=${value ?? ""}`).join("\n");
+  }
+
+  function parseFtpSourcesText(text) {
+    const sources = [];
+    const errors = [];
+    String(text || "").replace(/\r/g, "\n").split("\n").forEach((rawLine, index) => {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) return;
+      const parts = line.split("|").map((part) => part.trim());
+      if (parts.length < 3 || !parts[0] || !parts[1] || !parts[2]) {
+        errors.push(`Dong nguon ${index + 1} phai co dang TEN|LINK_THU_MUC|TEN_FILE.`);
+        return;
+      }
+      sources.push({ name: parts[0], folder_path: parts[1], file_name_template: parts.slice(2).join("|") });
+    });
+    return { sources, errors };
+  }
+
+  function sourcesToText(sources) {
+    if (!Array.isArray(sources)) return "";
+    return sources
+      .map((source) => `${source.name || source.label || ""}|${source.folder_path || ""}|${source.file_name_template || source.file || ""}`)
+      .join("\n");
+  }
+
+  function parseFtpStoredConfig(report) {
+    const rawTemplate = String(report?.file_name_template || "").trim();
+    let config = {};
+    if (rawTemplate.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(rawTemplate);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) config = parsed;
+      } catch {
+        config = {};
+      }
+    }
+    const isAdvanced = Boolean(config.sources || config.variables || config.file_name_template || config.output_file_name_template);
+    const sources = Array.isArray(config.sources) ? config.sources : [];
+    return {
+      isAdvanced,
+      variables: config.variables && typeof config.variables === "object" ? config.variables : {},
+      sources,
+      file_name_template: isAdvanced ? String(config.file_name_template || "") : rawTemplate,
+      output_file_name_template: isAdvanced ? String(config.output_file_name_template || config.file_name_template || "") : rawTemplate,
+    };
+  }
+
+  function buildStoredFileTemplate(fileTemplate, variablesText, sourcesText) {
+    const variables = parseFtpVariablesText(variablesText);
+    const parsedSources = parseFtpSourcesText(sourcesText);
+    if (parsedSources.errors.length) {
+      return { ok: false, message: parsedSources.errors[0], value: "" };
+    }
+    const cleanFileTemplate = String(fileTemplate || "").trim();
+    if (!parsedSources.sources.length && !Object.keys(variables).length) {
+      return { ok: true, value: cleanFileTemplate, sources: [] };
+    }
+    const outputTemplate = cleanFileTemplate || "ftp_tong_hop_{yyyyMMdd}.xlsx";
+    return {
+      ok: true,
+      sources: parsedSources.sources,
+      value: JSON.stringify({
+        version: 1,
+        file_name_template: outputTemplate,
+        output_file_name_template: outputTemplate,
+        variables,
+        sources: parsedSources.sources,
+      }),
+    };
+  }
+
+  function fileTemplateForRun(report, fileTemplate) {
+    const config = parseFtpStoredConfig(report);
+    if (!config.isAdvanced) return String(fileTemplate || "").trim();
+    const nextConfig = {
+      version: 1,
+      file_name_template: config.file_name_template || String(fileTemplate || "").trim(),
+      output_file_name_template: String(fileTemplate || config.output_file_name_template || config.file_name_template || "").trim(),
+      variables: config.variables,
+      sources: config.sources,
+    };
+    if (!nextConfig.sources.length) {
+      nextConfig.file_name_template = nextConfig.output_file_name_template;
+    }
+    return JSON.stringify(nextConfig);
+  }
+
+  function ftpTemplateLabel(value) {
+    const config = parseFtpStoredConfig({ file_name_template: value });
+    if (config.sources.length) {
+      return `Gop ${config.sources.length} nguon -> ${config.output_file_name_template || "ftp_tong_hop.xlsx"}`;
+    }
+    return config.file_name_template || value || "";
   }
 
   async function loadFtpReports({ force = false } = {}) {
@@ -80,8 +191,11 @@
     let rows = [...ftpReportDrafts, ...ftpReports];
     if (pickedCode) rows = rows.filter((item) => item.ma_bao_cao === pickedCode);
     if (search) {
-      rows = rows.filter((item) => [item.ma_bao_cao, item.ten_bao_cao, item.folder_path, item.file_name_template, item.connection_code]
-        .join(" ").toLowerCase().includes(search));
+      rows = rows.filter((item) => {
+        const config = parseFtpStoredConfig(item);
+        return [item.ma_bao_cao, item.ten_bao_cao, item.folder_path, item.file_name_template, item.connection_code, sourcesToText(config.sources), variablesToText(config.variables)]
+          .join(" ").toLowerCase().includes(search);
+      });
     }
     editor.innerHTML = rows.length
       ? rows.map((report) => renderFtpReportCard(report)).join("")
@@ -122,6 +236,8 @@
   function renderFtpReportCard(report) {
     const rowKey = report._rowKey || `ftp-${report.id}`;
     const isDraft = rowKey.startsWith("draft-");
+    const config = parseFtpStoredConfig(report);
+    const templateValue = config.isAdvanced ? config.output_file_name_template : report.file_name_template || "";
     return `
     <div class="sql-report-editor-card" data-ftp-row="${escapeHtml(rowKey)}" data-ftp-report-id="${escapeHtml(report.id || "")}">
       <div class="section-heading compact">
@@ -130,8 +246,10 @@
       </div>
       <label>Ma bao cao<input class="form-control inline-admin-input" data-inline-ftp-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="Tu sinh neu de trong" /></label>
       <label>Ten bao cao<input class="form-control inline-admin-input" data-inline-ftp-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="Ten bao cao FTP" /></label>
-      <label>Link thu muc<input class="form-control inline-admin-input" data-inline-ftp-field="folder_path" value="${escapeHtml(report.folder_path || "")}" placeholder="/duong/dan/thu_muc hoac ftp://10.159.23.100/..." /></label>
-      <label>Ten file<input class="form-control inline-admin-input" data-inline-ftp-field="file_name_template" value="${escapeHtml(report.file_name_template || "")}" placeholder="bao_cao_{yyyymmdd}.xlsx hoac *.xls" /><small class="cell-note">{yyyy}, {mm}, {dd}, {yyyymmdd}, {ddmmyyyy}, {{today}}, {{yesterday}}</small></label>
+      <label>Link thu muc<input class="form-control inline-admin-input" data-inline-ftp-field="folder_path" value="${escapeHtml(report.folder_path || "")}" placeholder="/DATA_BILLING/CTO/FiberPTM/{yyyyMM}" /></label>
+      <label>Ten file / file xuat<input class="form-control inline-admin-input" data-inline-ftp-field="file_name_template" value="${escapeHtml(templateValue)}" placeholder="bao_cao_{yyyymmdd}.xlsx hoac ftp_tong_hop_{thang}.xlsx" /><small class="cell-note">{yyyyMM}, {yyyymmdd}, {ddmmyyyy}, {today}, {yesterday}, {last_dd}, {thang}</small></label>
+      <label>Bien mac dinh<textarea class="form-control inline-admin-input font-mono text-xs" data-inline-ftp-field="variables_text" rows="2" placeholder="thang={yyyyMM}">${escapeHtml(variablesToText(config.variables))}</textarea></label>
+      <label>Nguon gop FTP<textarea class="form-control inline-admin-input font-mono text-xs" data-inline-ftp-field="sources_text" rows="4" placeholder="CTO|/DATA_BILLING/CTO/FiberPTM/{thang}|CTO_Fiber_PTM_LK_ngay_{last_dd}.xlsx&#10;HGA|/DATA_BILLING/HGA/FiberPTM/{thang}|HGA_Fiber_PTM_LK_ngay_{last_dd}.xlsx&#10;STG|/DATA_BILLING/STG/FiberPTM/{thang}|STG_Fiber_PTM_LK_ngay_{last_dd}.xlsx">${escapeHtml(sourcesToText(config.sources))}</textarea><small class="cell-note">Bo trong neu chi tai 1 file. Moi dong: TEN|LINK_THU_MUC|TEN_FILE.</small></label>
       <label>Ket noi<input class="form-control inline-admin-input" data-inline-ftp-field="connection_code" value="${escapeHtml(report.connection_code || "ftp_storage")}" placeholder="ftp_storage" /></label>
       <label class="checkbox-label inline-checkbox"><input type="checkbox" data-inline-ftp-field="is_active" ${report.is_active !== false ? "checked" : ""} /> Dang su dung</label>
     </div>`;
@@ -152,15 +270,27 @@
   async function saveInlineFtpReport(rowKey, button) {
     const row = document.querySelector(`[data-ftp-row="${CSS.escape(rowKey)}"]`);
     if (!row) return;
+    const sourceInput = row.querySelector('[data-inline-ftp-field="sources_text"]')?.value || "";
+    const variableInput = row.querySelector('[data-inline-ftp-field="variables_text"]')?.value || "";
+    const storedTemplate = buildStoredFileTemplate(
+      row.querySelector('[data-inline-ftp-field="file_name_template"]')?.value.trim() || "",
+      variableInput,
+      sourceInput,
+    );
+    if (!storedTemplate.ok) {
+      showToast(storedTemplate.message, "error");
+      return;
+    }
     const payload = {
       id: row.dataset.ftpReportId ? Number(row.dataset.ftpReportId) : null,
       ma_bao_cao: row.querySelector('[data-inline-ftp-field="ma_bao_cao"]')?.value.trim() || "",
       ten_bao_cao: row.querySelector('[data-inline-ftp-field="ten_bao_cao"]')?.value.trim() || "",
       folder_path: row.querySelector('[data-inline-ftp-field="folder_path"]')?.value.trim() || "",
-      file_name_template: row.querySelector('[data-inline-ftp-field="file_name_template"]')?.value.trim() || "",
+      file_name_template: storedTemplate.value,
       connection_code: row.querySelector('[data-inline-ftp-field="connection_code"]')?.value.trim() || "ftp_storage",
       is_active: Boolean(row.querySelector('[data-inline-ftp-field="is_active"]')?.checked),
     };
+    if (!payload.folder_path && storedTemplate.sources?.length) payload.folder_path = storedTemplate.sources[0].folder_path;
     if (!payload.ten_bao_cao || !payload.folder_path || !payload.file_name_template) {
       showToast("Vui long nhap ten bao cao, link thu muc va ten file FTP.", "error");
       return;
@@ -222,10 +352,19 @@
 
   function renderFtpRunOverrides() {
     const report = selectedFtpReport();
+    const config = parseFtpStoredConfig(report);
     const folder = $("#ftp-run-folder-path");
     const fileName = $("#ftp-run-file-template");
+    const variables = $("#ftp-run-variables");
+    const summary = $("#ftp-run-source-summary");
     if (folder) folder.value = report?.folder_path || "";
-    if (fileName) fileName.value = report?.file_name_template || "";
+    if (fileName) fileName.value = config.isAdvanced ? config.output_file_name_template : report?.file_name_template || "";
+    if (variables) variables.value = variablesToText(config.variables);
+    if (summary) {
+      summary.textContent = config.sources.length
+        ? `Bao cao nay se tai ${config.sources.length} nguon FTP va gop thanh 1 file.`
+        : "Bao cao don: co the sua link thu muc, ten file va bien truoc khi chay.";
+    }
     refreshFtpRunHistory(report?.ma_bao_cao || "");
   }
 
@@ -244,7 +383,8 @@
         body: JSON.stringify({
           ma_bao_cao: report.ma_bao_cao,
           folder_path: $("#ftp-run-folder-path")?.value.trim() || "",
-          file_name_template: $("#ftp-run-file-template")?.value.trim() || "",
+          file_name_template: fileTemplateForRun(report, $("#ftp-run-file-template")?.value.trim() || ""),
+          variables: parseFtpVariablesText($("#ftp-run-variables")?.value || ""),
         }),
       }));
       showMessage($("#ftp-run-message"), response.message || "Da dua task FTP vao hang doi may tram.", "success");
@@ -291,7 +431,7 @@
     return `
       <tr>
         <td class="onebss-time-cell">${escapeHtml(startedAt)}</td>
-        <td>${escapeHtml(run.ten_bao_cao || run.ma_bao_cao || "")}<small class="cell-note">${escapeHtml(run.resolved_file_name || run.file_name_template || "")}</small></td>
+        <td>${escapeHtml(run.ten_bao_cao || run.ma_bao_cao || "")}<small class="cell-note">${escapeHtml(run.resolved_file_name || ftpTemplateLabel(run.file_name_template) || "")}</small></td>
         <td><span class="status ${ok ? "success" : activeStatuses().has(statusValue) ? "viewer" : "inactive"}">${escapeHtml(run.status || "-")}</span></td>
         <td>${file}</td>
         <td>${escapeHtml(run.message || "")}${actions ? `<div class="action-group onebss-row-actions">${actions}</div>` : ""}</td>

@@ -596,6 +596,7 @@ class RunFtpReportPayload(BaseModel):
     ma_bao_cao: str
     folder_path: str = ""
     file_name_template: str = ""
+    variables: dict[str, Any] = Field(default_factory=dict)
     job_id: str = ""
 
 
@@ -4196,6 +4197,11 @@ def save_admin_ftp_report(request: Request, payload: FtpReportPayload) -> dict:
     ten_bao_cao = payload.ten_bao_cao.strip()
     folder_path = payload.folder_path.strip()
     file_name_template = payload.file_name_template.strip()
+    template_config = _decode_ftp_template_config(file_name_template)
+    template_sources = template_config.get("sources") if isinstance(template_config.get("sources"), list) else []
+    if not folder_path and template_sources:
+        first_source = next((item for item in template_sources if isinstance(item, dict)), {})
+        folder_path = str(first_source.get("folder_path") or "").strip()
     if not ten_bao_cao:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ten bao cao FTP khong duoc de trong.")
     if not folder_path:
@@ -6213,6 +6219,45 @@ def _ftp_worker_result_file_updates(run: dict[str, Any], payload: FtpWorkerResul
     }
 
 
+def _decode_ftp_template_config(value: str) -> dict[str, Any]:
+    text = str(value or "").strip()
+    if not text.startswith("{"):
+        return {}
+    try:
+        config = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(config, dict):
+        return {}
+    if not any(key in config for key in ("sources", "variables", "file_name_template", "output_file_name_template")):
+        return {}
+    return config
+
+
+def _normalized_ftp_variables(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    variables: dict[str, str] = {}
+    for key, item in value.items():
+        name = str(key or "").strip()
+        if not name:
+            continue
+        variables[name] = str(item or "").strip()
+    return variables
+
+
+def _ftp_template_with_run_variables(file_name_template: str, variables: dict[str, Any]) -> str:
+    run_variables = _normalized_ftp_variables(variables)
+    if not run_variables:
+        return file_name_template
+    config = _decode_ftp_template_config(file_name_template)
+    if not config:
+        config = {"file_name_template": str(file_name_template or "").strip()}
+    default_variables = config.get("variables") if isinstance(config.get("variables"), dict) else {}
+    config["variables"] = {**{str(key): str(value) for key, value in default_variables.items()}, **run_variables}
+    return json.dumps(config, ensure_ascii=False, separators=(",", ":"))
+
+
 def _ftp_report_job_response(job_id: str, run: dict[str, Any]) -> dict[str, Any]:
     status_value = str(run.get("status") or "queued").lower()
     response = {
@@ -6650,8 +6695,11 @@ def run_ftp_report(request: Request, payload: RunFtpReportPayload) -> dict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bao cao FTP nay dang tam tat.")
     folder_path = payload.folder_path.strip() or str(report.get("folder_path") or "").strip()
     file_name_template = payload.file_name_template.strip() or str(report.get("file_name_template") or "").strip()
-    if not folder_path or not file_name_template:
+    template_config = _decode_ftp_template_config(file_name_template)
+    has_template_sources = bool(isinstance(template_config.get("sources"), list) and template_config.get("sources"))
+    if (not folder_path and not has_template_sources) or not file_name_template:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chua du link thu muc hoac ten file FTP.")
+    file_name_template = _ftp_template_with_run_variables(file_name_template, payload.variables)
     job_id = re.sub(r"[^A-Za-z0-9_-]+", "", payload.job_id.strip()) or uuid.uuid4().hex
     try:
         existing_run = repository.get_ftp_report_run(job_id)

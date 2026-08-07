@@ -124,11 +124,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=209" in public_response.text
+        assert "/static/app.js?v=210" in public_response.text
         assert "/static/styles.css?v=130" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
-        public_js = client.get("/static/app.js?v=209")
+        public_js = client.get("/static/app.js?v=210")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -1019,7 +1019,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=209" in page.text
+        assert "/static/app.js?v=210" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -3456,6 +3456,88 @@ def test_admin_can_manage_and_run_ftp_report() -> None:
         assert cleared.json()["deleted"] == 1
 
 
+def test_ftp_report_run_accepts_variables_and_multi_source_config() -> None:
+    with TestClient(app) as client:
+        login(client)
+        ftp_connection = client.put(
+            "/api/admin/connections/ftp_storage",
+            json={
+                "name": "FTP noi bo",
+                "connection_type": "ftp",
+                "description": "Ket noi FTP noi bo",
+                "config": {
+                    "host": "10.159.23.100",
+                    "port": 21,
+                    "username": "thangph.cto",
+                    "password": "$Phthang125125",
+                    "passive": True,
+                    "timeout_seconds": 60,
+                    "secret_ref": "FTP_PASSWORD",
+                },
+                "is_active": True,
+            },
+        )
+        assert ftp_connection.status_code == 200
+        advanced_template = json.dumps({
+            "version": 1,
+            "variables": {"thang": "{yyyyMM}"},
+            "output_file_name_template": "FiberPTM_{thang}.xlsx",
+            "file_name_template": "FiberPTM_{thang}.xlsx",
+            "sources": [
+                {
+                    "name": "CTO",
+                    "folder_path": "/DATA_BILLING/CTO/FiberPTM/{thang}",
+                    "file_name_template": "CTO_Fiber_PTM_LK_ngay_{last_dd}.xlsx",
+                },
+                {
+                    "name": "HGA",
+                    "folder_path": "/DATA_BILLING/HGA/FiberPTM/{thang}",
+                    "file_name_template": "HGA_Fiber_PTM_LK_ngay_{last_dd}.xlsx",
+                },
+                {
+                    "name": "STG",
+                    "folder_path": "/DATA_BILLING/STG/FiberPTM/{thang}",
+                    "file_name_template": "STG_Fiber_PTM_LK_ngay_{last_dd}.xlsx",
+                },
+            ],
+        })
+        created = client.post(
+            "/api/admin/ftp-reports",
+            json={
+                "ma_bao_cao": "FTP_PTM_MULTI",
+                "ten_bao_cao": "FTP PTM multi",
+                "folder_path": "/DATA_BILLING/CTO/FiberPTM/{thang}",
+                "file_name_template": advanced_template,
+                "connection_code": "ftp_storage",
+                "is_active": True,
+            },
+        )
+        assert created.status_code == 200
+
+        run = client.post(
+            "/api/ftp-reports/run",
+            json={
+                "ma_bao_cao": "FTP_PTM_MULTI",
+                "variables": {"thang": "202607"},
+            },
+        )
+        assert run.status_code == 200
+        job_id = run.json()["job_id"]
+
+        claim = client.post(
+            "/api/ftp-worker/tasks/claim",
+            json={"worker_id": "ws-ftp-multi"},
+            headers={"Authorization": "Bearer test-worker-token"},
+        )
+        assert claim.status_code == 200
+        task = claim.json()["task"]
+        assert task["run_id"] == job_id
+        task_template = json.loads(task["file_name_template"])
+        assert task_template["variables"]["thang"] == "202607"
+        assert len(task_template["sources"]) == 3
+        assert task_template["sources"][0]["folder_path"] == "/DATA_BILLING/CTO/FiberPTM/{thang}"
+
+
 def test_save_onebss_report_ignores_audit_log_failure(monkeypatch) -> None:
     class FakeRepository:
         def get_user_by_id(self, user_id):
@@ -5199,6 +5281,9 @@ def test_ftp_workstation_worker_renders_date_file_template() -> None:
     assert worker.render_ftp_file_template("bao_cao_{yyyymmdd}.xlsx", now) == "bao_cao_20260708.xlsx"
     assert worker.render_ftp_file_template("bao_cao_{ddmmyyyy}.xlsx", now) == "bao_cao_08072026.xlsx"
     assert worker.render_ftp_file_template("bao_cao_{{yesterday}}.xlsx", now) == "bao_cao_20260707.xlsx"
+    assert worker.render_ftp_file_template("/DATA_BILLING/CTO/FiberPTM/{yyyyMM}", now) == "/DATA_BILLING/CTO/FiberPTM/202607"
+    assert worker.render_ftp_file_template("CTO_DTTS_HOAMANG_{thang}01.CSV", now, {"thang": "202607"}) == "CTO_DTTS_HOAMANG_20260701.CSV"
+    assert worker.render_ftp_file_template("CTO_Fiber_PTM_LK_ngay_{last_dd}.xlsx", now, {"thang": "202607"}) == "CTO_Fiber_PTM_LK_ngay_31.xlsx"
 
     config, folder_path, file_template = worker.parse_ftp_task({
         "folder_path": "ftp://ftp-user:ftp-pass@10.159.23.100:2121/reports/doanh_thu_{ddmmyyyy}.xlsx",
@@ -5213,6 +5298,51 @@ def test_ftp_workstation_worker_renders_date_file_template() -> None:
     assert config["timeout_seconds"] == 90
     assert folder_path == "/reports"
     assert file_template == "doanh_thu_{ddmmyyyy}.xlsx"
+
+
+def test_ftp_workstation_worker_plans_and_merges_multi_source_files(tmp_path) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    now = datetime(2026, 7, 8, 9, 5)
+    advanced_template = json.dumps({
+        "version": 1,
+        "variables": {"thang": "{yyyyMM}"},
+        "output_file_name_template": "FiberPTM_{thang}.xlsx",
+        "sources": [
+            {"name": "CTO", "folder_path": "/DATA_BILLING/CTO/FiberPTM/{thang}", "file_name_template": "CTO_Fiber_PTM_LK_ngay_{last_dd}.csv"},
+            {"name": "HGA", "folder_path": "/DATA_BILLING/HGA/FiberPTM/{thang}", "file_name_template": "HGA_Fiber_PTM_LK_ngay_{last_dd}.csv"},
+        ],
+    })
+    plan = worker.build_ftp_download_plan({
+        "ma_bao_cao": "FTP_PTM",
+        "folder_path": "/DATA_BILLING/CTO/FiberPTM/{thang}",
+        "file_name_template": advanced_template,
+        "variables": {"thang": "202607"},
+        "connection": {"config": {"host": "10.159.23.100", "username": "u", "password": "p"}},
+    }, now)
+    assert plan["is_multi_source"] is True
+    assert plan["output_file_name"] == "FiberPTM_202607.xlsx"
+    assert plan["sources"][0]["folder_path"] == "/DATA_BILLING/CTO/FiberPTM/202607"
+    assert plan["sources"][0]["file_name_template"] == "CTO_Fiber_PTM_LK_ngay_31.csv"
+
+    cto = tmp_path / "cto.csv"
+    hga = tmp_path / "hga.csv"
+    cto.write_text("ma_tb,doanh_thu\nA,10\n", encoding="utf-8")
+    hga.write_text("ma_tb,doanh_thu\nB,20\n", encoding="utf-8")
+    target = tmp_path / "merged.xlsx"
+    worker._merge_ftp_downloaded_files([
+        {"source": "CTO", "file_path": str(cto), "resolved_file_name": "cto.csv"},
+        {"source": "HGA", "file_path": str(hga), "resolved_file_name": "hga.csv"},
+    ], target)
+
+    workbook = openpyxl.load_workbook(target, read_only=True)
+    rows = list(workbook["TongHop"].iter_rows(values_only=True))
+    workbook.close()
+    assert rows == [
+        ("Nguon", "ma_tb", "doanh_thu"),
+        ("CTO", "A", "10"),
+        ("HGA", "B", "20"),
+    ]
 
 
 def test_onebss_workstation_worker_retries_transient_web_errors(monkeypatch) -> None:
@@ -6869,16 +6999,16 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         home = client.get("/")
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
-        assert "/static/shell.js?v=26" in home.text
-        assert "/static/app.js?v=209" not in home.text
-        shell_js = client.get("/static/shell.js?v=26")
+        assert "/static/shell.js?v=27" in home.text
+        assert "/static/app.js?v=210" not in home.text
+        shell_js = client.get("/static/shell.js?v=27")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
         assert "function dedupeFeaturesForDisplay" in shell_js.text
         assert "function readCachedNavigation" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=209" in shell_js.text
+        assert "/static/app.js?v=210" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -6891,8 +7021,8 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
-        assert "/static/shell.js?v=26" in dashboard.text
-        assert "/static/app.js?v=209" not in dashboard.text
+        assert "/static/shell.js?v=27" in dashboard.text
+        assert "/static/app.js?v=210" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -6912,49 +7042,49 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "dynamic-report-body" not in reports.text
         assert "dynamic-report-prev" not in reports.text
         assert "dynamic-report-next" not in reports.text
-        assert "/static/app.js?v=209" in reports.text
+        assert "/static/app.js?v=210" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=209" in workstation.text
+        assert "/static/app.js?v=210" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=209" in work_tasks.text
+        assert "/static/app.js?v=210" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=209" in report_links.text
+        assert "/static/app.js?v=210" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=209" in system.text
+        assert "/static/app.js?v=210" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=209" in onebss_mining.text
+        assert "/static/app.js?v=210" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 
         ftp_mining = client.get("/daodulieuftp")
         assert ftp_mining.status_code == 200
         assert "view-ftp-mining" in ftp_mining.text
-        assert "/static/app.js?v=209" in ftp_mining.text
+        assert "/static/app.js?v=210" in ftp_mining.text
         assert "/static/ftp-mining.js" not in ftp_mining.text
         assert ftp_mining.text.count('class="app-view') == 1
 

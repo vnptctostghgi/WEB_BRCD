@@ -8,9 +8,9 @@
     <link rel="icon" type="image/png" href="/static/images/system-logo.png" />
     <link rel="apple-touch-icon" href="/static/images/system-logo.png" />
     {% if shell_only %}
-    <link rel="preload" href="/static/shell.js?v=26" as="script" />
+    <link rel="preload" href="/static/shell.js?v=27" as="script" />
     {% else %}
-    <link rel="preload" href="/static/app.js?v=209" as="script" />
+    <link rel="preload" href="/static/app.js?v=210" as="script" />
     {% endif %}
     <link rel="stylesheet" href="/static/tailwind-built.css?v=1" />
     <link rel="stylesheet" href="/static/styles.css?v=130" />
@@ -435,6 +435,7 @@
               <label>Loại báo cáo<select class="form-control" id="ftp-run-report-select" name="ma_bao_cao"></select></label>
               <label>Link thư mục<input class="form-control" id="ftp-run-folder-path" name="folder_path" placeholder="/duong/dan/thu_muc hoặc ftp://10.159.23.100/..." /></label>
               <label>Tên file<input class="form-control" id="ftp-run-file-template" name="file_name_template" placeholder="bao_cao_{yyyymmdd}.xlsx hoặc *.xls" /></label>
+              <label>Biến chạy<textarea class="form-control font-mono text-xs" id="ftp-run-variables" name="variables" rows="2" placeholder="thang=202607"></textarea><small id="ftp-run-source-summary" class="cell-note">Có thể dùng {yyyyMM}, {yyyymmdd}, {ddmmyyyy}, {last_dd}, {thang} trong link và tên file.</small></label>
               <div class="onebss-run-actions">
                 <button class="btn-secondary" id="refresh-ftp-runs" type="button">Làm mới</button>
                 <button class="btn-primary" id="run-ftp-report" type="submit"><span class="button-label">Lấy báo cáo</span><span class="spinner"></span></button>
@@ -911,9 +912,9 @@
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
     {% if shell_only %}
-    <script defer src="/static/shell.js?v=26"></script>
+    <script defer src="/static/shell.js?v=27"></script>
     {% else %}
-    <script defer src="/static/app.js?v=209"></script>
+    <script defer src="/static/app.js?v=210"></script>
     {% endif %}
   </body>
 </html>
