@@ -150,7 +150,7 @@ WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_w
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260808-ftp-source-ui-v33"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260808-ftp-hga-normalize-v34"
 WORKSTATION_CONNECTION_PREFIX = "workstation_"
 WORKSTATION_DEFAULT_PRIORITY = 100
 WORKSTATION_SETUP_INCLUDE_PATHS = (
@@ -4202,13 +4202,13 @@ def save_admin_ftp_report(request: Request, payload: FtpReportPayload) -> dict:
     actor = admin_user(request)
     repository = build_app_repository()
     ten_bao_cao = payload.ten_bao_cao.strip()
-    folder_path = payload.folder_path.strip()
-    file_name_template = payload.file_name_template.strip()
+    folder_path = _normalize_legacy_ftp_site_text(payload.folder_path.strip())
+    file_name_template = _normalize_ftp_template_legacy_sites(payload.file_name_template.strip())
     template_config = _decode_ftp_template_config(file_name_template)
     template_sources = template_config.get("sources") if isinstance(template_config.get("sources"), list) else []
     if not folder_path and template_sources:
         first_source = next((item for item in template_sources if isinstance(item, dict)), {})
-        folder_path = str(first_source.get("folder_path") or "").strip()
+        folder_path = _normalize_legacy_ftp_site_text(first_source.get("folder_path")).strip()
     if not ten_bao_cao:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ten bao cao FTP khong duoc de trong.")
     if not folder_path:
@@ -6496,6 +6496,38 @@ def _decode_ftp_template_config(value: str) -> dict[str, Any]:
         return {}
     return config
 
+def _normalize_legacy_ftp_site_text(value: Any) -> str:
+    text = str(value or "")
+    text = re.sub(r"/DATA_BILLING/HGA(?=/|$)", "/DATA_BILLING/HAG", text, flags=re.IGNORECASE)
+    return re.sub(r"\bHGA_", "HAG_", text, flags=re.IGNORECASE)
+
+
+def _normalize_ftp_template_legacy_sites(file_name_template: str) -> str:
+    config = _decode_ftp_template_config(file_name_template)
+    if not config:
+        return _normalize_legacy_ftp_site_text(file_name_template)
+    for key in ("file_name_template", "output_file_name_template", "output"):
+        if key in config:
+            config[key] = _normalize_legacy_ftp_site_text(config.get(key))
+    sources = config.get("sources")
+    if isinstance(sources, list):
+        normalized_sources: list[Any] = []
+        for source in sources:
+            if not isinstance(source, dict):
+                normalized_sources.append(source)
+                continue
+            next_source = dict(source)
+            for key in ("name", "label", "source"):
+                if str(next_source.get(key) or "").strip().upper() == "HGA":
+                    next_source[key] = "HAG"
+            for key in ("folder_path", "file_name_template", "file"):
+                if key in next_source:
+                    next_source[key] = _normalize_legacy_ftp_site_text(next_source.get(key))
+            normalized_sources.append(next_source)
+        config["sources"] = normalized_sources
+    return json.dumps(config, ensure_ascii=False, separators=(",", ":"))
+
+
 
 def _normalized_ftp_variables(value: Any) -> dict[str, str]:
     if not isinstance(value, dict):
@@ -6512,6 +6544,7 @@ def _normalized_ftp_variables(value: Any) -> dict[str, str]:
 
 
 def _ftp_template_with_run_variables(file_name_template: str, variables: dict[str, Any]) -> str:
+    file_name_template = _normalize_ftp_template_legacy_sites(file_name_template)
     run_variables = _normalized_ftp_variables(variables)
     if not run_variables:
         return file_name_template
@@ -6958,8 +6991,8 @@ def run_ftp_report(request: Request, payload: RunFtpReportPayload) -> dict:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay cau hinh bao cao FTP.")
     if not report.get("is_active"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Bao cao FTP nay dang tam tat.")
-    folder_path = payload.folder_path.strip() or str(report.get("folder_path") or "").strip()
-    file_name_template = payload.file_name_template.strip() or str(report.get("file_name_template") or "").strip()
+    folder_path = _normalize_legacy_ftp_site_text(payload.folder_path.strip() or str(report.get("folder_path") or "").strip())
+    file_name_template = _normalize_ftp_template_legacy_sites(payload.file_name_template.strip() or str(report.get("file_name_template") or "").strip())
     template_config = _decode_ftp_template_config(file_name_template)
     has_template_sources = bool(isinstance(template_config.get("sources"), list) and template_config.get("sources"))
     if (not folder_path and not has_template_sources) or not file_name_template:

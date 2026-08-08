@@ -40,7 +40,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.08.08-ftp-source-ui-v33"
+WORKER_VERSION = "2026.08.08-ftp-hga-normalize-v34"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -1078,6 +1078,12 @@ def render_ftp_file_template(template: str, now: datetime | None = None, variabl
     return _replace_ftp_template_tokens(str(template or "").strip(), ftp_template_values(now, variables)).strip()
 
 
+def normalize_legacy_ftp_site_text(value: Any) -> str:
+    text = str(value or "")
+    text = re.sub(r"/DATA_BILLING/HGA(?=/|$)", "/DATA_BILLING/HAG", text, flags=re.IGNORECASE)
+    return re.sub(r"\bHGA_", "HAG_", text, flags=re.IGNORECASE)
+
+
 def decode_ftp_template_config(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -1097,8 +1103,8 @@ def decode_ftp_template_config(value: Any) -> dict[str, Any]:
 
 def _parse_ftp_location(base_config: dict[str, Any], folder_path: str, file_template: str) -> tuple[dict[str, Any], str, str]:
     ftp_config = dict(base_config)
-    folder_value = str(folder_path or "").strip()
-    template_value = str(file_template or "").strip()
+    folder_value = normalize_legacy_ftp_site_text(folder_path).strip()
+    template_value = normalize_legacy_ftp_site_text(file_template).strip()
     parsed = urlparse(folder_value)
     if parsed.scheme.lower() == "ftp":
         if parsed.hostname:
@@ -1167,8 +1173,10 @@ def build_ftp_download_plan(task: dict[str, Any], now: datetime | None = None) -
             if not isinstance(source, dict):
                 continue
             label = str(source.get("name") or source.get("label") or source.get("source") or f"Nguon {index}").strip()
-            folder_path = render_ftp_file_template(str(source.get("folder_path") or ""), now, variables)
-            file_template = render_ftp_file_template(str(source.get("file_name_template") or source.get("file") or ""), now, variables)
+            if label.upper() == "HGA":
+                label = "HAG"
+            folder_path = normalize_legacy_ftp_site_text(render_ftp_file_template(str(source.get("folder_path") or ""), now, variables))
+            file_template = normalize_legacy_ftp_site_text(render_ftp_file_template(str(source.get("file_name_template") or source.get("file") or ""), now, variables))
             source_config, folder_path, file_template = _parse_ftp_location(dict(base_config), folder_path, file_template)
             source_items.append({
                 "name": label or f"Nguon {index}",
@@ -1178,8 +1186,8 @@ def build_ftp_download_plan(task: dict[str, Any], now: datetime | None = None) -
             })
     else:
         source_config, folder_path, file_template = parse_ftp_task(task)
-        folder_path = render_ftp_file_template(folder_path, now, variables)
-        file_template = render_ftp_file_template(file_template, now, variables)
+        folder_path = normalize_legacy_ftp_site_text(render_ftp_file_template(folder_path, now, variables))
+        file_template = normalize_legacy_ftp_site_text(render_ftp_file_template(file_template, now, variables))
         source_items.append({
             "name": str(task.get("ma_bao_cao") or task.get("ten_bao_cao") or "FTP").strip() or "FTP",
             "folder_path": folder_path,
@@ -1192,7 +1200,7 @@ def build_ftp_download_plan(task: dict[str, Any], now: datetime | None = None) -
         or task.get("output_file_name_template")
         or f"{task.get('ma_bao_cao') or 'ftp'}_{{yyyyMMdd}}.xlsx"
     ).strip()
-    output_name = render_ftp_file_template(output_template, now, variables) or f"ftp_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
+    output_name = normalize_legacy_ftp_site_text(render_ftp_file_template(output_template, now, variables)) or f"ftp_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
     if sources_config and not Path(output_name).suffix:
         output_name = f"{output_name}.xlsx"
     return {

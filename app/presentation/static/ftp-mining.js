@@ -47,6 +47,24 @@
     return Object.entries(variables).map(([key, value]) => `${key}=${value ?? ""}`).join("\n");
   }
 
+  function normalizeLegacyFtpSiteText(value) {
+    return String(value || "")
+      .replace(/\/DATA_BILLING\/HGA(?=\/|$)/gi, "/DATA_BILLING/HAG")
+      .replace(/\bHGA_/gi, "HAG_");
+  }
+
+  function normalizeFtpSource(source) {
+    if (!source || typeof source !== "object") return source;
+    const next = { ...source };
+    ["name", "label", "source"].forEach((key) => {
+      if (String(next[key] || "").trim().toUpperCase() === "HGA") next[key] = "HAG";
+    });
+    next.folder_path = normalizeLegacyFtpSiteText(next.folder_path);
+    if (next.file_name_template !== undefined) next.file_name_template = normalizeLegacyFtpSiteText(next.file_name_template);
+    if (next.file !== undefined) next.file = normalizeLegacyFtpSiteText(next.file);
+    return next;
+  }
+
   function parseFtpSourcesText(text) {
     const sources = [];
     const errors = [];
@@ -58,7 +76,7 @@
         errors.push(`Dong nguon ${index + 1} phai co dang TEN|LINK_THU_MUC|TEN_FILE.`);
         return;
       }
-      sources.push({ name: parts[0], folder_path: parts[1], file_name_template: parts.slice(2).join("|") });
+      sources.push(normalizeFtpSource({ name: parts[0], folder_path: parts[1], file_name_template: parts.slice(2).join("|") }));
     });
     return { sources, errors };
   }
@@ -73,8 +91,8 @@
   function sourcesTextForReport(report, config) {
     const sourceText = sourcesToText(config?.sources);
     if (sourceText) return sourceText;
-    const folderPath = String(report?.folder_path || "").trim();
-    const fileTemplate = String(config?.file_name_template || report?.file_name_template || "").trim();
+    const folderPath = normalizeLegacyFtpSiteText(report?.folder_path).trim();
+    const fileTemplate = normalizeLegacyFtpSiteText(config?.file_name_template || report?.file_name_template).trim();
     if (!folderPath || !fileTemplate) return "";
     const label = String(report?.ma_bao_cao || report?.ten_bao_cao || "FTP").trim() || "FTP";
     return `${label}|${folderPath}|${fileTemplate}`;
@@ -92,13 +110,13 @@
       }
     }
     const isAdvanced = Boolean(config.sources || config.variables || config.file_name_template || config.output_file_name_template);
-    const sources = Array.isArray(config.sources) ? config.sources : [];
+    const sources = Array.isArray(config.sources) ? config.sources.map(normalizeFtpSource) : [];
     return {
       isAdvanced,
       variables: config.variables && typeof config.variables === "object" ? config.variables : {},
       sources,
-      file_name_template: isAdvanced ? String(config.file_name_template || "") : rawTemplate,
-      output_file_name_template: isAdvanced ? String(config.output_file_name_template || config.file_name_template || "") : rawTemplate,
+      file_name_template: isAdvanced ? normalizeLegacyFtpSiteText(config.file_name_template) : normalizeLegacyFtpSiteText(rawTemplate),
+      output_file_name_template: isAdvanced ? normalizeLegacyFtpSiteText(config.output_file_name_template || config.file_name_template) : normalizeLegacyFtpSiteText(rawTemplate),
     };
   }
 

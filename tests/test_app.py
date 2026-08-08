@@ -124,11 +124,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=214" in public_response.text
+        assert "/static/app.js?v=215" in public_response.text
         assert "/static/styles.css?v=131" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
-        public_js = client.get("/static/app.js?v=214")
+        public_js = client.get("/static/app.js?v=215")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -318,8 +318,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert 'Set-UserEnvironment "SQL_WORKER_POLL_SECONDS" "10"' in setup_script
         assert 'Set-UserEnvironment "FTP_WORKER_POLL_SECONDS" "30"' in setup_script
         assert "ONEBSS_TASK_TIMEOUT_SECONDS" in start_worker_script
-        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION.endswith("v33")
-        assert 'WORKER_VERSION = "2026.08.08-ftp-source-ui-v33"' in worker_script
+        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION.endswith("v34")
+        assert 'WORKER_VERSION = "2026.08.08-ftp-hga-normalize-v34"' in worker_script
         assert "normalize_ftp_variable_value" in worker_script
         assert "ONEBSS_GRID_TIMEOUT_SECONDS" in start_worker_script
         assert "ONEBSS_PROCESSING_TIMEOUT_RETRY_ATTEMPTS" in start_worker_script
@@ -1025,7 +1025,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=214" in page.text
+        assert "/static/app.js?v=215" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -3497,8 +3497,8 @@ def test_ftp_report_run_accepts_variables_and_multi_source_config() -> None:
                 },
                 {
                     "name": "HAG",
-                    "folder_path": "/DATA_BILLING/HAG/FiberPTM/{thang}",
-                    "file_name_template": "HAG_Fiber_PTM_LK_ngay_{last_dd}.xlsx",
+                    "folder_path": "/DATA_BILLING/HGA/FiberPTM/{thang}",
+                    "file_name_template": "HGA_Fiber_PTM_LK_ngay_{last_dd}.xlsx",
                 },
                 {
                     "name": "STG",
@@ -3543,6 +3543,9 @@ def test_ftp_report_run_accepts_variables_and_multi_source_config() -> None:
         assert task_template["variables"]["thang"] == "202607"
         assert len(task_template["sources"]) == 3
         assert task_template["sources"][0]["folder_path"] == "/DATA_BILLING/CTO/FiberPTM/{thang}"
+        assert task_template["sources"][1]["name"] == "HAG"
+        assert task_template["sources"][1]["folder_path"] == "/DATA_BILLING/HAG/FiberPTM/{thang}"
+        assert task_template["sources"][1]["file_name_template"] == "HAG_Fiber_PTM_LK_ngay_{last_dd}.xlsx"
 
 
 def test_save_onebss_report_ignores_audit_log_failure(monkeypatch) -> None:
@@ -5318,7 +5321,7 @@ def test_ftp_workstation_worker_plans_and_merges_multi_source_files(tmp_path) ->
         "output_file_name_template": "DTTS_HOAMANG_{thang}.xlsx",
         "sources": [
             {"name": "CTO", "folder_path": "/DATA_BILLING/CTO/SUBS", "file_name_template": "CTO_DTTS_HOAMANG_{thang}01.CSV"},
-            {"name": "HAG", "folder_path": "/DATA_BILLING/HAG/SUBS", "file_name_template": "HAG_DTTS_HOAMANG_{thang}01.CSV"},
+            {"name": "HAG", "folder_path": "/DATA_BILLING/HGA/SUBS", "file_name_template": "HGA_DTTS_HOAMANG_{thang}01.CSV"},
             {"name": "STG", "folder_path": "/DATA_BILLING/STG/SUBS", "file_name_template": "STG_DTTS_HOAMANG_{thang}01.CSV"},
         ],
     })
@@ -5333,6 +5336,9 @@ def test_ftp_workstation_worker_plans_and_merges_multi_source_files(tmp_path) ->
     assert plan["output_file_name"] == "DTTS_HOAMANG_202607.xlsx"
     assert plan["sources"][0]["folder_path"] == "/DATA_BILLING/CTO/SUBS"
     assert plan["sources"][0]["file_name_template"] == "CTO_DTTS_HOAMANG_20260701.CSV"
+    assert plan["sources"][1]["name"] == "HAG"
+    assert plan["sources"][1]["folder_path"] == "/DATA_BILLING/HAG/SUBS"
+    assert plan["sources"][1]["file_name_template"] == "HAG_DTTS_HOAMANG_20260701.CSV"
 
     cto = tmp_path / "cto.csv"
     hag = tmp_path / "hag.csv"
@@ -7242,16 +7248,16 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         home = client.get("/")
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
-        assert "/static/shell.js?v=31" in home.text
-        assert "/static/app.js?v=214" not in home.text
-        shell_js = client.get("/static/shell.js?v=31")
+        assert "/static/shell.js?v=32" in home.text
+        assert "/static/app.js?v=215" not in home.text
+        shell_js = client.get("/static/shell.js?v=32")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
         assert "function dedupeFeaturesForDisplay" in shell_js.text
         assert "function readCachedNavigation" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=214" in shell_js.text
+        assert "/static/app.js?v=215" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -7264,8 +7270,8 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
-        assert "/static/shell.js?v=31" in dashboard.text
-        assert "/static/app.js?v=214" not in dashboard.text
+        assert "/static/shell.js?v=32" in dashboard.text
+        assert "/static/app.js?v=215" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -7285,49 +7291,49 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "dynamic-report-body" not in reports.text
         assert "dynamic-report-prev" not in reports.text
         assert "dynamic-report-next" not in reports.text
-        assert "/static/app.js?v=214" in reports.text
+        assert "/static/app.js?v=215" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=214" in workstation.text
+        assert "/static/app.js?v=215" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=214" in work_tasks.text
+        assert "/static/app.js?v=215" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=214" in report_links.text
+        assert "/static/app.js?v=215" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=214" in system.text
+        assert "/static/app.js?v=215" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=214" in onebss_mining.text
+        assert "/static/app.js?v=215" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 
         ftp_mining = client.get("/daodulieuftp")
         assert ftp_mining.status_code == 200
         assert "view-ftp-mining" in ftp_mining.text
-        assert "/static/app.js?v=214" in ftp_mining.text
+        assert "/static/app.js?v=215" in ftp_mining.text
         assert "/static/ftp-mining.js" not in ftp_mining.text
         assert ftp_mining.text.count('class="app-view') == 1
 
