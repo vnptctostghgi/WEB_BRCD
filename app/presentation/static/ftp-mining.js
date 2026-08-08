@@ -22,6 +22,12 @@
     return new Set(["queued", "running"]);
   }
 
+  function normalizeFtpVariableValue(value) {
+    const text = String(value ?? "").trim();
+    const match = text.match(/^\{([0-9][0-9A-Za-z._/-]*)\}$/);
+    return match ? match[1] : text;
+  }
+
   function parseFtpVariablesText(text) {
     const variables = {};
     String(text || "").replace(/\r/g, "\n").split("\n").forEach((rawLine) => {
@@ -31,7 +37,7 @@
       if (separatorIndex <= 0) return;
       const key = line.slice(0, separatorIndex).trim();
       if (!key) return;
-      variables[key] = line.slice(separatorIndex + 1).trim();
+      variables[key] = normalizeFtpVariableValue(line.slice(separatorIndex + 1));
     });
     return variables;
   }
@@ -246,10 +252,10 @@
       </div>
       <label>Ma bao cao<input class="form-control inline-admin-input" data-inline-ftp-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="Tu sinh neu de trong" /></label>
       <label>Ten bao cao<input class="form-control inline-admin-input" data-inline-ftp-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="Ten bao cao FTP" /></label>
-      <label>Link thu muc<input class="form-control inline-admin-input" data-inline-ftp-field="folder_path" value="${escapeHtml(report.folder_path || "")}" placeholder="/DATA_BILLING/CTO/FiberPTM/{yyyyMM}" /></label>
-      <label>Ten file / file xuat<input class="form-control inline-admin-input" data-inline-ftp-field="file_name_template" value="${escapeHtml(templateValue)}" placeholder="bao_cao_{yyyymmdd}.xlsx hoac ftp_tong_hop_{thang}.xlsx" /><small class="cell-note">{yyyyMM}, {yyyymmdd}, {ddmmyyyy}, {today}, {yesterday}, {last_dd}, {thang}</small></label>
+      <label>Link thu muc<input class="form-control inline-admin-input" data-inline-ftp-field="folder_path" value="${escapeHtml(report.folder_path || "")}" placeholder="/DATA_BILLING/CTO/SUBS" /></label>
+      <label>Ten file / file xuat<input class="form-control inline-admin-input" data-inline-ftp-field="file_name_template" value="${escapeHtml(templateValue)}" placeholder="DTTS_HOAMANG_{thang}.xlsx" /><small class="cell-note">{yyyyMM}, {yyyymmdd}, {ddmmyyyy}, {today}, {yesterday}, {last_dd}, {thang}</small></label>
       <label>Bien mac dinh<textarea class="form-control inline-admin-input font-mono text-xs" data-inline-ftp-field="variables_text" rows="2" placeholder="thang={yyyyMM}">${escapeHtml(variablesToText(config.variables))}</textarea></label>
-      <label>Nguon gop FTP<textarea class="form-control inline-admin-input font-mono text-xs" data-inline-ftp-field="sources_text" rows="4" placeholder="CTO|/DATA_BILLING/CTO/FiberPTM/{thang}|CTO_Fiber_PTM_LK_ngay_{last_dd}.xlsx&#10;HGA|/DATA_BILLING/HGA/FiberPTM/{thang}|HGA_Fiber_PTM_LK_ngay_{last_dd}.xlsx&#10;STG|/DATA_BILLING/STG/FiberPTM/{thang}|STG_Fiber_PTM_LK_ngay_{last_dd}.xlsx">${escapeHtml(sourcesToText(config.sources))}</textarea><small class="cell-note">Bo trong neu chi tai 1 file. Moi dong: TEN|LINK_THU_MUC|TEN_FILE.</small></label>
+      <label>Nguon gop FTP<textarea class="form-control inline-admin-input font-mono text-xs" data-inline-ftp-field="sources_text" rows="4" placeholder="CTO|/DATA_BILLING/CTO/SUBS|CTO_DTTS_HOAMANG_{thang}01.CSV&#10;HGA|/DATA_BILLING/HGA/SUBS|HGA_DTTS_HOAMANG_{thang}01.CSV&#10;STG|/DATA_BILLING/STG/SUBS|STG_DTTS_HOAMANG_{thang}01.CSV">${escapeHtml(sourcesToText(config.sources))}</textarea><small class="cell-note">Bo trong neu chi tai 1 file. Moi dong: TEN|LINK_THU_MUC|TEN_FILE.</small></label>
       <label>Ket noi<input class="form-control inline-admin-input" data-inline-ftp-field="connection_code" value="${escapeHtml(report.connection_code || "ftp_storage")}" placeholder="ftp_storage" /></label>
       <label class="checkbox-label inline-checkbox"><input type="checkbox" data-inline-ftp-field="is_active" ${report.is_active !== false ? "checked" : ""} /> Dang su dung</label>
     </div>`;

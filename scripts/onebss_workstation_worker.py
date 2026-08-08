@@ -40,7 +40,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.08.07-ftp-template-merge-v31"
+WORKER_VERSION = "2026.08.08-ftp-variable-braces-v32"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -967,10 +967,16 @@ def safe_local_filename(value: str, fallback: str = "ftp_result") -> str:
     return text or fallback
 
 
+def normalize_ftp_variable_value(value: Any) -> str:
+    text = str(value or "").strip()
+    match = re.fullmatch(r"\{([0-9][0-9A-Za-z._/-]*)\}", text)
+    return match.group(1) if match else text
+
+
 def normalize_ftp_variables(value: Any) -> dict[str, str]:
     if isinstance(value, dict):
         return {
-            str(key).strip(): str(item).strip()
+            str(key).strip(): normalize_ftp_variable_value(item)
             for key, item in value.items()
             if str(key).strip()
         }
@@ -987,7 +993,7 @@ def normalize_ftp_variables(value: Any) -> dict[str, str]:
         key, item = line.split(separator, 1)
         key = key.strip()
         if key:
-            variables[key] = item.strip()
+            variables[key] = normalize_ftp_variable_value(item)
     return variables
 
 
@@ -1381,73 +1387,6 @@ def download_ftp_report_file(task: dict[str, Any], progress_callback=None) -> di
         "duration_ms": duration_ms,
         "sources": downloaded,
     }
-
-
-def download_ftp_report_file(task: dict[str, Any], progress_callback=None) -> dict[str, Any]:
-    config, folder_path, file_template = parse_ftp_task(task)
-    host = str(config.get("host") or "").strip()
-    username = str(config.get("username") or "").strip()
-    password = str(config.get("password") or "")
-    port = int(config.get("port") or 21)
-    timeout = float(config.get("timeout_seconds") or 60)
-    passive = config.get("passive", True) is not False
-    if not host or not username or not password:
-        raise RuntimeError("FTP thieu host, username hoac password.")
-    resolved_name = render_ftp_file_template(file_template)
-    if not resolved_name:
-        raise RuntimeError("Ten file FTP sau khi render dang rong.")
-    if progress_callback:
-        progress_callback(f"Dang ket noi FTP {host}:{port}.", "running", resolved_name)
-    started = time.monotonic()
-    ftp = ftplib.FTP()
-    try:
-        ftp.connect(host=host, port=port, timeout=timeout)
-        ftp.login(user=username, passwd=password)
-        ftp.set_pasv(passive)
-        if folder_path and folder_path not in {".", "/"}:
-            ftp.cwd(folder_path)
-        if progress_callback:
-            progress_callback(f"Dang tim file {resolved_name}.", "running", resolved_name)
-        wildcard = any(character in resolved_name for character in "*?[")
-        names = ftp.nlst()
-        if wildcard:
-            matches = [name for name in names if fnmatch.fnmatch(Path(name).name, resolved_name)]
-        else:
-            matches = [name for name in names if Path(name).name.lower() == resolved_name.lower()]
-            if not matches:
-                matches = [resolved_name]
-        if not matches:
-            raise FileNotFoundError(f"Khong tim thay file FTP: {resolved_name}")
-        remote_name = sorted(matches, key=lambda item: ftp_modified_sort_key(ftp, item), reverse=True)[0]
-        local_dir = Path(str(get_settings().data_mining_download_dir or "data/data_mining_downloads")) / "ftp"
-        local_dir.mkdir(parents=True, exist_ok=True)
-        local_name = safe_local_filename(Path(remote_name).name or resolved_name, "ftp_result")
-        local_path = (local_dir / f"{datetime.now():%Y%m%d_%H%M%S}_{local_name}").resolve()
-        if progress_callback:
-            progress_callback(f"Dang tai file {Path(remote_name).name}.", "running", Path(remote_name).name)
-        with local_path.open("wb") as handle:
-            ftp.retrbinary(f"RETR {remote_name}", handle.write)
-        if local_path.stat().st_size <= 0:
-            local_path.unlink(missing_ok=True)
-            raise RuntimeError("File FTP tai ve rong.")
-        duration_ms = int((time.monotonic() - started) * 1000)
-        return {
-            "ok": True,
-            "status": "success",
-            "message": "Da tai file FTP tren may tram.",
-            "resolved_file_name": Path(remote_name).name,
-            "file_name": local_path.name,
-            "file_path": str(local_path),
-            "duration_ms": duration_ms,
-        }
-    finally:
-        try:
-            ftp.quit()
-        except Exception:
-            try:
-                ftp.close()
-            except Exception:
-                pass
 
 
 def upload_ftp_result_file(client: httpx.Client, run_id: str, file_path: str) -> dict[str, Any]:

@@ -3518,7 +3518,7 @@ def test_ftp_report_run_accepts_variables_and_multi_source_config() -> None:
             "/api/ftp-reports/run",
             json={
                 "ma_bao_cao": "FTP_PTM_MULTI",
-                "variables": {"thang": "202607"},
+                "variables": {"thang": "{202607}"},
             },
         )
         assert run.status_code == 200
@@ -5283,6 +5283,7 @@ def test_ftp_workstation_worker_renders_date_file_template() -> None:
     assert worker.render_ftp_file_template("bao_cao_{{yesterday}}.xlsx", now) == "bao_cao_20260707.xlsx"
     assert worker.render_ftp_file_template("/DATA_BILLING/CTO/FiberPTM/{yyyyMM}", now) == "/DATA_BILLING/CTO/FiberPTM/202607"
     assert worker.render_ftp_file_template("CTO_DTTS_HOAMANG_{thang}01.CSV", now, {"thang": "202607"}) == "CTO_DTTS_HOAMANG_20260701.CSV"
+    assert worker.render_ftp_file_template("CTO_DTTS_HOAMANG_{thang}01.CSV", now, {"thang": "{202607}"}) == "CTO_DTTS_HOAMANG_20260701.CSV"
     assert worker.render_ftp_file_template("CTO_Fiber_PTM_LK_ngay_{last_dd}.xlsx", now, {"thang": "202607"}) == "CTO_Fiber_PTM_LK_ngay_31.xlsx"
 
     config, folder_path, file_template = worker.parse_ftp_task({
@@ -5307,23 +5308,23 @@ def test_ftp_workstation_worker_plans_and_merges_multi_source_files(tmp_path) ->
     advanced_template = json.dumps({
         "version": 1,
         "variables": {"thang": "{yyyyMM}"},
-        "output_file_name_template": "FiberPTM_{thang}.xlsx",
+        "output_file_name_template": "DTTS_HOAMANG_{thang}.xlsx",
         "sources": [
-            {"name": "CTO", "folder_path": "/DATA_BILLING/CTO/FiberPTM/{thang}", "file_name_template": "CTO_Fiber_PTM_LK_ngay_{last_dd}.csv"},
-            {"name": "HGA", "folder_path": "/DATA_BILLING/HGA/FiberPTM/{thang}", "file_name_template": "HGA_Fiber_PTM_LK_ngay_{last_dd}.csv"},
+            {"name": "CTO", "folder_path": "/DATA_BILLING/CTO/SUBS", "file_name_template": "CTO_DTTS_HOAMANG_{thang}01.CSV"},
+            {"name": "HGA", "folder_path": "/DATA_BILLING/HGA/SUBS", "file_name_template": "HGA_DTTS_HOAMANG_{thang}01.CSV"},
         ],
     })
     plan = worker.build_ftp_download_plan({
-        "ma_bao_cao": "FTP_PTM",
-        "folder_path": "/DATA_BILLING/CTO/FiberPTM/{thang}",
+        "ma_bao_cao": "FTP_SUBS",
+        "folder_path": "/DATA_BILLING/CTO/SUBS",
         "file_name_template": advanced_template,
-        "variables": {"thang": "202607"},
+        "variables": {"thang": "{202607}"},
         "connection": {"config": {"host": "10.159.23.100", "username": "u", "password": "p"}},
     }, now)
     assert plan["is_multi_source"] is True
-    assert plan["output_file_name"] == "FiberPTM_202607.xlsx"
-    assert plan["sources"][0]["folder_path"] == "/DATA_BILLING/CTO/FiberPTM/202607"
-    assert plan["sources"][0]["file_name_template"] == "CTO_Fiber_PTM_LK_ngay_31.csv"
+    assert plan["output_file_name"] == "DTTS_HOAMANG_202607.xlsx"
+    assert plan["sources"][0]["folder_path"] == "/DATA_BILLING/CTO/SUBS"
+    assert plan["sources"][0]["file_name_template"] == "CTO_DTTS_HOAMANG_20260701.CSV"
 
     cto = tmp_path / "cto.csv"
     hga = tmp_path / "hga.csv"

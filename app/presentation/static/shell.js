@@ -35,7 +35,7 @@ const navGroupIcons = {
 let dashboardFeatureCodes = new Set();
 let dashboardPageIdByFeatureCode = new Map();
 const NAVIGATION_CLIENT_CACHE_TTL_MS = 60 * 1000;
-const NAVIGATION_CLIENT_CACHE_VERSION = "2026-08-07-ftp-templates";
+const NAVIGATION_CLIENT_CACHE_VERSION = "2026-08-08-ftp-variable-braces";
 
 function navigationClientCacheKey() {
   return `vnptcto:navigation:${NAVIGATION_CLIENT_CACHE_VERSION}:${document.body.dataset.navCacheKey || document.body.dataset.role || "guest"}`;

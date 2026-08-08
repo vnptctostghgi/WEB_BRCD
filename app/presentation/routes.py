@@ -6505,7 +6505,9 @@ def _normalized_ftp_variables(value: Any) -> dict[str, str]:
         name = str(key or "").strip()
         if not name:
             continue
-        variables[name] = str(item or "").strip()
+        text = str(item or "").strip()
+        match = re.fullmatch(r"\{([0-9][0-9A-Za-z._/-]*)\}", text)
+        variables[name] = match.group(1) if match else text
     return variables
 
 
