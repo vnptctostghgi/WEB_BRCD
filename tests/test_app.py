@@ -318,8 +318,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert 'Set-UserEnvironment "SQL_WORKER_POLL_SECONDS" "10"' in setup_script
         assert 'Set-UserEnvironment "FTP_WORKER_POLL_SECONDS" "30"' in setup_script
         assert "ONEBSS_TASK_TIMEOUT_SECONDS" in start_worker_script
-        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION.endswith("v34")
-        assert 'WORKER_VERSION = "2026.08.08-ftp-hga-normalize-v34"' in worker_script
+        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION.endswith("v35")
+        assert 'WORKER_VERSION = "2026.08.08-ftp-drive-upload-v35"' in worker_script
         assert "normalize_ftp_variable_value" in worker_script
         assert "ONEBSS_GRID_TIMEOUT_SECONDS" in start_worker_script
         assert "ONEBSS_PROCESSING_TIMEOUT_RETRY_ATTEMPTS" in start_worker_script
@@ -3350,7 +3350,8 @@ def test_onebss_worker_get_otp_creates_request_when_status_update_timed_out(monk
         assert job.json()["otp_request_id"] == "OTP-AUTO-GET-001"
 
 
-def test_admin_can_manage_and_run_ftp_report() -> None:
+def test_admin_can_manage_and_run_ftp_report(monkeypatch) -> None:
+    monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings_arg, storage_link="", repository=None: "")
     with TestClient(app) as client:
         login(client)
         ftp_connection = client.put(
@@ -3460,6 +3461,112 @@ def test_admin_can_manage_and_run_ftp_report() -> None:
         cleared = client.delete(f"/api/ftp-reports/runs?ma_bao_cao={code}")
         assert cleared.status_code == 200
         assert cleared.json()["deleted"] == 1
+
+
+def test_ftp_worker_web_upload_uses_global_drive_folder(monkeypatch, tmp_path) -> None:
+    settings = get_settings().model_copy(
+        update={
+            "data_mining_download_dir": str(tmp_path),
+            "google_drive_folder_id": "drive-folder-ftp",
+        }
+    )
+    saved_calls = []
+
+    def fake_save_downloaded_file(settings_arg, source_file, storage_link, repository=None):
+        saved_calls.append((str(source_file), storage_link))
+        return {
+            "ok": True,
+            "message": "Da upload FTP vao Drive.",
+            "storage_link": "https://drive.google.com/file/d/ftp-drive-file/view",
+            "storage_status": "uploaded_google_drive:ftp-drive-file",
+        }
+
+    monkeypatch.setattr(routes, "get_settings", lambda: settings)
+    monkeypatch.setattr(routes, "save_downloaded_file", fake_save_downloaded_file)
+    with TestClient(app) as client:
+        login(client)
+        created = client.post(
+            "/api/admin/ftp-reports",
+            json={
+                "ma_bao_cao": "FTP_DRIVE_WEB",
+                "ten_bao_cao": "FTP Drive web upload",
+                "folder_path": "/bao_cao/drive",
+                "file_name_template": "drive_{yyyyMM}.xlsx",
+                "connection_code": "ftp_storage",
+                "is_active": True,
+            },
+        )
+        assert created.status_code == 200
+
+        response = client.post("/api/ftp-reports/run", json={"ma_bao_cao": "FTP_DRIVE_WEB"})
+        assert response.status_code == 200
+        job_id = response.json()["job_id"]
+        uploaded = client.post(
+            f"/api/ftp-worker/tasks/{job_id}/file",
+            files={"file": ("ftp_result.xlsx", b"xlsx-bytes", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            headers={"Authorization": "Bearer test-worker-token"},
+        )
+
+        assert uploaded.status_code == 200
+        file_payload = uploaded.json()["file"]
+        assert file_payload["storage_link"] == "https://drive.google.com/file/d/ftp-drive-file/view"
+        assert file_payload["storage_status"] == "uploaded_google_drive:ftp-drive-file"
+        run_payload = uploaded.json()["run"]
+        assert run_payload["file_url"] == "https://drive.google.com/file/d/ftp-drive-file/view"
+        assert "download_url" not in run_payload
+        assert saved_calls and saved_calls[0][1] == "drive-folder-ftp"
+        cleared = client.delete("/api/ftp-reports/runs?ma_bao_cao=FTP_DRIVE_WEB")
+        assert cleared.status_code == 200
+
+
+def test_ftp_worker_claim_includes_drive_folder(monkeypatch) -> None:
+    monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings_arg, storage_link="", repository=None: "drive-folder-ftp")
+    with TestClient(app) as client:
+        login(client)
+        ftp_connection = client.put(
+            "/api/admin/connections/ftp_storage",
+            json={
+                "name": "FTP noi bo",
+                "connection_type": "ftp",
+                "description": "Ket noi FTP noi bo",
+                "config": {
+                    "host": "10.159.23.100",
+                    "port": 21,
+                    "username": "thangph.cto",
+                    "password": "$Phthang125125",
+                    "passive": True,
+                    "timeout_seconds": 60,
+                    "secret_ref": "FTP_PASSWORD",
+                },
+                "is_active": True,
+            },
+        )
+        assert ftp_connection.status_code == 200
+        created = client.post(
+            "/api/admin/ftp-reports",
+            json={
+                "ma_bao_cao": "FTP_DRIVE_CLAIM",
+                "ten_bao_cao": "FTP Drive claim",
+                "folder_path": "/bao_cao/drive",
+                "file_name_template": "drive_{yyyyMM}.xlsx",
+                "connection_code": "ftp_storage",
+                "is_active": True,
+            },
+        )
+        assert created.status_code == 200
+
+        response = client.post("/api/ftp-reports/run", json={"ma_bao_cao": "FTP_DRIVE_CLAIM"})
+        assert response.status_code == 200
+        claim = client.post(
+            "/api/ftp-worker/tasks/claim",
+            json={"worker_id": "ws-ftp-drive"},
+            headers={"Authorization": "Bearer test-worker-token"},
+        )
+
+        assert claim.status_code == 200
+        assert claim.json()["task"]["drive_folder_id"] == "drive-folder-ftp"
+        cleared = client.delete("/api/ftp-reports/runs?ma_bao_cao=FTP_DRIVE_CLAIM")
+        assert cleared.status_code == 200
 
 
 def test_ftp_report_run_accepts_variables_and_multi_source_config() -> None:
@@ -5362,6 +5469,47 @@ def test_ftp_workstation_worker_plans_and_merges_multi_source_files(tmp_path) ->
         ("HAG", "B", "20"),
         ("STG", "C", "30"),
     ]
+
+
+def test_ftp_workstation_worker_uploads_drive_before_web_file(monkeypatch, tmp_path) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    source = tmp_path / "ftp_result.xlsx"
+    source.write_bytes(b"xlsx-bytes")
+    drive_calls = []
+    web_upload_calls = []
+    progress_messages = []
+
+    def fake_upload_result_file_to_internal_drive(file_path, drive_folder_id, **kwargs):
+        drive_calls.append((file_path, drive_folder_id, kwargs))
+        return {
+            "file_name": "ftp_result.xlsx",
+            "storage_link": "https://drive.google.com/file/d/ftp-worker-file/view",
+            "storage_status": "uploaded_google_drive:ftp-worker-file",
+            "message": "Da upload file FTP len Google Drive qua API trung gian.",
+        }
+
+    def fake_upload_ftp_result_file(client, run_id, file_path):
+        web_upload_calls.append((run_id, file_path))
+        return {}
+
+    monkeypatch.setattr(worker, "upload_result_file_to_internal_drive", fake_upload_result_file_to_internal_drive)
+    monkeypatch.setattr(worker, "upload_ftp_result_file", fake_upload_ftp_result_file)
+
+    result = worker.attach_ftp_file_if_needed(
+        object(),
+        "RUN-FTP-DRIVE",
+        {"ok": True, "status": "success", "file_name": "ftp_result.xlsx", "file_path": str(source)},
+        "drive-folder-ftp",
+        lambda message, *args: progress_messages.append(message),
+    )
+
+    assert result["storage_link"] == "https://drive.google.com/file/d/ftp-worker-file/view"
+    assert result["storage_status"] == "uploaded_google_drive:ftp-worker-file"
+    assert result["message"] == "Da upload file FTP len Google Drive qua API trung gian."
+    assert drive_calls == [(str(source), "drive-folder-ftp", {"request_source": "ftp-worker", "default_message": "Da upload file FTP len Google Drive qua API trung gian."})]
+    assert web_upload_calls == []
+    assert "Da upload file FTP len Google Drive." in progress_messages
 
 
 def test_ftp_workstation_worker_cwd_error_names_source_and_folder(monkeypatch, tmp_path) -> None:

@@ -40,7 +40,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.08.08-ftp-hga-normalize-v34"
+WORKER_VERSION = "2026.08.08-ftp-drive-upload-v35"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -222,7 +222,13 @@ def internal_sql_api_urls() -> list[str]:
     return _unique_urls(urls)
 
 
-def upload_result_file_to_internal_drive(file_path: str, drive_folder_id: str) -> dict[str, Any]:
+def upload_result_file_to_internal_drive(
+    file_path: str,
+    drive_folder_id: str,
+    *,
+    request_source: str = "onebss-worker",
+    default_message: str = "Da upload file OneBSS len Google Drive qua API trung gian.",
+) -> dict[str, Any]:
     folder_id = str(drive_folder_id or "").strip()
     if not folder_id:
         return {}
@@ -236,7 +242,7 @@ def upload_result_file_to_internal_drive(file_path: str, drive_folder_id: str) -
     mime_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
     payload = {
         "action": "upload_file_to_drive",
-        "source": "onebss-worker",
+        "source": request_source,
         "file_name": source.name,
         "file_base64": base64.b64encode(source.read_bytes()).decode("ascii"),
         "content_type": mime_type,
@@ -272,7 +278,7 @@ def upload_result_file_to_internal_drive(file_path: str, drive_folder_id: str) -
         "file_name": str(data.get("file_name") or source.name),
         "storage_link": drive_url,
         "storage_status": f"uploaded_google_drive:{file_id}" if file_id else "uploaded_google_drive",
-        "message": str(data.get("message") or "Da upload file OneBSS len Google Drive qua API trung gian."),
+        "message": str(data.get("message") or default_message),
     }
 
 
@@ -1423,8 +1429,52 @@ def upload_ftp_result_file(client: httpx.Client, run_id: str, file_path: str) ->
     return upload_task_file(client, f"/api/ftp-worker/tasks/{run_id}/file", file_path, FtpTaskCancelled)
 
 
+def attach_ftp_file_if_needed(client: httpx.Client, run_id: str, result: dict[str, Any], drive_folder_id: str = "", progress_callback=None) -> dict[str, Any]:
+    storage_status = str(result.get("storage_status") or "").lower()
+    if storage_status.startswith("uploaded_google_drive"):
+        return result
+    try:
+        if drive_folder_id and progress_callback:
+            progress_callback("Dang upload file FTP len Google Drive qua API trung gian.")
+        drive_uploaded = upload_result_file_to_internal_drive(
+            str(result.get("file_path") or ""),
+            drive_folder_id,
+            request_source="ftp-worker",
+            default_message="Da upload file FTP len Google Drive qua API trung gian.",
+        )
+    except Exception as error:
+        print(f"Cannot upload FTP result to Drive through internal API: {error}", file=sys.stderr)
+        if progress_callback:
+            progress_callback("Upload Google Drive qua API trung gian loi, dang gui file FTP ve web.")
+        drive_uploaded = {}
+    if drive_uploaded:
+        if progress_callback:
+            progress_callback("Da upload file FTP len Google Drive.")
+        merged = {**result}
+        for key in ("file_name", "storage_link", "storage_status"):
+            if drive_uploaded.get(key):
+                merged[key] = drive_uploaded.get(key)
+        merged["ok"] = True
+        merged["status"] = "success"
+        merged["message"] = drive_uploaded.get("message") or "Da upload file FTP len Google Drive qua API trung gian."
+        return merged
+    if progress_callback:
+        progress_callback("Dang gui file FTP ket qua ve web de co link tai xuong.")
+    uploaded = upload_ftp_result_file(client, run_id, str(result.get("file_path") or ""))
+    if not uploaded:
+        return result
+    if progress_callback:
+        progress_callback("Da gui file FTP ket qua ve web.")
+    merged = {**result}
+    for key in ("file_name", "file_path", "storage_link", "storage_status"):
+        if uploaded.get(key):
+            merged[key] = uploaded.get(key)
+    return merged
+
+
 def process_ftp_task(client: httpx.Client, task: dict[str, Any], worker_id: str) -> None:
     run_id = str(task.get("run_id") or "")
+    drive_folder_id = str(task.get("drive_folder_id") or "").strip()
     started = time.monotonic()
     last_progress = {"message": "", "at": 0.0}
 
@@ -1458,12 +1508,8 @@ def process_ftp_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
     try:
         send_progress("May tram da nhan task FTP. Dang khoi tao ket noi.")
         result = download_ftp_report_file(task, send_progress)
-        send_progress("Da tai file FTP. Dang gui file ve web.", "running", str(result.get("resolved_file_name") or ""))
-        uploaded = upload_ftp_result_file(client, run_id, str(result.get("file_path") or ""))
-        if uploaded:
-            for key in ("file_name", "file_path", "storage_link", "storage_status"):
-                if uploaded.get(key):
-                    result[key] = uploaded.get(key)
+        send_progress("Da tai file FTP. Dang xu ly link ket qua.", "running", str(result.get("resolved_file_name") or ""))
+        result = attach_ftp_file_if_needed(client, run_id, result, drive_folder_id, send_progress)
         duration_ms = int(result.get("duration_ms") or int((time.monotonic() - started) * 1000))
         finish_response = request_json(
             client,

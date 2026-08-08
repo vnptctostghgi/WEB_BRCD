@@ -150,7 +150,7 @@ WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_w
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260808-ftp-hga-normalize-v34"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260808-ftp-drive-upload-v35"
 WORKSTATION_CONNECTION_PREFIX = "workstation_"
 WORKSTATION_DEFAULT_PRIORITY = 100
 WORKSTATION_SETUP_INCLUDE_PATHS = (
@@ -6464,15 +6464,34 @@ def export_loaded_dynamic_report(request: Request, payload: ExportLoadedReportPa
 def _ftp_report_download_url(run: dict[str, Any]) -> str:
     file_path = str(run.get("file_path") or "").strip()
     run_id = str(run.get("run_id") or "").strip()
+    storage_link = str(run.get("storage_link") or "").strip()
+    storage_status = str(run.get("storage_status") or "").strip()
+    if storage_link.startswith(("http://", "https://")) and (
+        storage_status.lower().startswith("uploaded_google_drive")
+        or "/file/d/" in storage_link
+        or "/spreadsheets/d/" in storage_link
+        or "?id=" in storage_link
+        or "&id=" in storage_link
+    ):
+        return ""
+    if _ftp_drive_link_from_storage_status(storage_status):
+        return ""
     if not file_path or not run_id or not Path(file_path).exists():
         return ""
     return f"/api/ftp-reports/runs/{quote(run_id)}/download"
+
+
+def _ftp_drive_link_from_storage_status(storage_status: str) -> str:
+    return _onebss_drive_link_from_storage_status(storage_status)
 
 
 def _ftp_report_file_url(run: dict[str, Any]) -> str:
     storage_link = str(run.get("storage_link") or "").strip()
     if storage_link.startswith(("http://", "https://")):
         return storage_link
+    drive_link = _ftp_drive_link_from_storage_status(str(run.get("storage_status") or ""))
+    if drive_link:
+        return drive_link
     return _ftp_report_download_url(run)
 
 
@@ -6484,6 +6503,8 @@ def _decorate_ftp_report_run(run: dict[str, Any]) -> dict[str, Any]:
     file_url = _ftp_report_file_url(decorated)
     if file_url:
         decorated["file_url"] = file_url
+    if file_url.startswith(("http://", "https://")) and not str(decorated.get("storage_link") or "").strip():
+        decorated["storage_link"] = file_url
     download_url = _ftp_report_download_url(decorated)
     if download_url:
         decorated["download_url"] = download_url
@@ -6507,9 +6528,13 @@ def _ftp_worker_cancelled_response(run: dict[str, Any]) -> dict[str, Any]:
 def _ftp_worker_result_file_updates(run: dict[str, Any], payload: FtpWorkerResultPayload) -> dict[str, Any]:
     payload_file_path = str(payload.file_path or "").strip()
     current_file_path = str(run.get("file_path") or "").strip()
+    payload_storage_link = str(payload.storage_link or "").strip()
+    payload_storage_status = str(payload.storage_status or "").strip()
+    payload_is_drive = payload_storage_status.lower().startswith("uploaded_google_drive")
+    payload_is_external_file = payload_storage_link.startswith(("http://", "https://"))
     payload_is_server_file = bool(payload_file_path and Path(payload_file_path).exists())
     current_is_server_file = bool(current_file_path and Path(current_file_path).exists())
-    keep_current_file = current_is_server_file and not payload_is_server_file
+    keep_current_file = current_is_server_file and not payload_is_drive and not payload_is_external_file and not payload_is_server_file
     return {
         "resolved_file_name": payload.resolved_file_name or run.get("resolved_file_name") or "",
         "file_name": (run.get("file_name") if keep_current_file else payload.file_name) or run.get("file_name") or "",
@@ -7119,6 +7144,7 @@ def claim_ftp_worker_task(request: Request, payload: FtpWorkerClaimPayload) -> d
             },
         )
         return {"ok": False, "task": None, "message": message}
+    folder_id = google_drive_folder_id(get_settings(), "", repository)
     return {
         "ok": True,
         "task": {
@@ -7134,6 +7160,7 @@ def claim_ftp_worker_task(request: Request, payload: FtpWorkerClaimPayload) -> d
                 "name": connection.get("name") or connection_code,
                 "config": config,
             },
+            "drive_folder_id": folder_id,
             "created_by": run.get("created_by") or "",
             "started_at": run.get("started_at") or "",
         },
@@ -7191,14 +7218,28 @@ async def upload_ftp_worker_task_file(request: Request, run_id: str, file: Uploa
         target_file.unlink(missing_ok=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File ket qua FTP rong.")
 
+    storage_link = ""
+    storage_status = "uploaded_worker_file"
     worker_id = str(run.get("worker_id") or "")
     message = _message_with_workstation(worker_id, "Da nhan file ket qua FTP tu may tram.")
+    settings = get_settings()
+    storage_target = google_drive_folder_id(settings, "", repository)
+    if storage_target:
+        storage_result = save_downloaded_file(settings, target_file, storage_target, repository)
+        if storage_result.get("ok") and str(storage_result.get("storage_status") or "").startswith("uploaded_google_drive"):
+            storage_link = str(storage_result.get("storage_link") or "")
+            storage_status = str(storage_result.get("storage_status") or storage_status)
+            message = str(storage_result.get("message") or message)
+        elif storage_result.get("storage_status"):
+            storage_status = f"uploaded_worker_file:{storage_result.get('storage_status')}"
+            message = f"{message} {storage_result.get('message') or ''}".strip()
     updated = repository.update_ftp_report_run(
         run_id.strip(),
         {
             "file_name": safe_name,
             "file_path": str(target_file),
-            "storage_status": "uploaded_worker_file",
+            "storage_link": storage_link,
+            "storage_status": storage_status,
             "message": message,
         },
     )
@@ -7213,8 +7254,8 @@ async def upload_ftp_worker_task_file(request: Request, run_id: str, file: Uploa
         "file": {
             "file_name": safe_name,
             "file_path": str(target_file),
-            "storage_link": "",
-            "storage_status": "uploaded_worker_file",
+            "storage_link": storage_link,
+            "storage_status": storage_status,
             "message": message,
         },
         "run": _decorate_ftp_report_run(updated or run),
