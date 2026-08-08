@@ -4087,6 +4087,105 @@ legend {
   align-items: end;
 }
 
+.ftp-run-form {
+  display: grid;
+  gap: .85rem;
+}
+
+.ftp-run-fields {
+  display: grid;
+  grid-template-columns: minmax(15rem, 1fr) minmax(18rem, 1.25fr) minmax(14rem, .85fr);
+  gap: .85rem;
+  align-items: end;
+}
+
+.ftp-run-form label {
+  display: grid;
+  gap: .4rem;
+  color: #dbeafe;
+  font-size: .78rem;
+  font-weight: 900;
+}
+
+.ftp-variable-field textarea {
+  min-height: 3rem;
+  resize: vertical;
+}
+
+.ftp-source-panel {
+  display: grid;
+  gap: .55rem;
+  border: 1px solid rgba(37, 99, 235, .22);
+  border-radius: 8px;
+  background: rgba(219, 234, 254, .46);
+  padding: .72rem;
+  color: #0f172a;
+  font-size: .82rem;
+  font-weight: 750;
+}
+
+.ftp-source-panel-title {
+  color: #1e3a8a;
+  font-size: .78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.ftp-source-list {
+  display: grid;
+  gap: .42rem;
+}
+
+.ftp-source-item {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(12rem, .95fr) minmax(12rem, 1.05fr);
+  gap: .55rem;
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, .34);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .78);
+  padding: .5rem .6rem;
+}
+
+.ftp-source-badge {
+  display: inline-flex;
+  min-width: 3.2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #1d4ed8;
+  color: #fff;
+  font-size: .76rem;
+  font-weight: 900;
+}
+
+.ftp-source-path,
+.ftp-source-file {
+  color: #334155;
+  font-family: "Courier New", monospace;
+  font-size: .78rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.ftp-source-file {
+  color: #0f766e;
+}
+
+.ftp-run-actions {
+  display: flex;
+  gap: .65rem;
+  flex-wrap: wrap;
+}
+
+.ftp-run-actions .btn-primary,
+.ftp-run-actions .btn-secondary {
+  min-width: 10.5rem;
+  min-height: 2.75rem;
+  justify-content: center;
+}
+
 .onebss-run-parameters {
   display: grid;
   grid-template-columns: minmax(11rem, .7fr) minmax(18rem, 1.3fr);
@@ -4477,6 +4576,7 @@ legend {
   .dynamic-report-controls,
   .dynamic-report-filter-row,
   .onebss-run-form,
+  .ftp-run-fields,
   .onebss-run-parameters {
     grid-template-columns: 1fr;
   }
@@ -4489,15 +4589,39 @@ legend {
     min-width: 0;
     flex-direction: row;
   }
+
+  .ftp-source-item {
+    grid-template-columns: 4.5rem minmax(0, 1fr);
+  }
+
+  .ftp-source-file {
+    grid-column: 2;
+  }
 }
 
 @media (max-width: 640px) {
   .dynamic-report-actions,
   .onebss-history-header,
-  .onebss-run-actions {
+  .onebss-run-actions,
+  .ftp-run-actions {
     grid-template-columns: 1fr;
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .ftp-source-item {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .ftp-source-badge {
+    justify-content: flex-start;
+    width: max-content;
+    padding-inline: .7rem;
+  }
+
+  .ftp-source-file {
+    grid-column: auto;
   }
 }
 

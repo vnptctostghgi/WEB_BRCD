@@ -142,6 +142,20 @@
     return JSON.stringify(nextConfig);
   }
 
+  function renderFtpSourceItems(sources) {
+    return sources.map((source) => {
+      const label = source.name || source.label || source.source || "FTP";
+      const path = source.folder_path || "";
+      const file = source.file_name_template || source.file || "";
+      return `
+        <div class="ftp-source-item">
+          <span class="ftp-source-badge">${escapeHtml(label)}</span>
+          <code class="ftp-source-path">${escapeHtml(path)}</code>
+          <code class="ftp-source-file">${escapeHtml(file)}</code>
+        </div>`;
+    }).join("");
+  }
+
   function ftpTemplateLabel(value) {
     const config = parseFtpStoredConfig({ file_name_template: value });
     if (config.sources.length) {
@@ -377,21 +391,19 @@
     if (variables) variables.value = variablesToText(config.variables);
     if (summary) {
       if (hasSources) {
-        const sourceRows = config.sources.map((source) => {
-          const label = source.name || source.label || source.source || "FTP";
-          const path = source.folder_path || "";
-          const file = source.file_name_template || source.file || "";
-          return `${escapeHtml(label)}: ${escapeHtml(path)} | ${escapeHtml(file)}`;
-        }).join("<br>");
-        summary.innerHTML = `Bao cao nay se tai ${config.sources.length} nguon FTP va gop thanh 1 file.<br>${sourceRows}`;
+        summary.innerHTML = `
+          <div class="ftp-source-panel-title">Gop ${config.sources.length} nguon FTP thanh 1 file</div>
+          <div class="ftp-source-list">${renderFtpSourceItems(config.sources)}</div>`;
       } else {
         const sourceRows = sourcesTextForReport(report, config)
           .split("\n")
           .filter(Boolean)
-          .map((line) => escapeHtml(line))
-          .join("<br>");
-        summary.innerHTML = sourceRows
-          ? `Bao cao nay se tai 1 nguon FTP.<br>${sourceRows}`
+          .map((line) => {
+            const parts = line.split("|");
+            return { name: parts[0] || "FTP", folder_path: parts[1] || "", file_name_template: parts.slice(2).join("|") || "" };
+          });
+        summary.innerHTML = sourceRows.length
+          ? `<div class="ftp-source-panel-title">Nguon FTP</div><div class="ftp-source-list">${renderFtpSourceItems(sourceRows)}</div>`
           : "Bao cao don: co the sua ten file va bien truoc khi chay.";
       }
     }
