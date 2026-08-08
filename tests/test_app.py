@@ -272,6 +272,7 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
             install_task_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/install_onebss_worker_task.ps1").decode("utf-8")
             background_worker_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/run_onebss_worker_background.ps1").decode("utf-8")
             start_worker_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/start_onebss_worker.ps1").decode("utf-8")
+            worker_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/onebss_workstation_worker.py").decode("utf-8")
             uninstall_task_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/uninstall_onebss_worker_task.ps1").decode("utf-8")
             health_script = archive.read("VNPTCTO_WORKSTATION_SETUP/scripts/test_vnptcto_workstation.ps1").decode("utf-8")
             api_task_script = archive.read("VNPTCTO_WORKSTATION_SETUP/docs/install_api_trung_gian_task.ps1").decode("utf-8")
@@ -315,6 +316,9 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert 'Set-UserEnvironment "SQL_WORKER_POLL_SECONDS" "10"' in setup_script
         assert 'Set-UserEnvironment "FTP_WORKER_POLL_SECONDS" "30"' in setup_script
         assert "ONEBSS_TASK_TIMEOUT_SECONDS" in start_worker_script
+        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION.endswith("v32")
+        assert 'WORKER_VERSION = "2026.08.08-ftp-variable-braces-v32"' in worker_script
+        assert "normalize_ftp_variable_value" in worker_script
         assert "ONEBSS_GRID_TIMEOUT_SECONDS" in start_worker_script
         assert "ONEBSS_PROCESSING_TIMEOUT_RETRY_ATTEMPTS" in start_worker_script
         assert "ONEBSS_PROCESSING_TIMEOUT_RETRY_DELAY_SECONDS" in start_worker_script
