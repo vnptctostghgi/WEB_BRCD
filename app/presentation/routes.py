@@ -4212,7 +4212,7 @@ def save_admin_ftp_report(request: Request, payload: FtpReportPayload) -> dict:
     if not ten_bao_cao:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ten bao cao FTP khong duoc de trong.")
     if not folder_path:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Link thu muc FTP khong duoc de trong.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nguon gop FTP khong duoc de trong.")
     if not file_name_template:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ten file FTP khong duoc de trong.")
     ma_bao_cao = payload.ma_bao_cao.strip().upper() or repository.generate_ftp_report_code()
@@ -6963,7 +6963,7 @@ def run_ftp_report(request: Request, payload: RunFtpReportPayload) -> dict:
     template_config = _decode_ftp_template_config(file_name_template)
     has_template_sources = bool(isinstance(template_config.get("sources"), list) and template_config.get("sources"))
     if (not folder_path and not has_template_sources) or not file_name_template:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chua du link thu muc hoac ten file FTP.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chua du nguon FTP hoac ten file FTP.")
     file_name_template = _ftp_template_with_run_variables(file_name_template, payload.variables)
     job_id = re.sub(r"[^A-Za-z0-9_-]+", "", payload.job_id.strip()) or uuid.uuid4().hex
     try:

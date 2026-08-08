@@ -164,7 +164,7 @@ const dashboardBuilderLayoutCache = new Map();
 const DASHBOARD_VIEWER_REFRESH_POLL_MS = 4000;
 const DATA_CACHE_TTL_MS = 2 * 60 * 1000;
 const NAVIGATION_CLIENT_CACHE_TTL_MS = 60 * 1000;
-const NAVIGATION_CLIENT_CACHE_VERSION = "2026-08-08-ftp-hag-site";
+const NAVIGATION_CLIENT_CACHE_VERSION = "2026-08-08-ftp-source-summary";
 const TABLE_PAGE_SIZE = 20;
 const PUBLIC_MESSAGES_LIMIT = 10;
 const TABLE_SHORT_PAGE_SIZE = 10;
@@ -337,7 +337,7 @@ function ensureFtpMiningScriptLoaded() {
   if (ftpMiningScriptPromise) return ftpMiningScriptPromise;
   ftpMiningScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/ftp-mining.js?v=5";
+    script.src = "/static/ftp-mining.js?v=6";
     script.defer = true;
     script.dataset.ftpMining = "true";
     script.addEventListener("load", () => {

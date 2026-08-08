@@ -70,6 +70,16 @@
       .join("\n");
   }
 
+  function sourcesTextForReport(report, config) {
+    const sourceText = sourcesToText(config?.sources);
+    if (sourceText) return sourceText;
+    const folderPath = String(report?.folder_path || "").trim();
+    const fileTemplate = String(config?.file_name_template || report?.file_name_template || "").trim();
+    if (!folderPath || !fileTemplate) return "";
+    const label = String(report?.ma_bao_cao || report?.ten_bao_cao || "FTP").trim() || "FTP";
+    return `${label}|${folderPath}|${fileTemplate}`;
+  }
+
   function parseFtpStoredConfig(report) {
     const rawTemplate = String(report?.file_name_template || "").trim();
     let config = {};
@@ -199,7 +209,7 @@
     if (search) {
       rows = rows.filter((item) => {
         const config = parseFtpStoredConfig(item);
-        return [item.ma_bao_cao, item.ten_bao_cao, item.folder_path, item.file_name_template, item.connection_code, sourcesToText(config.sources), variablesToText(config.variables)]
+        return [item.ma_bao_cao, item.ten_bao_cao, item.folder_path, item.file_name_template, item.connection_code, sourcesTextForReport(item, config), variablesToText(config.variables)]
           .join(" ").toLowerCase().includes(search);
       });
     }
@@ -252,10 +262,10 @@
       </div>
       <label>Ma bao cao<input class="form-control inline-admin-input" data-inline-ftp-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="Tu sinh neu de trong" /></label>
       <label>Ten bao cao<input class="form-control inline-admin-input" data-inline-ftp-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="Ten bao cao FTP" /></label>
-      <label>Link thu muc<input class="form-control inline-admin-input" data-inline-ftp-field="folder_path" value="${escapeHtml(report.folder_path || "")}" placeholder="/DATA_BILLING/CTO/SUBS" /></label>
+      <input type="hidden" data-inline-ftp-field="folder_path" value="${escapeHtml(report.folder_path || "")}" />
       <label>Ten file / file xuat<input class="form-control inline-admin-input" data-inline-ftp-field="file_name_template" value="${escapeHtml(templateValue)}" placeholder="DTTS_HOAMANG_{thang}.xlsx" /><small class="cell-note">{yyyyMM}, {yyyymmdd}, {ddmmyyyy}, {today}, {yesterday}, {last_dd}, {thang}</small></label>
       <label>Bien mac dinh<textarea class="form-control inline-admin-input font-mono text-xs" data-inline-ftp-field="variables_text" rows="2" placeholder="thang={yyyyMM}">${escapeHtml(variablesToText(config.variables))}</textarea></label>
-      <label>Nguon gop FTP<textarea class="form-control inline-admin-input font-mono text-xs" data-inline-ftp-field="sources_text" rows="4" placeholder="CTO|/DATA_BILLING/CTO/SUBS|CTO_DTTS_HOAMANG_{thang}01.CSV&#10;HAG|/DATA_BILLING/HAG/SUBS|HAG_DTTS_HOAMANG_{thang}01.CSV&#10;STG|/DATA_BILLING/STG/SUBS|STG_DTTS_HOAMANG_{thang}01.CSV">${escapeHtml(sourcesToText(config.sources))}</textarea><small class="cell-note">Bo trong neu chi tai 1 file. Moi dong: TEN|LINK_THU_MUC|TEN_FILE.</small></label>
+      <label>Nguon gop FTP<textarea class="form-control inline-admin-input font-mono text-xs" data-inline-ftp-field="sources_text" rows="4" placeholder="CTO|/DATA_BILLING/CTO/SUBS|CTO_DTTS_HOAMANG_{thang}01.CSV&#10;HAG|/DATA_BILLING/HAG/SUBS|HAG_DTTS_HOAMANG_{thang}01.CSV&#10;STG|/DATA_BILLING/STG/SUBS|STG_DTTS_HOAMANG_{thang}01.CSV">${escapeHtml(sourcesTextForReport(report, config))}</textarea><small class="cell-note">Moi dong: TEN|LINK_THU_MUC|TEN_FILE. Co the nhap 1 hoac nhieu nguon.</small></label>
       <label>Ket noi<input class="form-control inline-admin-input" data-inline-ftp-field="connection_code" value="${escapeHtml(report.connection_code || "ftp_storage")}" placeholder="ftp_storage" /></label>
       <label class="checkbox-label inline-checkbox"><input type="checkbox" data-inline-ftp-field="is_active" ${report.is_active !== false ? "checked" : ""} /> Dang su dung</label>
     </div>`;
@@ -296,9 +306,9 @@
       connection_code: row.querySelector('[data-inline-ftp-field="connection_code"]')?.value.trim() || "ftp_storage",
       is_active: Boolean(row.querySelector('[data-inline-ftp-field="is_active"]')?.checked),
     };
-    if (!payload.folder_path && storedTemplate.sources?.length) payload.folder_path = storedTemplate.sources[0].folder_path;
+    if (storedTemplate.sources?.length) payload.folder_path = storedTemplate.sources[0].folder_path;
     if (!payload.ten_bao_cao || !payload.folder_path || !payload.file_name_template) {
-      showToast("Vui long nhap ten bao cao, link thu muc va ten file FTP.", "error");
+      showToast("Vui long nhap ten bao cao va it nhat 1 dong Nguon gop FTP.", "error");
       return;
     }
     setButtonLoading(button, true);
@@ -359,17 +369,31 @@
   function renderFtpRunOverrides() {
     const report = selectedFtpReport();
     const config = parseFtpStoredConfig(report);
-    const folder = $("#ftp-run-folder-path");
+    const hasSources = config.sources.length > 0;
     const fileName = $("#ftp-run-file-template");
     const variables = $("#ftp-run-variables");
     const summary = $("#ftp-run-source-summary");
-    if (folder) folder.value = report?.folder_path || "";
     if (fileName) fileName.value = config.isAdvanced ? config.output_file_name_template : report?.file_name_template || "";
     if (variables) variables.value = variablesToText(config.variables);
     if (summary) {
-      summary.textContent = config.sources.length
-        ? `Bao cao nay se tai ${config.sources.length} nguon FTP va gop thanh 1 file.`
-        : "Bao cao don: co the sua link thu muc, ten file va bien truoc khi chay.";
+      if (hasSources) {
+        const sourceRows = config.sources.map((source) => {
+          const label = source.name || source.label || source.source || "FTP";
+          const path = source.folder_path || "";
+          const file = source.file_name_template || source.file || "";
+          return `${escapeHtml(label)}: ${escapeHtml(path)} | ${escapeHtml(file)}`;
+        }).join("<br>");
+        summary.innerHTML = `Bao cao nay se tai ${config.sources.length} nguon FTP va gop thanh 1 file.<br>${sourceRows}`;
+      } else {
+        const sourceRows = sourcesTextForReport(report, config)
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => escapeHtml(line))
+          .join("<br>");
+        summary.innerHTML = sourceRows
+          ? `Bao cao nay se tai 1 nguon FTP.<br>${sourceRows}`
+          : "Bao cao don: co the sua ten file va bien truoc khi chay.";
+      }
     }
     refreshFtpRunHistory(report?.ma_bao_cao || "");
   }
@@ -388,7 +412,7 @@
         method: "POST",
         body: JSON.stringify({
           ma_bao_cao: report.ma_bao_cao,
-          folder_path: $("#ftp-run-folder-path")?.value.trim() || "",
+          folder_path: "",
           file_name_template: fileTemplateForRun(report, $("#ftp-run-file-template")?.value.trim() || ""),
           variables: parseFtpVariablesText($("#ftp-run-variables")?.value || ""),
         }),

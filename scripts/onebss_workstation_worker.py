@@ -1226,7 +1226,7 @@ def _download_ftp_source_file(source: dict[str, Any], local_dir: Path, progress_
         ftp.login(user=username, passwd=password)
         ftp.set_pasv(passive)
         if folder_path and folder_path not in {".", "/"}:
-            ftp.cwd(folder_path)
+            _cwd_ftp_folder(ftp, folder_path, label)
         if progress_callback:
             progress_callback(f"Dang tim file {label}: {resolved_name}.", "running", resolved_name)
         wildcard = any(character in resolved_name for character in "*?[")
@@ -1265,6 +1265,28 @@ def _download_ftp_source_file(source: dict[str, Any], local_dir: Path, progress_
                 ftp.close()
             except Exception:
                 pass
+
+
+def _cwd_ftp_folder(ftp: ftplib.FTP, folder_path: str, label: str) -> None:
+    try:
+        ftp.cwd(folder_path)
+        return
+    except ftplib.all_errors as direct_error:
+        if not folder_path.startswith("/"):
+            raise RuntimeError(
+                f"Khong vao duoc thu muc FTP {label}: {folder_path}. FTP tra ve: {direct_error}"
+            ) from direct_error
+        try:
+            ftp.cwd("/")
+            for segment in [part for part in folder_path.split("/") if part]:
+                ftp.cwd(segment)
+            return
+        except ftplib.all_errors as segmented_error:
+            raise RuntimeError(
+                "Khong vao duoc thu muc FTP "
+                f"{label}: {folder_path}. FTP tra ve: {direct_error}. "
+                f"Thu vao tung cap cung loi: {segmented_error}"
+            ) from segmented_error
 
 
 def _read_ftp_csv_rows(path: Path) -> list[list[Any]]:
