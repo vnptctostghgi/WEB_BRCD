@@ -1113,13 +1113,14 @@ class SupabaseRepository:
             return None
         run_id = str(rows[0].get("run_id") or "")
         now = self._now()
+        worker = str(worker_id or "")[:120]
         self._patch(
             "ftp_report_runs",
             {"run_id": f"eq.{run_id}", "status": "eq.queued"},
             {
                 "status": "running",
-                "message": "May tram da nhan task FTP va dang tai file.",
-                "worker_id": str(worker_id or "")[:120],
+                "message": f"May tram {worker} da nhan task FTP va dang tai file." if worker else "May tram da nhan task FTP va dang tai file.",
+                "worker_id": worker,
                 "claimed_at": now,
                 "updated_at": now,
             },
@@ -1294,10 +1295,11 @@ class SupabaseRepository:
         if not queued:
             return None
         run = sorted(queued, key=lambda item: str(item.get("started_at") or ""))[0]
+        worker = str(worker_id or "")[:120]
         return self._ftp_fallback_update_run(str(run.get("run_id") or ""), {
             "status": "running",
-            "message": "May tram da nhan task FTP va dang tai file.",
-            "worker_id": str(worker_id or "")[:120],
+            "message": f"May tram {worker} da nhan task FTP va dang tai file." if worker else "May tram da nhan task FTP va dang tai file.",
+            "worker_id": worker,
             "claimed_at": self._now(),
         })
 
@@ -1382,10 +1384,11 @@ class SupabaseRepository:
             return None
         run_id = str(rows[0].get("run_id") or "")
         now = self._now()
+        worker = str(worker_id or "")[:120]
         payload = {
             "status": "running",
-            "message": "May tram da nhan task va dang xu ly OneBSS.",
-            "worker_id": str(worker_id or "")[:120],
+            "message": f"May tram {worker} da nhan task va dang xu ly OneBSS." if worker else "May tram da nhan task va dang xu ly OneBSS.",
+            "worker_id": worker,
             "claimed_at": now,
             "updated_at": now,
         }

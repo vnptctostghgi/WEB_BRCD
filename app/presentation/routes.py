@@ -2315,6 +2315,16 @@ def _normalize_workstation_worker_id(worker_id: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "-", str(worker_id or "").strip())[:120] or "onebss-workstation"
 
 
+def _message_with_workstation(worker_id: Any, message: Any = "", fallback: str = "") -> str:
+    text = str(message or fallback or "").strip()
+    clean_worker_id = _normalize_workstation_worker_id(str(worker_id or "")) if str(worker_id or "").strip() else ""
+    if not clean_worker_id:
+        return text
+    if clean_worker_id.casefold() in text.casefold():
+        return text
+    return f"{text} (may tram: {clean_worker_id})" if text else f"May tram {clean_worker_id} dang xu ly task."
+
+
 def _normalize_workstation_roles(roles: list[Any] | None) -> list[str]:
     return [str(role).strip()[:80] for role in (roles or []) if str(role).strip()][:20]
 
@@ -2338,7 +2348,7 @@ def _record_workstation_heartbeat(
         "roles": _normalize_workstation_roles(WORKSTATION_DEFAULT_ROLES if roles is None else roles),
         "version": str(version or "").strip()[:80],
         "local_time": str(local_time or "").strip()[:80],
-        "message": str(message or "").strip()[:240],
+        "message": _message_with_workstation(clean_worker_id, message)[:240],
         "details": dict(incoming_details),
         "received_at": iso_datetime(now),
         "received_at_ts": time.time(),
@@ -2686,7 +2696,7 @@ def workstation_run_last_seen(run: dict[str, Any]) -> datetime | None:
 
 def _onebss_run_has_only_claim_progress(run: dict[str, Any]) -> bool:
     message = str(run.get("message") or "").strip().lower()
-    if "may tram da nhan task va dang xu ly onebss" not in message:
+    if not all(token in message for token in ("may tram", "da nhan task", "onebss")):
         return False
     if str(run.get("worker_session_id") or "").strip() or str(run.get("otp_request_id") or "").strip():
         return False
@@ -2730,6 +2740,7 @@ def _expire_stale_onebss_worker_runs(repository: Any, ma_bao_cao: str = "", limi
                     f"{int(ONEBSS_REPORT_CLAIM_NO_PROGRESS_SECONDS / 60)} phut. "
                     "He thong da dung task nay de khong treo hang doi. Hay khoi dong lai worker/may tram roi bam lay bao cao lai."
                 )
+                stale_message = _message_with_workstation(run.get("worker_id") or "", stale_message)
             else:
                 stale_seconds = ONEBSS_REPORT_STALE_ACTIVE_SECONDS
                 stale_message = (
@@ -2737,6 +2748,7 @@ def _expire_stale_onebss_worker_runs(repository: Any, ma_bao_cao: str = "", limi
                     f"{int(ONEBSS_REPORT_STALE_ACTIVE_SECONDS / 60)} phut khong co cap nhat tu may tram. "
                     "He thong da mo khoa de chay lai."
                 )
+                stale_message = _message_with_workstation(run.get("worker_id") or "", stale_message)
         else:
             continue
         if not last_seen:
@@ -5834,9 +5846,13 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
         report_name=run_payload.report_name,
     )
     if not prepared.get("ok"):
+        failed_message = _message_with_workstation(
+            payload.worker_id,
+            prepared.get("message") or "Khong chuan bi duoc truy van SQL cho may tram.",
+        )
         updates = {
             "status": "failed",
-            "message": prepared.get("message") or "Khong chuan bi duoc truy van SQL cho may tram.",
+            "message": failed_message,
             "details": prepared.get("details") if isinstance(prepared.get("details"), dict) else {},
         }
         if task_kind == "export":
@@ -5845,7 +5861,7 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
             _set_dynamic_report_run_job(job_id, **updates)
         else:
             _set_dashboard_refresh_job(job_id, **updates)
-        return {"ok": False, "task": None, "message": prepared.get("message") or "Khong chuan bi duoc truy van SQL."}
+        return {"ok": False, "task": None, "message": failed_message}
     if task_kind == "export":
         filename = _dynamic_report_export_filename({"report": {"ma_bao_cao": prepared.get("ma_bao_cao") or run_payload.ma_bao_cao}})
         _set_dynamic_report_export_job(
@@ -5945,16 +5961,17 @@ def update_sql_worker_task_status(request: Request, run_id: str, payload: SqlWor
     job = _get_dynamic_report_run_job(run_id)
     if job:
         worker_id = payload.worker_id or job.get("worker_id") or ""
+        message = _message_with_workstation(worker_id, payload.message, "May tram dang truy van SQL bang API local.")
         _record_workstation_heartbeat(
             worker_id,
             "busy",
-            payload.message or "May tram dang truy van SQL bang API local.",
+            message,
             details={**(payload.details or {}), "run_id": run_id, "task_type": "sql_load"},
         )
         updated = _set_dynamic_report_run_job(
             run_id,
             status=payload.status.strip().lower() or "running_worker",
-            message=payload.message or "May tram dang truy van SQL bang API local.",
+            message=message,
             worker_id=worker_id,
             details=payload.details or job.get("details") or {},
         )
@@ -5962,16 +5979,17 @@ def update_sql_worker_task_status(request: Request, run_id: str, payload: SqlWor
     dashboard_job = _get_dashboard_refresh_job(run_id)
     if dashboard_job:
         worker_id = payload.worker_id or dashboard_job.get("worker_id") or ""
+        message = _message_with_workstation(worker_id, payload.message, "May tram dang lam moi du lieu dashboard.")
         _record_workstation_heartbeat(
             worker_id,
             "busy",
-            payload.message or "May tram dang lam moi du lieu dashboard.",
+            message,
             details={**(payload.details or {}), "run_id": run_id, "task_type": "dashboard_refresh"},
         )
         updated = _set_dashboard_refresh_job(
             run_id,
             status=payload.status.strip().lower() or "running_worker",
-            message=payload.message or "May tram dang lam moi du lieu dashboard.",
+            message=message,
             worker_id=worker_id,
             details=payload.details or dashboard_job.get("details") or {},
         )
@@ -5980,16 +5998,17 @@ def update_sql_worker_task_status(request: Request, run_id: str, payload: SqlWor
     if not export_job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task SQL.")
     worker_id = payload.worker_id or export_job.get("worker_id") or ""
+    message = _message_with_workstation(worker_id, payload.message, "May tram dang lay du lieu SQL va upload Google Drive.")
     _record_workstation_heartbeat(
         worker_id,
         "busy",
-        payload.message or "May tram dang lay du lieu SQL va upload Google Drive.",
+        message,
         details={**(payload.details or {}), "run_id": run_id, "task_type": "sql_export"},
     )
     _set_dynamic_report_export_job(
         run_id,
         status=payload.status.strip().lower() or "running_worker",
-        message=payload.message or "May tram dang lay du lieu SQL va upload Google Drive.",
+        message=message,
         worker_id=worker_id,
         details=payload.details or export_job.get("details") or {},
     )
@@ -6058,14 +6077,16 @@ def finish_sql_worker_task(request: Request, run_id: str, payload: SqlWorkerResu
         )
         ok_status = str(payload.status or "").lower() not in {"failed", "error"}
         status_value = "complete" if payload.ok and ok_status and drive_url else "failed"
+        worker_id = str(details.get("worker_id") or export_job.get("worker_id") or "")
         if not drive_url and payload.ok and ok_status:
-            message = "May tram da xuat file nhung chua tra ve link Google Drive."
+            base_message = "May tram da xuat file nhung chua tra ve link Google Drive."
         else:
-            message = payload.message or (
+            base_message = payload.message or (
                 "Da xuat Excel tren may tram va upload Google Drive."
                 if status_value == "complete"
                 else "May tram chua xuat duoc file Excel len Google Drive."
             )
+        message = _message_with_workstation(worker_id, base_message)
         _set_dynamic_report_export_job(
             run_id,
             status=status_value,
@@ -6075,11 +6096,11 @@ def finish_sql_worker_task(request: Request, run_id: str, payload: SqlWorkerResu
             rows=rows_count,
             total=as_int(pagination.get("total"), details.get("total"), rows_count),
             details=details,
-            worker_id=str(details.get("worker_id") or export_job.get("worker_id") or ""),
+            worker_id=worker_id,
         )
         updated_export = _get_dynamic_report_export_job(run_id) or export_job
         _record_workstation_heartbeat(
-            str(updated_export.get("worker_id") or export_job.get("worker_id") or ""),
+            str(updated_export.get("worker_id") or worker_id),
             "idle" if status_value == "complete" else "error",
             message,
             details={"run_id": run_id, "task_type": "sql_export", "status": status_value},
@@ -6114,10 +6135,17 @@ def finish_sql_worker_task(request: Request, run_id: str, payload: SqlWorkerResu
                 "ma_bao_cao": dashboard_job.get("report_code") or run_payload.ma_bao_cao,
                 "ten_bao_cao": dashboard_job.get("report_name") or "",
             }
+        details = payload.details if isinstance(payload.details, dict) else {}
+        worker_id = str(details.get("worker_id") or dashboard_job.get("worker_id") or "")
+        message = _message_with_workstation(
+            worker_id,
+            payload.message,
+            "Da lam moi du lieu dashboard tren may tram." if payload.ok else "May tram khong lam moi duoc dashboard.",
+        )
         result = {
             "ok": bool(payload.ok),
-            "message": payload.message or ("Da lam moi du lieu dashboard tren may tram." if payload.ok else "May tram khong lam moi duoc dashboard."),
-            "details": payload.details if isinstance(payload.details, dict) else {},
+            "message": message,
+            "details": details,
             "report": report,
             "columns": payload.columns,
             "rows": rows,
@@ -6136,9 +6164,10 @@ def finish_sql_worker_task(request: Request, run_id: str, payload: SqlWorkerResu
             rows=len(rows),
             total=(pagination.get("total") if isinstance(pagination, dict) else None) or len(rows),
             details=result["details"],
+            worker_id=worker_id,
         )
         _record_workstation_heartbeat(
-            str(dashboard_job.get("worker_id") or ""),
+            worker_id,
             "idle" if status_value == "complete" else "error",
             result["message"],
             details={"run_id": run_id, "task_type": "dashboard_refresh", "status": status_value},
@@ -6148,10 +6177,17 @@ def finish_sql_worker_task(request: Request, run_id: str, payload: SqlWorkerResu
     run_payload = _dynamic_report_payload_from_job(job)
     if not report:
         report = {"ma_bao_cao": job.get("report_code") or run_payload.ma_bao_cao, "ten_bao_cao": job.get("report_name") or ""}
+    details = payload.details if isinstance(payload.details, dict) else {}
+    worker_id = str(details.get("worker_id") or job.get("worker_id") or "")
+    message = _message_with_workstation(
+        worker_id,
+        payload.message,
+        "Da tai du lieu bao cao tren may tram." if payload.ok else "May tram khong tai duoc du lieu bao cao.",
+    )
     result = {
         "ok": bool(payload.ok),
-        "message": payload.message or ("Da tai du lieu bao cao tren may tram." if payload.ok else "May tram khong tai duoc du lieu bao cao."),
-        "details": payload.details if isinstance(payload.details, dict) else {},
+        "message": message,
+        "details": details,
         "report": report,
         "columns": payload.columns,
         "rows": rows,
@@ -6166,9 +6202,10 @@ def finish_sql_worker_task(request: Request, run_id: str, payload: SqlWorkerResu
         rows=len(rows),
         total=(pagination.get("total") if isinstance(pagination, dict) else None) or len(rows),
         details=result["details"],
+        worker_id=worker_id,
     )
     _record_workstation_heartbeat(
-        str(job.get("worker_id") or ""),
+        worker_id,
         "idle" if status_value == "complete" else "error",
         result["message"],
         details={"run_id": run_id, "task_type": "sql_load", "status": status_value},
@@ -7057,29 +7094,31 @@ def claim_ftp_worker_task(request: Request, payload: FtpWorkerClaimPayload) -> d
         return {"ok": True, "task": None, "message": "Khong co task FTP dang cho."}
     report = repository.get_ftp_report_by_code(str(run.get("ma_bao_cao") or ""))
     if not report:
+        message = _message_with_workstation(payload.worker_id, "Khong tim thay cau hinh bao cao FTP cho task.")
         repository.update_ftp_report_run(
             str(run.get("run_id") or ""),
             {
                 "status": "failed",
-                "message": "Khong tim thay cau hinh bao cao FTP cho task.",
+                "message": message,
                 "finished_at": datetime.now().isoformat(timespec="seconds"),
             },
         )
-        return {"ok": False, "task": None, "message": "Khong tim thay cau hinh bao cao FTP."}
+        return {"ok": False, "task": None, "message": message}
     connection_code = str(report.get("connection_code") or "ftp_storage").strip() or "ftp_storage"
     connection = repository.get_system_connection_by_code(connection_code)
     config = connection.get("config") if connection and isinstance(connection.get("config"), dict) else {}
     missing = [key for key in ("host", "username", "password") if not str(config.get(key) or "").strip()]
     if not connection or not connection.get("is_active") or missing:
+        message = _message_with_workstation(payload.worker_id, "Ket noi FTP chua san sang tren Quan tri ket noi.")
         repository.update_ftp_report_run(
             str(run.get("run_id") or ""),
             {
                 "status": "failed",
-                "message": "Ket noi FTP chua san sang tren Quản trị kết nối.",
+                "message": message,
                 "finished_at": datetime.now().isoformat(timespec="seconds"),
             },
         )
-        return {"ok": False, "task": None, "message": "Ket noi FTP chua san sang."}
+        return {"ok": False, "task": None, "message": message}
     return {
         "ok": True,
         "task": {
@@ -7110,12 +7149,20 @@ def update_ftp_worker_task_status(request: Request, run_id: str, payload: FtpWor
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task FTP.")
     if _ftp_report_run_cancelled(run):
         return _ftp_worker_cancelled_response(run)
+    worker_id = payload.worker_id or run.get("worker_id") or ""
+    message = _message_with_workstation(worker_id, payload.message, "May tram dang xu ly task FTP.")
+    _record_workstation_heartbeat(
+        worker_id,
+        "busy",
+        message,
+        details={**(payload.details or {}), "run_id": run_id.strip(), "report": run.get("ma_bao_cao") or "", "task_type": "ftp"},
+    )
     updated = repository.update_ftp_report_run(
         run_id.strip(),
         {
             "status": payload.status.strip().lower() or "running",
-            "message": payload.message or "May tram dang xu ly task FTP.",
-            "worker_id": payload.worker_id or run.get("worker_id") or "",
+            "message": message,
+            "worker_id": worker_id,
             "resolved_file_name": payload.resolved_file_name or run.get("resolved_file_name") or "",
         },
     )
@@ -7144,14 +7191,22 @@ async def upload_ftp_worker_task_file(request: Request, run_id: str, file: Uploa
         target_file.unlink(missing_ok=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File ket qua FTP rong.")
 
+    worker_id = str(run.get("worker_id") or "")
+    message = _message_with_workstation(worker_id, "Da nhan file ket qua FTP tu may tram.")
     updated = repository.update_ftp_report_run(
         run_id.strip(),
         {
             "file_name": safe_name,
             "file_path": str(target_file),
             "storage_status": "uploaded_worker_file",
-            "message": "Da nhan file ket qua FTP tu may tram.",
+            "message": message,
         },
+    )
+    _record_workstation_heartbeat(
+        worker_id,
+        "busy",
+        message,
+        details={"run_id": run_id.strip(), "report": run.get("ma_bao_cao") or "", "task_type": "ftp", "file_name": safe_name},
     )
     return {
         "ok": True,
@@ -7160,7 +7215,7 @@ async def upload_ftp_worker_task_file(request: Request, run_id: str, file: Uploa
             "file_path": str(target_file),
             "storage_link": "",
             "storage_status": "uploaded_worker_file",
-            "message": "Da nhan file ket qua FTP tu may tram.",
+            "message": message,
         },
         "run": _decorate_ftp_report_run(updated or run),
     }
@@ -7178,15 +7233,28 @@ def finish_ftp_worker_task(request: Request, run_id: str, payload: FtpWorkerResu
     finished_at = datetime.now().isoformat(timespec="seconds")
     status_value = payload.status.strip().lower() or ("success" if payload.ok else "failed")
     file_updates = _ftp_worker_result_file_updates(run, payload)
+    details = payload.details if isinstance(payload.details, dict) else {}
+    worker_id = str(details.get("worker_id") or run.get("worker_id") or "")
+    message = _message_with_workstation(
+        worker_id,
+        payload.message,
+        "Da lay bao cao FTP tren may tram." if payload.ok else "May tram khong lay duoc bao cao FTP.",
+    )
     updated = repository.update_ftp_report_run(
         run_id.strip(),
         {
             "status": status_value,
-            "message": payload.message or ("Da lay bao cao FTP tren may tram." if payload.ok else "May tram khong lay duoc bao cao FTP."),
+            "message": message,
             **file_updates,
             "duration_ms": payload.duration_ms,
             "finished_at": finished_at,
         },
+    )
+    _record_workstation_heartbeat(
+        worker_id,
+        "idle" if payload.ok else "error",
+        message,
+        details={"run_id": run_id.strip(), "report": run.get("ma_bao_cao") or "", "task_type": "ftp", "status": status_value},
     )
     try:
         repository.add_audit_log(
@@ -7581,15 +7649,16 @@ def claim_onebss_worker_task(request: Request, payload: OneBssWorkerClaimPayload
     )
     report = repository.get_onebss_report_by_code(str(run.get("ma_bao_cao") or ""))
     if not report:
+        message = _message_with_workstation(payload.worker_id, "Khong tim thay cau hinh bao cao OneBSS cho task.")
         repository.update_onebss_report_run(
             str(run.get("run_id") or ""),
             {
                 "status": "failed",
-                "message": "Khong tim thay cau hinh bao cao OneBSS cho task.",
+                "message": message,
                 "finished_at": datetime.now().isoformat(timespec="seconds"),
             },
         )
-        return {"ok": False, "task": None, "message": "Khong tim thay cau hinh bao cao OneBSS."}
+        return {"ok": False, "task": None, "message": message}
     folder_id = google_drive_folder_id(get_settings(), "", repository)
     return {
         "ok": True,
@@ -7623,10 +7692,11 @@ def update_onebss_worker_task_status(request: Request, run_id: str, payload: One
     status_value = payload.status.strip().lower()
     worker_session_id = payload.worker_session_id.strip()
     worker_id = payload.worker_id or run.get("worker_id") or ""
+    message = _message_with_workstation(worker_id, payload.message, "May tram dang xu ly task OneBSS.")
     _record_workstation_heartbeat(
         worker_id,
         "busy",
-        payload.message or "May tram dang xu ly task OneBSS.",
+        message,
         details={"run_id": run_id.strip(), "report": run.get("ma_bao_cao") or "", "task_type": "onebss", **(payload.details or {})},
         version=str((payload.details or {}).get("worker_version") or ""),
     )
@@ -7638,7 +7708,7 @@ def update_onebss_worker_task_status(request: Request, run_id: str, payload: One
         run_id.strip(),
         {
             "status": status_value or "running",
-            "message": payload.message or "May tram dang xu ly task OneBSS.",
+            "message": message,
             "worker_id": worker_id,
             "worker_session_id": worker_session_id or run.get("worker_session_id") or "",
         },
@@ -7658,7 +7728,7 @@ def get_onebss_worker_task_otp(request: Request, run_id: str) -> dict:
     _record_workstation_heartbeat(
         str(run.get("worker_id") or ""),
         "busy",
-        "May tram dang doi OTP OneBSS.",
+        _message_with_workstation(run.get("worker_id") or "", "May tram dang doi OTP OneBSS."),
         details={"run_id": run_id.strip(), "report": run.get("ma_bao_cao") or "", "task_type": "onebss"},
     )
     request_id = str(run.get("otp_request_id") or "").strip()
@@ -7672,11 +7742,12 @@ def get_onebss_worker_task_otp(request: Request, run_id: str) -> dict:
         return {"ok": False, "status": "waiting", "message": "Task chua co OTP request.", "otp": ""}
     result = consume_onebss_mobile_gateway_otp(get_settings(), request_id)
     if result.get("ok") and result.get("otp"):
+        message = _message_with_workstation(run.get("worker_id") or "", "May tram da nhan OTP va dang tiep tuc dang nhap OneBSS.")
         updated = repository.update_onebss_report_run(
             run_id.strip(),
             {
                 "status": "running",
-                "message": "May tram da nhan OTP va dang tiep tuc dang nhap OneBSS.",
+                "message": message,
             },
         )
         return {"ok": True, "status": "matched", "otp": result.get("otp"), "run": _decorate_onebss_report_run(updated or run)}
@@ -7709,7 +7780,8 @@ async def upload_onebss_worker_task_file(request: Request, run_id: str, file: Up
 
     storage_link = ""
     storage_status = "uploaded_worker_file"
-    storage_message = "Da nhan file ket qua tu may tram."
+    worker_id = str(run.get("worker_id") or "")
+    storage_message = _message_with_workstation(worker_id, "Da nhan file ket qua tu may tram.")
     settings = get_settings()
     report = repository.get_onebss_report_by_code(str(run.get("ma_bao_cao") or "")) or {}
     storage_target = google_drive_folder_id(settings, "", repository)
@@ -7732,6 +7804,12 @@ async def upload_onebss_worker_task_file(request: Request, run_id: str, file: Up
             "storage_status": storage_status,
             "message": storage_message,
         },
+    )
+    _record_workstation_heartbeat(
+        worker_id,
+        "busy",
+        storage_message,
+        details={"run_id": run_id.strip(), "report": run.get("ma_bao_cao") or "", "task_type": "onebss", "file_name": safe_name},
     )
     return {
         "ok": True,
@@ -7758,20 +7836,27 @@ def finish_onebss_worker_task(request: Request, run_id: str, payload: OneBssWork
     finished_at = datetime.now().isoformat(timespec="seconds")
     status_value = payload.status.strip().lower() or ("success" if payload.ok else "failed")
     file_updates = _onebss_worker_result_file_updates(run, payload)
+    details = payload.details if isinstance(payload.details, dict) else {}
+    worker_id = str(details.get("worker_id") or run.get("worker_id") or "")
+    message = _message_with_workstation(
+        worker_id,
+        payload.message,
+        "Da lay bao cao OneBSS tren may tram." if payload.ok else "May tram khong lay duoc bao cao OneBSS.",
+    )
     updated = repository.update_onebss_report_run(
         run_id.strip(),
         {
             "status": status_value,
-            "message": payload.message or ("Da lay bao cao OneBSS tren may tram." if payload.ok else "May tram khong lay duoc bao cao OneBSS."),
+            "message": message,
             **file_updates,
             "duration_ms": payload.duration_ms,
             "finished_at": finished_at,
         },
     )
     _record_workstation_heartbeat(
-        str((updated or run).get("worker_id") or ""),
+        worker_id,
         "idle" if payload.ok else "error",
-        payload.message or ("Da lay bao cao OneBSS tren may tram." if payload.ok else "May tram khong lay duoc bao cao OneBSS."),
+        message,
         details={"run_id": run_id.strip(), "report": run.get("ma_bao_cao") or "", "task_type": "onebss", "status": status_value},
     )
     try:

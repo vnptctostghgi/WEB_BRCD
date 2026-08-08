@@ -1860,7 +1860,7 @@ class AppRepository:
                 SET status='running', message=?, worker_id=?, claimed_at=?, updated_at=?
                 WHERE run_id=? AND status='queued'
                 """,
-                ("May tram da nhan task FTP va dang tai file.", worker, now, now, run_id),
+                (f"May tram {worker} da nhan task FTP va dang tai file." if worker else "May tram da nhan task FTP va dang tai file.", worker, now, now, run_id),
             )
             updated = connection.execute("SELECT * FROM ftp_report_runs WHERE run_id=?", (run_id,)).fetchone()
             return self._decode_ftp_report_run(dict(updated)) if updated else None
@@ -1989,7 +1989,7 @@ class AppRepository:
                 SET status='running', message=?, worker_id=?, claimed_at=?, updated_at=?
                 WHERE run_id=? AND status='queued'
                 """,
-                ("May tram da nhan task va dang xu ly OneBSS.", worker, now, now, run_id),
+                (f"May tram {worker} da nhan task va dang xu ly OneBSS." if worker else "May tram da nhan task va dang xu ly OneBSS.", worker, now, now, run_id),
             )
             updated = connection.execute("SELECT * FROM onebss_report_runs WHERE run_id=?", (run_id,)).fetchone()
             return self._decode_onebss_report_run(dict(updated)) if updated else None
