@@ -6533,6 +6533,7 @@ def _decode_ftp_template_config(value: str) -> dict[str, Any]:
         return {}
     return config
 
+
 def _normalize_legacy_ftp_site_text(value: Any) -> str:
     text = str(value or "")
     text = re.sub(r"/DATA_BILLING/HGA(?=/|$)", "/DATA_BILLING/HAG", text, flags=re.IGNORECASE)
@@ -6563,7 +6564,6 @@ def _normalize_ftp_template_legacy_sites(file_name_template: str) -> str:
             normalized_sources.append(next_source)
         config["sources"] = normalized_sources
     return json.dumps(config, ensure_ascii=False, separators=(",", ":"))
-
 
 
 def _normalized_ftp_variables(value: Any) -> dict[str, str]:
