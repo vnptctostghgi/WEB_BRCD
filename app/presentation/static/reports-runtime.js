@@ -519,6 +519,7 @@ function renderOneBssRunParameters() {
   const jsonTemplate = JSON.stringify(report?.parameters || {}, null, 2);
   container.innerHTML = `
     ${variables.length ? `<div class="compact-code-cell">${renderCompactCode(variables.join(", "))}</div>` : ""}
+    <small class="cell-note">Bien ngay ho tro: {{today}}, {today;yyyyMMdd}, {today;MM/yyyy}, {today-7d;dd/MM/yyyy}.</small>
     <label>Tham số đã cấu hình<textarea class="form-control onebss-param-json font-mono text-xs" rows="9" readonly placeholder="Chưa cấu hình tham số trong Quản trị dữ liệu OneBSS">${escapeHtml(jsonTemplate === "{}" ? "" : jsonTemplate)}</textarea></label>
   `;
 }
@@ -889,6 +890,7 @@ function renderOneBssRunParameters() {
     <label class="onebss-json-panel">
       <span class="onebss-field-title">Tham s\u1ed1 l\u1ea7n ch\u1ea1y n\u00e0y</span>
       <textarea class="form-control onebss-param-json font-mono text-xs" rows="${oneBssRunParameterEditing ? 10 : 5}" ${oneBssRunParameterEditing ? "" : "readonly"} placeholder="{}">${escapeHtml(jsonTemplate === "{}" ? "" : jsonTemplate)}</textarea>
+      <small class="cell-note">Bien ngay ho tro: {{today}}, {today;yyyyMMdd}, {today;MM/yyyy}, {today-7d;dd/MM/yyyy}.</small>
     </label>
   `;
   updateOneBssParameterEditButton();

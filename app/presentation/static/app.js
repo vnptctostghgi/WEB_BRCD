@@ -360,7 +360,7 @@ function ensureReportsRuntimeScriptLoaded() {
   if (reportsRuntimeScriptPromise) return reportsRuntimeScriptPromise;
   reportsRuntimeScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/reports-runtime.js?v=13";
+    script.src = "/static/reports-runtime.js?v=14";
     script.defer = true;
     script.dataset.reportsRuntime = "true";
     script.addEventListener("load", () => {
@@ -6028,6 +6028,7 @@ function createOneBssReportDraft() {
       P_LOAI_NGAY: "1",
       P_TUNGAY: "{{month_start}}",
       P_DENNGAY: "{{today}}",
+      P_THANG: "{today;MM/yyyy}",
       P_LOAI_BAOCAO: "2",
       P_LOAI_BIENDONG: "1",
       $merge_excel: { sheet: "DATA", source_column: "P_PHANVUNG_ID" },
@@ -6238,6 +6239,7 @@ function renderOneBssReportEditor(report, isDraft = false) {
       <label>Mã báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="Tự sinh nếu để trống" /></label>
       <label>Tên báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="Tên báo cáo OneBSS" /></label>
       <div class="onebss-parameter-converter">
+        <small class="cell-note">Bien ngay ho tro: {{today}}, {today;yyyyMMdd}, {today;MM/yyyy}, {today-7d;dd/MM/yyyy}.</small>
         <label>JSON mẫu từ trình duyệt<textarea class="form-control inline-admin-input font-mono text-xs onebss-sample-json" data-onebss-sample-json rows="10" placeholder='{p_phanvung_id: "66", p_nhanvienkd_id: "0", p_nhanvienkt_id: "0"}'></textarea><small class="cell-note" data-onebss-sample-status>Dán JSON chuẩn hoặc mẫu object copy từ trình duyệt để tự tách biến và tạo tham số chạy.</small></label>
         <label>Tham số xuất trực tiếp JSON<textarea class="form-control inline-admin-input font-mono text-xs" data-inline-onebss-field="parameters" rows="10" placeholder='{"P_PHANVUNG_ID":{"$each":["13","47","66"]},"P_TUNGAY":"{{month_start}}","P_DENNGAY":"{{today}}"}'>${escapeHtml(parameterJson === "{}" ? "" : parameterJson)}</textarea><small class="cell-note">JSON này là tham số chạy thật. P_PHANVUNG_ID sẽ chạy lần lượt 13, 47, 66 khi được sinh từ mẫu.</small></label>
       </div>

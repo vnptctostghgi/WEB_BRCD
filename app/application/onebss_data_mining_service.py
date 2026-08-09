@@ -31,7 +31,24 @@ except ZoneInfoNotFoundError:
 ONEBSS_HOST = "onebss.vnpt.vn"
 ONEBSS_STATE_PATH = Path("data/onebss_browser_state.json")
 FILENAME_UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
-DATE_TOKEN_PATTERN = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)(?:\s*([+-])\s*(\d+)\s*d)?\s*\}\}")
+DATE_TOKEN_PATTERN = re.compile(
+    r"""
+    \{\{\s*
+        (?P<double_token>[a-zA-Z_][a-zA-Z0-9_]*)
+        (?:\s*(?P<double_sign>[+-])\s*(?P<double_amount>\d+)\s*d)?
+        (?:\s*;\s*(?P<double_format>[^{}]+?)\s*)?
+    \}\}
+    |
+    \{\s*
+        (?P<single_token>[a-zA-Z_][a-zA-Z0-9_]*)
+        (?:\s*(?P<single_sign>[+-])\s*(?P<single_amount>\d+)\s*d)?
+        \s*;\s*(?P<single_format>[^{}]+?)\s*
+    \}
+    """,
+    re.VERBOSE,
+)
+DATE_TOKEN_NAMES = {"today", "yesterday", "tomorrow", "month_start", "month_end", "last_month_start", "last_month_end"}
+DATE_FORMAT_TOKEN_PATTERN = re.compile(r"yyyy|YYYY|yy|YY|MM|M|dd|DD|d|D|HH|H|hh|h|mm|m|ss|s")
 
 
 class OneBssDownloadError(RuntimeError):
@@ -382,7 +399,9 @@ def resolve_dynamic_parameter_value(value: Any, current: datetime) -> Any:
 
 
 def format_date_token(match: re.Match[str], current: datetime) -> str:
-    token = match.group(1).lower()
+    token = (match.group("double_token") or match.group("single_token") or "").lower()
+    if token not in DATE_TOKEN_NAMES:
+        return match.group(0)
     day = current.date()
     if token == "yesterday":
         day = day - timedelta(days=1)
@@ -398,15 +417,40 @@ def format_date_token(match: re.Match[str], current: datetime) -> str:
         day = (first_day - timedelta(days=1)).replace(day=1)
     elif token == "last_month_end":
         day = day.replace(day=1) - timedelta(days=1)
-    elif token != "today":
-        return match.group(0)
-    sign = match.group(2)
-    amount = int(match.group(3) or 0)
+    sign = match.group("double_sign") or match.group("single_sign")
+    amount = int(match.group("double_amount") or match.group("single_amount") or 0)
     if sign == "+":
         day = day + timedelta(days=amount)
     elif sign == "-":
         day = day - timedelta(days=amount)
-    return day.strftime("%d/%m/%Y")
+    fmt = (match.group("double_format") or match.group("single_format") or "").strip()
+    if not fmt:
+        return day.strftime("%d/%m/%Y")
+    return format_date_with_user_pattern(day, current, fmt)
+
+
+def format_date_with_user_pattern(day: Any, current: datetime, fmt: str) -> str:
+    values = {
+        "yyyy": f"{day.year:04d}",
+        "YYYY": f"{day.year:04d}",
+        "yy": f"{day.year % 100:02d}",
+        "YY": f"{day.year % 100:02d}",
+        "MM": f"{day.month:02d}",
+        "M": str(day.month),
+        "dd": f"{day.day:02d}",
+        "DD": f"{day.day:02d}",
+        "d": str(day.day),
+        "D": str(day.day),
+        "HH": f"{current.hour:02d}",
+        "H": str(current.hour),
+        "hh": f"{((current.hour - 1) % 12) + 1:02d}",
+        "h": str(((current.hour - 1) % 12) + 1),
+        "mm": f"{current.minute:02d}",
+        "m": str(current.minute),
+        "ss": f"{current.second:02d}",
+        "s": str(current.second),
+    }
+    return DATE_FORMAT_TOKEN_PATTERN.sub(lambda item: values.get(item.group(0), item.group(0)), fmt)
 
 
 def save_downloaded_file(settings: Settings, source_file: Path, storage_link: str, repository: Any | None = None) -> dict[str, Any]:

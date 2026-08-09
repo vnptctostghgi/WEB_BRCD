@@ -40,7 +40,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.08.08-ftp-drive-upload-v35"
+WORKER_VERSION = "2026.08.09-onebss-otp-format-v36"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -169,6 +169,9 @@ def wait_for_otp(
             if progress_callback:
                 progress_callback("Da nhan duoc OTP tu Mobile Gateway.")
             return str(data["otp"])
+        status_value = str(data.get("status") or "").strip().lower()
+        if status_value in {"expired", "cancelled", "consumed", "consume_failed"}:
+            raise TimeoutError(str(data.get("message") or "Khong lay duoc OTP OneBSS tu Mobile Gateway."))
         now = time.monotonic()
         elapsed = now - started
         if elapsed >= max_wait:

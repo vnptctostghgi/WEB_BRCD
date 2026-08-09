@@ -11,7 +11,7 @@ import unicodedata
 import uuid
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from itertools import product
 from pathlib import Path
 from typing import Any, Callable
@@ -33,6 +33,7 @@ from app.application.onebss_data_mining_service import (
 )
 from app.application.zalo_auto_message_service import install_playwright_chromium, playwright_needs_browser_install
 from app.data_access.repository_factory import build_repository
+from app.modules.mobile_gateway import security
 from app.modules.mobile_gateway.exceptions import OtpServiceError
 from app.modules.mobile_gateway.otp_service import OtpService
 from app.modules.mobile_gateway.repository import MobileGatewayRepository
@@ -150,6 +151,7 @@ PENDING_ONEBSS_API_SESSIONS: dict[str, PendingOneBssApiSession] = {}
 ONEBSS_API_TOKENS: dict[str, OneBssApiToken] = {}
 PENDING_ONEBSS_LOCK = threading.Lock()
 OneBssProgressCallback = Callable[[str], None]
+OTP_CONSUMED_RECOVERY_SECONDS = 10 * 60
 
 
 class OneBssProgressCancelled(Exception):
@@ -360,6 +362,35 @@ def inspect_onebss_mobile_gateway_otp(settings: Settings, request_id: str) -> di
     }
 
 
+def parse_onebss_otp_timestamp(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    text = text.replace("Z", "+00:00")
+    if re.search(r"[+-]\d{2}$", text):
+        text = f"{text}:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=LOCAL_TIMEZONE)
+    return parsed.astimezone(LOCAL_TIMEZONE)
+
+
+def recover_consumed_onebss_otp(settings: Settings, otp_request: dict[str, Any]) -> str:
+    consumed_at = parse_onebss_otp_timestamp(otp_request.get("consumed_at") or otp_request.get("updated_at"))
+    if consumed_at and datetime.now(LOCAL_TIMEZONE) - consumed_at > timedelta(seconds=OTP_CONSUMED_RECOVERY_SECONDS):
+        return ""
+    code = security.decrypt_text(settings, str(otp_request.get("code_encrypted") or ""), "otp")
+    if OTP_PATTERN.fullmatch(code or ""):
+        return code
+    visible_code = str(otp_request.get("code_masked") or "").strip()
+    if OTP_PATTERN.fullmatch(visible_code):
+        return visible_code
+    return ""
+
+
 def consume_onebss_mobile_gateway_otp(settings: Settings, request_id: str) -> dict[str, Any]:
     request_id = str(request_id or "").strip()
     if not request_id:
@@ -394,6 +425,24 @@ def consume_onebss_mobile_gateway_otp(settings: Settings, request_id: str) -> di
                 "matched_at": otp_request.get("matched_at") or "",
             }
         return {"ok": False, "status": "consume_failed", "message": "Da nhan OTP nhung khong doc duoc ma."}
+    if status_value == "consumed":
+        code = recover_consumed_onebss_otp(settings, otp_request)
+        if code:
+            return {
+                "ok": True,
+                "status": "consumed",
+                "otp": code,
+                "message": "Da lay lai OTP vua duoc Mobile Gateway xac nhan.",
+                "source_type": otp_request.get("matched_source_type") or "",
+                "source_id": otp_request.get("matched_source_id") or "",
+                "matched_at": otp_request.get("matched_at") or "",
+            }
+        return {
+            "ok": False,
+            "status": "consumed",
+            "message": "OTP request da duoc su dung va da qua thoi gian lay lai ma.",
+            "code_masked": otp_request.get("code_masked") or "",
+        }
 
     messages = {
         "waiting": "Dang doi tin nhan OTP.",
