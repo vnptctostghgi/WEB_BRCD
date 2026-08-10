@@ -16,6 +16,10 @@ param(
   [string]$OneBssTaskTimeoutSeconds = "1200",
   [string]$OneBssOtpWaitSeconds = "180",
   [string]$SqlWorkerTimeoutSeconds = "1800",
+  [string]$WorkerMaxConcurrentTasks = "4",
+  [string]$OneBssWorkerMaxTasks = "2",
+  [string]$SqlWorkerMaxTasks = "2",
+  [string]$FtpWorkerMaxTasks = "2",
   [string]$ExportPageSize = "20000",
   [string]$ExportMaxRows = "1000000",
   [string]$ConfigFile = "",
@@ -372,6 +376,11 @@ function Ensure-WorkstationEnvFile {
   Set-DotEnvValue $envFile "ONEBSS_PROCESSING_TIMEOUT_RETRY_DELAY_SECONDS" $onebssProcessingTimeoutRetryDelaySeconds
   Set-DotEnvValue $envFile "ONEBSS_TASK_TIMEOUT_SECONDS" $onebssTaskTimeoutSeconds
   Set-DotEnvValue $envFile "SQL_WORKER_TIMEOUT_SECONDS" $sqlWorkerTimeoutSeconds
+  Set-DotEnvValue $envFile "VNPTCTO_WORKER_MAX_CONCURRENT_TASKS" $workerMaxConcurrentTasks
+  Set-DotEnvValue $envFile "ONEBSS_WORKER_MAX_CONCURRENT_TASKS" $workerMaxConcurrentTasks
+  Set-DotEnvValue $envFile "ONEBSS_WORKER_MAX_ONEBSS_TASKS" $onebssWorkerMaxTasks
+  Set-DotEnvValue $envFile "SQL_WORKER_MAX_CONCURRENT_TASKS" $sqlWorkerMaxTasks
+  Set-DotEnvValue $envFile "FTP_WORKER_MAX_CONCURRENT_TASKS" $ftpWorkerMaxTasks
   Set-DotEnvValue $envFile "EXPORT_PAGE_SIZE" $exportPageSize
   Set-DotEnvValue $envFile "EXPORT_MAX_ROWS" $exportMaxRows
   Set-DotEnvValue $envFile "ONEBSS_USERNAME" $env:ONEBSS_USERNAME
@@ -774,6 +783,10 @@ $googleDriveOauthRefreshToken = Resolve-SetupValue $setupConfig "GoogleDriveOaut
 $googleDriveOauthEmail = Resolve-SetupValue $setupConfig "GoogleDriveOauthEmail" "" "" ""
 $googleDriveServiceAccountJsonBase64 = Resolve-SetupValue $setupConfig "GoogleDriveServiceAccountJsonBase64" "" "" "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64"
 $sqlWorkerTimeoutSeconds = Resolve-SetupValue $setupConfig "SqlWorkerTimeoutSeconds" $SqlWorkerTimeoutSeconds "1800" "SQL_WORKER_TIMEOUT_SECONDS"
+$workerMaxConcurrentTasks = Resolve-SetupValue $setupConfig "WorkerMaxConcurrentTasks" $WorkerMaxConcurrentTasks "4" "VNPTCTO_WORKER_MAX_CONCURRENT_TASKS"
+$onebssWorkerMaxTasks = Resolve-SetupValue $setupConfig "OneBssWorkerMaxTasks" $OneBssWorkerMaxTasks "2" "ONEBSS_WORKER_MAX_ONEBSS_TASKS"
+$sqlWorkerMaxTasks = Resolve-SetupValue $setupConfig "SqlWorkerMaxTasks" $SqlWorkerMaxTasks "2" "SQL_WORKER_MAX_CONCURRENT_TASKS"
+$ftpWorkerMaxTasks = Resolve-SetupValue $setupConfig "FtpWorkerMaxTasks" $FtpWorkerMaxTasks "2" "FTP_WORKER_MAX_CONCURRENT_TASKS"
 $exportPageSize = Resolve-SetupValue $setupConfig "ExportPageSize" $ExportPageSize "20000" "EXPORT_PAGE_SIZE"
 $exportMaxRows = Resolve-SetupValue $setupConfig "ExportMaxRows" $ExportMaxRows "1000000" "EXPORT_MAX_ROWS"
 
@@ -843,6 +856,11 @@ Set-UserEnvironment "ONEBSS_WORKER_HEARTBEAT_SECONDS" "60"
 Set-UserEnvironment "SQL_WORKER_POLL_SECONDS" "10"
 Set-UserEnvironment "FTP_WORKER_POLL_SECONDS" "30"
 Set-UserEnvironment "SQL_WORKER_TIMEOUT_SECONDS" $sqlWorkerTimeoutSeconds
+Set-UserEnvironment "VNPTCTO_WORKER_MAX_CONCURRENT_TASKS" $workerMaxConcurrentTasks
+Set-UserEnvironment "ONEBSS_WORKER_MAX_CONCURRENT_TASKS" $workerMaxConcurrentTasks
+Set-UserEnvironment "ONEBSS_WORKER_MAX_ONEBSS_TASKS" $onebssWorkerMaxTasks
+Set-UserEnvironment "SQL_WORKER_MAX_CONCURRENT_TASKS" $sqlWorkerMaxTasks
+Set-UserEnvironment "FTP_WORKER_MAX_CONCURRENT_TASKS" $ftpWorkerMaxTasks
 Set-UserEnvironment "EXPORT_PAGE_SIZE" $exportPageSize
 Set-UserEnvironment "EXPORT_MAX_ROWS" $exportMaxRows
 Set-UserEnvironment "ONEBSS_USERNAME" $onebssUsername

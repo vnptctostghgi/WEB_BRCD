@@ -167,6 +167,11 @@ foreach ($name in @(
   "ONEBSS_WORKER_HEARTBEAT_SECONDS",
   "SQL_WORKER_POLL_SECONDS",
   "FTP_WORKER_POLL_SECONDS",
+  "VNPTCTO_WORKER_MAX_CONCURRENT_TASKS",
+  "ONEBSS_WORKER_MAX_CONCURRENT_TASKS",
+  "ONEBSS_WORKER_MAX_ONEBSS_TASKS",
+  "SQL_WORKER_MAX_CONCURRENT_TASKS",
+  "FTP_WORKER_MAX_CONCURRENT_TASKS",
   "ONEBSS_USERNAME",
   "ONEBSS_PASSWORD",
   "ONEBSS_LOGIN_URL",
@@ -196,6 +201,25 @@ if ([string]::IsNullOrWhiteSpace($env:ONEBSS_WORKER_DISABLE_TASK_GUARD)) {
 }
 if ([string]::IsNullOrWhiteSpace($env:ONEBSS_WORKER_OTP_WAIT_SECONDS)) {
   $env:ONEBSS_WORKER_OTP_WAIT_SECONDS = "180"
+}
+if ([string]::IsNullOrWhiteSpace($env:VNPTCTO_WORKER_MAX_CONCURRENT_TASKS)) {
+  if (-not [string]::IsNullOrWhiteSpace($env:ONEBSS_WORKER_MAX_CONCURRENT_TASKS)) {
+    $env:VNPTCTO_WORKER_MAX_CONCURRENT_TASKS = $env:ONEBSS_WORKER_MAX_CONCURRENT_TASKS
+  } else {
+    $env:VNPTCTO_WORKER_MAX_CONCURRENT_TASKS = "4"
+  }
+}
+if ([string]::IsNullOrWhiteSpace($env:ONEBSS_WORKER_MAX_CONCURRENT_TASKS)) {
+  $env:ONEBSS_WORKER_MAX_CONCURRENT_TASKS = $env:VNPTCTO_WORKER_MAX_CONCURRENT_TASKS
+}
+if ([string]::IsNullOrWhiteSpace($env:ONEBSS_WORKER_MAX_ONEBSS_TASKS)) {
+  $env:ONEBSS_WORKER_MAX_ONEBSS_TASKS = "2"
+}
+if ([string]::IsNullOrWhiteSpace($env:SQL_WORKER_MAX_CONCURRENT_TASKS)) {
+  $env:SQL_WORKER_MAX_CONCURRENT_TASKS = "2"
+}
+if ([string]::IsNullOrWhiteSpace($env:FTP_WORKER_MAX_CONCURRENT_TASKS)) {
+  $env:FTP_WORKER_MAX_CONCURRENT_TASKS = "2"
 }
 
 $missingRuntimeConfig = New-Object System.Collections.Generic.List[string]
@@ -260,6 +284,7 @@ if ($missingRuntimeConfig.Count -gt 0) {
 Write-Host "Dang chay may tram OneBSS. Hay de cua so nay mo." -ForegroundColor Green
 Write-Host "Trang web: $env:VNPTCTO_BASE_URL"
 Write-Host "May tram: $env:ONEBSS_WORKER_ID"
+Write-Host "Da luong: tong $env:VNPTCTO_WORKER_MAX_CONCURRENT_TASKS task, OneBSS $env:ONEBSS_WORKER_MAX_ONEBSS_TASKS, SQL $env:SQL_WORKER_MAX_CONCURRENT_TASKS, FTP $env:FTP_WORKER_MAX_CONCURRENT_TASKS"
 Write-Host ""
 
 Invoke-External $VenvPython (Join-Path $Root "scripts\onebss_workstation_worker.py")

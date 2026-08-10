@@ -40,10 +40,208 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.08.09-onebss-otp-format-v36"
+WORKER_VERSION = "2026.08.10-parallel-worker-v37"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
+TASK_KIND_ONEBSS = "onebss"
+TASK_KIND_SQL = "sql"
+TASK_KIND_FTP = "ftp"
+TASK_KIND_LABELS = {
+    TASK_KIND_ONEBSS: "OneBSS",
+    TASK_KIND_SQL: "SQL",
+    TASK_KIND_FTP: "FTP",
+}
+
+
+def env_int(names: str | list[str], default: int, *, minimum: int = 1, maximum: int = 32) -> int:
+    env_names = [names] if isinstance(names, str) else names
+    raw_value = ""
+    for name in env_names:
+        raw_value = str(os.getenv(name, "") or "").strip()
+        if raw_value:
+            break
+    try:
+        value = int(float(raw_value)) if raw_value else int(default)
+    except (TypeError, ValueError):
+        value = int(default)
+    return max(int(minimum), min(int(value), int(maximum)))
+
+
+def worker_concurrency_limits() -> dict[str, int]:
+    total = env_int(
+        ["VNPTCTO_WORKER_MAX_CONCURRENT_TASKS", "ONEBSS_WORKER_MAX_CONCURRENT_TASKS"],
+        4,
+        minimum=1,
+        maximum=8,
+    )
+    return {
+        "total": total,
+        TASK_KIND_ONEBSS: min(env_int("ONEBSS_WORKER_MAX_ONEBSS_TASKS", 2, minimum=1, maximum=4), total),
+        TASK_KIND_SQL: min(env_int(["SQL_WORKER_MAX_CONCURRENT_TASKS", "SQL_WORKER_MAX_TASKS"], 2, minimum=1, maximum=4), total),
+        TASK_KIND_FTP: min(env_int(["FTP_WORKER_MAX_CONCURRENT_TASKS", "FTP_WORKER_MAX_TASKS"], 2, minimum=1, maximum=6), total),
+    }
+
+
+def worker_task_run_id(kind: str, task: dict[str, Any]) -> str:
+    if kind == TASK_KIND_SQL:
+        return str(task.get("run_id") or task.get("job_id") or "").strip()
+    return str(task.get("run_id") or "").strip()
+
+
+def worker_task_report_code(kind: str, task: dict[str, Any]) -> str:
+    if kind == TASK_KIND_ONEBSS and isinstance(task.get("report"), dict):
+        return str((task.get("report") or {}).get("ma_bao_cao") or "").strip()
+    if kind == TASK_KIND_SQL:
+        query = task.get("query") if isinstance(task.get("query"), dict) else {}
+        return str(task.get("report_code") or query.get("ma_bao_cao") or "").strip()
+    return str(task.get("ma_bao_cao") or "").strip()
+
+
+class WorkerConcurrencyTracker:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._active: dict[str, dict[str, Any]] = {}
+
+    def counts(self) -> dict[str, int]:
+        with self._lock:
+            return self._counts_locked()
+
+    def active_details(self) -> dict[str, Any]:
+        with self._lock:
+            counts = self._counts_locked()
+            active_tasks = [
+                {
+                    "run_id": run_id,
+                    "task_type": info.get("kind") or "",
+                    "report": info.get("report") or "",
+                    "elapsed_seconds": int(time.monotonic() - float(info.get("started_monotonic") or time.monotonic())),
+                }
+                for run_id, info in self._active.items()
+            ]
+        return {
+            "concurrency_limits": worker_concurrency_limits(),
+            "active_counts": counts,
+            "active_tasks": active_tasks,
+        }
+
+    def can_start(self, kind: str) -> bool:
+        limits = worker_concurrency_limits()
+        with self._lock:
+            counts = self._counts_locked()
+            return counts["total"] < limits["total"] and counts.get(kind, 0) < limits.get(kind, 1)
+
+    def try_start(self, kind: str, run_id: str, report_code: str = "") -> bool:
+        task_id = str(run_id or "").strip()
+        if not task_id:
+            task_id = f"{kind}-{time.time_ns()}"
+        limits = worker_concurrency_limits()
+        with self._lock:
+            counts = self._counts_locked()
+            if task_id in self._active:
+                return False
+            if counts["total"] >= limits["total"] or counts.get(kind, 0) >= limits.get(kind, 1):
+                return False
+            self._active[task_id] = {
+                "kind": kind,
+                "report": report_code,
+                "started_monotonic": time.monotonic(),
+            }
+            return True
+
+    def finish(self, run_id: str) -> None:
+        task_id = str(run_id or "").strip()
+        with self._lock:
+            self._active.pop(task_id, None)
+
+    def _counts_locked(self) -> dict[str, int]:
+        counts = {
+            "total": len(self._active),
+            TASK_KIND_ONEBSS: 0,
+            TASK_KIND_SQL: 0,
+            TASK_KIND_FTP: 0,
+        }
+        for info in self._active.values():
+            kind = str(info.get("kind") or "")
+            if kind in counts:
+                counts[kind] += 1
+        return counts
+
+
+class WorkerTaskDispatcher:
+    def __init__(self, base_url: str, headers: dict[str, str], worker_id: str, poll_seconds: float) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.headers = dict(headers)
+        self.worker_id = worker_id
+        self.poll_seconds = poll_seconds
+        self.tracker = WorkerConcurrencyTracker()
+        self._threads_lock = threading.Lock()
+        self._threads: list[threading.Thread] = []
+
+    def can_start(self, kind: str) -> bool:
+        return self.tracker.can_start(kind)
+
+    def active_counts(self) -> dict[str, int]:
+        return self.tracker.counts()
+
+    def active_details(self) -> dict[str, Any]:
+        return self.tracker.active_details()
+
+    def has_active_tasks(self) -> bool:
+        return self.active_counts()["total"] > 0
+
+    def has_available_slot(self) -> bool:
+        return any(self.can_start(kind) for kind in (TASK_KIND_ONEBSS, TASK_KIND_SQL, TASK_KIND_FTP))
+
+    def start_task(self, kind: str, task: dict[str, Any]) -> bool:
+        run_id = worker_task_run_id(kind, task) or f"{kind}-{time.time_ns()}"
+        report_code = worker_task_report_code(kind, task)
+        if not self.tracker.try_start(kind, run_id, report_code):
+            return False
+        thread = threading.Thread(
+            target=self._run_task,
+            args=(kind, task, run_id),
+            name=f"vnptcto-{kind}-{run_id[:24]}",
+            daemon=True,
+        )
+        with self._threads_lock:
+            self._threads.append(thread)
+        thread.start()
+        return True
+
+    def wait_until_idle(self) -> None:
+        while self.has_active_tasks():
+            with self._threads_lock:
+                threads = list(self._threads)
+            for thread in threads:
+                thread.join(timeout=0.2)
+            self.prune_threads()
+
+    def prune_threads(self) -> None:
+        with self._threads_lock:
+            self._threads = [thread for thread in self._threads if thread.is_alive()]
+
+    def _run_task(self, kind: str, task: dict[str, Any], run_id: str) -> None:
+        label = TASK_KIND_LABELS.get(kind, kind.upper())
+        try:
+            with httpx.Client(base_url=self.base_url, headers=self.headers, timeout=httpx.Timeout(60.0, connect=20.0)) as task_client:
+                if kind == TASK_KIND_ONEBSS:
+                    process_task(task_client, task, self.worker_id, self.poll_seconds)
+                elif kind == TASK_KIND_SQL:
+                    process_sql_task(task_client, task, self.worker_id)
+                elif kind == TASK_KIND_FTP:
+                    process_ftp_task(task_client, task, self.worker_id)
+                else:
+                    raise RuntimeError(f"Loai task khong ho tro: {kind}")
+        except Exception as error:
+            print(
+                f"Luong {label} {run_id} loi ngoai y muon: {describe_request_error(error)}",
+                file=sys.stderr,
+                flush=True,
+            )
+            traceback.print_exc(file=sys.stderr)
+        finally:
+            self.tracker.finish(run_id)
 
 
 def worker_process_details() -> dict[str, Any]:
@@ -1557,71 +1755,99 @@ def process_ftp_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
             print(f"Khong cap nhat duoc ket qua FTP: {describe_request_error(update_error)}", file=sys.stderr)
 
 
-def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float, *, include_sql: bool = True, include_ftp: bool = True) -> bool:
-    claim = request_json(
-        client,
-        "POST",
-        "/api/onebss-worker/tasks/claim",
-        json={
-            "worker_id": worker_id,
-            "version": WORKER_VERSION,
-            "details": worker_process_details(),
-        },
-        timeout=10.0,
-        _retry_forever=False,
-    )
-    if claim.get("transient_error"):
-        return False
-    task = claim.get("task") if isinstance(claim.get("task"), dict) else None
-    if task:
-        run_id = str(task.get("run_id") or "")
-        report_code = ""
-        if isinstance(task.get("report"), dict):
-            report_code = str((task.get("report") or {}).get("ma_bao_cao") or "")
-        print(f"Nhan task OneBSS {run_id} ({report_code}).", flush=True)
-        try:
-            status_response = request_json(
-                client,
-                "POST",
-                f"/api/onebss-worker/tasks/{run_id}/status",
-                json={
-                    "status": "running",
-                    "message": "May tram da nhan task OneBSS va dang chuan bi phien chay.",
-                    "worker_id": worker_id,
-                    "worker_session_id": "",
-                    "details": {
-                        **worker_process_details(),
-                        "task_type": "onebss",
-                        "process": "parent",
-                        "stage": "task_claimed",
-                    },
-                },
-                timeout=10.0,
-                _retry_forever=False,
-            )
-            if response_is_cancelled(status_response):
-                print(f"Task OneBSS {run_id} da bi huy truoc khi xu ly.", flush=True)
-                return True
-            if status_response.get("transient_error"):
-                print(
-                    f"Khong cap nhat duoc trang thai nhan task OneBSS {run_id}: {status_response.get('transient_error')}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-        except Exception as error:
-            print(f"Khong cap nhat duoc trang thai nhan task OneBSS {run_id}: {describe_request_error(error)}", file=sys.stderr, flush=True)
-        send_heartbeat(
-            client,
-            worker_id,
-            "busy",
-            f"Dang xu ly task {task.get('run_id') or ''}.",
-            {"run_id": task.get("run_id") or "", "report": (task.get("report") or {}).get("ma_bao_cao") if isinstance(task.get("report"), dict) else ""},
-        )
-        process_task(client, task, worker_id, poll_seconds)
-        send_heartbeat(client, worker_id, "idle", "May tram OneBSS da quay lai trang thai cho task.")
-        return True
+def poll_worker_once(
+    client: httpx.Client,
+    worker_id: str,
+    poll_seconds: float,
+    *,
+    include_sql: bool = True,
+    include_ftp: bool = True,
+    dispatcher: WorkerTaskDispatcher | None = None,
+) -> bool:
+    if dispatcher is not None:
+        dispatcher.prune_threads()
 
-    if include_sql:
+    if dispatcher is None or dispatcher.can_start(TASK_KIND_ONEBSS):
+        claim = request_json(
+            client,
+            "POST",
+            "/api/onebss-worker/tasks/claim",
+            json={
+                "worker_id": worker_id,
+                "version": WORKER_VERSION,
+                "details": {
+                    **worker_process_details(),
+                    **(dispatcher.active_details() if dispatcher is not None else {}),
+                },
+            },
+            timeout=10.0,
+            _retry_forever=False,
+        )
+        if claim.get("transient_error"):
+            return False
+        task = claim.get("task") if isinstance(claim.get("task"), dict) else None
+        if task:
+            run_id = worker_task_run_id(TASK_KIND_ONEBSS, task)
+            report_code = worker_task_report_code(TASK_KIND_ONEBSS, task)
+            print(f"Nhan task OneBSS {run_id} ({report_code}).", flush=True)
+            try:
+                status_response = request_json(
+                    client,
+                    "POST",
+                    f"/api/onebss-worker/tasks/{run_id}/status",
+                    json={
+                        "status": "running",
+                        "message": "May tram da nhan task OneBSS va dang chuan bi phien chay.",
+                        "worker_id": worker_id,
+                        "worker_session_id": "",
+                        "details": {
+                            **worker_process_details(),
+                            "task_type": "onebss",
+                            "process": "parent",
+                            "stage": "task_claimed",
+                            **(dispatcher.active_details() if dispatcher is not None else {}),
+                        },
+                    },
+                    timeout=10.0,
+                    _retry_forever=False,
+                )
+                if response_is_cancelled(status_response):
+                    print(f"Task OneBSS {run_id} da bi huy truoc khi xu ly.", flush=True)
+                    return True
+                if status_response.get("transient_error"):
+                    print(
+                        f"Khong cap nhat duoc trang thai nhan task OneBSS {run_id}: {status_response.get('transient_error')}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+            except Exception as error:
+                print(f"Khong cap nhat duoc trang thai nhan task OneBSS {run_id}: {describe_request_error(error)}", file=sys.stderr, flush=True)
+            if dispatcher is not None and dispatcher.start_task(TASK_KIND_ONEBSS, task):
+                send_heartbeat(
+                    client,
+                    worker_id,
+                    "busy",
+                    f"May tram da bat dau task OneBSS {run_id}.",
+                    {
+                        "run_id": run_id,
+                        "report": report_code,
+                        "task_type": "onebss",
+                        **dispatcher.active_details(),
+                    },
+                )
+                return True
+            send_heartbeat(
+                client,
+                worker_id,
+                "busy",
+                f"Dang xu ly task {run_id}.",
+                {"run_id": run_id, "report": report_code, "task_type": "onebss"},
+            )
+            process_task(client, task, worker_id, poll_seconds)
+            send_heartbeat(client, worker_id, "idle", "May tram OneBSS da quay lai trang thai cho task.")
+            return True
+
+    if include_sql and (dispatcher is None or dispatcher.can_start(TASK_KIND_SQL)):
         sql_claim = request_json(
             client,
             "POST",
@@ -1629,7 +1855,10 @@ def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float, 
             json={
                 "worker_id": worker_id,
                 "version": WORKER_VERSION,
-                "details": worker_process_details(),
+                "details": {
+                    **worker_process_details(),
+                    **(dispatcher.active_details() if dispatcher is not None else {}),
+                },
             },
             timeout=10.0,
             _retry_forever=False,
@@ -1638,18 +1867,29 @@ def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float, 
             return False
         sql_task = sql_claim.get("task") if isinstance(sql_claim.get("task"), dict) else None
         if sql_task:
+            run_id = worker_task_run_id(TASK_KIND_SQL, sql_task)
+            report_code = worker_task_report_code(TASK_KIND_SQL, sql_task)
+            if dispatcher is not None and dispatcher.start_task(TASK_KIND_SQL, sql_task):
+                send_heartbeat(
+                    client,
+                    worker_id,
+                    "busy",
+                    f"May tram da bat dau task SQL {run_id}.",
+                    {"run_id": run_id, "report": report_code, "task_type": "sql", **dispatcher.active_details()},
+                )
+                return True
             send_heartbeat(
                 client,
                 worker_id,
                 "busy",
-                f"Dang xu ly task SQL {sql_task.get('run_id') or ''}.",
-                {"run_id": sql_task.get("run_id") or "", "report": sql_task.get("report_code") or "", "task_type": "sql"},
+                f"Dang xu ly task SQL {run_id}.",
+                {"run_id": run_id, "report": report_code, "task_type": "sql"},
             )
             process_sql_task(client, sql_task, worker_id)
             send_heartbeat(client, worker_id, "idle", "May tram SQL da quay lai trang thai cho task.")
             return True
 
-    if include_ftp:
+    if include_ftp and (dispatcher is None or dispatcher.can_start(TASK_KIND_FTP)):
         ftp_claim = request_json(
             client,
             "POST",
@@ -1657,7 +1897,10 @@ def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float, 
             json={
                 "worker_id": worker_id,
                 "version": WORKER_VERSION,
-                "details": worker_process_details(),
+                "details": {
+                    **worker_process_details(),
+                    **(dispatcher.active_details() if dispatcher is not None else {}),
+                },
             },
             timeout=10.0,
             _retry_forever=False,
@@ -1666,12 +1909,23 @@ def poll_worker_once(client: httpx.Client, worker_id: str, poll_seconds: float, 
             return False
         ftp_task = ftp_claim.get("task") if isinstance(ftp_claim.get("task"), dict) else None
         if ftp_task:
+            run_id = worker_task_run_id(TASK_KIND_FTP, ftp_task)
+            report_code = worker_task_report_code(TASK_KIND_FTP, ftp_task)
+            if dispatcher is not None and dispatcher.start_task(TASK_KIND_FTP, ftp_task):
+                send_heartbeat(
+                    client,
+                    worker_id,
+                    "busy",
+                    f"May tram da bat dau task FTP {run_id}.",
+                    {"run_id": run_id, "report": report_code, "task_type": "ftp", **dispatcher.active_details()},
+                )
+                return True
             send_heartbeat(
                 client,
                 worker_id,
                 "busy",
-                f"Dang xu ly task FTP {ftp_task.get('run_id') or ''}.",
-                {"run_id": ftp_task.get("run_id") or "", "report": ftp_task.get("ma_bao_cao") or "", "task_type": "ftp"},
+                f"Dang xu ly task FTP {run_id}.",
+                {"run_id": run_id, "report": report_code, "task_type": "ftp"},
             )
             process_ftp_task(client, ftp_task, worker_id)
             send_heartbeat(client, worker_id, "idle", "May tram FTP da quay lai trang thai cho task.")
@@ -1691,10 +1945,13 @@ def main() -> int:
     args = parser.parse_args()
     if not args.token:
         raise SystemExit("Missing INTERNAL_API_TOKEN or --token.")
+    limits = worker_concurrency_limits()
     print(
         "Worker version "
         f"{WORKER_VERSION}; task_guard={'on' if onebss_task_guard_enabled() else 'off'}; "
-        f"otp_wait={int(onebss_worker_otp_wait_seconds())}s.",
+        f"otp_wait={int(onebss_worker_otp_wait_seconds())}s; "
+        f"parallel_total={limits['total']}; onebss={limits[TASK_KIND_ONEBSS]}; "
+        f"sql={limits[TASK_KIND_SQL]}; ftp={limits[TASK_KIND_FTP]}.",
         flush=True,
     )
 
@@ -1703,18 +1960,37 @@ def main() -> int:
     ftp_poll_seconds = max(float(os.getenv("FTP_WORKER_POLL_SECONDS", "30") or "30"), args.poll_seconds)
     next_sql_poll = 0.0
     next_ftp_poll = 0.0
+    dispatcher = WorkerTaskDispatcher(args.base_url, headers, args.worker_id, args.poll_seconds)
     with httpx.Client(base_url=args.base_url.rstrip("/"), headers=headers, timeout=httpx.Timeout(60.0, connect=20.0)) as client:
-        send_heartbeat(client, args.worker_id, "starting", "May tram OneBSS dang khoi dong.")
+        send_heartbeat(client, args.worker_id, "starting", "May tram OneBSS dang khoi dong.", dispatcher.active_details())
         last_heartbeat = time.monotonic()
         while True:
             now = time.monotonic()
             if now - last_heartbeat >= max(15.0, args.heartbeat_seconds):
-                send_heartbeat(client, args.worker_id, "idle", "May tram OneBSS dang cho task.")
+                dispatcher.prune_threads()
+                active_counts = dispatcher.active_counts()
+                if active_counts["total"] > 0:
+                    send_heartbeat(
+                        client,
+                        args.worker_id,
+                        "busy",
+                        f"May tram dang xu ly {active_counts['total']}/{worker_concurrency_limits()['total']} task.",
+                        dispatcher.active_details(),
+                    )
+                else:
+                    send_heartbeat(client, args.worker_id, "idle", "May tram OneBSS dang cho task.", dispatcher.active_details())
                 last_heartbeat = now
             include_sql = now >= next_sql_poll
             include_ftp = now >= next_ftp_poll
             try:
-                processed = poll_worker_once(client, args.worker_id, args.poll_seconds, include_sql=include_sql, include_ftp=include_ftp)
+                processed = poll_worker_once(
+                    client,
+                    args.worker_id,
+                    args.poll_seconds,
+                    include_sql=include_sql,
+                    include_ftp=include_ftp,
+                    dispatcher=dispatcher,
+                )
             except Exception as error:
                 processed = False
                 print(
@@ -1725,14 +2001,18 @@ def main() -> int:
                 traceback.print_exc(file=sys.stderr)
                 time.sleep(max(5.0, args.poll_seconds))
             if include_sql:
-                next_sql_poll = time.monotonic() + sql_poll_seconds
+                next_sql_poll = time.monotonic() + (0.0 if processed and dispatcher.has_available_slot() else sql_poll_seconds)
             if include_ftp:
-                next_ftp_poll = time.monotonic() + ftp_poll_seconds
+                next_ftp_poll = time.monotonic() + (0.0 if processed and dispatcher.has_available_slot() else ftp_poll_seconds)
             if processed:
                 last_heartbeat = time.monotonic()
             if args.once:
+                dispatcher.wait_until_idle()
                 return 0
-            time.sleep(args.poll_seconds)
+            if processed and dispatcher.has_available_slot():
+                time.sleep(min(1.0, max(0.2, args.poll_seconds / 5)))
+            else:
+                time.sleep(args.poll_seconds)
 
 
 if __name__ == "__main__":

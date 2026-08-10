@@ -150,7 +150,7 @@ WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_w
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260809-onebss-otp-format-v36"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260810-parallel-worker-v37"
 WORKSTATION_CONNECTION_PREFIX = "workstation_"
 WORKSTATION_DEFAULT_PRIORITY = 100
 WORKSTATION_SETUP_INCLUDE_PATHS = (
@@ -3220,6 +3220,10 @@ def workstation_setup_config_script(request: Request) -> str:
         ("OneBssTaskTimeoutSeconds", "1200", "Maximum wall-clock seconds for one OneBSS worker task."),
         ("OneBssOtpWaitSeconds", "180", "Maximum seconds to wait for OneBSS OTP from Mobile Gateway."),
         ("SqlWorkerTimeoutSeconds", str(settings.dynamic_report_export_timeout_seconds or 1800), "SQL/export timeout for long Oracle reports."),
+        ("WorkerMaxConcurrentTasks", "4", "Maximum total concurrent workstation tasks on a 12GB workstation."),
+        ("OneBssWorkerMaxTasks", "2", "Maximum concurrent OneBSS tasks."),
+        ("SqlWorkerMaxTasks", "2", "Maximum concurrent SQL/export tasks."),
+        ("FtpWorkerMaxTasks", "2", "Maximum concurrent FTP tasks."),
         ("ExportPageSize", str(settings.dynamic_report_export_page_size or 20000), "Rows fetched per Oracle batch when exporting."),
         ("ExportMaxRows", str(settings.dynamic_report_export_max_rows or 1000000), "Maximum rows per export job."),
         ("GoogleDriveFolderId", configured_drive_folder_id, "Optional Drive folder for local fallback."),

@@ -297,6 +297,10 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "OneBssProcessingTimeoutRetryAttempts = '3'" in config_text
         assert "OneBssProcessingTimeoutRetryDelaySeconds = '8'" in config_text
         assert "SqlWorkerTimeoutSeconds = '1800'" in config_text
+        assert "WorkerMaxConcurrentTasks = '4'" in config_text
+        assert "OneBssWorkerMaxTasks = '2'" in config_text
+        assert "SqlWorkerMaxTasks = '2'" in config_text
+        assert "FtpWorkerMaxTasks = '2'" in config_text
         assert "ExportPageSize = '20000'" in config_text
         assert "ExportMaxRows = '1000000'" in config_text
         assert "Khong can go token" in readme_text
@@ -317,9 +321,16 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert 'Set-UserEnvironment "ONEBSS_WORKER_DISABLE_TASK_GUARD" "1"' in setup_script
         assert 'Set-UserEnvironment "SQL_WORKER_POLL_SECONDS" "10"' in setup_script
         assert 'Set-UserEnvironment "FTP_WORKER_POLL_SECONDS" "30"' in setup_script
+        assert 'Set-UserEnvironment "VNPTCTO_WORKER_MAX_CONCURRENT_TASKS" $workerMaxConcurrentTasks' in setup_script
+        assert 'Set-UserEnvironment "ONEBSS_WORKER_MAX_CONCURRENT_TASKS" $workerMaxConcurrentTasks' in setup_script
+        assert 'Set-UserEnvironment "ONEBSS_WORKER_MAX_ONEBSS_TASKS" $onebssWorkerMaxTasks' in setup_script
+        assert 'Set-UserEnvironment "SQL_WORKER_MAX_CONCURRENT_TASKS" $sqlWorkerMaxTasks' in setup_script
+        assert 'Set-UserEnvironment "FTP_WORKER_MAX_CONCURRENT_TASKS" $ftpWorkerMaxTasks' in setup_script
         assert "ONEBSS_TASK_TIMEOUT_SECONDS" in start_worker_script
-        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION.endswith("v36")
-        assert 'WORKER_VERSION = "2026.08.09-onebss-otp-format-v36"' in worker_script
+        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION.endswith("v37")
+        assert 'WORKER_VERSION = "2026.08.10-parallel-worker-v37"' in worker_script
+        assert "WorkerConcurrencyTracker" in worker_script
+        assert "WorkerTaskDispatcher" in worker_script
         assert "normalize_ftp_variable_value" in worker_script
         assert "ONEBSS_GRID_TIMEOUT_SECONDS" in start_worker_script
         assert "ONEBSS_PROCESSING_TIMEOUT_RETRY_ATTEMPTS" in start_worker_script
@@ -329,6 +340,11 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert '$env:ONEBSS_WORKER_DISABLE_TASK_GUARD = "1"' in start_worker_script
         assert "SQL_WORKER_POLL_SECONDS" in start_worker_script
         assert "FTP_WORKER_POLL_SECONDS" in start_worker_script
+        assert "VNPTCTO_WORKER_MAX_CONCURRENT_TASKS" in start_worker_script
+        assert "ONEBSS_WORKER_MAX_CONCURRENT_TASKS" in start_worker_script
+        assert "ONEBSS_WORKER_MAX_ONEBSS_TASKS" in start_worker_script
+        assert "SQL_WORKER_MAX_CONCURRENT_TASKS" in start_worker_script
+        assert "FTP_WORKER_MAX_CONCURRENT_TASKS" in start_worker_script
         assert "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_BASE64" in setup_script
         assert "OracleDbDsn" in setup_script
         assert "OracleDbHost" in setup_script
@@ -430,6 +446,11 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert "ONEBSS_DRIVE_UPLOAD_API_URL" in uninstall_task_script
         assert "SQL_WORKER_POLL_SECONDS" in uninstall_task_script
         assert "FTP_WORKER_POLL_SECONDS" in uninstall_task_script
+        assert "VNPTCTO_WORKER_MAX_CONCURRENT_TASKS" in uninstall_task_script
+        assert "ONEBSS_WORKER_MAX_CONCURRENT_TASKS" in uninstall_task_script
+        assert "ONEBSS_WORKER_MAX_ONEBSS_TASKS" in uninstall_task_script
+        assert "SQL_WORKER_MAX_CONCURRENT_TASKS" in uninstall_task_script
+        assert "FTP_WORKER_MAX_CONCURRENT_TASKS" in uninstall_task_script
         assert "timeout /t" not in setup_bat.lower()
         assert "\npause" not in setup_bat.lower()
 
@@ -5955,6 +5976,90 @@ def test_workstation_worker_idle_claims_include_process_details() -> None:
         assert call["json"]["details"]["pid"]
         assert call["json"]["details"]["worker_version"] == worker.WORKER_VERSION
         assert "dang chay nen" in call["json"]["details"]["worker_process"]
+
+
+def test_workstation_worker_concurrency_limits_and_tracker(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    for name in (
+        "VNPTCTO_WORKER_MAX_CONCURRENT_TASKS",
+        "ONEBSS_WORKER_MAX_CONCURRENT_TASKS",
+        "ONEBSS_WORKER_MAX_ONEBSS_TASKS",
+        "SQL_WORKER_MAX_CONCURRENT_TASKS",
+        "SQL_WORKER_MAX_TASKS",
+        "FTP_WORKER_MAX_CONCURRENT_TASKS",
+        "FTP_WORKER_MAX_TASKS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    assert worker.worker_concurrency_limits() == {
+        "total": 4,
+        worker.TASK_KIND_ONEBSS: 2,
+        worker.TASK_KIND_SQL: 2,
+        worker.TASK_KIND_FTP: 2,
+    }
+
+    monkeypatch.setenv("VNPTCTO_WORKER_MAX_CONCURRENT_TASKS", "2")
+    monkeypatch.setenv("ONEBSS_WORKER_MAX_ONEBSS_TASKS", "1")
+    monkeypatch.setenv("SQL_WORKER_MAX_CONCURRENT_TASKS", "2")
+    monkeypatch.setenv("FTP_WORKER_MAX_CONCURRENT_TASKS", "2")
+    tracker = worker.WorkerConcurrencyTracker()
+    assert tracker.try_start(worker.TASK_KIND_ONEBSS, "ONEBSS-1", "BC_ONEBSS") is True
+    assert tracker.try_start(worker.TASK_KIND_ONEBSS, "ONEBSS-2", "BC_ONEBSS") is False
+    assert tracker.try_start(worker.TASK_KIND_SQL, "SQL-1", "BC_SQL") is True
+    assert tracker.try_start(worker.TASK_KIND_FTP, "FTP-1", "BC_FTP") is False
+    assert tracker.counts() == {
+        "total": 2,
+        worker.TASK_KIND_ONEBSS: 1,
+        worker.TASK_KIND_SQL: 1,
+        worker.TASK_KIND_FTP: 0,
+    }
+    tracker.finish("ONEBSS-1")
+    assert tracker.try_start(worker.TASK_KIND_FTP, "FTP-1", "BC_FTP") is True
+
+
+def test_workstation_worker_parallel_poll_skips_full_onebss_slot(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    calls = []
+    started = []
+
+    class FakeDispatcher:
+        def prune_threads(self) -> None:
+            return None
+
+        def active_details(self) -> dict:
+            return {"active_counts": {"total": 1, "onebss": 1, "sql": 0, "ftp": 0}}
+
+        def can_start(self, kind: str) -> bool:
+            return kind != worker.TASK_KIND_ONEBSS
+
+        def start_task(self, kind: str, task: dict) -> bool:
+            started.append((kind, task.get("run_id")))
+            return True
+
+    class FakeClient:
+        def request(self, method: str, path: str, **kwargs):
+            calls.append({"method": method, "path": path, "json": kwargs.get("json") or {}})
+
+            class FakeResponse:
+                status_code = 200
+
+                def raise_for_status(self) -> None:
+                    return None
+
+                def json(self) -> dict:
+                    if path == "/api/sql-worker/tasks/claim":
+                        return {"ok": True, "task": {"run_id": "SQL-1", "report_code": "BC_SQL", "query": {}}}
+                    return {"ok": True, "task": None}
+
+            return FakeResponse()
+
+    monkeypatch.setattr(worker, "send_heartbeat", lambda *args, **kwargs: None)
+
+    assert worker.poll_worker_once(FakeClient(), "ws-parallel", 0, dispatcher=FakeDispatcher()) is True
+    assert [call["path"] for call in calls] == ["/api/sql-worker/tasks/claim"]
+    assert started == [(worker.TASK_KIND_SQL, "SQL-1")]
 
 
 def test_workstation_worker_can_skip_slow_secondary_claims() -> None:
