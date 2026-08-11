@@ -78,7 +78,7 @@ const dashboardLayoutDefinitions = {
   "6_columns_4_2": { total: 6, spans: [4, 2], label: "6 cột: 4 + 2" },
 };
 const dashboardLayoutColumns = Object.fromEntries(Object.entries(dashboardLayoutDefinitions).map(([key, definition]) => [key, definition.spans.length]));
-const dashboardDataWidgetTypes = new Set(["bar_chart", "pie_chart", "line_chart", "combo_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "multi_line_chart", "data_table", "metric", "data_card"]);
+const dashboardDataWidgetTypes = new Set(["bar_chart", "pie_chart", "line_chart", "combo_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "multi_line_chart", "data_table", "metric", "data_card", "total_data_card"]);
 const dashboardNonSqlWidgetTypes = new Set(["text_title", "google_sheet_embed"]);
 const dashboardColorScaleStops = [
   { ratio: 0, rgb: [239, 68, 68] },
@@ -1454,6 +1454,13 @@ function formatDashboardNumber(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "--";
   return new Intl.NumberFormat("vi-VN").format(number);
+}
+
+function formatDashboardPercent(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "--";
+  const percent = Math.abs(number) <= 1 ? number * 100 : number;
+  return `${new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 2 }).format(percent)}%`;
 }
 
 $("#password-form")?.addEventListener("submit", async (event) => {
@@ -2968,12 +2975,13 @@ function dashboardWidgetTypeLabel(type) {
     data_table: "Bảng số liệu",
     metric: "Thẻ số liệu",
     data_card: "Thẻ dữ liệu",
+    total_data_card: "Thẻ dữ liệu tổng",
     text_title: "Tiêu đề text",
   }[type] || type;
 }
 
 function dashboardWidgetTypeOptions(selectedType) {
-  return ["bar_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "pie_chart", "line_chart", "multi_line_chart", "combo_chart", "data_table", "metric", "data_card", "google_sheet_embed", "text_title"].map((type) => (
+  return ["bar_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "pie_chart", "line_chart", "multi_line_chart", "combo_chart", "data_table", "metric", "data_card", "total_data_card", "google_sheet_embed", "text_title"].map((type) => (
     `<option value="${type}" ${selectedType === type ? "selected" : ""}>${dashboardWidgetTypeLabel(type)}</option>`
   )).join("");
 }
@@ -3591,6 +3599,9 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
         line_label: activeConfig?.querySelector("[name='line_label']")?.value.trim() || "",
         series_columns: activeConfig?.querySelector("[name='series_columns']")?.value.trim() || "",
         series_labels: activeConfig?.querySelector("[name='series_labels']")?.value.trim() || "",
+        actual_column: activeConfig?.querySelector("[name='actual_column']")?.value.trim() || "",
+        target_column: activeConfig?.querySelector("[name='target_column']")?.value.trim() || "",
+        completion_column: activeConfig?.querySelector("[name='completion_column']")?.value.trim() || "",
         embed_url: activeConfig?.querySelector("[name='embed_url']")?.value.trim() || "",
         embed_height: activeConfig?.querySelector("[name='embed_height']")?.value.trim() || "",
         embed_width: activeConfig?.querySelector("[name='embed_width']")?.value.trim() || "",
@@ -3707,6 +3718,14 @@ function renderDashboardWidgetAdvancedConfig(widget) {
     <div class="dashboard-widget-config ${type === "data_card" ? "active" : ""}" data-config-for="data_card">
       <label>Ảnh biểu tượng<input class="form-control" name="icon_url" value="${escapeHtml(widget.icon_url || "")}" placeholder="https://.../icon.png" /></label>
       <label>Ghi chú thẻ<textarea class="form-control" name="text_content" rows="2" placeholder="Dòng ghi chú dưới số liệu">${escapeHtml(widget.text_content || "")}</textarea></label>
+    </div>
+    <div class="dashboard-widget-config ${type === "total_data_card" ? "active" : ""}" data-config-for="total_data_card">
+      <div class="grid gap-2 md:grid-cols-3">
+        <label>Cột TH<input class="form-control" name="actual_column" value="${dashboardConfigValue(widget, "actual_column", "TH")}" placeholder="TH" /></label>
+        <label>Cột KH<input class="form-control" name="target_column" value="${dashboardConfigValue(widget, "target_column", "KH")}" placeholder="KH" /></label>
+        <label>Cột TLHT<input class="form-control" name="completion_column" value="${dashboardConfigValue(widget, "completion_column", "Tỷ lệ hoàn thành")}" placeholder="Tỷ lệ hoàn thành hoặc TLHT" /></label>
+      </div>
+      <small>SQL nên trả 1 dòng gồm TH, KH và Tỷ lệ hoàn thành. Nếu thiếu TLHT, hệ thống tự tính từ TH/KH.</small>
     </div>
     <div class="dashboard-widget-config ${type === "google_sheet_embed" ? "active" : ""}" data-config-for="google_sheet_embed">
       <label>Link Google Sheet xuất bản lên web<input class="form-control" name="embed_url" value="${dashboardConfigValue(widget, "embed_url")}" placeholder="https://docs.google.com/spreadsheets/d/e/.../pubhtml" /></label>
@@ -4017,6 +4036,7 @@ function renderRuntimeWidget(widget, widgetData, elementId, options = {}) {
   if (widget.type === "data_table") return renderRuntimeTableWidget(title, result);
   if (widget.type === "metric") return renderRuntimeMetricWidget(title, result, widget.sql_code);
   if (widget.type === "data_card") return renderRuntimeDataCardWidget(widget, result);
+  if (widget.type === "total_data_card") return renderRuntimeTotalDataCardWidget(widget, result);
   return renderRuntimeChartWidget(title, result, widget, elementId, options);
 }
 
@@ -4094,6 +4114,33 @@ function pickDashboardLabelColumn(rows, columns, preferred = "", excluded = new 
   return columns.find((column) => !excluded.has(column) && rows.some((row) => String(row[column] ?? "").trim())) || columns[0] || "";
 }
 
+function normalizeDashboardColumnKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/đ/g, "d")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function pickDashboardColumnByAliases(columns, preferred = "", aliases = []) {
+  if (preferred) {
+    const exact = columns.find((column) => String(column) === String(preferred));
+    if (exact) return exact;
+    const preferredKey = normalizeDashboardColumnKey(preferred);
+    const normalized = columns.find((column) => normalizeDashboardColumnKey(column) === preferredKey);
+    if (normalized) return normalized;
+  }
+  const aliasKeys = aliases.map(normalizeDashboardColumnKey).filter(Boolean);
+  const exactAlias = columns.find((column) => aliasKeys.includes(normalizeDashboardColumnKey(column)));
+  if (exactAlias) return exactAlias;
+  return columns.find((column) => {
+    const columnKey = normalizeDashboardColumnKey(column);
+    return aliasKeys.some((aliasKey) => aliasKey.length > 2 && columnKey.includes(aliasKey));
+  }) || "";
+}
+
 function renderRuntimeMetricWidget(title, result, sqlCode) {
   const rows = result.rows || [];
   const columns = result.columns || [];
@@ -4132,6 +4179,47 @@ function renderRuntimeDataCardWidget(widget, result) {
   `;
 }
 
+function renderRuntimeTotalDataCardWidget(widget, result) {
+  const rows = result.rows || [];
+  const columns = result.columns || [];
+  if (!rows.length || !columns.length) {
+    return `<article class="runtime-widget-card"><h3>${escapeHtml(widget.title || widget.sql_code || "Thẻ dữ liệu tổng")}</h3><div class="runtime-widget-empty">Chưa có dữ liệu TH/KH/TLHT.</div></article>`;
+  }
+  const firstRow = rows[0] || {};
+  const actualColumn = pickDashboardColumnByAliases(columns, widget.chart_config?.actual_column || "TH", ["TH", "Thực hiện", "Thuc hien"]);
+  const targetColumn = pickDashboardColumnByAliases(columns, widget.chart_config?.target_column || "KH", ["KH", "Kế hoạch", "Ke hoach"]);
+  const completionColumn = pickDashboardColumnByAliases(columns, widget.chart_config?.completion_column || "Tỷ lệ hoàn thành", ["Tỷ lệ hoàn thành", "Ty le hoan thanh", "TLHT", "TY_LE_HOAN_THANH", "TYLEHOANTHANH", "Tỷ lệ", "Ty le"]);
+  const actualValue = actualColumn ? parseDashboardNumber(firstRow[actualColumn]) : NaN;
+  const targetValue = targetColumn ? parseDashboardNumber(firstRow[targetColumn]) : NaN;
+  let completionValue = completionColumn ? parseDashboardPercent(firstRow[completionColumn]) : NaN;
+  if (!Number.isFinite(completionValue) && Number.isFinite(actualValue) && Number.isFinite(targetValue) && targetValue !== 0) {
+    completionValue = actualValue / targetValue * 100;
+  }
+  const missingColumns = [
+    actualColumn ? "" : "TH",
+    targetColumn ? "" : "KH",
+    completionColumn || Number.isFinite(completionValue) ? "" : "TLHT",
+  ].filter(Boolean);
+  const note = missingColumns.length ? `Thiếu cột ${missingColumns.join(", ")}` : `${actualColumn || "TH"}/${targetColumn || "KH"} · ${completionColumn || "Tự tính TLHT"}`;
+  return `
+    <article class="runtime-widget-card runtime-total-data-card">
+      <div class="runtime-total-data-card-main">
+        <span class="runtime-total-data-card-label">${escapeHtml(widget.title || widget.sql_code || "Thẻ dữ liệu tổng")}</span>
+        <div class="runtime-total-data-card-value">
+          <strong>${formatDashboardNumber(actualValue)}</strong>
+          <i>/</i>
+          <strong>${formatDashboardNumber(targetValue)}</strong>
+        </div>
+        <small class="runtime-total-data-card-note">${escapeHtml(note)}</small>
+      </div>
+      <div class="runtime-total-data-card-rate">
+        <span>TLHT</span>
+        <strong>${formatDashboardPercent(completionValue)}</strong>
+      </div>
+    </article>
+  `;
+}
+
 function dashboardRuntimeChartData(widget, result) {
   if (widget.type === "combo_chart") return extractDashboardComboChartData(result, widget.chart_config || {});
   if (widget.type === "multi_bar_chart" || widget.type === "horizontal_multi_bar_chart" || widget.type === "multi_line_chart") {
@@ -4141,7 +4229,7 @@ function dashboardRuntimeChartData(widget, result) {
 }
 
 function dashboardRuntimeChartHeight(widget, widgetData) {
-  if (!widget || !dashboardDataWidgetTypes.has(widget.type) || ["data_table", "metric", "data_card"].includes(widget.type)) return 0;
+  if (!widget || !dashboardDataWidgetTypes.has(widget.type) || ["data_table", "metric", "data_card", "total_data_card"].includes(widget.type)) return 0;
   const result = widgetData?.data;
   if (!result?.ok) return 0;
   const chartData = dashboardRuntimeChartData(widget, result);
@@ -4645,6 +4733,16 @@ function parseDashboardNumber(value) {
   if (value === null || value === undefined || value === "") return NaN;
   if (typeof value === "number") return value;
   const normalized = String(value).replace(/\./g, "").replace(",", ".");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function parseDashboardPercent(value) {
+  if (value === null || value === undefined || value === "") return NaN;
+  if (typeof value === "number") return value;
+  const text = String(value).trim().replace(/%/g, "").replace(/\s+/g, "");
+  if (!text) return NaN;
+  const normalized = text.includes(",") ? text.replace(/\./g, "").replace(",", ".") : text;
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : NaN;
 }

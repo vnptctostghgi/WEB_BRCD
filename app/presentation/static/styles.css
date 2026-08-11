@@ -2427,7 +2427,8 @@ body.view-loading .app-view.active {
 }
 
 .runtime-widget-card:has(.metric-preview),
-.runtime-widget-card.runtime-data-card {
+.runtime-widget-card.runtime-data-card,
+.runtime-widget-card.runtime-total-data-card {
   min-height: 128px;
   display: grid;
   align-items: center;
@@ -2543,17 +2544,22 @@ body.view-loading .app-view.active {
 .dashboard-theme-light .runtime-widget-card h3,
 .dashboard-theme-light .runtime-text-widget h2,
 .dashboard-theme-light .runtime-data-card-value,
+.dashboard-theme-light .runtime-total-data-card-value,
+.dashboard-theme-light .runtime-total-data-card-rate strong,
 .dashboard-theme-light .metric-preview strong {
   color: #0f172a;
 }
 
 .dashboard-theme-light .runtime-data-card span,
+.dashboard-theme-light .runtime-total-data-card-label,
+.dashboard-theme-light .runtime-total-data-card-rate span,
 .dashboard-theme-light .metric-preview span {
   color: var(--app-primary);
 }
 
 .dashboard-theme-light .runtime-text-widget p,
 .dashboard-theme-light .runtime-data-card-note,
+.dashboard-theme-light .runtime-total-data-card-note,
 .dashboard-theme-light .metric-preview small {
   color: var(--app-muted);
 }
@@ -2616,13 +2622,13 @@ body.view-loading .app-view.active {
 }
 
 #view-dashboard-builder :is(.dashboard-page-card-body strong, .dashboard-linked-tools strong, .builder-row-title, .runtime-widget-card h3),
-.dashboard-theme-light :is(.runtime-widget-card h3, .runtime-text-widget h2, .runtime-data-card-value, .metric-preview strong, .bar-value, .bar-label span) {
+.dashboard-theme-light :is(.runtime-widget-card h3, .runtime-text-widget h2, .runtime-data-card-value, .runtime-total-data-card-value, .runtime-total-data-card-rate strong, .metric-preview strong, .bar-value, .bar-label span) {
   color: var(--app-text);
   text-shadow: none;
 }
 
 #view-dashboard-builder :is(.dashboard-page-card-body code, .dashboard-linked-tools small, .builder-widget-card small),
-.dashboard-theme-light :is(.runtime-text-widget p, .runtime-data-card-note, .metric-preview span, .metric-preview small, .dashboard-chart-empty) {
+.dashboard-theme-light :is(.runtime-text-widget p, .runtime-data-card-note, .runtime-total-data-card-label, .runtime-total-data-card-note, .runtime-total-data-card-rate span, .metric-preview span, .metric-preview small, .dashboard-chart-empty) {
   color: var(--app-muted);
   text-shadow: none;
 }
@@ -2852,6 +2858,93 @@ body.view-loading .app-view.active {
 @media (min-width: 1024px) {
   .metric-preview small {
     font-size: .94rem;
+  }
+}
+
+.runtime-total-data-card {
+  grid-template-columns: minmax(0, 1fr);
+  gap: .85rem;
+}
+
+.runtime-total-data-card-main {
+  display: grid;
+  min-width: 0;
+  gap: .36rem;
+}
+
+.runtime-total-data-card-label,
+.runtime-total-data-card-note,
+.runtime-total-data-card-rate span {
+  color: #dbeafe;
+  font-size: .78rem;
+  font-weight: 900;
+  letter-spacing: .05em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.runtime-total-data-card-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .28rem;
+  color: #fff;
+  line-height: .95;
+}
+
+.runtime-total-data-card-value strong {
+  min-width: 0;
+  color: inherit;
+  font-size: 2.05rem;
+  font-weight: 950;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.runtime-total-data-card-value i {
+  color: #93c5fd;
+  font-size: 1.28rem;
+  font-style: normal;
+  font-weight: 950;
+}
+
+.runtime-total-data-card-note {
+  display: block;
+  color: #bae6fd;
+  font-size: .72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.runtime-total-data-card-rate {
+  display: grid;
+  gap: .28rem;
+  justify-items: start;
+  border: 1px solid rgba(125, 211, 252, .3);
+  border-radius: 16px;
+  background: rgba(14, 165, 233, .13);
+  padding: .65rem .8rem;
+}
+
+.runtime-total-data-card-rate strong {
+  color: #a7f3d0;
+  font-size: 1.82rem;
+  font-weight: 950;
+  letter-spacing: 0;
+  line-height: .98;
+}
+
+@media (min-width: 768px) {
+  .runtime-total-data-card {
+    grid-template-columns: minmax(0, 1fr) minmax(8.5rem, auto);
+    align-items: center;
+  }
+
+  .runtime-total-data-card-rate {
+    justify-items: end;
+    text-align: right;
   }
 }
 
@@ -5681,12 +5774,17 @@ fieldset,
 }
 
 .runtime-data-card-value,
+.runtime-total-data-card-value,
+.runtime-total-data-card-rate strong,
 .metric-preview strong,
 .bar-value {
   color: var(--text-primary) !important;
 }
 
 .runtime-data-card-note,
+.runtime-total-data-card-label,
+.runtime-total-data-card-note,
+.runtime-total-data-card-rate span,
 .metric-preview span,
 .metric-preview small,
 .bar-label span,

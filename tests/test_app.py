@@ -124,11 +124,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=220" in public_response.text
-        assert "/static/styles.css?v=134" in public_response.text
+        assert "/static/app.js?v=221" in public_response.text
+        assert "/static/styles.css?v=135" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
-        public_js = client.get("/static/app.js?v=220")
+        public_js = client.get("/static/app.js?v=221")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -151,6 +151,8 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert 'event.target.closest("#save-dashboard-layout")' in public_js.text
         assert "await saveDashboardLayout(button)" in public_js.text
         assert '$("#add-dashboard-row")?.addEventListener("click", () => addDashboardRow($("#dashboard-row-type")?.value || "2_columns"))' in public_js.text
+        assert "total_data_card" in public_js.text
+        assert "function renderRuntimeTotalDataCardWidget" in public_js.text
         assert "data-save-google-drive-folder" in public_js.text
         assert "/api/google-drive/oauth/folder" in public_js.text
         assert "/api/google-drive/oauth/status" in public_js.text
@@ -196,7 +198,7 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert "/api/admin/public-messages/feed?limit=100" not in public_js.text
         assert "const PUBLIC_MESSAGES_LIMIT = 10" in public_js.text
         assert 'params.set("after", publicMessagesCursor)' in public_js.text
-        public_css = client.get("/static/styles.css?v=134")
+        public_css = client.get("/static/styles.css?v=135")
         assert public_css.status_code == 200
         assert ".sql-progress-hint" in public_css.text
         assert "Compact desktop rail" in public_css.text
@@ -205,6 +207,7 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert ".permission-children" in public_css.text
         assert ".dynamic-report-export-table a.table-action" in public_css.text
         assert ".sql-progress-step" in public_css.text
+        assert ".runtime-total-data-card" in public_css.text
         assert "text-decoration-color: rgba(11, 99, 182, .42)" in public_css.text
         assert ".menu-admin-toolbar" in public_css.text
         assert ".ftp-run-form" in public_css.text
@@ -1057,7 +1060,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=220" in page.text
+        assert "/static/app.js?v=221" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -7078,6 +7081,17 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data(monkeypatch) -
                                         "icon_url": "https://example.vn/icon.png",
                                         "text_content": "Ghi chú thẻ",
                                     },
+                                    {
+                                        "position": 3,
+                                        "type": "total_data_card",
+                                        "title": "Tổng hoàn thành",
+                                        "sql_code": "BC_BUILDER_TEST",
+                                        "chart_config": {
+                                            "actual_column": "TH",
+                                            "target_column": "KH",
+                                            "completion_column": "TLHT",
+                                        },
+                                    },
                                 ],
                             }
                         ],
@@ -7094,6 +7108,8 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data(monkeypatch) -
         assert saved_layout["tabs"][1]["grid_layout"][0]["widgets"][0]["type"] == "text_title"
         assert saved_layout["tabs"][1]["grid_layout"][1]["layout_type"] == "3_columns"
         assert saved_layout["tabs"][1]["grid_layout"][1]["widgets"][1]["icon_url"] == "https://example.vn/icon.png"
+        assert saved_layout["tabs"][1]["grid_layout"][1]["widgets"][2]["type"] == "total_data_card"
+        assert saved_layout["tabs"][1]["grid_layout"][1]["widgets"][2]["chart_config"]["completion_column"] == "TLHT"
 
         layouts = client.get("/api/admin/dashboard-layouts")
         assert layouts.status_code == 200
@@ -7128,7 +7144,7 @@ def test_admin_can_manage_dashboard_layout_and_lazy_load_tab_data(monkeypatch) -
         monkeypatch.setattr(routes.InternalApiClient, "run_sql_report", counting_run_sql_report)
         tab_b = client.get("/api/admin/dashboard-layouts/DASHBOARD_TEST_BUILDER/tabs/tab_b/data")
         assert tab_b.status_code == 200
-        assert [widget["type"] for widget in tab_b.json()["widgets"]] == ["combo_chart", "data_card"]
+        assert [widget["type"] for widget in tab_b.json()["widgets"]] == ["combo_chart", "data_card", "total_data_card"]
         assert api_calls == [("BC_BUILDER_TEST", {})]
 
         inverted_report_payload = {
@@ -7776,16 +7792,16 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         home = client.get("/")
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
-        assert "/static/shell.js?v=34" in home.text
-        assert "/static/app.js?v=220" not in home.text
-        shell_js = client.get("/static/shell.js?v=34")
+        assert "/static/shell.js?v=35" in home.text
+        assert "/static/app.js?v=221" not in home.text
+        shell_js = client.get("/static/shell.js?v=35")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
         assert "function dedupeFeaturesForDisplay" in shell_js.text
         assert "function readCachedNavigation" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=220" in shell_js.text
+        assert "/static/app.js?v=221" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -7798,8 +7814,8 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
-        assert "/static/shell.js?v=34" in dashboard.text
-        assert "/static/app.js?v=220" not in dashboard.text
+        assert "/static/shell.js?v=35" in dashboard.text
+        assert "/static/app.js?v=221" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -7819,49 +7835,49 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "dynamic-report-body" not in reports.text
         assert "dynamic-report-prev" not in reports.text
         assert "dynamic-report-next" not in reports.text
-        assert "/static/app.js?v=220" in reports.text
+        assert "/static/app.js?v=221" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=220" in workstation.text
+        assert "/static/app.js?v=221" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=220" in work_tasks.text
+        assert "/static/app.js?v=221" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=220" in report_links.text
+        assert "/static/app.js?v=221" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=220" in system.text
+        assert "/static/app.js?v=221" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=220" in onebss_mining.text
+        assert "/static/app.js?v=221" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 
         ftp_mining = client.get("/daodulieuftp")
         assert ftp_mining.status_code == 200
         assert "view-ftp-mining" in ftp_mining.text
-        assert "/static/app.js?v=220" in ftp_mining.text
+        assert "/static/app.js?v=221" in ftp_mining.text
         assert "/static/ftp-mining.js" not in ftp_mining.text
         assert ftp_mining.text.count('class="app-view') == 1
 
