@@ -150,7 +150,7 @@ WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_w
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260811-onebss-parallel-session-v38"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260811-sql-ftp-parallel-files-v39"
 WORKSTATION_CONNECTION_PREFIX = "workstation_"
 WORKSTATION_DEFAULT_PRIORITY = 100
 WORKSTATION_SETUP_INCLUDE_PATHS = (
@@ -4561,12 +4561,14 @@ class DynamicReportStreamingWorkbook:
         self.workbook.save(target_path)
 
 
-def _dynamic_report_export_filename(result: dict[str, Any]) -> str:
+def _dynamic_report_export_filename(result: dict[str, Any], job_id: str = "") -> str:
     report = result.get("report") if isinstance(result.get("report"), dict) else {}
     code = str(report.get("ma_bao_cao") or "truy_van_sql").strip().lower()
     code = re.sub(r"[^a-z0-9_-]+", "_", code)
     code = code.strip("_") or "truy_van_sql"
-    return f"{code}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    safe_job = re.sub(r"[^A-Za-z0-9_-]+", "", str(job_id or ""))[:12]
+    suffix = f"_{safe_job}" if safe_job else ""
+    return f"{code}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}.xlsx"
 
 
 def _dynamic_report_export_max_workers() -> int:
@@ -5839,16 +5841,50 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
             task_kind = "load"
             run_payload = _dynamic_report_payload_from_job(job)
             drive_folder_id = ""
-    prepared = build_database_service().prepare_dynamic_report_query(
-        ma_bao_cao=run_payload.ma_bao_cao.strip().upper(),
-        filters=run_payload.filters,
-        page=run_payload.page,
-        page_size=run_payload.page_size,
-        search=run_payload.search,
-        search_columns=run_payload.search_columns,
-        report_id=run_payload.report_id,
-        report_name=run_payload.report_name,
-    )
+    claim_label = {
+        "export": "lenh lay du lieu SQL",
+        "load": "task SQL",
+        "dashboard_refresh": "task dashboard",
+    }.get(task_kind, "task SQL")
+    claim_message = f"May tram {payload.worker_id} da nhan {claim_label} va dang chuan bi truy van."
+    if task_kind == "export":
+        _set_dynamic_report_export_job(
+            job_id,
+            status="running_worker",
+            message=claim_message,
+            worker_id=payload.worker_id,
+        )
+    elif task_kind == "load":
+        _set_dynamic_report_run_job(
+            job_id,
+            status="running_worker",
+            message=claim_message,
+            worker_id=payload.worker_id,
+        )
+    else:
+        _set_dashboard_refresh_job(
+            job_id,
+            status="running_worker",
+            message=claim_message,
+            worker_id=payload.worker_id,
+        )
+    try:
+        prepared = build_database_service().prepare_dynamic_report_query(
+            ma_bao_cao=run_payload.ma_bao_cao.strip().upper(),
+            filters=run_payload.filters,
+            page=run_payload.page,
+            page_size=run_payload.page_size,
+            search=run_payload.search,
+            search_columns=run_payload.search_columns,
+            report_id=run_payload.report_id,
+            report_name=run_payload.report_name,
+        )
+    except Exception as error:
+        prepared = {
+            "ok": False,
+            "message": f"Khong chuan bi duoc truy van SQL cho may tram: {error}",
+            "details": {"error_type": error.__class__.__name__},
+        }
     if not prepared.get("ok"):
         failed_message = _message_with_workstation(
             payload.worker_id,
@@ -5867,7 +5903,10 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
             _set_dashboard_refresh_job(job_id, **updates)
         return {"ok": False, "task": None, "message": failed_message}
     if task_kind == "export":
-        filename = _dynamic_report_export_filename({"report": {"ma_bao_cao": prepared.get("ma_bao_cao") or run_payload.ma_bao_cao}})
+        filename = _dynamic_report_export_filename(
+            {"report": {"ma_bao_cao": prepared.get("ma_bao_cao") or run_payload.ma_bao_cao}},
+            job_id,
+        )
         _set_dynamic_report_export_job(
             job_id,
             status="running_worker",
@@ -5889,6 +5928,8 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
             "tham_so": prepared.get("tham_so") if isinstance(prepared.get("tham_so"), dict) else {},
             "drive_folder_id": drive_folder_id,
             "file_name": filename,
+            "job_id": job_id,
+            "run_id": job_id,
             "pagination": {
                 "page_size": int(get_settings().dynamic_report_export_page_size or 20000),
                 "max_rows": int(get_settings().dynamic_report_export_max_rows or 1000000),
@@ -5913,6 +5954,8 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
             "ma_bao_cao": prepared.get("ma_bao_cao") or "",
             "cau_lenh_sql": prepared.get("cau_lenh_sql") or "",
             "tham_so": prepared.get("tham_so") if isinstance(prepared.get("tham_so"), dict) else {},
+            "job_id": job_id,
+            "run_id": job_id,
             "pagination": {
                 "page": int(prepared.get("page") or 1),
                 "page_size": int(prepared.get("page_size") or 20),
@@ -5937,6 +5980,8 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
             "ma_bao_cao": prepared.get("ma_bao_cao") or "",
             "cau_lenh_sql": prepared.get("cau_lenh_sql") or "",
             "tham_so": prepared.get("tham_so") if isinstance(prepared.get("tham_so"), dict) else {},
+            "job_id": job_id,
+            "run_id": job_id,
             "pagination": {
                 "page": int(prepared.get("page") or 1),
                 "page_size": int(prepared.get("page_size") or 20),

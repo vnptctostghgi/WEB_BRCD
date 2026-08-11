@@ -327,8 +327,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert 'Set-UserEnvironment "SQL_WORKER_MAX_CONCURRENT_TASKS" $sqlWorkerMaxTasks' in setup_script
         assert 'Set-UserEnvironment "FTP_WORKER_MAX_CONCURRENT_TASKS" $ftpWorkerMaxTasks' in setup_script
         assert "ONEBSS_TASK_TIMEOUT_SECONDS" in start_worker_script
-        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION.endswith("v38")
-        assert 'WORKER_VERSION = "2026.08.11-onebss-parallel-session-v38"' in worker_script
+        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION.endswith("v39")
+        assert 'WORKER_VERSION = "2026.08.11-sql-ftp-parallel-files-v39"' in worker_script
         assert "WorkerConcurrencyTracker" in worker_script
         assert "WorkerTaskDispatcher" in worker_script
         assert "normalize_ftp_variable_value" in worker_script
@@ -634,6 +634,13 @@ def test_api_middleware_streams_excel_export_without_count_or_offset(monkeypatch
     assert cursor.executed == [("SELECT ma_tb, doanh_thu FROM rpt", {"P": "X"})]
     workbook = openpyxl.load_workbook(target, read_only=True)
     assert len(list(workbook.active.iter_rows(values_only=True))) == 3
+
+
+def test_api_middleware_export_file_names_include_job_id() -> None:
+    module = load_api_middleware_module()
+
+    assert module.file_name_with_job_id("crs_20260811_120000.xlsx", "SQL-RUN-001") == "crs_20260811_120000_SQL-RUN-001.xlsx"
+    assert module.file_name_with_job_id("crs_SQL-RUN-001.xlsx", "SQL-RUN-001") == "crs_SQL-RUN-001.xlsx"
 
 
 def test_workstation_heartbeat_uses_worker_token() -> None:
@@ -5638,6 +5645,39 @@ def test_ftp_workstation_worker_plans_and_merges_multi_source_files(tmp_path) ->
     ]
 
 
+def test_ftp_workstation_worker_downloads_each_run_in_own_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    settings = get_settings().model_copy(update={"data_mining_download_dir": str(tmp_path)})
+    captured_dirs = []
+
+    def fake_download_source(source, local_dir, progress_callback=None):
+        captured_dirs.append(local_dir)
+        local_path = local_dir / "same_report.csv"
+        local_path.write_text("ma_tb\nTB001\n", encoding="utf-8")
+        return {
+            "source": source.get("name") or "FTP",
+            "resolved_file_name": "same_report.csv",
+            "file_name": local_path.name,
+            "file_path": str(local_path),
+        }
+
+    monkeypatch.setattr(worker, "get_settings", lambda: settings)
+    monkeypatch.setattr(worker, "_download_ftp_source_file", fake_download_source)
+
+    task = {
+        "run_id": "FTP-RUN-001",
+        "folder_path": "/reports",
+        "file_name_template": "same_report.csv",
+        "connection": {"config": {"host": "10.159.23.100", "username": "u", "password": "p"}},
+    }
+    result = worker.download_ftp_report_file(task)
+
+    assert result["ok"] is True
+    assert captured_dirs == [tmp_path / "ftp" / "runs" / "FTP-RUN-001"]
+    assert Path(result["file_path"]).parent == captured_dirs[0]
+
+
 def test_ftp_workstation_worker_uploads_drive_before_web_file(monkeypatch, tmp_path) -> None:
     from scripts import onebss_workstation_worker as worker
 
@@ -5674,7 +5714,15 @@ def test_ftp_workstation_worker_uploads_drive_before_web_file(monkeypatch, tmp_p
     assert result["storage_link"] == "https://drive.google.com/file/d/ftp-worker-file/view"
     assert result["storage_status"] == "uploaded_google_drive:ftp-worker-file"
     assert result["message"] == "Da upload file FTP len Google Drive qua API trung gian."
-    assert drive_calls == [(str(source), "drive-folder-ftp", {"request_source": "ftp-worker", "default_message": "Da upload file FTP len Google Drive qua API trung gian."})]
+    assert drive_calls == [(
+        str(source),
+        "drive-folder-ftp",
+        {
+            "request_source": "ftp-worker",
+            "default_message": "Da upload file FTP len Google Drive qua API trung gian.",
+            "job_id": "RUN-FTP-DRIVE",
+        },
+    )]
     assert web_upload_calls == []
     assert "Da upload file FTP len Google Drive." in progress_messages
 
@@ -6219,6 +6267,46 @@ def test_workstation_worker_can_skip_slow_secondary_claims() -> None:
 
     assert worker.poll_worker_once(FakeClient(), "ws-idle", 0, include_sql=False, include_ftp=False) is False
     assert calls == ["/api/onebss-worker/tasks/claim"]
+
+
+def test_sql_worker_forwards_run_id_to_local_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    posts = []
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"ok": True, "rows": [], "total": 0}
+
+    class FakeInternalClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def post(self, api_url: str, **kwargs):
+            posts.append({"api_url": api_url, "json": kwargs.get("json") or {}})
+            return FakeResponse()
+
+    monkeypatch.setattr(worker, "internal_sql_api_urls", lambda: ["http://127.0.0.1:8000/api/du-lieu-web"])
+    monkeypatch.setattr(worker.httpx, "Client", FakeInternalClient)
+
+    result = worker.run_sql_worker_query({
+        "run_id": "SQL-RUN-001",
+        "query": {"action": "export_sql_report_to_drive", "file_name": "crs.xlsx"},
+    })
+
+    assert result["ok"] is True
+    assert posts[0]["json"]["job_id"] == "SQL-RUN-001"
+    assert posts[0]["json"]["run_id"] == "SQL-RUN-001"
+    assert posts[0]["json"]["worker_task_id"] == "SQL-RUN-001"
 
 
 def test_workstation_worker_ftp_claim_transient_returns_to_poll(monkeypatch) -> None:

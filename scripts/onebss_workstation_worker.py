@@ -40,7 +40,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.08.11-onebss-parallel-session-v38"
+WORKER_VERSION = "2026.08.11-sql-ftp-parallel-files-v39"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -109,6 +109,13 @@ def onebss_worker_slot_state_path(worker_id: str, slot: int) -> Path:
     base_dir.mkdir(parents=True, exist_ok=True)
     slot_number = max(1, int(slot or 1))
     return base_dir / f"{safe_worker_file_part(worker_id)}-slot-{slot_number}.json"
+
+
+def task_run_workspace(base_dir: Path, kind: str, run_id: str) -> Path:
+    task_id = safe_worker_file_part(run_id) if str(run_id or "").strip() else f"{kind}-{time.time_ns()}"
+    target = base_dir / "runs" / task_id
+    target.mkdir(parents=True, exist_ok=True)
+    return target
 
 
 class WorkerConcurrencyTracker:
@@ -458,6 +465,7 @@ def upload_result_file_to_internal_drive(
     *,
     request_source: str = "onebss-worker",
     default_message: str = "Da upload file OneBSS len Google Drive qua API trung gian.",
+    job_id: str = "",
 ) -> dict[str, Any]:
     folder_id = str(drive_folder_id or "").strip()
     if not folder_id:
@@ -474,6 +482,8 @@ def upload_result_file_to_internal_drive(
         "action": "upload_file_to_drive",
         "source": request_source,
         "file_name": source.name,
+        "job_id": str(job_id or "").strip(),
+        "run_id": str(job_id or "").strip(),
         "file_base64": base64.b64encode(source.read_bytes()).decode("ascii"),
         "content_type": mime_type,
         "drive_folder_id": folder_id,
@@ -555,7 +565,11 @@ def attach_worker_file_if_needed(client: httpx.Client, run_id: str, result: dict
     try:
         if drive_folder_id and progress_callback:
             progress_callback("Dang upload file len Google Drive qua API trung gian.")
-        drive_uploaded = upload_result_file_to_internal_drive(str(result.get("file_path") or ""), drive_folder_id)
+        drive_uploaded = upload_result_file_to_internal_drive(
+            str(result.get("file_path") or ""),
+            drive_folder_id,
+            job_id=run_id,
+        )
     except Exception as error:
         print(f"Cannot upload OneBSS result to Drive through internal API: {error}", file=sys.stderr)
         if progress_callback:
@@ -989,9 +1003,14 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
 
 
 def run_sql_worker_query(task: dict[str, Any]) -> dict[str, Any]:
-    query = task.get("query") if isinstance(task.get("query"), dict) else {}
+    query = dict(task.get("query") if isinstance(task.get("query"), dict) else {})
     if not query:
         raise RuntimeError("Task SQL khong co cau lenh truy van.")
+    run_id = str(task.get("run_id") or task.get("job_id") or "").strip()
+    if run_id:
+        query.setdefault("run_id", run_id)
+        query.setdefault("job_id", run_id)
+        query.setdefault("worker_task_id", run_id)
     token = os.getenv("INTERNAL_API_TOKEN", "").strip()
     headers = {"Content-Type": "application/json"}
     if token:
@@ -1631,8 +1650,9 @@ def download_ftp_report_file(task: dict[str, Any], progress_callback=None) -> di
     sources = plan["sources"]
     if not sources:
         raise RuntimeError("Chua co nguon FTP nao de tai.")
-    local_dir = Path(str(get_settings().data_mining_download_dir or "data/data_mining_downloads")) / "ftp"
-    local_dir.mkdir(parents=True, exist_ok=True)
+    run_id = str(task.get("run_id") or task.get("job_id") or "").strip()
+    base_dir = Path(str(get_settings().data_mining_download_dir or "data/data_mining_downloads")) / "ftp"
+    local_dir = task_run_workspace(base_dir, "ftp", run_id)
     downloaded = [_download_ftp_source_file(source, local_dir, progress_callback) for source in sources]
     if not plan["is_multi_source"]:
         result = downloaded[0]
@@ -1680,6 +1700,7 @@ def attach_ftp_file_if_needed(client: httpx.Client, run_id: str, result: dict[st
             drive_folder_id,
             request_source="ftp-worker",
             default_message="Da upload file FTP len Google Drive qua API trung gian.",
+            job_id=run_id,
         )
     except Exception as error:
         print(f"Cannot upload FTP result to Drive through internal API: {error}", file=sys.stderr)

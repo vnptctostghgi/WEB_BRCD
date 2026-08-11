@@ -30,7 +30,7 @@ app = FastAPI(title="API trung gian VNPT CTO")
 
 EXCEL_MAX_ROWS_PER_SHEET = 1_048_576
 GOOGLE_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
-API_MIDDLEWARE_VERSION = "2026.07.30-synced-oracle-stream-export"
+API_MIDDLEWARE_VERSION = "2026.08.11-parallel-safe-export"
 ORACLE_DATE_INPUT_FORMATS = ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%Y/%m/%d", "%d.%m.%Y", "%Y%m%d")
 ORACLE_DSN_ENV_KEYS = (
     "DB_DSN",
@@ -231,6 +231,27 @@ def normalize_binds_for_sql(sql: str, binds: dict[str, Any]) -> dict[str, Any]:
 def safe_file_name(value: str) -> str:
     name = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "").strip())
     return name.strip("._") or f"truy_van_sql_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
+
+
+def payload_job_id(payload: dict[str, Any]) -> str:
+    for key in ("job_id", "run_id", "worker_task_id"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def file_name_with_job_id(file_name: str, job_id: str) -> str:
+    safe_name = safe_file_name(file_name)
+    safe_job = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(job_id or "").strip()).strip("._")[:24]
+    if not safe_job:
+        return safe_name
+    path = Path(safe_name)
+    stem = path.stem or safe_name
+    suffix = path.suffix
+    if safe_job.lower() in stem.lower():
+        return safe_name
+    return safe_file_name(f"{stem}_{safe_job}{suffix}")
 
 
 def excel_value(value: Any) -> Any:
@@ -732,7 +753,10 @@ def du_lieu_web(payload: dict[str, Any], authorization: str = Header(default="")
             content = payload_file_bytes(payload)
             if not content:
                 raise HTTPException(status_code=400, detail="File upload rong.")
-            file_name = safe_file_name(payload.get("file_name") or f"onebss_{datetime.now():%Y%m%d_%H%M%S}.xlsx")
+            file_name = file_name_with_job_id(
+                payload.get("file_name") or f"onebss_{datetime.now():%Y%m%d_%H%M%S}.xlsx",
+                payload_job_id(payload),
+            )
             content_type = str(payload.get("content_type") or "").strip()
             export_dir = Path(os.getenv("EXPORT_DIR", str(Path(tempfile.gettempdir()) / "vnptcto_exports")))
             export_dir.mkdir(parents=True, exist_ok=True)
@@ -781,7 +805,10 @@ def du_lieu_web(payload: dict[str, Any], authorization: str = Header(default="")
             pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
             page_size = int(pagination.get("page_size") or os.getenv("EXPORT_PAGE_SIZE", "20000"))
             max_rows = int(pagination.get("max_rows") or os.getenv("EXPORT_MAX_ROWS", "1000000"))
-            file_name = safe_file_name(payload.get("file_name") or f"{payload.get('ma_bao_cao')}_{datetime.now():%Y%m%d_%H%M%S}.xlsx")
+            file_name = file_name_with_job_id(
+                payload.get("file_name") or f"{payload.get('ma_bao_cao')}_{datetime.now():%Y%m%d_%H%M%S}.xlsx",
+                payload_job_id(payload),
+            )
             export_dir = Path(os.getenv("EXPORT_DIR", str(Path(tempfile.gettempdir()) / "vnptcto_exports")))
             export_dir.mkdir(parents=True, exist_ok=True)
             target_path = export_dir / file_name
