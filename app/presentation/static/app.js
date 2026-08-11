@@ -1709,6 +1709,36 @@ if (role === "admin") {
   $("#user-import-file")?.addEventListener("change", importUserFile);
   $("#save-bulk-permissions")?.addEventListener("click", saveBulkPermissions);
   $("#save-data-permissions")?.addEventListener("click", saveDataPermissions);
+  $("#new-dashboard-page")?.addEventListener("click", createDashboardPage);
+  $("#dashboard-layout-pages")?.addEventListener("click", handleDashboardPageAction);
+  $("#dashboard-builder-tabs")?.addEventListener("click", handleDashboardBuilderTabClick);
+  $("#dashboard-builder-tabs")?.addEventListener("dragstart", handleDashboardTabDragStart);
+  $("#dashboard-builder-tabs")?.addEventListener("dragover", handleDashboardTabDragOver);
+  $("#dashboard-builder-tabs")?.addEventListener("drop", handleDashboardTabDrop);
+  $("#dashboard-builder-tabs")?.addEventListener("dragend", handleDashboardTabDragEnd);
+  $("#add-dashboard-tab")?.addEventListener("click", addDashboardTab);
+  const dashboardRowType = $("#dashboard-row-type");
+  if (dashboardRowType) dashboardRowType.innerHTML = dashboardLayoutTypeOptions("2_columns");
+  $("#add-dashboard-row")?.addEventListener("click", () => addDashboardRow($("#dashboard-row-type")?.value || "2_columns"));
+  $("#dashboard-builder-workspace")?.addEventListener("click", handleDashboardWorkspaceClick);
+  $("#dashboard-builder-workspace")?.addEventListener("change", handleDashboardWorkspaceChange);
+  $("#dashboard-builder-workspace")?.addEventListener("input", handleDashboardWorkspaceInput);
+  $("#dashboard-builder-workspace")?.addEventListener("dragstart", handleDashboardRowDragStart);
+  $("#dashboard-builder-workspace")?.addEventListener("dragover", handleDashboardRowDragOver);
+  $("#dashboard-builder-workspace")?.addEventListener("drop", handleDashboardRowDrop);
+  $("#dashboard-builder-workspace")?.addEventListener("dragend", handleDashboardRowDragEnd);
+  $("#refresh-dashboard-sql-reports")?.addEventListener("click", (event) => refreshDashboardSqlReports(event.currentTarget));
+  $("#dashboard-preview-tabs")?.addEventListener("click", handleDashboardPreviewTabClick);
+  $("#refresh-dashboard-preview")?.addEventListener("click", () => loadDashboardPreviewTab(dashboardBuilderActiveTabId, { force: true }));
+  $("#dashboard-page-form")?.addEventListener("submit", submitDashboardPageDialog);
+  $("#dashboard-page-form [name='page_name']")?.addEventListener("input", syncDashboardPageDialogCode);
+  $("#dashboard-page-form [name='page_id']")?.addEventListener("input", markDashboardPageDialogCodeManual);
+  document.addEventListener("click", async (event) => {
+    const button = event.target.closest("#save-dashboard-layout");
+    if (!button) return;
+    event.preventDefault();
+    await saveDashboardLayout(button);
+  });
   document.addEventListener("click", (event) => {
     const button = event.target.closest("[data-permission-select]");
     if (!button) return;
@@ -2863,6 +2893,30 @@ function dashboardPageIdFromName(pageName) {
   return generatedId.startsWith("DASHBOARD_") ? generatedId : `DASHBOARD_${generatedId}`;
 }
 
+function normalizeDashboardPageIdInput(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, "_");
+}
+
+function dashboardPageIdIsValid(pageId) {
+  return /^[A-Z0-9_-]+$/.test(pageId);
+}
+
+function dashboardPageIdExists(pageId) {
+  const normalizedPageId = normalizeDashboardPageIdInput(pageId);
+  if (normalizeDashboardPageIdInput(dashboardBuilderLayout?.page_id) === normalizedPageId) return true;
+  return dashboardLayouts.some((page) => normalizeDashboardPageIdInput(page.page_id) === normalizedPageId);
+}
+
+function uniqueDashboardPageId(pageName) {
+  const baseId = dashboardPageIdFromName(pageName);
+  if (!dashboardPageIdExists(baseId)) return baseId;
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${baseId}_${index}`;
+    if (!dashboardPageIdExists(candidate)) return candidate;
+  }
+  return `${baseId}_${Date.now()}`;
+}
+
 function normalizeDashboardViewerLayout(layout, pageName = "") {
   const normalized = normalizeDashboardLayoutData(layout, pageName);
   if (!normalized.tabs.length) normalized.tabs = dashboardLayoutTemplate(normalized.page_name, normalized.page_id).tabs;
@@ -3072,7 +3126,8 @@ async function loadDashboardBuilder({ force = false } = {}) {
     markDataFresh("sqlReports");
     markDataFresh("features");
     if (dashboardLayouts.length) {
-      const preferredPage = dashboardLayouts.find((page) => page.page_id === preferredPageId) || dashboardLayouts[0];
+      const firstSavedPage = dashboardLayouts.find((page) => dashboardBuilderPageIsSaved(page));
+      const preferredPage = dashboardLayouts.find((page) => page.page_id === preferredPageId) || firstSavedPage || dashboardLayouts[0];
       await openDashboardPage(preferredPage.page_id);
     } else {
       dashboardBuilderLayout = dashboardLayoutTemplate();
@@ -3150,7 +3205,100 @@ async function openDashboardLayout(pageId) {
   await loadDashboardPreviewTab(dashboardBuilderActiveTabId);
 }
 
+function setDashboardPageDialogMessage(message, tone = "error") {
+  const result = $("#dashboard-page-form .result");
+  if (!result) return;
+  if (!message) {
+    result.className = "result hidden";
+    result.textContent = "";
+    return;
+  }
+  result.textContent = message;
+  result.className = `result ${tone}`;
+}
+
+function createDashboardPageDraft(pageName, pageId, parentCode) {
+  const cleanedName = repairTextEncoding(String(pageName || "").trim() || "Dashboard mới");
+  dashboardBuilderLayout = dashboardLayoutTemplate(cleanedName, normalizeDashboardPageIdInput(pageId) || uniqueDashboardPageId(cleanedName), { parentCode: parentCode || dashboardDefaultParentCode() });
+  dashboardBuilderActiveTabId = dashboardBuilderLayout.tabs[0].tab_id;
+  dashboardBuilderLoadedTabs = {};
+  renderDashboardBuilder();
+  renderDashboardPreview();
+  showMessage($("#dashboard-builder-message"), "Đã tạo bản nháp trang báo cáo. Kiểm tra Layout rồi bấm Lưu Layout để đưa trang vào menu.", "success");
+}
+
+function openDashboardPageDialog() {
+  const dialog = $("#dashboard-page-dialog");
+  const form = $("#dashboard-page-form");
+  if (!dialog || !form) return false;
+  form.reset();
+  const defaultName = "Dashboard mới";
+  const defaultPageId = uniqueDashboardPageId(defaultName);
+  const parentCode = $("#dashboard-parent-code")?.value || dashboardBuilderLayout?.parent_code || dashboardDefaultParentCode();
+  const parentSelect = form.elements.namedItem("parent_code");
+  if (parentSelect) {
+    parentSelect.innerHTML = dashboardParentMenuOptions(parentCode);
+    parentSelect.value = parentCode;
+  }
+  const pageNameInput = form.elements.namedItem("page_name");
+  const pageIdInput = form.elements.namedItem("page_id");
+  if (pageNameInput) pageNameInput.value = defaultName;
+  if (pageIdInput) {
+    pageIdInput.value = defaultPageId;
+    pageIdInput.dataset.generatedCode = defaultPageId;
+    pageIdInput.dataset.manual = "false";
+  }
+  setDashboardPageDialogMessage("");
+  dialog.showModal();
+  pageNameInput?.focus();
+  pageNameInput?.select?.();
+  return true;
+}
+
+function syncDashboardPageDialogCode(event) {
+  const form = event.currentTarget?.form || $("#dashboard-page-form");
+  const pageIdInput = form?.elements.namedItem("page_id");
+  if (!pageIdInput) return;
+  const currentGenerated = pageIdInput.dataset.generatedCode || "";
+  const canAutoUpdate = pageIdInput.dataset.manual !== "true" || normalizeDashboardPageIdInput(pageIdInput.value) === currentGenerated;
+  if (!canAutoUpdate) return;
+  const nextCode = uniqueDashboardPageId(event.currentTarget.value || "Dashboard mới");
+  pageIdInput.value = nextCode;
+  pageIdInput.dataset.generatedCode = nextCode;
+  pageIdInput.dataset.manual = "false";
+}
+
+function markDashboardPageDialogCodeManual(event) {
+  const input = event.currentTarget;
+  const normalized = normalizeDashboardPageIdInput(input.value);
+  if (input.value !== normalized) input.value = normalized;
+  input.dataset.manual = "true";
+}
+
+function submitDashboardPageDialog(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const pageName = String(form.elements.namedItem("page_name")?.value || "").trim();
+  const pageId = normalizeDashboardPageIdInput(form.elements.namedItem("page_id")?.value || uniqueDashboardPageId(pageName));
+  const parentCode = form.elements.namedItem("parent_code")?.value || dashboardDefaultParentCode();
+  if (!pageName) {
+    setDashboardPageDialogMessage("Vui lòng nhập tên trang báo cáo.");
+    return;
+  }
+  if (!dashboardPageIdIsValid(pageId)) {
+    setDashboardPageDialogMessage("Mã trang chỉ được chứa chữ, số, dấu gạch dưới hoặc gạch ngang.");
+    return;
+  }
+  if (dashboardPageIdExists(pageId)) {
+    setDashboardPageDialogMessage("Mã trang này đã có. Hãy sửa mã hoặc chọn một tên khác.");
+    return;
+  }
+  createDashboardPageDraft(pageName, pageId, parentCode);
+  $("#dashboard-page-dialog")?.close();
+}
+
 function createDashboardPage() {
+  if (openDashboardPageDialog()) return;
   const pageName = prompt("Nhập tên trang báo cáo mới:", "Dashboard mới");
   if (pageName === null) return;
   const cleanedName = pageName.trim() || "Dashboard mới";
@@ -3170,9 +3318,27 @@ function renderDashboardBuilder() {
     dashboardBuilderLayout.parent_code = parentSelect.value || dashboardBuilderLayout.parent_code;
   }
   renderDashboardPages();
+  renderDashboardBuilderStatus();
   renderDashboardBuilderTabs();
   renderDashboardWorkspace();
   renderDashboardPreview();
+}
+
+function renderDashboardBuilderStatus() {
+  const pageId = dashboardBuilderLayout?.page_id || "";
+  const page = dashboardBuilderPageById(pageId);
+  const saved = dashboardBuilderPageIsSaved(page);
+  const title = $("#dashboard-current-page-title");
+  const code = $("#dashboard-current-page-code");
+  const menu = $("#dashboard-current-page-menu");
+  const state = $("#dashboard-current-page-state");
+  if (title) title.textContent = dashboardBuilderLayout?.page_name || page?.page_name || pageId || "Dashboard";
+  if (code) code.textContent = pageId || "-";
+  if (menu) menu.textContent = `Menu: ${dashboardParentMenuLabel(dashboardBuilderLayout?.parent_code || page?.parent_code || dashboardDefaultParentCode())}`;
+  if (state) {
+    state.textContent = saved ? "Đã lưu" : "Bản nháp";
+    state.classList.toggle("is-saved", saved);
+  }
 }
 
 function renderDashboardPages() {
@@ -3181,7 +3347,10 @@ function renderDashboardPages() {
   const currentPageId = dashboardBuilderLayout?.page_id || "";
   const hasCurrent = dashboardLayouts.some((page) => page.page_id === currentPageId);
   const rows = [...dashboardLayouts];
-  if (currentPageId && !hasCurrent) {
+  const currentIndex = rows.findIndex((page) => page.page_id === currentPageId);
+  if (currentIndex > 0) {
+    rows.unshift(rows.splice(currentIndex, 1)[0]);
+  } else if (currentPageId && !hasCurrent) {
     rows.unshift({ page_id: currentPageId, page_name: dashboardBuilderLayout.page_name, parent_code: dashboardBuilderLayout.parent_code, unsaved: true });
   }
   container.innerHTML = rows.length ? rows.map((page) => `
@@ -3458,6 +3627,11 @@ function renderDashboardWorkspace() {
       <p class="eyebrow">Workspace Grid</p>
       <h2>Tab này chưa có Layout</h2>
       <p>Bấm Thêm Layout 1, 2, 3 hoặc 4 cột để bắt đầu bố trí tiêu đề, thẻ dữ liệu và biểu đồ.</p>
+      <div class="dashboard-empty-actions">
+        <button class="table-action" data-add-dashboard-empty-row="1_column" type="button">1 cột</button>
+        <button class="table-action" data-add-dashboard-empty-row="2_columns" type="button">2 cột</button>
+        <button class="table-action" data-add-dashboard-empty-row="4_columns" type="button">4 cột</button>
+      </div>
     </div>
   `;
 }
@@ -3593,6 +3767,11 @@ function addDashboardRow(layoutType) {
 }
 
 function handleDashboardWorkspaceClick(event) {
+  const addEmptyButton = event.target.closest("[data-add-dashboard-empty-row]");
+  if (addEmptyButton) {
+    addDashboardRow(addEmptyButton.dataset.addDashboardEmptyRow || "2_columns");
+    return;
+  }
   const moveButton = event.target.closest("[data-move-dashboard-row]");
   if (moveButton) {
     moveDashboardRow(moveButton.dataset.rowId, moveButton.dataset.moveDashboardRow);
@@ -5900,7 +6079,8 @@ function openSqlReport(reportId) {
   form.elements.namedItem("cau_lenh_sql").value = report?.cau_lenh_sql || "";
   form.elements.namedItem("cac_tham_so").value = (report?.cac_tham_so || []).join(", ");
   form.querySelector(".result").className = "result hidden";
-  $("#sql-report-dialog")?.showModal();
+  const dialog = $("#sql-report-dialog");
+  if (dialog && !dialog.open) dialog.showModal();
 }
 
 async function saveSqlReport(event) {
