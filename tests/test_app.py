@@ -327,8 +327,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert 'Set-UserEnvironment "SQL_WORKER_MAX_CONCURRENT_TASKS" $sqlWorkerMaxTasks' in setup_script
         assert 'Set-UserEnvironment "FTP_WORKER_MAX_CONCURRENT_TASKS" $ftpWorkerMaxTasks' in setup_script
         assert "ONEBSS_TASK_TIMEOUT_SECONDS" in start_worker_script
-        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION.endswith("v37")
-        assert 'WORKER_VERSION = "2026.08.10-parallel-worker-v37"' in worker_script
+        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION.endswith("v38")
+        assert 'WORKER_VERSION = "2026.08.11-onebss-parallel-session-v38"' in worker_script
         assert "WorkerConcurrencyTracker" in worker_script
         assert "WorkerTaskDispatcher" in worker_script
         assert "normalize_ftp_variable_value" in worker_script
@@ -3815,6 +3815,104 @@ def test_onebss_login_deviceid_screen_requests_otp() -> None:
     assert playwright.stopped is True
 
 
+def test_onebss_pending_browser_session_keeps_worker_state_path(monkeypatch, tmp_path) -> None:
+    from app.application import onebss_report_service as service
+
+    class FakeBodyLocator:
+        def __init__(self, page):
+            self.page = page
+
+        def inner_text(self, timeout=0):
+            return self.page.body_text
+
+    class FakePage:
+        url = "https://onebss.vnpt.vn/#/auth/login?username=quyennt.cto&deviceId=12345"
+
+        def __init__(self):
+            self.body_text = "Xac nhan gui yeu cau"
+
+        def locator(self, selector):
+            return FakeBodyLocator(self)
+
+        def wait_for_load_state(self, *args, **kwargs):
+            return None
+
+        def wait_for_timeout(self, *args, **kwargs):
+            return None
+
+    class FakeHelper:
+        def _click_button_text(self, page, texts):
+            page.body_text = "Nhap ma OTP"
+            return True
+
+    class FakeClosable:
+        def close(self):
+            return None
+
+    state_path = tmp_path / "slot-1-state.json"
+
+    monkeypatch.setattr(
+        service,
+        "start_onebss_otp_mobile_gateway_request",
+        lambda settings, session_id, parameters, **kwargs: {
+            "ok": False,
+            "status": "otp_required",
+            "session_id": session_id,
+            "parameters": parameters,
+        },
+    )
+
+    result = service.handle_onebss_otp_request(
+        get_settings(),
+        FakePage(),
+        FakeHelper(),
+        FakeClosable(),
+        FakeClosable(),
+        FakeClosable(),
+        {"ma_bao_cao": "TEST"},
+        {"P_DENNGAY": "{{today}}"},
+        "worker",
+        state_path=state_path,
+    )
+
+    assert result is not None
+    pending = service.pop_onebss_session(result["session_id"])
+    assert pending is not None
+    assert pending.state_path == str(state_path)
+    service.close_browser_stack(pending.browser, pending.context, pending.playwright)
+
+
+def test_onebss_api_parallel_login_waits_for_shared_token(monkeypatch) -> None:
+    from app.application import onebss_report_service as service
+
+    username = "parallel.onebss"
+    with service.PENDING_ONEBSS_LOCK:
+        service.PENDING_ONEBSS_API_SESSIONS.clear()
+        service.ONEBSS_API_TOKENS.pop(username, None)
+    pending = service.keep_onebss_api_session("secret", {"ma_bao_cao": "TEST"}, {}, username, "mobile", "device", "worker")
+
+    sleeps = {"count": 0}
+
+    def fake_sleep(seconds):
+        sleeps["count"] += 1
+        if sleeps["count"] == 1:
+            service.remember_onebss_api_token(
+                username,
+                {"access_token": "token", "token_type": "Bearer", "expires_in": 300},
+                mobile_id="mobile",
+                device_id="device",
+            )
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+    token = service.wait_for_onebss_api_token_from_pending_login(username, timeout_seconds=5)
+
+    assert token is not None
+    assert token.access_token == "token"
+    service.pop_onebss_api_session(pending.session_id)
+    with service.PENDING_ONEBSS_LOCK:
+        service.ONEBSS_API_TOKENS.pop(username, None)
+
+
 def test_onebss_mobile_gateway_default_filter_matches_vnpt_sms() -> None:
     from app.modules.mobile_gateway.otp_service import OtpService
     from app.modules.mobile_gateway.repository import MobileGatewayRepository
@@ -6060,6 +6158,43 @@ def test_workstation_worker_parallel_poll_skips_full_onebss_slot(monkeypatch: py
     assert worker.poll_worker_once(FakeClient(), "ws-parallel", 0, dispatcher=FakeDispatcher()) is True
     assert [call["path"] for call in calls] == ["/api/sql-worker/tasks/claim"]
     assert started == [(worker.TASK_KIND_SQL, "SQL-1")]
+
+
+def test_workstation_worker_assigns_separate_onebss_state_slots(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    started = []
+    release = threading.Event()
+
+    def fake_run_task(self, kind, task, run_id):
+        started.append((kind, run_id, dict(task)))
+        release.wait(timeout=2)
+        self.tracker.finish(run_id)
+
+    monkeypatch.setenv("VNPTCTO_WORKER_MAX_CONCURRENT_TASKS", "4")
+    monkeypatch.setenv("ONEBSS_WORKER_MAX_ONEBSS_TASKS", "2")
+    monkeypatch.setenv("VNPTCTO_WORKSTATION_ROOT", str(tmp_path))
+    monkeypatch.setattr(worker.WorkerTaskDispatcher, "_run_task", fake_run_task)
+
+    dispatcher = worker.WorkerTaskDispatcher("https://vnptcto.com", {"Authorization": "Bearer test"}, "ws-parallel", 0)
+    assert dispatcher.start_task(worker.TASK_KIND_ONEBSS, {"run_id": "ONEBSS-1", "report": {"ma_bao_cao": "BC1"}}) is True
+    deadline = time.monotonic() + 2
+    while len(started) < 1 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert dispatcher.start_task(worker.TASK_KIND_ONEBSS, {"run_id": "ONEBSS-2", "report": {"ma_bao_cao": "BC2"}}) is True
+    deadline = time.monotonic() + 2
+    while len(started) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    release.set()
+    dispatcher.wait_until_idle()
+
+    started_by_run = {run_id: task for _, run_id, task in started}
+    assert started_by_run["ONEBSS-1"]["_worker_slot"] == 1
+    assert started_by_run["ONEBSS-2"]["_worker_slot"] == 2
+    state_paths = [started_by_run["ONEBSS-1"]["_worker_state_path"], started_by_run["ONEBSS-2"]["_worker_state_path"]]
+    assert state_paths[0] != state_paths[1]
+    assert state_paths[0].endswith("ws-parallel-slot-1.json")
+    assert state_paths[1].endswith("ws-parallel-slot-2.json")
 
 
 def test_workstation_worker_can_skip_slow_secondary_claims() -> None:

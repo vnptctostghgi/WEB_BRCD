@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import re
+import shutil
 import threading
 import time
 import unicodedata
@@ -106,6 +107,7 @@ class PendingOneBssSession:
     parameters: dict[str, Any]
     created_by: str
     created_at: float
+    state_path: str = ""
 
 
 @dataclass
@@ -149,6 +151,7 @@ class OneBssDownloadedFile:
 PENDING_ONEBSS_SESSIONS: dict[str, PendingOneBssSession] = {}
 PENDING_ONEBSS_API_SESSIONS: dict[str, PendingOneBssApiSession] = {}
 ONEBSS_API_TOKENS: dict[str, OneBssApiToken] = {}
+ONEBSS_API_LOGIN_LOCKS: dict[str, threading.Lock] = {}
 PENDING_ONEBSS_LOCK = threading.Lock()
 OneBssProgressCallback = Callable[[str], None]
 OTP_CONSUMED_RECOVERY_SECONDS = 10 * 60
@@ -181,6 +184,22 @@ def onebss_parameter_progress_label(parameters: dict[str, Any], *, max_items: in
     return ", ".join(str(item) for item in visible_items[:max_items]) + suffix
 
 
+def resolve_onebss_browser_state_path(state_path: str | Path | None = None, *, seed_from_default: bool = False) -> Path:
+    path = Path(state_path) if state_path else ONEBSS_STATE_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if seed_from_default and path != ONEBSS_STATE_PATH and not path.exists() and ONEBSS_STATE_PATH.exists():
+        try:
+            shutil.copy2(ONEBSS_STATE_PATH, path)
+        except Exception:
+            logger.exception("Cannot seed OneBSS browser state for %s", path)
+    return path
+
+
+def save_onebss_browser_state(context: Any, state_path: str | Path | None = None) -> None:
+    path = resolve_onebss_browser_state_path(state_path)
+    context.storage_state(path=str(path))
+
+
 def run_onebss_report_request(
     settings: Settings,
     report: dict[str, Any],
@@ -190,6 +209,7 @@ def run_onebss_report_request(
     session_id: str = "",
     created_by: str = "",
     progress_callback: OneBssProgressCallback | None = None,
+    state_path: str | Path | None = None,
 ) -> dict[str, Any]:
     cleanup_expired_onebss_sessions()
     resolved_parameters = with_resolved_schedule_parameters({"parameters": parameters if isinstance(parameters, dict) else {}})["parameters"]
@@ -198,7 +218,7 @@ def run_onebss_report_request(
         return continue_onebss_api_session(settings, session_id, otp, resolved_parameters, progress_callback=progress_callback)
     if session_id:
         return continue_onebss_report_session(settings, session_id, otp, resolved_parameters, progress_callback=progress_callback)
-    return start_onebss_api_session(settings, report, resolved_parameters, created_by=created_by, progress_callback=progress_callback)
+    return start_onebss_api_session(settings, report, resolved_parameters, created_by=created_by, progress_callback=progress_callback, state_path=state_path)
 
 
 def onebss_report_otp_service_code(report: dict[str, Any] | None) -> str:
@@ -495,6 +515,80 @@ def match_onebss_mobile_gateway_manual_otp(settings: Settings, request_id: str, 
         return {"ok": False, "status": "failed", "message": str(error)[:300]}
 
 
+def onebss_api_login_lock(username: str) -> threading.Lock:
+    key = str(username or "").strip().lower()
+    with PENDING_ONEBSS_LOCK:
+        lock = ONEBSS_API_LOGIN_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            ONEBSS_API_LOGIN_LOCKS[key] = lock
+        return lock
+
+
+def onebss_api_login_pending(username: str) -> bool:
+    key = str(username or "").strip()
+    with PENDING_ONEBSS_LOCK:
+        return any(session.username == key for session in PENDING_ONEBSS_API_SESSIONS.values())
+
+
+def wait_for_onebss_api_token_from_pending_login(
+    username: str,
+    progress_callback: OneBssProgressCallback | None = None,
+    *,
+    timeout_seconds: float = 180.0,
+) -> OneBssApiToken | None:
+    if not onebss_api_login_pending(username):
+        return None
+    emit_onebss_progress(
+        progress_callback,
+        "Dang co task khac dang xac thuc OTP OneBSS. Task nay se dung phien do khi dang nhap xong.",
+    )
+    started = time.monotonic()
+    last_notice = started
+    while time.monotonic() - started < timeout_seconds:
+        token = get_valid_onebss_api_token(username)
+        if token:
+            emit_onebss_progress(progress_callback, "Da co phien OneBSS tu task khac, tiep tuc lay bao cao.")
+            return token
+        if not onebss_api_login_pending(username):
+            return None
+        now = time.monotonic()
+        if now - last_notice >= 20:
+            emit_onebss_progress(progress_callback, f"Van dang cho phien dang nhap OneBSS chung ({int(now - started)} giay).")
+            last_notice = now
+        time.sleep(2)
+    emit_onebss_progress(progress_callback, "Da het thoi gian cho phien OneBSS chung, task se thu dang nhap rieng.")
+    return None
+
+
+def finish_with_onebss_api_token(
+    settings: Settings,
+    token: OneBssApiToken,
+    report: dict[str, Any],
+    parameters: dict[str, Any],
+    *,
+    progress_callback: OneBssProgressCallback | None = None,
+) -> dict[str, Any] | None:
+    emit_onebss_progress(progress_callback, "Dang kiem tra phien dang nhap OneBSS con hieu luc.")
+    token_usable = onebss_validate_api_token(settings, token)
+    if token_usable is False:
+        forget_onebss_api_token(token.username)
+        emit_onebss_progress(progress_callback, "Phien dang nhap OneBSS da het han. Dang dang nhap lai.")
+        return None
+    if token_usable is True:
+        emit_onebss_progress(progress_callback, "Phien dang nhap OneBSS con dung duoc, khong can OTP.")
+    else:
+        emit_onebss_progress(progress_callback, "Chua kiem tra duoc phien OneBSS, thu dung phien hien co truoc.")
+    try:
+        return finish_onebss_report_download_api(settings, token, report, parameters, progress_callback=progress_callback)
+    except OneBssDownloadError as error:
+        if onebss_error_looks_auth_related(error):
+            forget_onebss_api_token(token.username)
+            emit_onebss_progress(progress_callback, "Phien OneBSS bi tu choi. Dang dang nhap lai.")
+            return None
+        return {"ok": False, "status": "failed", "message": str(error)[:1000], "parameters": parameters}
+
+
 def start_onebss_api_session(
     settings: Settings,
     report: dict[str, Any],
@@ -502,6 +596,7 @@ def start_onebss_api_session(
     *,
     created_by: str = "",
     progress_callback: OneBssProgressCallback | None = None,
+    state_path: str | Path | None = None,
 ) -> dict[str, Any]:
     try:
         report_url = normalize_onebss_report_url(report.get("report_url"))
@@ -515,66 +610,71 @@ def start_onebss_api_session(
     mobile_id, device_id = onebss_api_device_ids(username)
     cached_token = get_valid_onebss_api_token(username)
     if cached_token:
-        emit_onebss_progress(progress_callback, "Dang kiem tra phien dang nhap OneBSS con hieu luc.")
-        token_usable = onebss_validate_api_token(settings, cached_token)
-        if token_usable is False:
-            forget_onebss_api_token(username)
-            emit_onebss_progress(progress_callback, "Phien dang nhap OneBSS da het han. Dang dang nhap lai.")
-        else:
-            if token_usable is True:
-                emit_onebss_progress(progress_callback, "Phien dang nhap OneBSS con dung duoc, khong can OTP.")
-            else:
-                emit_onebss_progress(progress_callback, "Chua kiem tra duoc phien OneBSS, thu dung phien hien co truoc.")
-            try:
-                return finish_onebss_report_download_api(settings, cached_token, report, parameters, progress_callback=progress_callback)
-            except OneBssDownloadError as error:
-                if onebss_error_looks_auth_related(error):
-                    forget_onebss_api_token(username)
-                    emit_onebss_progress(progress_callback, "Phien OneBSS bi tu choi. Dang dang nhap lai.")
-                else:
-                    return {"ok": False, "status": "failed", "message": str(error)[:1000], "parameters": parameters}
+        cached_result = finish_with_onebss_api_token(settings, cached_token, report, parameters, progress_callback=progress_callback)
+        if cached_result is not None:
+            return cached_result
 
-    try:
-        emit_onebss_progress(progress_callback, "Da dien tai khoan OneBSS.")
-        emit_onebss_progress(progress_callback, "Da dien mat khau OneBSS.")
-        emit_onebss_progress(progress_callback, "Dang gui thong tin dang nhap den OneBSS.")
-        with httpx.Client(timeout=onebss_api_timeout(settings, minimum_seconds=30)) as client:
-            response = client.post(
-                f"{ONEBSS_API_BASE_URL}/quantri/user/xacthuc_tapdoan_v2",
-                headers=onebss_api_base_headers(),
-                json={
-                    "username": username,
-                    "password": password,
-                    "mobile_id": mobile_id,
-                    "device_id": device_id,
-                },
+    waited_token = wait_for_onebss_api_token_from_pending_login(username, progress_callback)
+    if waited_token:
+        waited_result = finish_with_onebss_api_token(settings, waited_token, report, parameters, progress_callback=progress_callback)
+        if waited_result is not None:
+            return waited_result
+
+    login_lock = onebss_api_login_lock(username)
+    with login_lock:
+        cached_token = get_valid_onebss_api_token(username)
+        if cached_token:
+            cached_result = finish_with_onebss_api_token(settings, cached_token, report, parameters, progress_callback=progress_callback)
+            if cached_result is not None:
+                return cached_result
+        if onebss_api_login_pending(username):
+            waited_token = wait_for_onebss_api_token_from_pending_login(username, progress_callback)
+            if waited_token:
+                waited_result = finish_with_onebss_api_token(settings, waited_token, report, parameters, progress_callback=progress_callback)
+                if waited_result is not None:
+                    return waited_result
+
+        try:
+            emit_onebss_progress(progress_callback, "Da dien tai khoan OneBSS.")
+            emit_onebss_progress(progress_callback, "Da dien mat khau OneBSS.")
+            emit_onebss_progress(progress_callback, "Dang gui thong tin dang nhap den OneBSS.")
+            with httpx.Client(timeout=onebss_api_timeout(settings, minimum_seconds=30)) as client:
+                response = client.post(
+                    f"{ONEBSS_API_BASE_URL}/quantri/user/xacthuc_tapdoan_v2",
+                    headers=onebss_api_base_headers(),
+                    json={
+                        "username": username,
+                        "password": password,
+                        "mobile_id": mobile_id,
+                        "device_id": device_id,
+                    },
+                )
+        except httpx.HTTPError as error:
+            logger.exception("Cannot start OneBSS API login")
+            return {"ok": False, "status": "login_failed", "message": f"Khong ket noi duoc API dang nhap OneBSS: {error}", "parameters": parameters}
+
+        data = parse_onebss_json_response(response)
+        secret_code = str(((data.get("data") if isinstance(data, dict) else {}) or {}).get("secretCode") or "").strip()
+        if response.status_code == 200 and secret_code:
+            emit_onebss_progress(progress_callback, "OneBSS da chap nhan tai khoan/mat khau.")
+            emit_onebss_progress(progress_callback, "Da gui OTP ve dien thoai.")
+            pending = keep_onebss_api_session(secret_code, report, parameters, username, mobile_id, device_id, created_by)
+            emit_onebss_progress(progress_callback, "Dang cho he thong bat tin nhan OTP.")
+            return start_onebss_otp_mobile_gateway_request(
+                settings,
+                pending.session_id,
+                parameters,
+                otp_service_code=onebss_report_otp_service_code(report),
+                report_url=report_url,
+                fallback_message="OneBSS da gui OTP ve dien thoai. Hay nhap OTP.",
             )
-    except httpx.HTTPError as error:
-        logger.exception("Cannot start OneBSS API login")
-        return {"ok": False, "status": "login_failed", "message": f"Khong ket noi duoc API dang nhap OneBSS: {error}", "parameters": parameters}
-
-    data = parse_onebss_json_response(response)
-    secret_code = str(((data.get("data") if isinstance(data, dict) else {}) or {}).get("secretCode") or "").strip()
-    if response.status_code == 200 and secret_code:
-        emit_onebss_progress(progress_callback, "OneBSS da chap nhan tai khoan/mat khau.")
-        emit_onebss_progress(progress_callback, "Da gui OTP ve dien thoai.")
-        pending = keep_onebss_api_session(secret_code, report, parameters, username, mobile_id, device_id, created_by)
-        emit_onebss_progress(progress_callback, "Dang cho he thong bat tin nhan OTP.")
-        return start_onebss_otp_mobile_gateway_request(
-            settings,
-            pending.session_id,
-            parameters,
-            otp_service_code=onebss_report_otp_service_code(report),
-            report_url=report_url,
-            fallback_message="OneBSS da gui OTP ve dien thoai. Hay nhap OTP.",
-        )
-    return {
-        "ok": False,
-        "status": "login_failed",
-        "message": onebss_api_error_message(data, response, fallback="Dang nhap OneBSS chua thanh cong."),
-        "parameters": parameters,
-        "report_url": report_url,
-    }
+        return {
+            "ok": False,
+            "status": "login_failed",
+            "message": onebss_api_error_message(data, response, fallback="Dang nhap OneBSS chua thanh cong."),
+            "parameters": parameters,
+            "report_url": report_url,
+        }
 
 def continue_onebss_api_session(
     settings: Settings,
@@ -652,6 +752,7 @@ def start_onebss_report_session(
     *,
     created_by: str = "",
     progress_callback: OneBssProgressCallback | None = None,
+    state_path: str | Path | None = None,
 ) -> dict[str, Any]:
     report_url = normalize_onebss_report_url(report.get("report_url"))
     username = str(getattr(settings, "onebss_username", "") or "").strip()
@@ -677,13 +778,14 @@ def start_onebss_report_session(
                 browser = playwright.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"], timeout=30000)
             else:
                 raise
+        browser_state_path = resolve_onebss_browser_state_path(state_path, seed_from_default=True)
         context_options: dict[str, Any] = {
             "accept_downloads": True,
             "locale": "vi-VN",
             "viewport": {"width": 1440, "height": 920},
         }
-        if ONEBSS_STATE_PATH.exists():
-            context_options["storage_state"] = str(ONEBSS_STATE_PATH)
+        if browser_state_path.exists():
+            context_options["storage_state"] = str(browser_state_path)
         context = browser.new_context(**context_options)
         page = context.new_page()
         page.set_default_timeout(30000)
@@ -720,7 +822,7 @@ def start_onebss_report_session(
             wait_for_onebss_auth_transition(page, helper, timeout_ms=30000)
             if page_contains(page, OTP_TEXT_NEEDLES):
                 emit_onebss_progress(progress_callback, "Da gui OTP ve dien thoai.")
-                pending = keep_onebss_session(playwright, browser, context, page, report, parameters, created_by)
+                pending = keep_onebss_session(playwright, browser, context, page, report, parameters, created_by, state_path=str(browser_state_path))
                 return start_onebss_otp_mobile_gateway_request(
                     settings,
                     pending.session_id,
@@ -732,14 +834,34 @@ def start_onebss_report_session(
             if device_result:
                 close_browser_stack(browser, context, playwright)
                 return device_result
-            otp_request_result = handle_onebss_otp_request(settings, page, helper, playwright, browser, context, report, parameters, created_by)
+            otp_request_result = handle_onebss_otp_request(
+                settings,
+                page,
+                helper,
+                playwright,
+                browser,
+                context,
+                report,
+                parameters,
+                created_by,
+                state_path=str(browser_state_path),
+            )
             if otp_request_result:
                 return otp_request_result
             if helper._is_login_page(page):
                 close_browser_stack(browser, context, playwright)
                 return {"ok": False, "status": "login_failed", "message": onebss_login_failed_message(page), "parameters": parameters}
         emit_onebss_progress(progress_callback, "Da dang nhap OneBSS thanh cong.")
-        result = finish_onebss_report_download(settings, helper, context, page, report, parameters, progress_callback=progress_callback)
+        result = finish_onebss_report_download(
+            settings,
+            helper,
+            context,
+            page,
+            report,
+            parameters,
+            progress_callback=progress_callback,
+            state_path=browser_state_path,
+        )
         close_browser_stack(browser, context, playwright)
         return result
     except Exception as error:
@@ -798,7 +920,16 @@ def continue_onebss_report_session(
             goto_onebss_page(page, report_url, step="open_report_after_otp")
             wait_for_onebss_network_quiet(page, timeout_ms=8000, pause_ms=1000)
         emit_onebss_progress(progress_callback, "Da dang nhap OneBSS thanh cong.")
-        result = finish_onebss_report_download(settings, helper, context, page, pending.report, pending.parameters, progress_callback=progress_callback)
+        result = finish_onebss_report_download(
+            settings,
+            helper,
+            context,
+            page,
+            pending.report,
+            pending.parameters,
+            progress_callback=progress_callback,
+            state_path=pending.state_path or None,
+        )
         pop_onebss_session(session_id)
         close_browser_stack(pending.browser, pending.context, pending.playwright)
         return result
@@ -1189,6 +1320,7 @@ def finish_onebss_report_download(
     parameters: dict[str, Any],
     *,
     progress_callback: OneBssProgressCallback | None = None,
+    state_path: str | Path | None = None,
 ) -> dict[str, Any]:
     started = time.monotonic()
     report_url = normalize_onebss_report_url(report.get("report_url"))
@@ -1223,7 +1355,7 @@ def finish_onebss_report_download(
             emit_onebss_progress(progress_callback, "Da tai file bao cao OneBSS.")
             emit_onebss_progress(progress_callback, "Dang luu/upload file ket qua.")
             storage_result = save_downloaded_file(settings, target_file, "")
-            context.storage_state(path=str(ONEBSS_STATE_PATH))
+            save_onebss_browser_state(context, state_path)
             ok = bool(storage_result.get("ok", True))
             export_info = downloaded.export_info
             return {
@@ -1262,7 +1394,7 @@ def finish_onebss_report_download(
             )
             emit_onebss_progress(progress_callback, f"Da tai file luot {index}/{len(parameter_runs)}.")
 
-        context.storage_state(path=str(ONEBSS_STATE_PATH))
+        save_onebss_browser_state(context, state_path)
         return finalize_onebss_multiple_downloads(
             settings,
             report,
@@ -2098,6 +2230,7 @@ def keep_onebss_session(
     report: dict[str, Any],
     parameters: dict[str, Any],
     created_by: str,
+    state_path: str | Path | None = None,
 ) -> PendingOneBssSession:
     session = PendingOneBssSession(
         session_id=uuid.uuid4().hex,
@@ -2109,6 +2242,7 @@ def keep_onebss_session(
         parameters=parameters,
         created_by=created_by,
         created_at=time.time(),
+        state_path=str(state_path or ""),
     )
     with PENDING_ONEBSS_LOCK:
         PENDING_ONEBSS_SESSIONS[session.session_id] = session
@@ -2370,6 +2504,7 @@ def handle_onebss_otp_request(
     report: dict[str, Any],
     parameters: dict[str, Any] | str,
     created_by: str | None = None,
+    state_path: str | Path | None = None,
 ) -> dict[str, Any] | None:
     legacy_manual_otp = False
     if not isinstance(settings, Settings):
@@ -2390,6 +2525,7 @@ def handle_onebss_otp_request(
         report = old_report if isinstance(old_report, dict) else {}
         parameters = old_parameters if isinstance(old_parameters, dict) else {}
         created_by = str(old_created_by or "system")
+        state_path = None
         legacy_manual_otp = True
     else:
         parameters = parameters if isinstance(parameters, dict) else {}
@@ -2415,7 +2551,7 @@ def handle_onebss_otp_request(
     if not clicked_any and not page_contains(page, OTP_TEXT_NEEDLES) and not url_indicates_otp_flow:
         return None
 
-    pending = keep_onebss_session(playwright, browser, context, page, report, parameters, created_by)
+    pending = keep_onebss_session(playwright, browser, context, page, report, parameters, created_by, state_path=state_path)
     if legacy_manual_otp:
         return onebss_manual_otp_response(
             pending.session_id,

@@ -40,7 +40,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.08.10-parallel-worker-v37"
+WORKER_VERSION = "2026.08.11-onebss-parallel-session-v38"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -98,6 +98,19 @@ def worker_task_report_code(kind: str, task: dict[str, Any]) -> str:
     return str(task.get("ma_bao_cao") or "").strip()
 
 
+def safe_worker_file_part(value: str) -> str:
+    text = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(value or "").strip())
+    return text.strip(".-")[:80] or "worker"
+
+
+def onebss_worker_slot_state_path(worker_id: str, slot: int) -> Path:
+    root = str(os.getenv("VNPTCTO_WORKSTATION_ROOT", "") or "").strip()
+    base_dir = Path(root) / "data" / "onebss-sessions" if root else ROOT / "data" / "onebss-worker-sessions"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    slot_number = max(1, int(slot or 1))
+    return base_dir / f"{safe_worker_file_part(worker_id)}-slot-{slot_number}.json"
+
+
 class WorkerConcurrencyTracker:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -115,6 +128,7 @@ class WorkerConcurrencyTracker:
                     "run_id": run_id,
                     "task_type": info.get("kind") or "",
                     "report": info.get("report") or "",
+                    "slot": int(info.get("slot") or 0),
                     "elapsed_seconds": int(time.monotonic() - float(info.get("started_monotonic") or time.monotonic())),
                 }
                 for run_id, info in self._active.items()
@@ -132,6 +146,9 @@ class WorkerConcurrencyTracker:
             return counts["total"] < limits["total"] and counts.get(kind, 0) < limits.get(kind, 1)
 
     def try_start(self, kind: str, run_id: str, report_code: str = "") -> bool:
+        return self.start_slot(kind, run_id, report_code) > 0
+
+    def start_slot(self, kind: str, run_id: str, report_code: str = "") -> int:
         task_id = str(run_id or "").strip()
         if not task_id:
             task_id = f"{kind}-{time.time_ns()}"
@@ -139,15 +156,22 @@ class WorkerConcurrencyTracker:
         with self._lock:
             counts = self._counts_locked()
             if task_id in self._active:
-                return False
+                return 0
             if counts["total"] >= limits["total"] or counts.get(kind, 0) >= limits.get(kind, 1):
-                return False
+                return 0
+            used_slots = {
+                int(info.get("slot") or 0)
+                for info in self._active.values()
+                if str(info.get("kind") or "") == kind
+            }
+            slot = next((candidate for candidate in range(1, limits.get(kind, 1) + 1) if candidate not in used_slots), 1)
             self._active[task_id] = {
                 "kind": kind,
                 "report": report_code,
+                "slot": slot,
                 "started_monotonic": time.monotonic(),
             }
-            return True
+            return slot
 
     def finish(self, run_id: str) -> None:
         task_id = str(run_id or "").strip()
@@ -196,11 +220,16 @@ class WorkerTaskDispatcher:
     def start_task(self, kind: str, task: dict[str, Any]) -> bool:
         run_id = worker_task_run_id(kind, task) or f"{kind}-{time.time_ns()}"
         report_code = worker_task_report_code(kind, task)
-        if not self.tracker.try_start(kind, run_id, report_code):
+        slot = self.tracker.start_slot(kind, run_id, report_code)
+        if not slot:
             return False
+        task_payload = dict(task)
+        if kind == TASK_KIND_ONEBSS:
+            task_payload["_worker_slot"] = slot
+            task_payload["_worker_state_path"] = str(onebss_worker_slot_state_path(self.worker_id, slot))
         thread = threading.Thread(
             target=self._run_task,
-            args=(kind, task, run_id),
+            args=(kind, task_payload, run_id),
             name=f"vnptcto-{kind}-{run_id[:24]}",
             daemon=True,
         )
@@ -611,6 +640,7 @@ def _run_onebss_report_request_child(
     parameters: dict[str, Any],
     otp: str,
     session_id: str,
+    state_path: str,
 ) -> None:
     headers = {"Authorization": f"Bearer {token}"}
     with httpx.Client(base_url=base_url.rstrip("/"), headers=headers, timeout=httpx.Timeout(60.0, connect=20.0)) as child_client:
@@ -648,6 +678,7 @@ def _run_onebss_report_request_child(
                 session_id=session_id,
                 created_by=worker_id,
                 progress_callback=child_progress,
+                state_path=state_path or None,
             )
             result_queue.put({"ok": True, "result": result})
         except OneBssTaskCancelled as error:
@@ -676,6 +707,7 @@ def run_onebss_report_request_guarded(
     otp: str,
     session_id: str,
     progress_callback=None,
+    state_path: str | Path | None = None,
 ) -> dict[str, Any]:
     if not onebss_task_guard_enabled() or not hasattr(client, "base_url"):
         settings = get_settings().model_copy(update={"mobile_gateway_enabled": False, "google_drive_folder_id": ""})
@@ -687,6 +719,7 @@ def run_onebss_report_request_guarded(
             session_id=session_id,
             created_by=worker_id,
             progress_callback=progress_callback,
+            state_path=state_path,
         )
 
     timeout_seconds = onebss_task_timeout_seconds()
@@ -696,7 +729,7 @@ def run_onebss_report_request_guarded(
     result_queue: mp.Queue = mp.Queue()
     process = mp.Process(
         target=_run_onebss_report_request_child,
-        args=(result_queue, str(client.base_url), token, worker_id, run_id, report, parameters, otp, session_id),
+        args=(result_queue, str(client.base_url), token, worker_id, run_id, report, parameters, otp, session_id, str(state_path or "")),
         daemon=True,
     )
     started = time.monotonic()
@@ -743,6 +776,8 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
     report = task.get("report") if isinstance(task.get("report"), dict) else {}
     parameters = task.get("parameters") if isinstance(task.get("parameters"), dict) else {}
     drive_folder_id = str(task.get("drive_folder_id") or "").strip()
+    worker_slot = int(task.get("_worker_slot") or 0)
+    worker_state_path = str(task.get("_worker_state_path") or "").strip()
     report_for_worker = {**report, "storage_link": ""}
     session_id = ""
     otp = ""
@@ -773,6 +808,8 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
                 "details": {
                     **worker_process_details(),
                     "task_type": "onebss",
+                    "worker_slot": worker_slot,
+                    "worker_state_path": worker_state_path,
                 },
             },
             timeout=8.0,
@@ -809,6 +846,7 @@ def process_task(client: httpx.Client, task: dict[str, Any], worker_id: str, pol
                 otp=otp,
                 session_id=session_id,
                 progress_callback=send_progress,
+                state_path=worker_state_path or None,
             )
             status = str(result.get("status") or ("success" if result.get("ok") else "failed")).lower()
             if status == "otp_session_expired":
