@@ -1486,6 +1486,13 @@ function dateInputValue(value) {
   return String(value || "").slice(0, 10);
 }
 
+function dateTimeValue(value) {
+  const text = String(value || "");
+  if (!text) return "";
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? text : date.toLocaleString("vi-VN");
+}
+
 function billingStatusLabel(status) {
   return {
     disabled: "Tắt",
@@ -1563,13 +1570,13 @@ function ensureEditUserPasswordTools(form) {
     <div class="password-admin-tools" id="edit-user-password-tools">
       <div class="password-admin-toolbar">
         <div>
-          <strong>Mật khẩu tạm mới</strong>
-          <small>Hệ thống không xem lại mật khẩu cũ. Tạo mật khẩu mới khi cần cấp lại tài khoản.</small>
+          <strong>Mật khẩu dùng một lần</strong>
+          <small>Tạo mã đăng nhập tạm thời, không đổi mật khẩu chính. Mã tự khóa sau lần đăng nhập thành công đầu tiên.</small>
         </div>
-        <button class="btn-secondary" type="button" id="generate-user-password">Tạo mật khẩu tạm</button>
+        <button class="btn-secondary" type="button" id="generate-user-password">Tạo mã dùng một lần</button>
       </div>
       <div class="generated-password-box hidden" id="generated-user-password-box" aria-live="polite">
-        <label>Mật khẩu vừa tạo<input class="form-control generated-password-input" id="generated-user-password" type="text" readonly /></label>
+        <label>Mã vừa tạo<input class="form-control generated-password-input" id="generated-user-password" type="text" readonly /></label>
         <button class="table-action" type="button" id="copy-generated-user-password">Copy</button>
       </div>
     </div>
@@ -1590,7 +1597,7 @@ async function generateUserPasswordFromDialog(button) {
   const id = Number(form.elements.namedItem("id")?.value || 0);
   const user = users.find((item) => Number(item.id) === id);
   if (!id) return;
-  if (!confirm(`Tạo mật khẩu tạm mới cho ${user?.username || "người dùng này"}? Mật khẩu hiện tại sẽ không đăng nhập được nữa.`)) return;
+  if (!confirm(`Tạo mật khẩu dùng một lần cho ${user?.username || "người dùng này"}? Mật khẩu chính của tài khoản vẫn giữ nguyên.`)) return;
   setButtonLoading(button, true);
   try {
     const result = await api(`/api/admin/users/${id}/generate-password`, { method: "POST" });
@@ -1603,10 +1610,14 @@ async function generateUserPasswordFromDialog(button) {
       users = users.map((item) => Number(item.id) === Number(result.user.id) ? { ...item, ...result.user } : item);
       renderUsersTable();
     }
-    showMessage(form.querySelector(".result"), result.message || "Đã tạo mật khẩu tạm mới.");
+    const expiresText = dateTimeValue(result.expires_at);
+    showMessage(
+      form.querySelector(".result"),
+      `${result.message || "Đã tạo mật khẩu dùng một lần."}${expiresText ? ` Hết hạn: ${expiresText}.` : ""}`,
+    );
     try {
       await copyTextToClipboard(password);
-      showToast("Đã copy mật khẩu tạm.");
+      showToast("Đã copy mật khẩu dùng một lần.");
     } catch {
       // Clipboard may be blocked; the password remains visible in the dialog.
     }
@@ -1620,7 +1631,7 @@ async function generateUserPasswordFromDialog(button) {
 async function copyGeneratedUserPasswordFromDialog() {
   try {
     await copyTextToClipboard($("#generated-user-password")?.value || "");
-    showToast("Đã copy mật khẩu tạm.");
+    showToast("Đã copy mật khẩu dùng một lần.");
   } catch (error) {
     showToast(error.message, "error");
   }

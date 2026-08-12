@@ -647,6 +647,22 @@ class AppRepository:
                 CREATE INDEX IF NOT EXISTS user_login_sessions_active_idx
                 ON user_login_sessions (user_id, is_active, created_at DESC);
 
+                CREATE TABLE IF NOT EXISTS user_one_time_passwords (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    created_by TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    used_at TEXT NOT NULL DEFAULT '',
+                    revoked_at TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS user_one_time_passwords_active_idx
+                ON user_one_time_passwords (user_id, used_at, revoked_at, expires_at DESC);
+
                 CREATE TABLE IF NOT EXISTS billing_plans (
                     code TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -954,6 +970,57 @@ class AppRepository:
                 """,
                 (hash_password(password), int(must_change), self._now(), user_id),
             )
+
+    def create_user_one_time_password(self, user_id: int, password: str, created_by: str, expires_at: str) -> dict[str, Any]:
+        now = self._now()
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE user_one_time_passwords
+                SET revoked_at = ?, updated_at = ?
+                WHERE user_id = ? AND used_at = '' AND revoked_at = '' AND expires_at > ?
+                """,
+                (now, now, user_id, now),
+            )
+            cursor = connection.execute(
+                """
+                INSERT INTO user_one_time_passwords
+                (user_id, password_hash, created_by, created_at, expires_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (user_id, hash_password(password), created_by[:120], now, expires_at, now),
+            )
+            row = connection.execute(
+                "SELECT * FROM user_one_time_passwords WHERE id = ?",
+                (int(cursor.lastrowid),),
+            ).fetchone()
+            return dict(row) if row else {}
+
+    def list_active_user_one_time_passwords(self, user_id: int, now: str) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, user_id, password_hash, expires_at
+                FROM user_one_time_passwords
+                WHERE user_id = ? AND used_at = '' AND revoked_at = '' AND expires_at > ?
+                ORDER BY created_at DESC, id DESC
+                """,
+                (user_id, now),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def mark_user_one_time_password_used(self, password_id: int) -> bool:
+        now = self._now()
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE user_one_time_passwords
+                SET used_at = ?, updated_at = ?
+                WHERE id = ? AND used_at = '' AND revoked_at = ''
+                """,
+                (now, now, password_id),
+            )
+            return cursor.rowcount == 1
 
     def count_active_admins(self) -> int:
         with self.connect() as connection:

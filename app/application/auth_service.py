@@ -1,5 +1,6 @@
 import secrets
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.data_access.app_repository import AppRepository, verify_password
@@ -12,6 +13,7 @@ PASSWORD_GROUPS = (
     "!@#$%*?",
 )
 PASSWORD_ALPHABET = "".join(PASSWORD_GROUPS)
+ONE_TIME_PASSWORD_TTL_HOURS = 24
 
 
 def generate_temporary_password(length: int = 14) -> str:
@@ -28,11 +30,16 @@ class AuthService:
 
     def authenticate(self, username: str, password: str) -> dict[str, Any] | None:
         user = self.repository.get_user_by_username(username.strip())
-        if not user or not user["is_active"] or not verify_password(password, user["password_hash"]):
+        if not user or not user["is_active"]:
             self.repository.add_audit_log(username.strip() or "unknown", "login_failed", "Đăng nhập thất bại")
             return None
-        self.repository.add_audit_log(user["username"], "login_success", "Đăng nhập thành công")
-        return self.public_user(user)
+        if verify_password(password, user["password_hash"]):
+            self.repository.add_audit_log(user["username"], "login_success", "Đăng nhập thành công")
+            return self.public_user(user)
+        if self._authenticate_one_time_password(user, password):
+            return self.public_user(user)
+        self.repository.add_audit_log(username.strip() or "unknown", "login_failed", "Đăng nhập thất bại")
+        return None
 
     def create_user(self, actor: str, username: str, full_name: str, password: str, role: str, employee: dict[str, Any] | None = None) -> dict[str, Any]:
         self._validate_user_input(username, full_name, password, role)
@@ -67,12 +74,18 @@ class AuthService:
         self.repository.change_password(user_id, password, must_change=True)
         self.repository.add_audit_log(actor, "password_reset", f"Đặt lại mật khẩu cho {user['username']}")
 
-    def generate_reset_password(self, actor: str, user_id: int) -> dict[str, Any]:
+    def generate_one_time_password(self, actor: str, user_id: int) -> dict[str, Any]:
+        user = self.repository.get_user_by_id(user_id)
+        if not user:
+            raise ValueError("Không tìm thấy người dùng.")
         password = generate_temporary_password()
-        self.reset_password(actor, user_id, password)
+        expires_at = (datetime.now(UTC) + timedelta(hours=ONE_TIME_PASSWORD_TTL_HOURS)).isoformat(timespec="seconds")
+        self.repository.create_user_one_time_password(user_id, password, actor, expires_at)
+        self.repository.add_audit_log(actor, "one_time_password_created", f"Tạo mật khẩu dùng một lần cho {user['username']}")
         return {
             "password": password,
-            "user": self.public_user(self.repository.get_user_by_id(user_id)),
+            "expires_at": expires_at,
+            "user": self.public_user(user),
         }
 
     def change_own_password(self, user_id: int, username: str, current_password: str, new_password: str) -> None:
@@ -83,6 +96,24 @@ class AuthService:
             raise ValueError("Mật khẩu mới phải có ít nhất 10 ký tự.")
         self.repository.change_password(user_id, new_password)
         self.repository.add_audit_log(username, "password_changed", "Đổi mật khẩu cá nhân")
+
+    def _authenticate_one_time_password(self, user: dict[str, Any], password: str) -> bool:
+        list_passwords = getattr(self.repository, "list_active_user_one_time_passwords", None)
+        mark_used = getattr(self.repository, "mark_user_one_time_password_used", None)
+        if not callable(list_passwords) or not callable(mark_used):
+            return False
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+        for item in list_passwords(int(user["id"]), now):
+            if verify_password(password, str(item.get("password_hash") or "")):
+                if mark_used(int(item["id"])):
+                    self.repository.add_audit_log(
+                        user["username"],
+                        "login_success_one_time_password",
+                        "Đăng nhập bằng mật khẩu dùng một lần",
+                    )
+                    return True
+                return False
+        return False
 
     @staticmethod
     def public_user(user: dict[str, Any] | None) -> dict[str, Any]:

@@ -3643,12 +3643,19 @@ def reset_password(request: Request, user_id: int, payload: PasswordPayload) -> 
 def generate_user_password(request: Request, user_id: int) -> dict:
     actor = admin_user(request)
     try:
-        result = build_auth_service().generate_reset_password(actor["username"], user_id)
+        result = build_auth_service().generate_one_time_password(actor["username"], user_id)
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    except RuntimeError as error:
+        if "user_one_time_passwords" in str(error):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Supabase chua co bang user_one_time_passwords. Hay chay file sql/supabase_user_one_time_passwords.sql trong SQL Editor truoc.",
+            ) from error
+        raise
     return {
         "ok": True,
-        "message": "Đã tạo mật khẩu tạm mới. Mật khẩu chỉ hiển thị một lần.",
+        "message": "Đã tạo mật khẩu dùng một lần. Mật khẩu chính không thay đổi.",
         **result,
     }
 

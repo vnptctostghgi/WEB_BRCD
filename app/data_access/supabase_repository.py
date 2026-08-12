@@ -339,6 +339,63 @@ class SupabaseRepository:
             "updated_at": self._now(),
         })
 
+    def create_user_one_time_password(self, user_id: int, password: str, created_by: str, expires_at: str) -> dict[str, Any]:
+        now = self._now()
+        try:
+            self._patch("user_one_time_passwords", {
+                "user_id": f"eq.{user_id}",
+                "used_at": "is.null",
+                "revoked_at": "is.null",
+                "expires_at": f"gt.{now}",
+            }, {
+                "revoked_at": now,
+                "updated_at": now,
+            })
+            return self._insert("user_one_time_passwords", {
+                "user_id": user_id,
+                "password_hash": hash_password(password),
+                "created_by": created_by[:120],
+                "created_at": now,
+                "expires_at": expires_at,
+                "updated_at": now,
+            })
+        except RuntimeError as error:
+            if self._is_missing_user_one_time_passwords_error(error):
+                raise RuntimeError("Supabase chua co bang user_one_time_passwords. Hay chay file sql/supabase_user_one_time_passwords.sql truoc.") from error
+            raise
+
+    def list_active_user_one_time_passwords(self, user_id: int, now: str) -> list[dict[str, Any]]:
+        try:
+            return self._get("user_one_time_passwords", {
+                "user_id": f"eq.{user_id}",
+                "used_at": "is.null",
+                "revoked_at": "is.null",
+                "expires_at": f"gt.{now}",
+                "select": "id,user_id,password_hash,expires_at",
+                "order": "created_at.desc,id.desc",
+            })
+        except RuntimeError as error:
+            if self._is_missing_user_one_time_passwords_error(error):
+                return []
+            raise
+
+    def mark_user_one_time_password_used(self, password_id: int) -> bool:
+        now = self._now()
+        try:
+            rows = self._patch_returning("user_one_time_passwords", {
+                "id": f"eq.{password_id}",
+                "used_at": "is.null",
+                "revoked_at": "is.null",
+            }, {
+                "used_at": now,
+                "updated_at": now,
+            })
+            return bool(rows)
+        except RuntimeError as error:
+            if self._is_missing_user_one_time_passwords_error(error):
+                return False
+            raise
+
     def count_active_admins(self) -> int:
         return len(self._get("users", {"role": "eq.admin", "is_active": "eq.true", "select": "id"}))
 
@@ -2232,6 +2289,14 @@ class SupabaseRepository:
         )
 
     @staticmethod
+    def _is_missing_user_one_time_passwords_error(error: Exception) -> bool:
+        text = str(error).lower()
+        return "user_one_time_passwords" in text and any(
+            marker in text
+            for marker in ("pgrst", "does not exist", "could not find", "schema cache", "relation")
+        )
+
+    @staticmethod
     def _is_missing_ftp_table_error(error: Exception) -> bool:
         text = str(error).lower()
         return ("ftp_reports" in text or "ftp_report_runs" in text) and any(
@@ -2268,6 +2333,9 @@ class SupabaseRepository:
 
     def _patch(self, table: str, params: dict[str, str], payload: dict[str, Any]) -> None:
         self._request("PATCH", table, params=params, json=payload, headers={"Prefer": "return=minimal"})
+
+    def _patch_returning(self, table: str, params: dict[str, str], payload: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request("PATCH", table, params=params, json=payload, headers={"Prefer": "return=representation"}) or []
 
     def _delete(self, table: str, params: dict[str, str]) -> None:
         self._request("DELETE", table, params=params, headers={"Prefer": "return=minimal"})
