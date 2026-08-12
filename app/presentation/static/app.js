@@ -164,7 +164,7 @@ const dashboardBuilderLayoutCache = new Map();
 const DASHBOARD_VIEWER_REFRESH_POLL_MS = 4000;
 const DATA_CACHE_TTL_MS = 2 * 60 * 1000;
 const NAVIGATION_CLIENT_CACHE_TTL_MS = 60 * 1000;
-const NAVIGATION_CLIENT_CACHE_VERSION = "2026-08-08-ftp-hga-normalize-v34";
+const NAVIGATION_CLIENT_CACHE_VERSION = "2026-08-12-feature-permissions-v35";
 const TABLE_PAGE_SIZE = 20;
 const PUBLIC_MESSAGES_LIMIT = 10;
 const TABLE_SHORT_PAGE_SIZE = 10;
@@ -1730,7 +1730,7 @@ async function openEditUser(id, options = {}) {
   }
 }
 
-if (role === "admin") {
+if (document.body.dataset.role) {
   $("#create-user-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;

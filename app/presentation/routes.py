@@ -2186,9 +2186,32 @@ def require_feature(request: Request, feature_code: str) -> dict:
     user = current_user(request)
     if user["role"] == "admin":
         return user
-    if feature_code not in build_app_repository().get_user_permissions(user["id"]):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bạn chưa được cấp quyền sử dụng chức năng này.")
+    permissions = {str(code) for code in user.get("permissions", []) if str(code)}
+    normalized_permissions = {normalize_feature_code(code) for code in permissions}
+    normalized_feature = normalize_feature_code(feature_code)
+    if feature_code not in permissions and normalized_feature not in normalized_permissions:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ONLY_MESSAGE)
     return user
+
+
+def require_any_feature(request: Request, *feature_codes: str) -> dict:
+    user = current_user(request)
+    if user["role"] == "admin":
+        return user
+    permissions = {str(code) for code in user.get("permissions", []) if str(code)}
+    normalized_permissions = {normalize_feature_code(code) for code in permissions}
+    for feature_code in feature_codes:
+        if feature_code in permissions or normalize_feature_code(feature_code) in normalized_permissions:
+            return user
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ADMIN_ONLY_MESSAGE)
+
+
+def user_has_feature(user: dict, *feature_codes: str) -> bool:
+    if user.get("role") == "admin":
+        return True
+    permissions = {str(code) for code in user.get("permissions", []) if str(code)}
+    normalized_permissions = {normalize_feature_code(code) for code in permissions}
+    return any(feature_code in permissions or normalize_feature_code(feature_code) in normalized_permissions for feature_code in feature_codes)
 
 
 def user_can_open_feature_path(user: dict, feature_path: str) -> bool:
@@ -3350,6 +3373,9 @@ def render_index_page(request: Request, feature_path: str) -> Response:
     def render_view(view_name: str) -> bool:
         return not initial_view or initial_view == view_name
 
+    def can_use(*feature_codes: str) -> bool:
+        return user_has_feature(user, *feature_codes)
+
     return templates.TemplateResponse(
         request=request,
         name="index.html",
@@ -3359,6 +3385,7 @@ def render_index_page(request: Request, feature_path: str) -> Response:
             "shell_only": shell_only,
             "initial_view": initial_view,
             "render_view": render_view,
+            "can_use": can_use,
             "workstation_setup_package_version": WORKSTATION_SETUP_PACKAGE_VERSION,
         },
     )
@@ -3472,19 +3499,19 @@ def dashboard_fiber(request: Request) -> dict:
 
 @router.get("/api/admin/users")
 def list_users(request: Request) -> dict:
-    admin_user(request)
+    require_any_feature(request, "quantringuoidung", "phanquyennguoidung", "phanquyendulieunguoidung")
     return {"users": build_app_repository().list_users()}
 
 
 @router.get("/api/admin/billing/plans")
 def list_billing_plans(request: Request) -> dict:
-    admin_user(request)
+    require_feature(request, "quantringuoidung")
     return {"plans": build_app_repository().list_billing_plans(active_only=True)}
 
 
 @router.post("/api/admin/users")
 def create_user(request: Request, payload: CreateUserPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantringuoidung")
     try:
         user = build_auth_service().create_user(
             actor["username"], payload.username, payload.full_name, payload.password, payload.role
@@ -3496,7 +3523,7 @@ def create_user(request: Request, payload: CreateUserPayload) -> dict:
 
 @router.put("/api/admin/users/{user_id}/billing")
 def update_user_billing(request: Request, user_id: int, payload: UserBillingPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantringuoidung")
     repository = build_app_repository()
     if not repository.get_user_by_id(user_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay nguoi dung.")
@@ -3522,7 +3549,7 @@ def update_user_billing(request: Request, user_id: int, payload: UserBillingPayl
 
 @router.post("/api/admin/users/{user_id}/billing/renew")
 def renew_user_billing(request: Request, user_id: int, payload: BillingRenewPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantringuoidung")
     repository = build_app_repository()
     user = repository.get_user_by_id(user_id)
     if not user:
@@ -3549,7 +3576,7 @@ def renew_user_billing(request: Request, user_id: int, payload: BillingRenewPayl
 
 @router.get("/api/admin/users/import-template")
 def download_user_import_template(request: Request) -> Response:
-    admin_user(request)
+    require_feature(request, "quantringuoidung")
     workbook = openpyxl.Workbook()
     sheet = workbook.active
     sheet.title = "NguoiDung"
@@ -3567,7 +3594,7 @@ def download_user_import_template(request: Request) -> Response:
 
 @router.post("/api/admin/users/import")
 async def import_users(request: Request, file: UploadFile = File(...)) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantringuoidung")
     if not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chỉ hỗ trợ file Excel .xlsx.")
     content = await file.read(MAX_USER_IMPORT_BYTES + 1)
@@ -3604,7 +3631,7 @@ async def import_users(request: Request, file: UploadFile = File(...)) -> dict:
 
 @router.put("/api/admin/users/{user_id}")
 def update_user(request: Request, user_id: int, payload: UpdateUserPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantringuoidung")
     try:
         user = build_auth_service().update_user(
             actor["username"], actor["id"], user_id, payload.full_name, payload.role, payload.is_active
@@ -3616,7 +3643,7 @@ def update_user(request: Request, user_id: int, payload: UpdateUserPayload) -> d
 
 @router.delete("/api/admin/users/{user_id}")
 def delete_user(request: Request, user_id: int) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantringuoidung")
     user = build_app_repository().get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy người dùng.")
@@ -3631,7 +3658,7 @@ def delete_user(request: Request, user_id: int) -> dict:
 
 @router.post("/api/admin/users/{user_id}/reset-password")
 def reset_password(request: Request, user_id: int, payload: PasswordPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantringuoidung")
     try:
         build_auth_service().reset_password(actor["username"], user_id, payload.password)
     except ValueError as error:
@@ -3641,7 +3668,7 @@ def reset_password(request: Request, user_id: int, payload: PasswordPayload) -> 
 
 @router.post("/api/admin/users/{user_id}/generate-password")
 def generate_user_password(request: Request, user_id: int) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantringuoidung")
     try:
         result = build_auth_service().generate_one_time_password(actor["username"], user_id)
     except ValueError as error:
@@ -3662,13 +3689,13 @@ def generate_user_password(request: Request, user_id: int) -> dict:
 
 @router.get("/api/admin/audit-logs")
 def audit_logs(request: Request) -> dict:
-    admin_user(request)
+    require_feature(request, "nhatkyhoatdong")
     return {"logs": build_app_repository().list_audit_logs()}
 
 
 @router.get("/api/admin/system")
 def system_info(request: Request) -> dict:
-    admin_user(request)
+    require_feature(request, "quantriketnoi")
     settings = get_settings()
     users = build_app_repository().list_users()
     return {
@@ -3685,7 +3712,7 @@ def system_info(request: Request) -> dict:
 
 @router.get("/api/admin/storage/health")
 def storage_health(request: Request) -> dict:
-    admin_user(request)
+    require_feature(request, "quantriketnoi")
     repository = build_app_repository()
     if hasattr(repository, "health_check"):
         return repository.health_check()
@@ -3709,7 +3736,7 @@ def workstation_heartbeat(request: Request, payload: WorkstationHeartbeatPayload
 
 @router.get("/api/admin/workstation/overview")
 def workstation_overview(request: Request) -> dict:
-    admin_user(request)
+    require_feature(request, "maytram")
     repository = build_app_repository()
     profiles = workstation_registry_profiles(repository)
     runs: list[dict[str, Any]] = []
@@ -3763,7 +3790,7 @@ def workstation_overview(request: Request) -> dict:
 
 @router.post("/api/admin/workstation/profile")
 def save_workstation_profile(request: Request, payload: WorkstationProfilePayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "maytram")
     repository = build_app_repository()
     profile = upsert_workstation_profile(
         repository,
@@ -3782,7 +3809,7 @@ def save_workstation_profile(request: Request, payload: WorkstationProfilePayloa
 
 @router.post("/api/admin/workstation/{worker_id}/test")
 def test_workstation_worker(request: Request, worker_id: str) -> dict:
-    admin_user(request)
+    require_feature(request, "maytram")
     repository = build_app_repository()
     profiles = workstation_registry_profiles(repository)
     runs: list[dict[str, Any]] = []
@@ -3814,7 +3841,7 @@ def test_workstation_worker(request: Request, worker_id: str) -> dict:
 
 @router.delete("/api/admin/workstation/{worker_id}")
 def delete_workstation_worker(request: Request, worker_id: str) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "maytram")
     repository = build_app_repository()
     current = workstation_profile_for(worker_id, workstation_registry_profiles(repository))
     profile = upsert_workstation_profile(
@@ -3836,7 +3863,7 @@ def delete_workstation_worker(request: Request, worker_id: str) -> dict:
 
 @router.get("/api/admin/workstation/setup-package")
 def download_workstation_setup_package(request: Request) -> Response:
-    admin_user(request)
+    require_feature(request, "maytram")
     payload = workstation_setup_package_bytes(request)
     filename = f"VNPTCTO_WORKSTATION_SETUP_{WORKSTATION_SETUP_PACKAGE_VERSION}_{datetime.now():%Y%m%d_%H%M}.zip"
     return Response(
@@ -3852,13 +3879,13 @@ def download_workstation_setup_package(request: Request) -> Response:
 
 @router.get("/api/google-drive/oauth/status")
 def google_drive_oauth_status_api(request: Request) -> dict:
-    admin_user(request)
+    require_feature(request, "quantriketnoi")
     return google_drive_oauth_status(get_settings(), build_app_repository())
 
 
 @router.post("/api/google-drive/oauth/folder")
 def save_google_drive_oauth_folder(request: Request, payload: GoogleDriveFolderPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     folder_id = extract_google_drive_folder_id(payload.folder_id) or str(payload.folder_id or "").strip()
     if not folder_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Hay nhap link thu muc Google Drive hoac folder_id.")
@@ -3885,7 +3912,7 @@ def save_google_drive_oauth_folder(request: Request, payload: GoogleDriveFolderP
 
 @router.post("/api/google-drive/oauth/start")
 def google_drive_oauth_start(request: Request) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     settings = get_settings()
     if not google_drive_oauth_client_configured(settings):
         raise HTTPException(
@@ -3935,7 +3962,7 @@ def google_drive_oauth_callback(request: Request) -> HTMLResponse:
     except BadSignature:
         return google_drive_oauth_result_page(False, "Ma xac thuc Google Drive khong hop le.")
     try:
-        actor = admin_user(request)
+        actor = require_feature(request, "quantriketnoi")
     except HTTPException:
         return google_drive_oauth_result_page(False, "Hay dang nhap trang quan tri roi ket noi Google Drive lai.")
     if str(state_payload.get("username") or "") != str(actor.get("username") or ""):
@@ -3984,7 +4011,7 @@ def google_drive_oauth_callback(request: Request) -> HTMLResponse:
 
 @router.post("/api/google-drive/oauth/disconnect")
 def google_drive_oauth_disconnect(request: Request) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     clear_google_drive_oauth_tokens(build_app_repository())
     build_app_repository().add_audit_log(actor["username"], "google_drive_oauth_disconnected", "Ngat ket noi Google Drive OAuth")
     return {"ok": True, "message": "Da ngat ket noi Google Drive OAuth."}
@@ -3992,7 +4019,7 @@ def google_drive_oauth_disconnect(request: Request) -> dict:
 
 @router.get("/api/admin/connections")
 def system_connections(request: Request) -> dict:
-    admin_user(request)
+    require_feature(request, "quantriketnoi")
     connections = build_app_repository().list_system_connections()
     for connection in connections:
         config = connection.get("config", {})
@@ -4006,7 +4033,7 @@ def system_connections(request: Request) -> dict:
 
 @router.post("/api/admin/connections/{code}/test")
 def test_system_connection(request: Request, code: str) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     try:
         result = build_connection_service().test_connection(code)
     except ValueError as error:
@@ -4018,7 +4045,7 @@ def test_system_connection(request: Request, code: str) -> dict:
 
 @router.put("/api/admin/connections/{code}")
 def save_system_connection(request: Request, code: str, payload: SystemConnectionPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     repository = build_app_repository()
     existing = repository.get_system_connection_by_code(code.strip()) or {}
     existing_config = existing.get("config") if isinstance(existing.get("config"), dict) else {}
@@ -4067,7 +4094,7 @@ def download_report_link(request: Request, report_id: int) -> Response:
 
 @router.get("/api/admin/report-links")
 def list_admin_report_links(request: Request) -> dict:
-    admin_user(request)
+    require_any_feature(request, "quantriketnoi", "linkbaocao")
     try:
         links = build_app_repository().list_report_links(include_inactive=True)
     except RuntimeError as error:
@@ -4077,7 +4104,7 @@ def list_admin_report_links(request: Request) -> dict:
 
 @router.post("/api/admin/report-links")
 def save_admin_report_link(request: Request, payload: ReportLinkPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_any_feature(request, "quantriketnoi", "linkbaocao")
     repository = build_app_repository()
     report_id = payload.id
     ten_bao_cao = payload.ten_bao_cao.strip()
@@ -4101,7 +4128,7 @@ def save_admin_report_link(request: Request, payload: ReportLinkPayload) -> dict
 
 @router.delete("/api/admin/report-links/{report_id}")
 def delete_admin_report_link(request: Request, report_id: int) -> dict:
-    actor = admin_user(request)
+    actor = require_any_feature(request, "quantriketnoi", "linkbaocao")
     repository = build_app_repository()
     try:
         repository.delete_report_link(report_id)
@@ -4113,7 +4140,7 @@ def delete_admin_report_link(request: Request, report_id: int) -> dict:
 
 @router.get("/api/admin/sql-reports")
 def list_sql_reports(request: Request) -> dict:
-    admin_user(request)
+    require_any_feature(request, "quantriketnoi", "quantrisql", "thietkelayoutbaocao")
     try:
         reports = build_app_repository().list_sql_reports()
     except RuntimeError as error:
@@ -4123,7 +4150,7 @@ def list_sql_reports(request: Request) -> dict:
 
 @router.post("/api/admin/sql-reports")
 def save_sql_report(request: Request, payload: SqlReportPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_any_feature(request, "quantriketnoi", "quantrisql", "thietkelayoutbaocao")
     repository = build_app_repository()
     existing_report = repository.get_sql_report_by_id(payload.id) if payload.id else None
     ten_bao_cao = payload.ten_bao_cao.strip()
@@ -4150,7 +4177,7 @@ def save_sql_report(request: Request, payload: SqlReportPayload) -> dict:
 
 @router.delete("/api/admin/sql-reports/{report_id}")
 def delete_sql_report(request: Request, report_id: int) -> dict:
-    actor = admin_user(request)
+    actor = require_any_feature(request, "quantriketnoi", "quantrisql", "thietkelayoutbaocao")
     repository = build_app_repository()
     existing_report = repository.get_sql_report_by_id(report_id)
     if hasattr(repository, "delete_dashboard_chart_cache_for_sql_report"):
@@ -4169,7 +4196,7 @@ def delete_sql_report(request: Request, report_id: int) -> dict:
 
 @router.get("/api/admin/onebss-reports")
 def list_admin_onebss_reports(request: Request) -> dict:
-    admin_user(request)
+    require_any_feature(request, "quantriketnoi", "quantridulieuonebss")
     try:
         return {"reports": build_app_repository().list_onebss_reports()}
     except RuntimeError as error:
@@ -4178,7 +4205,7 @@ def list_admin_onebss_reports(request: Request) -> dict:
 
 @router.post("/api/admin/onebss-reports")
 def save_admin_onebss_report(request: Request, payload: OneBssReportPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_any_feature(request, "quantriketnoi", "quantridulieuonebss")
     repository = build_app_repository()
     ten_bao_cao = payload.ten_bao_cao.strip()
     if not ten_bao_cao:
@@ -4214,7 +4241,7 @@ def save_admin_onebss_report(request: Request, payload: OneBssReportPayload) -> 
 
 @router.delete("/api/admin/onebss-reports/{report_id}")
 def delete_admin_onebss_report(request: Request, report_id: int) -> dict:
-    actor = admin_user(request)
+    actor = require_any_feature(request, "quantriketnoi", "quantridulieuonebss")
     repository = build_app_repository()
     try:
         repository.delete_onebss_report(report_id)
@@ -4227,7 +4254,7 @@ def delete_admin_onebss_report(request: Request, report_id: int) -> dict:
 
 @router.get("/api/admin/ftp-reports")
 def list_admin_ftp_reports(request: Request) -> dict:
-    admin_user(request)
+    require_feature(request, "quantriketnoi")
     try:
         return {"reports": build_app_repository().list_ftp_reports()}
     except RuntimeError as error:
@@ -4236,7 +4263,7 @@ def list_admin_ftp_reports(request: Request) -> dict:
 
 @router.post("/api/admin/ftp-reports")
 def save_admin_ftp_report(request: Request, payload: FtpReportPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     repository = build_app_repository()
     ten_bao_cao = payload.ten_bao_cao.strip()
     folder_path = _normalize_legacy_ftp_site_text(payload.folder_path.strip())
@@ -4278,7 +4305,7 @@ def save_admin_ftp_report(request: Request, payload: FtpReportPayload) -> dict:
 
 @router.delete("/api/admin/ftp-reports/{report_id}")
 def delete_admin_ftp_report(request: Request, report_id: int) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     repository = build_app_repository()
     try:
         repository.delete_ftp_report(report_id)
@@ -4291,7 +4318,7 @@ def delete_admin_ftp_report(request: Request, report_id: int) -> dict:
 
 @router.get("/api/admin/dashboard-layouts")
 def list_dashboard_layouts(request: Request) -> dict:
-    admin_user(request)
+    require_feature(request, "thietkelayoutbaocao")
     try:
         layouts = build_app_repository().list_dashboard_layouts()
     except RuntimeError as error:
@@ -4311,7 +4338,7 @@ def list_visible_dashboard_layouts(request: Request) -> dict:
 
 @router.get("/api/admin/dashboard-layout-pages")
 def list_dashboard_layout_pages(request: Request) -> dict:
-    admin_user(request)
+    require_feature(request, "thietkelayoutbaocao")
     repository = build_app_repository()
     try:
         layouts = repository.list_dashboard_layouts()
@@ -4329,7 +4356,7 @@ def navigation(request: Request) -> dict:
 
 @router.get("/api/admin/dashboard-layouts/{page_id}")
 def get_dashboard_layout(request: Request, page_id: str) -> dict:
-    admin_user(request)
+    require_feature(request, "thietkelayoutbaocao")
     repository = build_app_repository()
     safe_page_id = normalize_dashboard_code(page_id, "Mã trang")
     features = repository.list_features()
@@ -4347,7 +4374,7 @@ def get_visible_dashboard_layout(request: Request, page_id: str) -> dict:
 
 @router.post("/api/admin/dashboard-layouts")
 def save_dashboard_layout(request: Request, payload: DashboardLayoutPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "thietkelayoutbaocao")
     repository = build_app_repository()
     page_id, page_name, layout = normalize_dashboard_layout(payload)
     features = repository.list_features()
@@ -4368,7 +4395,7 @@ def save_dashboard_layout(request: Request, payload: DashboardLayoutPayload) -> 
 
 @router.delete("/api/admin/dashboard-layouts/{page_id}")
 def delete_dashboard_layout(request: Request, page_id: str) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "thietkelayoutbaocao")
     safe_page_id = normalize_dashboard_code(page_id, "Mã trang")
     try:
         build_app_repository().delete_dashboard_layout(safe_page_id)
@@ -4381,7 +4408,7 @@ def delete_dashboard_layout(request: Request, page_id: str) -> dict:
 
 @router.delete("/api/admin/dashboard-layout-pages/{feature_code}")
 def purge_unsaved_dashboard_layout_page(request: Request, feature_code: str) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "thietkelayoutbaocao")
     repository = build_app_repository()
     raw_code = str(feature_code or "").strip()
     normalized_code = normalize_feature_code(raw_code)
@@ -4409,7 +4436,7 @@ def purge_unsaved_dashboard_layout_page(request: Request, feature_code: str) -> 
 
 @router.get("/api/admin/dashboard-layouts/{page_id}/tabs/{tab_id}/data")
 def load_dashboard_layout_tab_data(request: Request, page_id: str, tab_id: str, refresh: bool = False) -> dict:
-    admin_user(request)
+    require_feature(request, "thietkelayoutbaocao")
     safe_page_id = normalize_dashboard_code(page_id, "Mã trang")
     safe_tab_id = normalize_dashboard_code(tab_id, "Mã Tab", uppercase=False)
     try:
@@ -4466,7 +4493,7 @@ def load_google_sheet_table(request: Request, url: str) -> dict:
 
 @router.get("/api/reports/configs")
 def list_report_configs(request: Request) -> dict:
-    admin_user(request)
+    require_any_feature(request, "truyvansql", "thietkelayoutbaocao")
     def load() -> dict[str, Any]:
         try:
             reports = build_app_repository().list_sql_reports()
@@ -5651,7 +5678,7 @@ def _run_dynamic_report_run_job(job_id: str, payload: RunReportPayload, actor: s
 
 @router.post("/api/reports/run-jobs")
 def start_dynamic_report_run_job(request: Request, payload: RunReportPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "truyvansql")
     _cleanup_dynamic_report_run_jobs()
     job_id = uuid.uuid4().hex
     now = time.time()
@@ -5692,7 +5719,7 @@ def start_dynamic_report_run_job(request: Request, payload: RunReportPayload) ->
 
 @router.get("/api/reports/run-jobs/{job_id}")
 def get_dynamic_report_run_job(request: Request, job_id: str) -> dict:
-    admin_user(request)
+    require_feature(request, "truyvansql")
     _cleanup_dynamic_report_run_jobs()
     job = _get_dynamic_report_run_job(job_id)
     if not job:
@@ -6304,7 +6331,7 @@ def finish_sql_worker_task(request: Request, run_id: str, payload: SqlWorkerResu
 
 @router.post("/api/reports/run")
 def run_dynamic_report(request: Request, payload: RunReportPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "truyvansql")
     if _dynamic_report_direct_query_disabled():
         return _dynamic_report_direct_query_disabled_payload(payload)
     try:
@@ -6340,14 +6367,14 @@ def run_dynamic_report(request: Request, payload: RunReportPayload) -> dict:
 
 @router.get("/api/reports/history")
 def list_dynamic_report_history(request: Request, limit: int = 30) -> dict:
-    admin_user(request)
+    require_feature(request, "truyvansql")
     _cleanup_dynamic_report_export_jobs()
     return {"items": _list_dynamic_report_history(limit)}
 
 
 @router.post("/api/reports/export")
 def export_dynamic_report(request: Request, payload: RunReportPayload) -> Response:
-    admin_user(request)
+    require_feature(request, "truyvansql")
     try:
         result = build_database_service().export_dynamic_report(
             ma_bao_cao=payload.ma_bao_cao.strip().upper(),
@@ -6377,7 +6404,7 @@ def export_dynamic_report(request: Request, payload: RunReportPayload) -> Respon
 
 @router.post("/api/reports/export-jobs")
 def start_dynamic_report_export_job(request: Request, payload: RunReportPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "truyvansql")
     _cleanup_dynamic_report_export_jobs()
     job_id = uuid.uuid4().hex
     now = time.time()
@@ -6428,7 +6455,7 @@ def start_dynamic_report_export_job(request: Request, payload: RunReportPayload)
 
 @router.get("/api/reports/export-jobs")
 def list_dynamic_report_export_jobs(request: Request, limit: int = 100) -> dict:
-    admin_user(request)
+    require_feature(request, "truyvansql")
     _cleanup_dynamic_report_export_jobs()
     jobs = [
         _dynamic_report_export_job_response(str(job.get("job_id") or ""), job)
@@ -6439,7 +6466,7 @@ def list_dynamic_report_export_jobs(request: Request, limit: int = 100) -> dict:
 
 @router.delete("/api/reports/export-jobs/{job_id}")
 def cancel_dynamic_report_export_job(request: Request, job_id: str) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "truyvansql")
     _cleanup_dynamic_report_export_jobs()
     job = _get_dynamic_report_export_job(job_id)
     if not job:
@@ -6482,7 +6509,7 @@ def cancel_dynamic_report_export_job(request: Request, job_id: str) -> dict:
 
 @router.get("/api/reports/export-jobs/{job_id}")
 def get_dynamic_report_export_job(request: Request, job_id: str) -> dict:
-    admin_user(request)
+    require_feature(request, "truyvansql")
     _cleanup_dynamic_report_export_jobs()
     job = _get_dynamic_report_export_job(job_id)
     if not job:
@@ -6492,7 +6519,7 @@ def get_dynamic_report_export_job(request: Request, job_id: str) -> dict:
 
 @router.get("/api/reports/export-jobs/{job_id}/download")
 def download_dynamic_report_export_job(request: Request, job_id: str) -> Response:
-    admin_user(request)
+    require_feature(request, "truyvansql")
     job = _get_dynamic_report_export_job(job_id)
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy job xuất Excel.")
@@ -6510,7 +6537,7 @@ def download_dynamic_report_export_job(request: Request, job_id: str) -> Respons
 
 @router.post("/api/reports/export-loaded")
 def export_loaded_dynamic_report(request: Request, payload: ExportLoadedReportPayload) -> Response:
-    admin_user(request)
+    require_feature(request, "truyvansql")
     max_rows = get_settings().dynamic_report_export_max_rows
     rows = payload.rows[:max_rows]
     result = {
@@ -7013,7 +7040,7 @@ def _save_onebss_job_result(
 
 @router.get("/api/ftp-reports/configs")
 def list_ftp_report_configs(request: Request) -> dict:
-    admin_user(request)
+    require_feature(request, "daodulieuftp")
     try:
         reports = build_app_repository().list_ftp_reports(active_only=True)
     except RuntimeError as error:
@@ -7023,7 +7050,7 @@ def list_ftp_report_configs(request: Request) -> dict:
 
 @router.get("/api/ftp-reports/runs")
 def list_ftp_report_runs(request: Request, ma_bao_cao: str = "", limit: int = 50) -> dict:
-    admin_user(request)
+    require_feature(request, "daodulieuftp")
     report_code = ma_bao_cao.strip().upper()
     try:
         runs = [
@@ -7038,7 +7065,7 @@ def list_ftp_report_runs(request: Request, ma_bao_cao: str = "", limit: int = 50
 @router.delete("/api/ftp-reports/runs")
 @router.post("/api/ftp-reports/runs/clear")
 def clear_ftp_report_runs(request: Request, ma_bao_cao: str = "") -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "daodulieuftp")
     repository = build_app_repository()
     report_code = ma_bao_cao.strip().upper()
     try:
@@ -7053,7 +7080,7 @@ def clear_ftp_report_runs(request: Request, ma_bao_cao: str = "") -> dict:
 @router.post("/api/ftp-reports/runs/{run_id}/cancel")
 @router.delete("/api/ftp-reports/runs/{run_id}/cancel")
 def cancel_ftp_report_run(request: Request, run_id: str) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "daodulieuftp")
     repository = build_app_repository()
     try:
         run = repository.get_ftp_report_run(run_id.strip())
@@ -7085,7 +7112,7 @@ def cancel_ftp_report_run(request: Request, run_id: str) -> dict:
 
 @router.get("/api/ftp-reports/jobs/{job_id}")
 def get_ftp_report_job(request: Request, job_id: str) -> dict:
-    admin_user(request)
+    require_feature(request, "daodulieuftp")
     try:
         run = build_app_repository().get_ftp_report_run(job_id.strip())
     except RuntimeError as error:
@@ -7097,7 +7124,7 @@ def get_ftp_report_job(request: Request, job_id: str) -> dict:
 
 @router.get("/api/ftp-reports/runs/{run_id}/download")
 def download_ftp_report_run(request: Request, run_id: str) -> Response:
-    admin_user(request)
+    require_feature(request, "daodulieuftp")
     try:
         run = build_app_repository().get_ftp_report_run(run_id.strip())
     except RuntimeError as error:
@@ -7112,7 +7139,7 @@ def download_ftp_report_run(request: Request, run_id: str) -> Response:
 
 @router.post("/api/ftp-reports/run")
 def run_ftp_report(request: Request, payload: RunFtpReportPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "daodulieuftp")
     repository = build_app_repository()
     ma_bao_cao = payload.ma_bao_cao.strip().upper()
     try:
@@ -7478,7 +7505,7 @@ def _start_onebss_report_job_thread(job_id: str, **kwargs: Any) -> None:
 
 @router.get("/api/onebss-reports/configs")
 def list_onebss_report_configs(request: Request) -> dict:
-    admin_user(request)
+    require_feature(request, "daodulieuonebss")
     def load() -> dict[str, Any]:
         try:
             reports = build_app_repository().list_onebss_reports()
@@ -7491,7 +7518,7 @@ def list_onebss_report_configs(request: Request) -> dict:
 
 @router.get("/api/onebss-reports/runs")
 def list_onebss_report_runs(request: Request, ma_bao_cao: str = "", limit: int = 50) -> dict:
-    admin_user(request)
+    require_feature(request, "daodulieuonebss")
     report_code = ma_bao_cao.strip().upper()
     repository = build_app_repository()
     try:
@@ -7508,7 +7535,7 @@ def list_onebss_report_runs(request: Request, ma_bao_cao: str = "", limit: int =
 @router.delete("/api/onebss-reports/runs")
 @router.post("/api/onebss-reports/runs/clear")
 def clear_onebss_report_runs(request: Request, ma_bao_cao: str = "") -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "daodulieuonebss")
     repository = build_app_repository()
     report_code = ma_bao_cao.strip().upper()
     try:
@@ -7526,7 +7553,7 @@ def clear_onebss_report_runs(request: Request, ma_bao_cao: str = "") -> dict:
 @router.post("/api/onebss-reports/runs/{run_id}/cancel")
 @router.delete("/api/onebss-reports/runs/{run_id}/cancel")
 def cancel_onebss_report_run(request: Request, run_id: str) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "daodulieuonebss")
     repository = build_app_repository()
     run_id = run_id.strip()
     try:
@@ -7568,7 +7595,7 @@ def cancel_onebss_report_run(request: Request, run_id: str) -> dict:
 
 @router.get("/api/onebss-reports/otp-requests/{otp_request_id}")
 def get_onebss_otp_request(request: Request, otp_request_id: str) -> dict:
-    admin_user(request)
+    require_feature(request, "daodulieuonebss")
     result = inspect_onebss_mobile_gateway_otp(get_settings(), otp_request_id)
     if result.get("status") == "missing":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=result.get("message") or "Khong tim thay OTP request.")
@@ -7577,7 +7604,7 @@ def get_onebss_otp_request(request: Request, otp_request_id: str) -> dict:
 
 @router.get("/api/onebss-reports/jobs/{job_id}")
 def get_onebss_report_job(request: Request, job_id: str) -> dict:
-    admin_user(request)
+    require_feature(request, "daodulieuonebss")
     repository = build_app_repository()
     try:
         run = repository.get_onebss_report_run(job_id.strip())
@@ -7619,7 +7646,7 @@ def ensure_onebss_task_otp_request(repository: AppRepository, run: dict[str, Any
 
 @router.post("/api/onebss-reports/jobs/{job_id}/otp")
 def submit_onebss_report_job_otp(request: Request, job_id: str, payload: OneBssTaskOtpPayload) -> dict:
-    admin_user(request)
+    require_feature(request, "daodulieuonebss")
     repository = build_app_repository()
     run = repository.get_onebss_report_run(job_id.strip())
     if not run:
@@ -7647,7 +7674,7 @@ def submit_onebss_report_job_otp(request: Request, job_id: str, payload: OneBssT
 
 @router.get("/api/onebss-reports/runs/{run_id}/download")
 def download_onebss_report_run(request: Request, run_id: str) -> Response:
-    admin_user(request)
+    require_feature(request, "daodulieuonebss")
     run_id = run_id.strip()
     try:
         run = build_app_repository().get_onebss_report_run(run_id)
@@ -7665,7 +7692,7 @@ def download_onebss_report_run(request: Request, run_id: str) -> Response:
 
 @router.post("/api/onebss-reports/run")
 def run_onebss_report(request: Request, payload: RunOneBssReportPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "daodulieuonebss")
     repository = build_app_repository()
     ma_bao_cao = payload.ma_bao_cao.strip().upper()
     _expire_stale_onebss_worker_runs(repository, ma_bao_cao=ma_bao_cao)
@@ -7983,7 +8010,7 @@ def finish_onebss_worker_task(request: Request, run_id: str, payload: OneBssWork
 
 @router.post("/api/admin/telegram/test-message")
 def send_telegram_test_message(request: Request) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     result = TelegramNotifier(get_settings()).test()
     build_app_repository().add_audit_log(
         actor["username"],
@@ -8000,7 +8027,7 @@ def send_telegram_test_message(request: Request) -> dict:
 
 @router.get("/api/test/telegram-alert")
 def test_telegram_alert(request: Request) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     sent = TelegramNotifier(get_settings()).send_message(
         "TEST Telegram",
         "\u26a0\ufe0f [TEST] Hệ thống kiểm tra kết nối Bot Telegram hoạt động bình thường!",
@@ -8024,7 +8051,7 @@ def test_telegram_alert(request: Request) -> dict:
 
 @router.post("/api/admin/zalo/webhook/setup")
 def setup_zalo_webhook(request: Request) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     result = ZaloBotClient(get_settings()).configure_webhook()
     build_app_repository().add_audit_log(
         actor["username"],
@@ -8085,7 +8112,7 @@ async def zalo_webhook(request: Request) -> dict:
 
 @router.get("/api/admin/zalo/message-logs")
 def list_zalo_message_logs(request: Request, limit: int = 100) -> dict:
-    admin_user(request)
+    require_feature(request, "quantriketnoi")
     safe_limit = min(max(int(limit or 100), 1), 500)
     rows = build_app_repository().list_audit_logs(limit=min(max(safe_limit * 4, 100), 500))
     logs = []
@@ -8100,7 +8127,7 @@ def list_zalo_message_logs(request: Request, limit: int = 100) -> dict:
 
 @router.post("/api/admin/zalo/send-test-message")
 def send_zalo_test_message(request: Request, payload: ZaloSendMessagePayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     repository = build_app_repository()
     chat_id = payload.chat_id.strip() or latest_zalo_chat_id(repository)
     text = payload.text.strip() or "Tin nhan test tu Bot VNPT Can Tho."
@@ -8126,7 +8153,7 @@ def send_zalo_test_message(request: Request, payload: ZaloSendMessagePayload) ->
 
 @router.get("/api/admin/zalo/auto-messages")
 def list_zalo_auto_messages(request: Request) -> dict:
-    admin_user(request)
+    require_feature(request, "quantriketnoi")
     repository = build_app_repository()
     try:
         schedules = repository.list_zalo_auto_messages()
@@ -8137,7 +8164,7 @@ def list_zalo_auto_messages(request: Request) -> dict:
 
 @router.post("/api/admin/zalo/auto-messages")
 def save_zalo_auto_message(request: Request, payload: ZaloAutoMessagePayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     repository = build_app_repository()
     try:
         schedule_id = payload.schedule_id.strip() or repository.generate_zalo_auto_message_id()
@@ -8152,7 +8179,7 @@ def save_zalo_auto_message(request: Request, payload: ZaloAutoMessagePayload) ->
 
 @router.delete("/api/admin/zalo/auto-messages/{schedule_id}")
 def delete_zalo_auto_message(request: Request, schedule_id: str) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     repository = build_app_repository()
     try:
         if not repository.get_zalo_auto_message(schedule_id):
@@ -8166,7 +8193,7 @@ def delete_zalo_auto_message(request: Request, schedule_id: str) -> dict:
 
 @router.post("/api/admin/zalo/auto-messages/{schedule_id}/captures")
 def upload_zalo_auto_message_capture(request: Request, schedule_id: str, payload: ZaloCapturePayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     repository = build_app_repository()
     try:
         schedule = repository.get_zalo_auto_message(schedule_id)
@@ -8188,7 +8215,7 @@ def upload_zalo_auto_message_capture(request: Request, schedule_id: str, payload
 
 @router.post("/api/admin/dashboard/capture")
 def capture_dashboard_page(request: Request, payload: PageCapturePayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     repository = build_app_repository()
     page_url = normalize_zalo_page_url(payload.page_url or "/")
     try:
@@ -8205,7 +8232,7 @@ def capture_dashboard_page(request: Request, payload: PageCapturePayload) -> dic
 
 @router.post("/api/admin/zalo/auto-messages/{schedule_id}/send-now")
 def send_zalo_auto_message_now(request: Request, schedule_id: str) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     repository = build_app_repository()
     try:
         schedule = repository.get_zalo_auto_message(schedule_id)
@@ -8242,7 +8269,7 @@ def get_zalo_auto_message_capture(capture_id: str, token: str = "") -> Response:
 
 @router.get("/api/admin/data-mining/schedules")
 def list_data_mining_schedules(request: Request) -> dict:
-    admin_user(request)
+    require_feature(request, "quantriketnoi")
     repository = build_app_repository()
     try:
         return {"schedules": repository.list_data_mining_schedules()}
@@ -8252,7 +8279,7 @@ def list_data_mining_schedules(request: Request) -> dict:
 
 @router.post("/api/admin/data-mining/schedules")
 def save_data_mining_schedule(request: Request, payload: DataMiningSchedulePayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     repository = build_app_repository()
     try:
         schedule_id = payload.schedule_id.strip() or repository.generate_data_mining_schedule_id()
@@ -8267,7 +8294,7 @@ def save_data_mining_schedule(request: Request, payload: DataMiningSchedulePaylo
 
 @router.delete("/api/admin/data-mining/schedules/{schedule_id}")
 def delete_data_mining_schedule(request: Request, schedule_id: str) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     repository = build_app_repository()
     try:
         if not repository.get_data_mining_schedule(schedule_id):
@@ -8281,7 +8308,7 @@ def delete_data_mining_schedule(request: Request, schedule_id: str) -> dict:
 
 @router.get("/api/admin/data-mining/runs")
 def list_data_mining_runs(request: Request, schedule_id: str = "", limit: int = 50) -> dict:
-    admin_user(request)
+    require_feature(request, "quantriketnoi")
     repository = build_app_repository()
     try:
         return {"runs": repository.list_data_mining_runs(schedule_id=schedule_id.strip(), limit=limit)}
@@ -8339,7 +8366,7 @@ def _run_data_mining_schedule_background(
 
 @router.post("/api/admin/data-mining/schedules/{schedule_id}/run-now")
 def run_data_mining_schedule_now(request: Request, schedule_id: str, payload: DataMiningRunPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantriketnoi")
     repository = build_app_repository()
     try:
         schedule = repository.get_data_mining_schedule(schedule_id)
@@ -8382,7 +8409,7 @@ def run_data_mining_schedule_now(request: Request, schedule_id: str, payload: Da
 
 @router.get("/api/admin/work-tasks")
 def list_work_tasks(request: Request, include_completed: bool = False) -> dict:
-    admin_user(request)
+    require_feature(request, "quanlycongviec")
     try:
         return {"tasks": build_app_repository().list_work_tasks(include_completed=include_completed)}
     except RuntimeError as error:
@@ -8391,7 +8418,7 @@ def list_work_tasks(request: Request, include_completed: bool = False) -> dict:
 
 @router.post("/api/admin/work-tasks")
 def save_work_task(request: Request, payload: WorkTaskPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quanlycongviec")
     task_name = payload.ten_cong_viec.strip()
     if not task_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tên công việc không được để trống.")
@@ -8425,7 +8452,7 @@ def save_work_task(request: Request, payload: WorkTaskPayload) -> dict:
 
 @router.delete("/api/admin/work-tasks/{task_id}")
 def delete_work_task(request: Request, task_id: str) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quanlycongviec")
     repository = build_app_repository()
     try:
         if not repository.get_work_task(task_id):
@@ -8439,7 +8466,7 @@ def delete_work_task(request: Request, task_id: str) -> dict:
 
 @router.post("/api/admin/work-tasks/{task_id}/complete")
 def complete_work_task(request: Request, task_id: str) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quanlycongviec")
     repository = build_app_repository()
     try:
         if not repository.get_work_task(task_id):
@@ -8467,13 +8494,13 @@ def notifications(request: Request) -> dict:
 
 @router.get("/api/websites")
 def websites(request: Request) -> dict:
-    require_feature(request, "xemdanhsachtaikhoan")
+    require_any_feature(request, "taikhoanweb", "xemdanhsachtaikhoan", "themvasuataikhoan", "xemmatkhaudaluu")
     return {"websites": build_app_repository().list_websites(active_only=True)}
 
 
 @router.get("/api/credentials")
 def credentials(request: Request) -> dict:
-    user = require_feature(request, "xemdanhsachtaikhoan")
+    user = require_any_feature(request, "taikhoanweb", "xemdanhsachtaikhoan", "themvasuataikhoan", "xemmatkhaudaluu")
     return {"credentials": build_app_repository().list_credentials(user["id"])}
 
 
@@ -8511,13 +8538,13 @@ def delete_credential(request: Request, credential_id: int) -> dict:
 
 @router.get("/api/admin/websites")
 def admin_websites(request: Request) -> dict:
-    admin_user(request)
+    require_feature(request, "quantridanhmuc")
     return {"websites": build_app_repository().list_websites()}
 
 
 @router.post("/api/admin/websites")
 def save_admin_website(request: Request, payload: WebsitePayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantridanhmuc")
     try:
         website = build_vault_service().save_website(
             actor["username"], payload.id, payload.name, payload.url, payload.requires_otp, payload.is_active
@@ -8530,13 +8557,21 @@ def save_admin_website(request: Request, payload: WebsitePayload) -> dict:
 
 @router.get("/api/admin/features")
 def features(request: Request) -> dict:
-    admin_user(request)
+    require_any_feature(
+        request,
+        "quantrimenu",
+        "phanquyennguoidung",
+        "quantringuoidung",
+        "thietkelayoutbaocao",
+        "quantridanhmuc",
+        "quantriketnoi",
+    )
     return {"features": build_app_repository().list_features()}
 
 
 @router.post("/api/admin/features/menu")
 def create_menu_feature(request: Request, payload: CreateMenuPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantrimenu")
     repository = build_app_repository()
     try:
         feature = repository.create_menu_feature(payload.name)
@@ -8549,7 +8584,7 @@ def create_menu_feature(request: Request, payload: CreateMenuPayload) -> dict:
 
 @router.put("/api/admin/features/layout")
 def save_feature_layout(request: Request, payload: FeatureLayoutPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantrimenu")
     repository = build_app_repository()
     existing_features = repository.list_features()
     validate_feature_layout_payload(existing_features, payload.features)
@@ -8565,13 +8600,13 @@ def save_feature_layout(request: Request, payload: FeatureLayoutPayload) -> dict
 
 @router.get("/api/admin/roles")
 def list_roles(request: Request) -> dict:
-    admin_user(request)
+    require_any_feature(request, "quantridanhmuc", "quantrivaitro")
     return {"roles": build_app_repository().list_system_roles()}
 
 
 @router.post("/api/admin/roles")
 def save_role(request: Request, payload: SystemRolePayload) -> dict:
-    actor = admin_user(request)
+    actor = require_any_feature(request, "quantridanhmuc", "quantrivaitro")
     code = payload.code.strip().lower()
     if not code:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mã vai trò không được để trống.")
@@ -8588,7 +8623,7 @@ def save_role(request: Request, payload: SystemRolePayload) -> dict:
 
 @router.delete("/api/admin/roles/{code}")
 def delete_role(request: Request, code: str) -> dict:
-    actor = admin_user(request)
+    actor = require_any_feature(request, "quantridanhmuc", "quantrivaitro")
     build_app_repository().delete_system_role(code.strip().lower())
     build_app_repository().add_audit_log(actor["username"], "role_deleted", f"Xoa vai tro {code}")
     return {"ok": True}
@@ -8596,13 +8631,13 @@ def delete_role(request: Request, code: str) -> dict:
 
 @router.get("/api/admin/users/{user_id}/permissions")
 def user_permissions(request: Request, user_id: int) -> dict:
-    admin_user(request)
+    require_any_feature(request, "phanquyennguoidung", "quantringuoidung")
     return {"feature_codes": build_app_repository().get_user_permissions(user_id)}
 
 
 @router.put("/api/admin/users/{user_id}/permissions")
 def update_permissions(request: Request, user_id: int, payload: PermissionPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_any_feature(request, "phanquyennguoidung", "quantringuoidung")
     valid_codes = {feature["code"] for feature in build_app_repository().list_features()}
     if not set(payload.feature_codes).issubset(valid_codes):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Danh sách quyền không hợp lệ.")
@@ -8614,7 +8649,7 @@ def update_permissions(request: Request, user_id: int, payload: PermissionPayloa
 
 @router.put("/api/admin/permissions/bulk")
 def update_bulk_permissions(request: Request, payload: BulkPermissionPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "phanquyennguoidung")
     valid_codes = {feature["code"] for feature in build_app_repository().list_features()}
     if not payload.user_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chưa chọn người dùng.")
@@ -8628,13 +8663,13 @@ def update_bulk_permissions(request: Request, payload: BulkPermissionPayload) ->
 
 @router.get("/api/admin/regions")
 def list_regions(request: Request) -> dict:
-    admin_user(request)
+    require_any_feature(request, "quantridanhmuc", "phanquyendulieunguoidung")
     return {"regions": build_app_repository().list_data_regions()}
 
 
 @router.post("/api/admin/regions")
 def save_region(request: Request, payload: DataRegionPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantridanhmuc")
     build_app_repository().save_data_region(payload.code.strip(), payload.name.strip(), payload.is_active, payload.sort_order)
     build_app_repository().add_audit_log(actor["username"], "region_saved", f"Luu phan vung {payload.code}")
     return {"ok": True}
@@ -8642,7 +8677,7 @@ def save_region(request: Request, payload: DataRegionPayload) -> dict:
 
 @router.delete("/api/admin/regions/{code}")
 def delete_region(request: Request, code: str) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "quantridanhmuc")
     repository = build_app_repository()
     repository.delete_data_region(code.strip())
     repository.add_audit_log(actor["username"], "region_deleted", f"Xoa phan vung {code}")
@@ -8651,13 +8686,13 @@ def delete_region(request: Request, code: str) -> dict:
 
 @router.get("/api/admin/users/{user_id}/data-permissions")
 def user_data_permissions(request: Request, user_id: int) -> dict:
-    admin_user(request)
+    require_feature(request, "phanquyendulieunguoidung")
     return {"region_codes": build_app_repository().get_user_data_permissions(user_id)}
 
 
 @router.put("/api/admin/data-permissions/bulk")
 def update_bulk_data_permissions(request: Request, payload: BulkDataPermissionPayload) -> dict:
-    actor = admin_user(request)
+    actor = require_feature(request, "phanquyendulieunguoidung")
     valid_codes = {region["code"] for region in build_app_repository().list_data_regions()}
     if not payload.user_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chưa chọn người dùng.")

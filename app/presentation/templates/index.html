@@ -8,14 +8,14 @@
     <link rel="icon" type="image/png" href="/static/images/system-logo.png" />
     <link rel="apple-touch-icon" href="/static/images/system-logo.png" />
     {% if shell_only %}
-    <link rel="preload" href="/static/shell.js?v=37" as="script" />
+    <link rel="preload" href="/static/shell.js?v=38" as="script" />
     {% else %}
-    <link rel="preload" href="/static/app.js?v=223" as="script" />
+    <link rel="preload" href="/static/app.js?v=224" as="script" />
     {% endif %}
     <link rel="stylesheet" href="/static/tailwind-built.css?v=1" />
     <link rel="stylesheet" href="/static/styles.css?v=136" />
   </head>
-  <body class="app-booting min-h-screen bg-sky-50 text-slate-900 antialiased" data-role="{{ user.role }}" data-nav-cache-key="{{ user.id }}:{{ user.role }}:{{ user.permissions|length }}" data-must-change="{{ user.must_change_password }}" data-billing-blocked="{{ user.billing_access_blocked }}" data-can-manage-vault="{{ user.role == 'admin' or 'themvasuataikhoan' in user.permissions }}" data-can-reveal-vault="{{ user.role == 'admin' or 'xemmatkhaudaluu' in user.permissions }}">
+  <body class="app-booting min-h-screen bg-sky-50 text-slate-900 antialiased" data-role="{{ user.role }}" data-nav-cache-key="{{ user.id }}:{{ user.role }}:{{ user.permissions|length }}" data-must-change="{{ user.must_change_password }}" data-billing-blocked="{{ user.billing_access_blocked }}" data-can-manage-vault="{{ can_use('themvasuataikhoan') }}" data-can-reveal-vault="{{ can_use('xemmatkhaudaluu') }}">
     <svg class="icon-sprite" aria-hidden="true">
       <symbol id="icon-dashboard" viewBox="0 0 24 24"><path d="M4 13h7V4H4v9Zm0 7h7v-5H4v5Zm9 0h7v-9h-7v9Zm0-16v5h7V4h-7Z"/></symbol>
       <symbol id="icon-vault" viewBox="0 0 24 24"><path d="M6 10V8a6 6 0 1 1 12 0v2h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1Zm2 0h8V8a4 4 0 0 0-8 0v2Zm4 4a2 2 0 0 0-1 3.73V19h2v-1.27A2 2 0 0 0 12 14Z"/></symbol>
@@ -53,40 +53,70 @@
             <details class="nav-group">
               <summary data-feature-code="dashboard"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-dashboard"></use></svg><strong>Tổng quan</strong></summary>
             </details>
-            {% if user.role == "admin" %}
+            {% if can_use("quanlycongviec") %}
             <button class="nav-item" data-feature-code="quanlycongviec" data-view="work-tasks" data-title="Quản lý công việc" data-keywords="quan ly cong viec task lich telegram nhac viec"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản lý công việc</span></button>
             {% endif %}
-            {% if user.role == "admin" or "xemdanhsachtaikhoan" in user.permissions %}
+            {% if can_use("taikhoanweb", "xemdanhsachtaikhoan", "themvasuataikhoan", "xemmatkhaudaluu", "quantringuoidung", "quantrimenu", "quantridanhmuc", "quantriketnoi", "internalemail", "mobilegateway", "maytram", "phanquyennguoidung", "phanquyendulieunguoidung", "nhatkyhoatdong") %}
             <details class="nav-group">
               <summary data-feature-code="quantriweb"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-shield"></use></svg><strong>Quản trị hệ thống</strong></summary>
-              {% if user.role == "admin" or "xemdanhsachtaikhoan" in user.permissions %}
+              {% if can_use("taikhoanweb", "xemdanhsachtaikhoan", "themvasuataikhoan", "xemmatkhaudaluu") %}
               <button class="nav-item child" data-feature-code="taikhoanweb" data-view="vault" data-title="Tài khoản web" data-keywords="tai khoan web mat khau"><svg class="nav-svg"><use href="#icon-vault"></use></svg><span>Tài khoản web</span></button>
               {% endif %}
-              {% if user.role == "admin" %}
+              {% if can_use("quantringuoidung") %}
               <button class="nav-item child" data-feature-code="quantringuoidung" data-view="users" data-title="Quản trị người dùng" data-keywords="quan tri nguoi dung user"><svg class="nav-svg"><use href="#icon-users"></use></svg><span>Quản trị người dùng</span></button>
+              {% endif %}
+              {% if can_use("quantrimenu") %}
               <button class="nav-item child" data-feature-code="quantrimenu" data-view="menu-admin" data-title="Quản trị menu" data-keywords="quan tri menu sap xep di chuyen module"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản trị menu</span></button>
+              {% endif %}
+              {% if can_use("quantridanhmuc") %}
               <button class="nav-item child" data-feature-code="quantridanhmuc" data-view="catalogs" data-title="Quản trị danh mục" data-keywords="quan tri danh muc phan vung vai tro bien"><svg class="nav-svg"><use href="#icon-list"></use></svg><span>Quản trị danh mục</span></button>
+              {% endif %}
+              {% if can_use("quantriketnoi") %}
               <button class="nav-item child" data-feature-code="quantriketnoi" data-view="system" data-title="Quản trị kết nối" data-keywords="quan tri ket noi api db ftp drive telegram"><svg class="nav-svg"><use href="#icon-plug"></use></svg><span>Quản trị kết nối</span></button>
+              {% endif %}
+              {% if can_use("internalemail") %}
               <button class="nav-item child" data-feature-code="internalemail" data-view="internal-email" data-title="Mail n&#7897;i b&#7897;" data-keywords="mail email noi bo imap otp webmail email.vnpt.vn"><svg class="nav-svg"><use href="#icon-audit"></use></svg><span>Mail n&#7897;i b&#7897;</span></button>
+              {% endif %}
+              {% if can_use("mobilegateway") %}
               <button class="nav-item child" data-feature-code="mobilegateway" data-view="mobile-gateway" data-title="Mobile Gateway" data-keywords="mobile gateway sms otp android onebss"><svg class="nav-svg"><use href="#icon-database"></use></svg><span>Mobile Gateway</span></button>
+              {% endif %}
+              {% if can_use("maytram") %}
               <button class="nav-item child" data-feature-code="maytram" data-view="workstation" data-title="Máy trạm" data-keywords="may tram workstation onebss sql export excel redis queue backup drive scheduler"><svg class="nav-svg"><use href="#icon-database"></use></svg><span>Máy trạm</span></button>
+              {% endif %}
+              {% if can_use("phanquyennguoidung", "phanquyendulieunguoidung") %}
               <details class="nav-group nav-subgroup">
                 <summary data-feature-code="phanquyen"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-shield"></use></svg><strong>Phân quyền</strong></summary>
+                {% if can_use("phanquyennguoidung") %}
                 <button class="nav-item child subchild" data-feature-code="phanquyennguoidung" data-view="permissions" data-title="Phân quyền người dùng" data-keywords="phan quyen nguoi dung chuc nang"><svg class="nav-svg"><use href="#icon-shield"></use></svg><span>Người dùng</span></button>
+                {% endif %}
+                {% if can_use("phanquyendulieunguoidung") %}
                 <button class="nav-item child subchild" data-feature-code="phanquyendulieunguoidung" data-view="data-permissions" data-title="Phân quyền dữ liệu người dùng" data-keywords="phan quyen du lieu phan vung"><svg class="nav-svg"><use href="#icon-database"></use></svg><span>Dữ liệu</span></button>
+                {% endif %}
               </details>
+              {% endif %}
+              {% if can_use("nhatkyhoatdong") %}
               <button class="nav-item child" data-feature-code="nhatkyhoatdong" data-view="audit" data-title="Nhật ký hoạt động" data-keywords="nhat ky audit log"><svg class="nav-svg"><use href="#icon-audit"></use></svg><span>Nhật ký hoạt động</span></button>
               {% endif %}
             </details>
             {% endif %}
-            {% if user.role == "admin" %}
+            {% if can_use("truyvansql") %}
             <button class="nav-item" data-feature-code="truyvansql" data-view="reports" data-title="Đào dữ liệu SQL" data-keywords="dao du lieu sql oracle excel drive may tram"><svg class="nav-svg"><use href="#icon-database"></use></svg><span>Đào dữ liệu SQL</span></button>
+            {% endif %}
+            {% if can_use("thietkelayoutbaocao", "daodulieuonebss", "daodulieuftp", "publicmessages", "linkbaocao") %}
             <details class="nav-group">
               <summary data-feature-code="baocaomoi"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-chart"></use></svg><strong>Báo cáo mới</strong></summary>
+              {% if can_use("thietkelayoutbaocao") %}
               <button class="nav-item child" data-feature-code="thietkelayoutbaocao" data-view="dashboard-builder" data-title="Thiết kế Layout báo cáo" data-keywords="dashboard builder thiet ke layout bao cao tab bieu do"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Thiết kế Layout báo cáo</span></button>
+              {% endif %}
+              {% if can_use("daodulieuonebss") %}
               <button class="nav-item child" data-feature-code="daodulieuonebss" data-view="onebss-mining" data-title="Đào dữ liệu OneBSS" data-keywords="dao du lieu onebss bao cao excel"><svg class="nav-svg"><use href="#icon-database"></use></svg><span>Đào dữ liệu OneBSS</span></button>
+              {% endif %}
+              {% if can_use("daodulieuftp") %}
               <button class="nav-item child" data-feature-code="daodulieuftp" data-view="ftp-mining" data-title="Đào dữ liệu FTP" data-keywords="dao du lieu ftp bao cao file may tram"><svg class="nav-svg"><use href="#icon-download"></use></svg><span>Đào dữ liệu FTP</span></button>
+              {% endif %}
+              {% if can_use("publicmessages") %}
               <button class="nav-item child" data-feature-code="publicmessages" data-view="public-messages" data-title="N&#7897;i dung public" data-keywords="noi dung public sms email otp copy"><svg class="nav-svg"><use href="#icon-audit"></use></svg><span>N&#7897;i dung public</span></button>
+              {% endif %}
             </details>
             {% endif %}
           </div>
@@ -189,12 +219,12 @@
         </section>
         {% endif %}
 
-        {% if user.role == "admin" or "xemdanhsachtaikhoan" in user.permissions %}
+        {% if can_use("taikhoanweb", "xemdanhsachtaikhoan", "themvasuataikhoan", "xemmatkhaudaluu") %}
         {% if render_view("vault") %}
         <section class="app-view" id="view-vault">
           <div class="page-header">
             <div><p class="eyebrow">Kho cá nhân</p><h1>Tài khoản website</h1><p class="subtitle">Mật khẩu được mã hóa khi lưu. Thao tác xem mật khẩu được ghi nhật ký.</p></div>
-            {% if user.role == "admin" or "themvasuataikhoan" in user.permissions %}<button class="btn-primary" data-open-dialog="credential-dialog">Thêm tài khoản</button>{% endif %}
+            {% if can_use("themvasuataikhoan") %}<button class="btn-primary" data-open-dialog="credential-dialog">Thêm tài khoản</button>{% endif %}
           </div>
           <div class="notice warning"><strong>Lưu ý bảo mật.</strong> Chỉ lưu tài khoản phục vụ công việc và được đơn vị cho phép.</div>
           <section class="data-card"><div class="table-scroll"><table><thead><tr><th class="table-action-column">Thao tác</th><th>Website</th><th>Địa chỉ</th><th>Tài khoản</th><th>OTP</th></tr></thead><tbody id="credentials-table"></tbody></table></div></section>
@@ -202,7 +232,7 @@
         {% endif %}
         {% endif %}
 
-        {% if user.role == "admin" or initial_view == "public-messages" %}
+        {% if true %}
         {% if render_view("users") %}
         <section class="app-view" id="view-users">
           <div class="page-header"><div><p class="eyebrow">Quản trị web</p><h1>Quản trị người dùng</h1><p class="subtitle">Tạo, xóa, sửa và thêm người dùng hàng loạt bằng Excel.</p></div><div class="action-group"><a class="btn-secondary" href="/api/admin/users/import-template">Tải file mẫu</a><label class="btn-secondary cursor-pointer">Nạp Excel<input id="user-import-file" type="file" accept=".xlsx" class="hidden" /></label><button class="btn-primary" data-open-dialog="create-user-dialog">Tạo người dùng</button></div></div>
@@ -309,7 +339,7 @@
         {% if render_view("dashboard-builder") %}
         <section class="app-view" id="view-dashboard-builder">
           <div class="page-header">
-            <div><p class="eyebrow">Dashboard Builder</p><h1>Thiết kế Layout báo cáo</h1><p class="subtitle">Quản trị viên cấu hình Trang, Tab, Layout và biểu đồ. Nhân viên thường không thể mở chức năng này.</p></div>
+            <div><p class="eyebrow">Dashboard Builder</p><h1>Thiết kế Layout báo cáo</h1><p class="subtitle">Cấu hình Trang, Tab, Layout và biểu đồ theo quyền được cấp.</p></div>
             <div class="action-group">
               <button class="btn-secondary" id="new-dashboard-page" type="button">Tạo trang báo cáo</button>
               <button class="btn-primary" id="save-dashboard-layout" type="button"><span class="button-label">Lưu Layout</span><span class="spinner"></span></button>
@@ -584,7 +614,7 @@
               </table>
             </div>
           </section>
-          <section class="data-card mt-4"><h2>Kiểm tra vận hành</h2><div class="mt-4 grid gap-3 md:grid-cols-2"><p class="check-item">Mật khẩu được băm, không lưu dạng rõ.</p><p class="check-item">Cookie phiên không đọc được bằng JavaScript.</p><p class="check-item">DB cơ quan chỉ được truy cập qua API nội bộ.</p><p class="check-item">Route quản trị yêu cầu vai trò admin.</p></div></section>
+          <section class="data-card mt-4"><h2>Kiểm tra vận hành</h2><div class="mt-4 grid gap-3 md:grid-cols-2"><p class="check-item">Mật khẩu được băm, không lưu dạng rõ.</p><p class="check-item">Cookie phiên không đọc được bằng JavaScript.</p><p class="check-item">DB cơ quan chỉ được truy cập qua API nội bộ.</p><p class="check-item">Route chức năng yêu cầu quyền được cấp.</p></div></section>
         </section>
         {% endif %}
 
@@ -876,7 +906,7 @@
     <dialog id="password-dialog"><form class="dialog-form" id="password-form"><div class="dialog-heading"><div><p class="eyebrow">Bảo mật</p><h2>Đổi mật khẩu</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Mật khẩu hiện tại<input class="form-control" type="password" name="current_password" required /></label><label>Mật khẩu mới<input class="form-control" type="password" name="new_password" minlength="10" required /><small>Tối thiểu 10 ký tự.</small></label><div class="result hidden" role="alert"></div><button class="btn-primary" type="submit">Lưu mật khẩu mới</button></form></dialog>
 
     {% if not shell_only %}
-    {% if user.role == "admin" %}
+    {% if true %}
     {% if render_view("websites") %}
     <dialog id="website-dialog"><form class="dialog-form" id="website-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Danh mục</p><h2>Website</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<input class="form-control" name="name" required /></label><label>Địa chỉ website<input class="form-control" name="url" type="url" placeholder="https://..." required /></label><label class="checkbox-label"><input type="checkbox" name="requires_otp" /> Website yêu cầu OTP</label><label class="checkbox-label"><input type="checkbox" name="is_active" checked /> Đang sử dụng</label><div class="result hidden"></div><button class="btn-primary" type="submit">Lưu danh mục</button></form></dialog>
     {% endif %}
@@ -936,7 +966,7 @@
       </form>
     </dialog>
     {% endif %}
-    {% if user.role == "admin" or "themvasuataikhoan" in user.permissions %}
+    {% if can_use("themvasuataikhoan") %}
     {% if render_view("vault") %}
     <dialog id="credential-dialog"><form class="dialog-form" id="credential-form"><input type="hidden" name="id" /><div class="dialog-heading"><div><p class="eyebrow">Kho cá nhân</p><h2>Lưu tài khoản web</h2></div><button type="button" class="icon-button" data-close-dialog>×</button></div><label>Tên website<select class="form-control" name="website_id" id="credential-website" required></select></label><label>Địa chỉ<input class="form-control" id="credential-url" readonly /></label><div id="credential-otp" class="rounded-2xl bg-vnpt-50 p-3 text-sm font-semibold text-vnpt-700 dark:bg-vnpt-950/40 dark:text-sky-100"></div><label>Tài khoản<input class="form-control" name="login_username" autocomplete="off" required /></label><label>Mật khẩu<input class="form-control" name="password" type="password" autocomplete="new-password" required /></label><label>Ghi chú<textarea class="form-control min-h-24" name="notes" rows="3"></textarea></label><div class="result hidden"></div><button class="btn-primary" type="submit">Mã hóa và lưu</button></form></dialog>
     {% endif %}
@@ -944,9 +974,9 @@
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
     {% if shell_only %}
-    <script defer src="/static/shell.js?v=37"></script>
+    <script defer src="/static/shell.js?v=38"></script>
     {% else %}
-    <script defer src="/static/app.js?v=223"></script>
+    <script defer src="/static/app.js?v=224"></script>
     {% endif %}
   </body>
 </html>

@@ -35,7 +35,7 @@ const navGroupIcons = {
 let dashboardFeatureCodes = new Set();
 let dashboardPageIdByFeatureCode = new Map();
 const NAVIGATION_CLIENT_CACHE_TTL_MS = 60 * 1000;
-const NAVIGATION_CLIENT_CACHE_VERSION = "2026-08-08-ftp-hga-normalize-v34";
+const NAVIGATION_CLIENT_CACHE_VERSION = "2026-08-12-feature-permissions-v35";
 
 function navigationClientCacheKey() {
   return `vnptcto:navigation:${NAVIGATION_CLIENT_CACHE_VERSION}:${document.body.dataset.navCacheKey || document.body.dataset.role || "guest"}`;
@@ -445,7 +445,7 @@ function warmFeatureBundle() {
   const link = document.createElement("link");
   link.rel = "preload";
   link.as = "script";
-  link.href = "/static/app.js?v=223";
+  link.href = "/static/app.js?v=224";
   link.dataset.featureBundleWarm = "true";
   document.head.appendChild(link);
 }

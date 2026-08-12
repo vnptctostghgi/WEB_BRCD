@@ -29,7 +29,7 @@ def require_mobile_permission(request: Request, permission: str) -> dict:
     if user.get("role") == "admin":
         return user
     granted = set(user.get("permissions") or [])
-    if permission not in granted and "mobile_gateway.manage" not in granted:
+    if permission not in granted and "mobile_gateway.manage" not in granted and MOBILE_GATEWAY_FEATURE_CODE not in granted:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Ban chua duoc cap quyen Mobile Gateway.",
@@ -41,4 +41,4 @@ def has_mobile_permission(user: dict, permission: str) -> bool:
     if user.get("role") == "admin":
         return True
     granted = set(user.get("permissions") or [])
-    return permission in granted or "mobile_gateway.manage" in granted
+    return permission in granted or "mobile_gateway.manage" in granted or MOBILE_GATEWAY_FEATURE_CODE in granted

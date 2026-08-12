@@ -124,11 +124,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=223" in public_response.text
+        assert "/static/app.js?v=224" in public_response.text
         assert "/static/styles.css?v=136" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
-        public_js = client.get("/static/app.js?v=223")
+        public_js = client.get("/static/app.js?v=224")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -1065,7 +1065,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=223" in page.text
+        assert "/static/app.js?v=224" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -7797,16 +7797,16 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         home = client.get("/")
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
-        assert "/static/shell.js?v=37" in home.text
-        assert "/static/app.js?v=223" not in home.text
-        shell_js = client.get("/static/shell.js?v=37")
+        assert "/static/shell.js?v=38" in home.text
+        assert "/static/app.js?v=224" not in home.text
+        shell_js = client.get("/static/shell.js?v=38")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
         assert "function dedupeFeaturesForDisplay" in shell_js.text
         assert "function readCachedNavigation" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=223" in shell_js.text
+        assert "/static/app.js?v=224" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -7819,8 +7819,8 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
-        assert "/static/shell.js?v=37" in dashboard.text
-        assert "/static/app.js?v=223" not in dashboard.text
+        assert "/static/shell.js?v=38" in dashboard.text
+        assert "/static/app.js?v=224" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -7840,49 +7840,49 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "dynamic-report-body" not in reports.text
         assert "dynamic-report-prev" not in reports.text
         assert "dynamic-report-next" not in reports.text
-        assert "/static/app.js?v=223" in reports.text
+        assert "/static/app.js?v=224" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=223" in workstation.text
+        assert "/static/app.js?v=224" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=223" in work_tasks.text
+        assert "/static/app.js?v=224" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=223" in report_links.text
+        assert "/static/app.js?v=224" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=223" in system.text
+        assert "/static/app.js?v=224" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=223" in onebss_mining.text
+        assert "/static/app.js?v=224" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 
         ftp_mining = client.get("/daodulieuftp")
         assert ftp_mining.status_code == 200
         assert "view-ftp-mining" in ftp_mining.text
-        assert "/static/app.js?v=223" in ftp_mining.text
+        assert "/static/app.js?v=224" in ftp_mining.text
         assert "/static/ftp-mining.js" not in ftp_mining.text
         assert ftp_mining.text.count('class="app-view') == 1
 
@@ -7906,6 +7906,98 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         )
         assert run_response.status_code == 403
         assert run_response.json()["detail"] == "Bạn không có quyền truy cập chức năng này"
+
+
+def test_viewer_feature_permissions_unlock_mining_pages_and_runtime_apis() -> None:
+    suffix = uuid.uuid4().hex[:8]
+    username = f"viewer_mining_{suffix}"
+    password = "Viewer@Mining123"
+    sql_code = f"BC_MINING_{suffix}".upper()
+    onebss_code = f"OB_MINING_{suffix}".upper()
+    ftp_code = f"FTP_MINING_{suffix}".upper()
+    with TestClient(app) as client:
+        login(client)
+        assert client.post(
+            "/api/admin/sql-reports",
+            json={
+                "ten_bao_cao": "SQL mining viewer",
+                "ma_bao_cao": sql_code,
+                "cau_lenh_sql": "SELECT ma_tb FROM css_cto.db_thuebao WHERE trang_thai = :STATUS;",
+                "cac_tham_so": ["STATUS"],
+            },
+        ).status_code == 200
+        assert client.post(
+            "/api/admin/onebss-reports",
+            json={
+                "ma_bao_cao": onebss_code,
+                "ten_bao_cao": "OneBSS mining viewer",
+                "danh_sach_bien": ["P_TUNGAY"],
+                "parameters": {"P_TUNGAY": "01/07/2026"},
+                "report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST_VIEWER_MINING&name=Test",
+                "storage_link": "",
+            },
+        ).status_code == 200
+        assert client.post(
+            "/api/admin/ftp-reports",
+            json={
+                "ma_bao_cao": ftp_code,
+                "ten_bao_cao": "FTP mining viewer",
+                "folder_path": "/reports/viewer",
+                "file_name_template": "viewer_{yyyymmdd}.xlsx",
+                "connection_code": "ftp_storage",
+                "is_active": True,
+            },
+        ).status_code == 200
+        created = client.post(
+            "/api/admin/users",
+            json={
+                "username": username,
+                "full_name": "Viewer Mining",
+                "password": password,
+                "role": "viewer",
+            },
+        )
+        assert created.status_code == 200
+        viewer_id = created.json()["user"]["id"]
+        granted = client.put(
+            f"/api/admin/users/{viewer_id}/permissions",
+            json={"feature_codes": ["truyvansql", "daodulieuonebss", "daodulieuftp"]},
+        )
+        assert granted.status_code == 200
+
+        client.post("/api/auth/logout")
+        login(client, username, password)
+        navigation = client.get("/api/navigation")
+        assert navigation.status_code == 200
+        feature_codes = {feature["code"] for feature in navigation.json()["features"]}
+        assert {"truyvansql", "daodulieuonebss", "daodulieuftp"} <= feature_codes
+
+        for path, marker in [
+            ("/truyvansql", "view-reports"),
+            ("/daodulieuonebss", "view-onebss-mining"),
+            ("/daodulieuftp", "view-ftp-mining"),
+        ]:
+            page = client.get(path)
+            assert page.status_code == 200
+            assert marker in page.text
+            assert "app-shell-placeholder" not in page.text
+            assert "/static/app.js?v=224" in page.text
+
+        report_configs = client.get("/api/reports/configs")
+        assert report_configs.status_code == 200
+        assert sql_code in {report["ma_bao_cao"] for report in report_configs.json()["reports"]}
+        assert client.get("/api/reports/history").status_code == 200
+        assert client.get("/api/reports/export-jobs").status_code == 200
+
+        onebss_configs = client.get("/api/onebss-reports/configs")
+        assert onebss_configs.status_code == 200
+        assert onebss_code in {report["ma_bao_cao"] for report in onebss_configs.json()["reports"]}
+        assert client.get("/api/onebss-reports/runs?limit=5").status_code == 200
+
+        ftp_configs = client.get("/api/ftp-reports/configs")
+        assert ftp_configs.status_code == 200
+        assert ftp_code in {report["ma_bao_cao"] for report in ftp_configs.json()["reports"]}
+        assert client.get("/api/ftp-reports/runs?limit=5").status_code == 200
 
 
 def test_auto_module_is_removed_from_dashboard() -> None:
@@ -7933,6 +8025,49 @@ def test_admin_can_create_viewer_and_viewer_cannot_access_admin_api() -> None:
         client.post("/api/auth/logout")
         login(client, "viewer_test", "Viewer@Test123")
         assert client.get("/api/admin/users").status_code == 403
+
+
+def test_viewer_with_user_management_feature_can_manage_users() -> None:
+    suffix = uuid.uuid4().hex[:8]
+    manager_username = f"viewer_user_mgr_{suffix}"
+    managed_username = f"viewer_managed_{suffix}"
+    with TestClient(app) as client:
+        login(client)
+        created = client.post(
+            "/api/admin/users",
+            json={
+                "username": manager_username,
+                "full_name": "Viewer User Manager",
+                "password": "Viewer@Manager123",
+                "role": "viewer",
+            },
+        )
+        assert created.status_code == 200
+        manager_id = created.json()["user"]["id"]
+        granted = client.put(
+            f"/api/admin/users/{manager_id}/permissions",
+            json={"feature_codes": ["quantringuoidung"]},
+        )
+        assert granted.status_code == 200
+
+        client.post("/api/auth/logout")
+        login(client, manager_username, "Viewer@Manager123")
+        page = client.get("/quantringuoidung")
+        assert page.status_code == 200
+        assert 'id="view-users"' in page.text
+        assert "/static/app.js?v=224" in page.text
+        assert client.get("/api/admin/users").status_code == 200
+        managed = client.post(
+            "/api/admin/users",
+            json={
+                "username": managed_username,
+                "full_name": "Managed Viewer",
+                "password": "Viewer@Managed123",
+                "role": "viewer",
+            },
+        )
+        assert managed.status_code == 200
+        assert managed.json()["user"]["username"] == managed_username
 
 
 def test_admin_can_generate_one_time_password_and_viewer_cannot() -> None:

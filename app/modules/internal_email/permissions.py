@@ -16,7 +16,7 @@ def require_internal_email_permission(request: Request, permission: str) -> dict
     if user.get("role") == "admin":
         return user
     granted = set(user.get("permissions") or [])
-    if permission not in granted and "internal_email.manage" not in granted:
+    if permission not in granted and "internal_email.manage" not in granted and INTERNAL_EMAIL_FEATURE_CODE not in granted:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Bạn chưa được cấp quyền Mail nội bộ.",
@@ -28,4 +28,4 @@ def has_internal_email_permission(user: dict, permission: str) -> bool:
     if user.get("role") == "admin":
         return True
     granted = set(user.get("permissions") or [])
-    return permission in granted or "internal_email.manage" in granted
+    return permission in granted or "internal_email.manage" in granted or INTERNAL_EMAIL_FEATURE_CODE in granted
