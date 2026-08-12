@@ -1553,6 +1553,79 @@ function updateEditBillingSummary() {
   summary.textContent = expires ? `${planText}. Hạn dùng đến ${expires}.` : `${planText}. Chưa đặt hạn dùng.`;
 }
 
+function ensureEditUserPasswordTools(form) {
+  if (!form || $("#edit-user-password-tools")) return;
+  const passwordInput = form.elements.namedItem("password");
+  const passwordLabel = passwordInput?.closest("label");
+  if (!passwordLabel) return;
+  passwordInput.setAttribute("autocomplete", "new-password");
+  passwordLabel.insertAdjacentHTML("afterend", `
+    <div class="password-admin-tools" id="edit-user-password-tools">
+      <div class="password-admin-toolbar">
+        <div>
+          <strong>Mật khẩu tạm mới</strong>
+          <small>Hệ thống không xem lại mật khẩu cũ. Tạo mật khẩu mới khi cần cấp lại tài khoản.</small>
+        </div>
+        <button class="btn-secondary" type="button" id="generate-user-password">Tạo mật khẩu tạm</button>
+      </div>
+      <div class="generated-password-box hidden" id="generated-user-password-box" aria-live="polite">
+        <label>Mật khẩu vừa tạo<input class="form-control generated-password-input" id="generated-user-password" type="text" readonly /></label>
+        <button class="table-action" type="button" id="copy-generated-user-password">Copy</button>
+      </div>
+    </div>
+  `);
+}
+
+function resetGeneratedUserPassword(form) {
+  ensureEditUserPasswordTools(form);
+  const input = $("#generated-user-password");
+  const box = $("#generated-user-password-box");
+  if (input) input.value = "";
+  box?.classList.add("hidden");
+}
+
+async function generateUserPasswordFromDialog(button) {
+  const form = $("#edit-user-form");
+  if (!form) return;
+  const id = Number(form.elements.namedItem("id")?.value || 0);
+  const user = users.find((item) => Number(item.id) === id);
+  if (!id) return;
+  if (!confirm(`Tạo mật khẩu tạm mới cho ${user?.username || "người dùng này"}? Mật khẩu hiện tại sẽ không đăng nhập được nữa.`)) return;
+  setButtonLoading(button, true);
+  try {
+    const result = await api(`/api/admin/users/${id}/generate-password`, { method: "POST" });
+    const password = result.password || "";
+    const input = $("#generated-user-password");
+    const box = $("#generated-user-password-box");
+    if (input) input.value = password;
+    box?.classList.remove("hidden");
+    if (result.user?.id) {
+      users = users.map((item) => Number(item.id) === Number(result.user.id) ? { ...item, ...result.user } : item);
+      renderUsersTable();
+    }
+    showMessage(form.querySelector(".result"), result.message || "Đã tạo mật khẩu tạm mới.");
+    try {
+      await copyTextToClipboard(password);
+      showToast("Đã copy mật khẩu tạm.");
+    } catch {
+      // Clipboard may be blocked; the password remains visible in the dialog.
+    }
+  } catch (error) {
+    showMessage(form.querySelector(".result"), error.message, "error");
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+async function copyGeneratedUserPasswordFromDialog() {
+  try {
+    await copyTextToClipboard($("#generated-user-password")?.value || "");
+    showToast("Đã copy mật khẩu tạm.");
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
 async function loadUsers({ force = false } = {}) {
   if (!force && isDataFresh("users")) {
     renderUsersTable();
@@ -1582,7 +1655,7 @@ function renderUsersTable() {
   if (count) count.textContent = `${filteredUsers.length}/${users.length} người dùng`;
   $("#users-table").innerHTML = filteredUsers.length ? filteredUsers.map((user) => `
     <tr>
-      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-user="${user.id}">Chỉnh sửa</button> <button class="table-action" data-renew-billing="${user.id}">Gia hạn</button> <button class="table-action danger" data-delete-user="${user.id}">Xóa</button></div></td>
+      <td class="table-action-cell"><div class="action-group"><button class="table-action" data-edit-user="${user.id}">Chỉnh sửa</button> <button class="table-action" data-edit-user-password="${user.id}">Mật khẩu</button> <button class="table-action" data-renew-billing="${user.id}">Gia hạn</button> <button class="table-action danger" data-delete-user="${user.id}">Xóa</button></div></td>
       <td><strong>${escapeHtml(user.username)}</strong><small class='cell-note'>${escapeHtml(user.email || user.employee_code || "")}</small>${user.must_change_password ? "<small class='cell-note'>Cần đổi mật khẩu</small>" : ""}</td>
       <td>${escapeHtml(user.full_name)}<small class='cell-note'>${escapeHtml(user.department || "")}</small></td>
       <td><span class="status ${user.role === "admin" ? "admin" : "viewer"}">${user.role === "admin" ? "Quản trị viên" : "Người xem"}</span></td>
@@ -1590,6 +1663,7 @@ function renderUsersTable() {
       <td>${renderUserBillingCell(user)}</td>
     </tr>`).join("") : emptyRow(6, keyword ? "Không tìm thấy người dùng" : "Chưa có người dùng", keyword ? "Hãy thử nhập từ khóa khác." : "Hãy tạo hoặc import người dùng từ Excel.");
   document.querySelectorAll("[data-edit-user]").forEach((button) => button.addEventListener("click", () => openEditUser(Number(button.dataset.editUser))));
+  document.querySelectorAll("[data-edit-user-password]").forEach((button) => button.addEventListener("click", () => openEditUser(Number(button.dataset.editUserPassword), { focusPassword: true })));
   document.querySelectorAll("[data-renew-billing]").forEach((button) => button.addEventListener("click", () => renewUserBillingDemo(Number(button.dataset.renewBilling))));
   document.querySelectorAll("[data-delete-user]").forEach((button) => button.addEventListener("click", () => deleteUser(Number(button.dataset.deleteUser))));
 }
@@ -1618,10 +1692,11 @@ async function renewUserBillingDemo(id, selectedPlanCode = "") {
   }
 }
 
-async function openEditUser(id) {
+async function openEditUser(id, options = {}) {
   const user = users.find((item) => item.id === id);
   const form = $("#edit-user-form");
   await ensureBillingPlans();
+  resetGeneratedUserPassword(form);
   form.elements.namedItem("id").value = user.id;
   form.elements.namedItem("full_name").value = user.full_name;
   form.elements.namedItem("role").value = user.role;
@@ -1638,6 +1713,10 @@ async function openEditUser(id) {
   const granted = new Set((await api(`/api/admin/users/${id}/permissions`)).feature_codes);
   renderPermissionTree("#permission-tree", granted);
   $("#edit-user-dialog").showModal();
+  if (options.focusPassword) {
+    $("#edit-user-password-tools")?.scrollIntoView({ block: "center", behavior: "smooth" });
+    $("#generate-user-password")?.focus();
+  }
 }
 
 if (role === "admin") {
@@ -1668,6 +1747,21 @@ if (role === "admin") {
       await loadUsers({ force: true });
     } catch (error) {
       showMessage(form.querySelector(".result"), error.message, "error");
+    }
+  });
+
+  $("#edit-user-form")?.addEventListener("click", async (event) => {
+    const target = event.target;
+    const generateButton = target?.closest?.("#generate-user-password");
+    if (generateButton) {
+      event.preventDefault();
+      await generateUserPasswordFromDialog(generateButton);
+      return;
+    }
+    const copyButton = target?.closest?.("#copy-generated-user-password");
+    if (copyButton) {
+      event.preventDefault();
+      await copyGeneratedUserPasswordFromDialog();
     }
   });
 

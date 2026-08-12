@@ -1,7 +1,25 @@
+import secrets
 import sqlite3
 from typing import Any
 
 from app.data_access.app_repository import AppRepository, verify_password
+
+
+PASSWORD_GROUPS = (
+    "ABCDEFGHJKLMNPQRSTUVWXYZ",
+    "abcdefghijkmnopqrstuvwxyz",
+    "23456789",
+    "!@#$%*?",
+)
+PASSWORD_ALPHABET = "".join(PASSWORD_GROUPS)
+
+
+def generate_temporary_password(length: int = 14) -> str:
+    length = max(length, len(PASSWORD_GROUPS))
+    password_chars = [secrets.choice(group) for group in PASSWORD_GROUPS]
+    password_chars.extend(secrets.choice(PASSWORD_ALPHABET) for _ in range(length - len(password_chars)))
+    secrets.SystemRandom().shuffle(password_chars)
+    return "".join(password_chars)
 
 
 class AuthService:
@@ -48,6 +66,14 @@ class AuthService:
             raise ValueError("Không tìm thấy người dùng.")
         self.repository.change_password(user_id, password, must_change=True)
         self.repository.add_audit_log(actor, "password_reset", f"Đặt lại mật khẩu cho {user['username']}")
+
+    def generate_reset_password(self, actor: str, user_id: int) -> dict[str, Any]:
+        password = generate_temporary_password()
+        self.reset_password(actor, user_id, password)
+        return {
+            "password": password,
+            "user": self.public_user(self.repository.get_user_by_id(user_id)),
+        }
 
     def change_own_password(self, user_id: int, username: str, current_password: str, new_password: str) -> None:
         user = self.repository.get_user_by_id(user_id)

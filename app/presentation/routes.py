@@ -3639,6 +3639,20 @@ def reset_password(request: Request, user_id: int, payload: PasswordPayload) -> 
     return {"ok": True, "message": "Đặt lại mật khẩu thành công."}
 
 
+@router.post("/api/admin/users/{user_id}/generate-password")
+def generate_user_password(request: Request, user_id: int) -> dict:
+    actor = admin_user(request)
+    try:
+        result = build_auth_service().generate_reset_password(actor["username"], user_id)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return {
+        "ok": True,
+        "message": "Đã tạo mật khẩu tạm mới. Mật khẩu chỉ hiển thị một lần.",
+        **result,
+    }
+
+
 @router.get("/api/admin/audit-logs")
 def audit_logs(request: Request) -> dict:
     admin_user(request)

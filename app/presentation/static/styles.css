@@ -3304,6 +3304,62 @@ tbody tr:hover {
   background: rgba(14, 165, 233, .08);
 }
 
+.password-admin-tools {
+  display: grid;
+  gap: .75rem;
+  border: 1px solid rgba(245, 158, 11, .36);
+  border-radius: 14px;
+  background: rgba(255, 251, 235, .78);
+  padding: .85rem;
+}
+
+.password-admin-toolbar,
+.generated-password-box {
+  display: grid;
+  gap: .75rem;
+}
+
+.password-admin-toolbar strong {
+  display: block;
+  color: #78350f;
+  font-size: .9rem;
+  font-weight: 900;
+}
+
+.password-admin-toolbar small {
+  display: block;
+  margin-top: .15rem;
+  color: #92400e;
+  font-size: .78rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.generated-password-box {
+  align-items: end;
+  border-top: 1px solid rgba(245, 158, 11, .22);
+  padding-top: .75rem;
+}
+
+.generated-password-input {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.dark .password-admin-tools {
+  border-color: rgba(251, 191, 36, .32);
+  background: rgba(69, 26, 3, .36);
+}
+
+.dark .password-admin-toolbar strong {
+  color: #fde68a;
+}
+
+.dark .password-admin-toolbar small {
+  color: #fcd34d;
+}
+
 .billing-grid {
   display: grid;
   gap: .85rem;
@@ -3327,6 +3383,11 @@ tbody tr:hover {
 @media (min-width: 720px) {
   .billing-grid {
     grid-template-columns: minmax(0, 1.4fr) minmax(160px, .6fr);
+  }
+
+  .password-admin-toolbar,
+  .generated-password-box {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 }
 
