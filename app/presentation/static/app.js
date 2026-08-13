@@ -156,6 +156,7 @@ let workstationScriptPromise = null;
 let workTasksScriptPromise = null;
 let reportLinksScriptPromise = null;
 let dataMiningScriptPromise = null;
+let taskReportAutoScriptPromise = null;
 let ftpMiningScriptPromise = null;
 let reportsRuntimeScriptPromise = null;
 const dataCacheTimestamps = new Map();
@@ -164,7 +165,7 @@ const dashboardBuilderLayoutCache = new Map();
 const DASHBOARD_VIEWER_REFRESH_POLL_MS = 4000;
 const DATA_CACHE_TTL_MS = 2 * 60 * 1000;
 const NAVIGATION_CLIENT_CACHE_TTL_MS = 60 * 1000;
-const NAVIGATION_CLIENT_CACHE_VERSION = "2026-08-12-feature-permissions-v35";
+const NAVIGATION_CLIENT_CACHE_VERSION = "2026-08-13-task-report-auto-v36";
 const TABLE_PAGE_SIZE = 20;
 const PUBLIC_MESSAGES_LIMIT = 10;
 const TABLE_SHORT_PAGE_SIZE = 10;
@@ -328,6 +329,29 @@ function ensureDataMiningScriptLoaded() {
     if (!existingScript) document.body.appendChild(script);
   });
   return dataMiningScriptPromise;
+}
+
+function ensureTaskReportAutoScriptLoaded() {
+  if (window.VNPTTaskReportAuto?.loadTaskReportAuto) return Promise.resolve();
+  const existingScript = document.querySelector("script[data-task-report-auto='true']");
+  if (existingScript?.dataset.loaded === "true") return Promise.resolve();
+  if (taskReportAutoScriptPromise) return taskReportAutoScriptPromise;
+  taskReportAutoScriptPromise = new Promise((resolve, reject) => {
+    const script = existingScript || document.createElement("script");
+    script.src = "/static/task-report-auto.js?v=1";
+    script.defer = true;
+    script.dataset.taskReportAuto = "true";
+    script.addEventListener("load", () => {
+      script.dataset.loaded = "true";
+      resolve();
+    }, { once: true });
+    script.addEventListener("error", () => {
+      taskReportAutoScriptPromise = null;
+      reject(new Error("Khong tai duoc module Task report auto."));
+    }, { once: true });
+    if (!existingScript) document.body.appendChild(script);
+  });
+  return taskReportAutoScriptPromise;
 }
 
 function ensureFtpMiningScriptLoaded() {
@@ -494,6 +518,7 @@ const navFeatureConfig = {
   thietkelayoutbaocao: { view: "dashboard-builder", icon: "chart", keywords: "dashboard builder thiet ke layout bao cao tab bieu do" },
   daodulieuonebss: { view: "onebss-mining", icon: "database", keywords: "dao du lieu onebss bao cao excel" },
   daodulieuftp: { view: "ftp-mining", icon: "download", keywords: "dao du lieu ftp bao cao file may tram" },
+  taskreportauto: { view: "task-report-auto", icon: "chart", keywords: "task report auto lich sheet zalo onebss sql ftp" },
   linkbaocao: { view: "report-links", icon: "download", keywords: "link bao cao google drive sheet doc slides pdf copy tai xuong" },
   publicmessages: { view: "public-messages", icon: "audit", keywords: "noi dung public sms email otp copy" },
 };
@@ -845,6 +870,10 @@ function viewLoaderForNav(nextView, dashboardPageId) {
   if (nextView === "ftp-mining") return async () => {
     await ensureFtpMiningScriptLoaded();
     return loadFtpMining();
+  };
+  if (nextView === "task-report-auto") return async () => {
+    await ensureTaskReportAutoScriptLoaded();
+    return loadTaskReportAuto();
   };
   if (nextView === "report-links") return async () => {
     await ensureReportLinksScriptLoaded();
@@ -5384,6 +5413,12 @@ async function loadFtpMining(options = {}) {
   await ensureFtpMiningScriptLoaded();
   if (!window.VNPTFtpMining?.loadFtpMining) throw new Error("Module FTP chua san sang.");
   return window.VNPTFtpMining.loadFtpMining(options);
+}
+
+async function loadTaskReportAuto(options = {}) {
+  await ensureTaskReportAutoScriptLoaded();
+  if (!window.VNPTTaskReportAuto?.loadTaskReportAuto) throw new Error("Module Task report auto chua san sang.");
+  return window.VNPTTaskReportAuto.loadTaskReportAuto(options);
 }
 
 async function loadConnections({ force = false } = {}) {

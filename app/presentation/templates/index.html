@@ -8,9 +8,9 @@
     <link rel="icon" type="image/png" href="/static/images/system-logo.png" />
     <link rel="apple-touch-icon" href="/static/images/system-logo.png" />
     {% if shell_only %}
-    <link rel="preload" href="/static/shell.js?v=38" as="script" />
+    <link rel="preload" href="/static/shell.js?v=39" as="script" />
     {% else %}
-    <link rel="preload" href="/static/app.js?v=224" as="script" />
+    <link rel="preload" href="/static/app.js?v=225" as="script" />
     {% endif %}
     <link rel="stylesheet" href="/static/tailwind-built.css?v=1" />
     <link rel="stylesheet" href="/static/styles.css?v=136" />
@@ -102,7 +102,7 @@
             {% if can_use("truyvansql") %}
             <button class="nav-item" data-feature-code="truyvansql" data-view="reports" data-title="Đào dữ liệu SQL" data-keywords="dao du lieu sql oracle excel drive may tram"><svg class="nav-svg"><use href="#icon-database"></use></svg><span>Đào dữ liệu SQL</span></button>
             {% endif %}
-            {% if can_use("thietkelayoutbaocao", "daodulieuonebss", "daodulieuftp", "publicmessages", "linkbaocao") %}
+            {% if can_use("thietkelayoutbaocao", "daodulieuonebss", "daodulieuftp", "taskreportauto", "publicmessages", "linkbaocao") %}
             <details class="nav-group">
               <summary data-feature-code="baocaomoi"><span class="chevron">›</span><svg class="nav-svg"><use href="#icon-chart"></use></svg><strong>Báo cáo mới</strong></summary>
               {% if can_use("thietkelayoutbaocao") %}
@@ -113,6 +113,9 @@
               {% endif %}
               {% if can_use("daodulieuftp") %}
               <button class="nav-item child" data-feature-code="daodulieuftp" data-view="ftp-mining" data-title="Đào dữ liệu FTP" data-keywords="dao du lieu ftp bao cao file may tram"><svg class="nav-svg"><use href="#icon-download"></use></svg><span>Đào dữ liệu FTP</span></button>
+              {% endif %}
+              {% if can_use("taskreportauto") %}
+              <button class="nav-item child" data-feature-code="taskreportauto" data-view="task-report-auto" data-title="Task report auto" data-keywords="task report auto lich sheet zalo onebss sql ftp"><svg class="nav-svg"><use href="#icon-chart"></use></svg><span>Task report auto</span></button>
               {% endif %}
               {% if can_use("publicmessages") %}
               <button class="nav-item child" data-feature-code="publicmessages" data-view="public-messages" data-title="N&#7897;i dung public" data-keywords="noi dung public sms email otp copy"><svg class="nav-svg"><use href="#icon-audit"></use></svg><span>N&#7897;i dung public</span></button>
@@ -493,6 +496,38 @@
               <table class="compact-admin-table inline-admin-table onebss-run-table">
                 <thead><tr><th>Thời gian</th><th>Báo cáo</th><th>Trạng thái</th><th>File dữ liệu</th><th>Thông báo</th></tr></thead>
                 <tbody id="ftp-run-history"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+        {% endif %}
+
+        {% if render_view("task-report-auto") %}
+        <section class="app-view" id="view-task-report-auto">
+          <div class="page-header">
+            <div><p class="eyebrow">Task report auto</p><h1>Task report auto</h1><p class="subtitle">OneBSS, SQL, FTP -> Google Sheet -> public web -> Zalo.</p></div>
+            <div class="action-group">
+              <button class="btn-secondary" id="refresh-task-report-auto" type="button">Lam moi</button>
+              <button class="btn-primary" id="add-task-report-auto" type="button">Them task</button>
+            </div>
+          </div>
+          <section class="data-card">
+            <div id="task-report-auto-message" class="result hidden mb-4"></div>
+            <div class="table-scroll">
+              <table class="compact-admin-table inline-admin-table">
+                <thead><tr><th class="table-action-column">Thao tac</th><th>Task</th><th>Nguon</th><th>Lich</th><th>Sheet</th><th>Zalo</th><th>Lan cuoi</th></tr></thead>
+                <tbody id="task-report-auto-tasks-table"></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="data-card mt-4">
+            <div class="section-heading compact">
+              <div><h2>Lich su chay</h2><p id="task-report-auto-runs-summary">Chua co du lieu</p></div>
+            </div>
+            <div class="table-scroll">
+              <table class="compact-admin-table inline-admin-table">
+                <thead><tr><th>Thoi gian</th><th>Task</th><th>Trang thai</th><th>Buoc</th><th>Ket qua</th></tr></thead>
+                <tbody id="task-report-auto-runs-table"></tbody>
               </table>
             </div>
           </section>
@@ -974,9 +1009,9 @@
     {% endif %}
     <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
     {% if shell_only %}
-    <script defer src="/static/shell.js?v=38"></script>
+    <script defer src="/static/shell.js?v=39"></script>
     {% else %}
-    <script defer src="/static/app.js?v=224"></script>
+    <script defer src="/static/app.js?v=225"></script>
     {% endif %}
   </body>
 </html>

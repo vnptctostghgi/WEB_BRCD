@@ -57,6 +57,7 @@ FEATURE_ROWS = [
     {"code": "daodulieuonebss", "name": "Đào dữ liệu OneBSS", "parent_code": "baocaomoi", "sort_order": 37},
     {"code": "daodulieuftp", "name": "Đào dữ liệu FTP", "parent_code": "baocaomoi", "sort_order": 38},
     {"code": "linkbaocao", "name": "Link báo cáo", "parent_code": "baocaomoi", "sort_order": 39},
+    {"code": "taskreportauto", "name": "Task report auto", "parent_code": "baocaomoi", "sort_order": 40},
     {"code": "taikhoanweb", "name": "Tài khoản web", "parent_code": "quantriweb", "sort_order": 40},
     {"code": "xemdanhsachtaikhoan", "name": "Xem danh sách tài khoản", "parent_code": "taikhoanweb", "sort_order": 41},
     {"code": "themvasuataikhoan", "name": "Thêm và sửa tài khoản", "parent_code": "taikhoanweb", "sort_order": 42},
@@ -1967,9 +1968,288 @@ class SupabaseRepository:
         rows = self._get("data_mining_runs", params)
         return [self._decode_data_mining_run(row) for row in rows]
 
+    def list_task_report_auto_tasks(self, active_only: bool = False) -> list[dict[str, Any]]:
+        params = {"order": "run_time.asc,task_id.asc"}
+        if active_only:
+            params["is_active"] = "eq.true"
+        rows = self._get("task_report_auto_tasks", params)
+        return [self._decode_task_report_auto_task(row) for row in rows]
+
+    def get_task_report_auto_task(self, task_id: str) -> dict[str, Any] | None:
+        rows = self._get("task_report_auto_tasks", {"task_id": f"eq.{task_id}", "limit": "1"})
+        return self._decode_task_report_auto_task(rows[0]) if rows else None
+
+    def generate_task_report_auto_task_id(self) -> str:
+        rows = self._get("task_report_auto_tasks", {"select": "task_id", "task_id": "like.TRA%", "order": "task_id.desc"})
+        max_number = 0
+        for row in rows:
+            suffix = str(row.get("task_id", ""))[3:]
+            if suffix.isdigit():
+                max_number = max(max_number, int(suffix))
+        return f"TRA{max_number + 1:04d}"
+
+    def save_task_report_auto_task(self, payload: dict[str, Any]) -> None:
+        now = self._now()
+        row = {
+            "task_id": str(payload["task_id"]).strip(),
+            "name": str(payload.get("name", "")).strip(),
+            "source_type": str(payload.get("source_type", "onebss")).strip().lower(),
+            "source_code": str(payload.get("source_code", "")).strip().upper(),
+            "source_config": payload.get("source_config") if isinstance(payload.get("source_config"), dict) else {},
+            "schedule_type": str(payload.get("schedule_type", "Daily")).strip() or "Daily",
+            "time_slots": payload.get("time_slots") if isinstance(payload.get("time_slots"), list) else [],
+            "run_time": str(payload.get("run_time", "07:00")).strip() or "07:00",
+            "weekday": str(payload.get("weekday", "")).strip(),
+            "month_day": int(payload.get("month_day") or 1),
+            "spreadsheet_id": str(payload.get("spreadsheet_id", "")).strip(),
+            "spreadsheet_url": str(payload.get("spreadsheet_url", "")).strip(),
+            "sheet_name": str(payload.get("sheet_name", "DATA")).strip() or "DATA",
+            "public_url": str(payload.get("public_url", "")).strip(),
+            "public_wait_selector": str(payload.get("public_wait_selector", "")).strip(),
+            "target_type": str(payload.get("target_type", "group")).strip() or "group",
+            "chat_id": str(payload.get("chat_id", "")).strip(),
+            "chat_name": str(payload.get("chat_name", "")).strip(),
+            "caption": str(payload.get("caption", "")).strip(),
+            "retry_limit": int(payload.get("retry_limit") or 0),
+            "is_active": bool(payload.get("is_active", True)),
+            "created_at": now,
+            "updated_at": now,
+        }
+        self._upsert("task_report_auto_tasks", row, "task_id")
+
+    def delete_task_report_auto_task(self, task_id: str) -> None:
+        self._delete("task_report_auto_captures", {"task_id": f"eq.{task_id}"})
+        self._delete("task_report_auto_runs", {"task_id": f"eq.{task_id}"})
+        self._delete("task_report_auto_tasks", {"task_id": f"eq.{task_id}"})
+
+    def create_task_report_auto_run(
+        self,
+        task_id: str,
+        run_key: str = "",
+        *,
+        created_by: str = "",
+        status: str = "queued",
+        message: str = "",
+    ) -> dict[str, Any]:
+        task = self.get_task_report_auto_task(task_id) or {}
+        now = self._now()
+        row = {
+            "run_id": f"TRA_RUN{uuid.uuid4().hex[:16].upper()}",
+            "task_id": task_id,
+            "run_key": run_key,
+            "status": str(status or "queued")[:50],
+            "current_step": "",
+            "message": str(message or "")[:1000],
+            "step_results": {},
+            "result": {},
+            "source_type": task.get("source_type") or "",
+            "source_run_id": "",
+            "spreadsheet_id": task.get("spreadsheet_id") or "",
+            "sheet_name": task.get("sheet_name") or "",
+            "capture_id": "",
+            "capture_url": "",
+            "chat_id": task.get("chat_id") or "",
+            "started_at": now,
+            "finished_at": None,
+            "duration_ms": 0,
+            "created_by": created_by or "",
+            "updated_at": now,
+        }
+        inserted = self._insert("task_report_auto_runs", row)
+        return self._decode_task_report_auto_run(inserted)
+
+    def claim_next_task_report_auto_run(self) -> dict[str, Any] | None:
+        rows = self._get("task_report_auto_runs", {"status": "eq.queued", "order": "started_at.asc,run_id.asc", "limit": "1"})
+        if not rows:
+            return None
+        run_id = str(rows[0].get("run_id") or "")
+        now = self._now()
+        updated = self._patch_returning(
+            "task_report_auto_runs",
+            {"run_id": f"eq.{run_id}", "status": "eq.queued"},
+            {
+                "status": "running",
+                "current_step": "queued",
+                "message": "Task report auto da nhan hang doi va dang chay.",
+                "updated_at": now,
+            },
+        )
+        return self._decode_task_report_auto_run(updated[0]) if updated else None
+
+    def get_task_report_auto_run(self, run_id: str) -> dict[str, Any] | None:
+        rows = self._get("task_report_auto_runs", {"run_id": f"eq.{run_id}", "limit": "1"})
+        return self._decode_task_report_auto_run(rows[0]) if rows else None
+
+    def update_task_report_auto_run(self, run_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+        allowed = {
+            "status",
+            "current_step",
+            "message",
+            "step_results",
+            "result",
+            "source_run_id",
+            "spreadsheet_id",
+            "sheet_name",
+            "capture_id",
+            "capture_url",
+            "chat_id",
+            "finished_at",
+            "duration_ms",
+            "updated_at",
+        }
+        payload = {key: value for key, value in updates.items() if key in allowed}
+        payload["updated_at"] = str(payload.get("updated_at") or self._now())
+        if payload:
+            self._patch("task_report_auto_runs", {"run_id": f"eq.{run_id}"}, payload)
+        return self.get_task_report_auto_run(run_id)
+
+    def append_task_report_auto_run_step(self, run_id: str, step: str, entry: dict[str, Any]) -> None:
+        run = self.get_task_report_auto_run(run_id) or {}
+        steps = run.get("step_results") if isinstance(run.get("step_results"), dict) else {}
+        items = steps.get(step) if isinstance(steps.get(step), list) else []
+        items.append(entry)
+        steps[step] = items
+        self.update_task_report_auto_run(run_id, {"step_results": steps})
+
+    def mark_task_report_auto_task_run(self, task_id: str, run_key: str, ok: bool | None, result: dict[str, Any]) -> None:
+        now = self._now()
+        payload = {
+            "last_run_key": run_key,
+            "last_run_at": now,
+            "last_status": str(result.get("status") or ("success" if ok else "queued" if ok is None else "failed"))[:50],
+            "last_error": "" if ok or ok is None else str(result.get("message") or result.get("error") or "")[:500],
+            "updated_at": now,
+        }
+        if ok:
+            payload.update({"last_success_key": run_key, "last_success_at": now})
+        self._patch("task_report_auto_tasks", {"task_id": f"eq.{task_id}"}, payload)
+
+    def list_task_report_auto_runs(self, task_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+        params = {"order": "started_at.desc", "limit": str(min(max(int(limit or 50), 1), 200))}
+        if task_id:
+            params["task_id"] = f"eq.{task_id}"
+        rows = self._get("task_report_auto_runs", params)
+        return [self._decode_task_report_auto_run(row) for row in rows]
+
+    def save_task_report_auto_capture(
+        self,
+        task_id: str,
+        run_id: str,
+        image_base64: str,
+        mime_type: str,
+        page_url: str = "",
+        created_by: str = "",
+    ) -> dict[str, Any]:
+        now = self._now()
+        row = {
+            "capture_id": f"TRACAP{uuid.uuid4().hex[:14].upper()}",
+            "task_id": task_id,
+            "run_id": run_id,
+            "mime_type": mime_type or "image/png",
+            "image_base64": image_base64,
+            "public_token": secrets.token_urlsafe(24),
+            "page_url": page_url or "",
+            "created_by": created_by or "",
+            "created_at": now,
+        }
+        inserted = self._insert("task_report_auto_captures", row)
+        return self._decode_task_report_auto_capture(inserted, include_image=False)
+
+    def get_task_report_auto_capture(self, capture_id: str) -> dict[str, Any] | None:
+        rows = self._get("task_report_auto_captures", {"capture_id": f"eq.{capture_id}", "limit": "1"})
+        return self._decode_task_report_auto_capture(rows[0], include_image=True) if rows else None
+
     def health_check(self) -> dict[str, Any]:
         rows = self._get("features", {"select": "code", "limit": "1"})
         return {"ok": True, "backend": "supabase", "feature_rows_seen": len(rows)}
+
+    @staticmethod
+    def _json_or(value: Any, fallback: Any) -> Any:
+        if isinstance(value, (dict, list)):
+            return value
+        try:
+            return json.loads(value or json.dumps(fallback))
+        except (TypeError, json.JSONDecodeError):
+            return fallback
+
+    @classmethod
+    def _decode_task_report_auto_task(cls, row: dict[str, Any]) -> dict[str, Any]:
+        source_config = cls._json_or(row.get("source_config") or row.get("source_config_json"), {})
+        time_slots = cls._json_or(row.get("time_slots") or row.get("time_slots_json"), [])
+        return {
+            "task_id": row.get("task_id"),
+            "name": row.get("name") or "",
+            "source_type": row.get("source_type") or "onebss",
+            "source_code": row.get("source_code") or "",
+            "source_config": source_config if isinstance(source_config, dict) else {},
+            "schedule_type": row.get("schedule_type") or "Daily",
+            "time_slots": time_slots if isinstance(time_slots, list) else [],
+            "run_time": row.get("run_time") or "07:00",
+            "weekday": row.get("weekday") or "",
+            "month_day": int(row.get("month_day") or 1),
+            "spreadsheet_id": row.get("spreadsheet_id") or "",
+            "spreadsheet_url": row.get("spreadsheet_url") or "",
+            "sheet_name": row.get("sheet_name") or "DATA",
+            "public_url": row.get("public_url") or "",
+            "public_wait_selector": row.get("public_wait_selector") or "",
+            "target_type": row.get("target_type") or "group",
+            "chat_id": row.get("chat_id") or "",
+            "chat_name": row.get("chat_name") or "",
+            "caption": row.get("caption") or "",
+            "retry_limit": int(row.get("retry_limit") or 0),
+            "is_active": bool(row.get("is_active")),
+            "last_run_key": row.get("last_run_key") or "",
+            "last_success_key": row.get("last_success_key") or "",
+            "last_run_at": row.get("last_run_at") or "",
+            "last_success_at": row.get("last_success_at") or "",
+            "last_status": row.get("last_status") or "",
+            "last_error": row.get("last_error") or "",
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        }
+
+    @classmethod
+    def _decode_task_report_auto_run(cls, row: dict[str, Any]) -> dict[str, Any]:
+        step_results = cls._json_or(row.get("step_results") or row.get("step_results_json"), {})
+        result = cls._json_or(row.get("result") or row.get("result_json"), {})
+        return {
+            "run_id": row.get("run_id"),
+            "task_id": row.get("task_id") or "",
+            "run_key": row.get("run_key") or "",
+            "status": row.get("status") or "",
+            "current_step": row.get("current_step") or "",
+            "message": row.get("message") or "",
+            "step_results": step_results if isinstance(step_results, dict) else {},
+            "result": result if isinstance(result, dict) else {},
+            "source_type": row.get("source_type") or "",
+            "source_run_id": row.get("source_run_id") or "",
+            "spreadsheet_id": row.get("spreadsheet_id") or "",
+            "sheet_name": row.get("sheet_name") or "",
+            "capture_id": row.get("capture_id") or "",
+            "capture_url": row.get("capture_url") or "",
+            "chat_id": row.get("chat_id") or "",
+            "started_at": row.get("started_at") or "",
+            "finished_at": row.get("finished_at") or "",
+            "duration_ms": int(row.get("duration_ms") or 0),
+            "created_by": row.get("created_by") or "",
+            "updated_at": row.get("updated_at") or "",
+        }
+
+    @staticmethod
+    def _decode_task_report_auto_capture(row: dict[str, Any], include_image: bool = False) -> dict[str, Any]:
+        payload = {
+            "capture_id": row.get("capture_id"),
+            "task_id": row.get("task_id") or "",
+            "run_id": row.get("run_id") or "",
+            "mime_type": row.get("mime_type") or "image/png",
+            "public_token": row.get("public_token") or "",
+            "page_url": row.get("page_url") or "",
+            "created_by": row.get("created_by") or "",
+            "created_at": row.get("created_at"),
+        }
+        if include_image:
+            payload["image_base64"] = row.get("image_base64") or ""
+        return payload
 
     @staticmethod
     def _decode_connection(row: dict[str, Any]) -> dict[str, Any]:

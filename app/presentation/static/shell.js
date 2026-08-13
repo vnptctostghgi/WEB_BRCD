@@ -17,6 +17,7 @@ const navFeatureConfig = {
   thietkelayoutbaocao: { view: "dashboard-builder", icon: "chart", keywords: "dashboard builder thiet ke layout bao cao tab bieu do" },
   daodulieuonebss: { view: "onebss-mining", icon: "database", keywords: "dao du lieu onebss bao cao excel" },
   daodulieuftp: { view: "ftp-mining", icon: "download", keywords: "dao du lieu ftp bao cao file may tram" },
+  taskreportauto: { view: "task-report-auto", icon: "chart", keywords: "task report auto lich sheet zalo onebss sql ftp" },
   linkbaocao: { view: "report-links", icon: "download", keywords: "link bao cao google drive sheet doc slides pdf copy tai xuong" },
   publicmessages: { view: "public-messages", icon: "audit", keywords: "noi dung public sms email otp copy" },
 };
@@ -35,7 +36,7 @@ const navGroupIcons = {
 let dashboardFeatureCodes = new Set();
 let dashboardPageIdByFeatureCode = new Map();
 const NAVIGATION_CLIENT_CACHE_TTL_MS = 60 * 1000;
-const NAVIGATION_CLIENT_CACHE_VERSION = "2026-08-12-feature-permissions-v35";
+const NAVIGATION_CLIENT_CACHE_VERSION = "2026-08-13-task-report-auto-v36";
 
 function navigationClientCacheKey() {
   return `vnptcto:navigation:${NAVIGATION_CLIENT_CACHE_VERSION}:${document.body.dataset.navCacheKey || document.body.dataset.role || "guest"}`;
@@ -445,7 +446,7 @@ function warmFeatureBundle() {
   const link = document.createElement("link");
   link.rel = "preload";
   link.as = "script";
-  link.href = "/static/app.js?v=224";
+  link.href = "/static/app.js?v=225";
   link.dataset.featureBundleWarm = "true";
   document.head.appendChild(link);
 }

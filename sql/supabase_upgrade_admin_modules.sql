@@ -126,6 +126,13 @@ set name = excluded.name,
     parent_code = excluded.parent_code,
     sort_order = excluded.sort_order;
 
+insert into public.features (code, name, parent_code, sort_order)
+values ('taskreportauto', 'Task report auto', 'baocaomoi', 40)
+on conflict (code) do update
+set name = excluded.name,
+    parent_code = excluded.parent_code,
+    sort_order = excluded.sort_order;
+
 drop table if exists public.attt_exam_links;
 
 create unique index if not exists users_employee_code_lower_idx
@@ -268,6 +275,86 @@ create table if not exists public.data_mining_runs (
 
 create index if not exists data_mining_runs_schedule_idx
 on public.data_mining_runs (schedule_id, started_at desc);
+
+create table if not exists public.task_report_auto_tasks (
+  task_id text primary key,
+  name text not null,
+  source_type text not null default 'onebss',
+  source_code text not null default '',
+  source_config jsonb not null default '{}'::jsonb,
+  schedule_type text not null default 'Daily',
+  time_slots jsonb not null default '[]'::jsonb,
+  run_time text not null default '07:00',
+  weekday text not null default '',
+  month_day integer not null default 1,
+  spreadsheet_id text not null default '',
+  spreadsheet_url text not null default '',
+  sheet_name text not null default 'DATA',
+  public_url text not null default '',
+  public_wait_selector text not null default '',
+  target_type text not null default 'group',
+  chat_id text not null default '',
+  chat_name text not null default '',
+  caption text not null default '',
+  retry_limit integer not null default 2,
+  is_active boolean not null default true,
+  last_run_key text not null default '',
+  last_success_key text not null default '',
+  last_run_at timestamptz,
+  last_success_at timestamptz,
+  last_status text not null default '',
+  last_error text not null default '',
+  created_at timestamptz not null,
+  updated_at timestamptz not null
+);
+
+create table if not exists public.task_report_auto_runs (
+  run_id text primary key,
+  task_id text not null references public.task_report_auto_tasks(task_id) on delete cascade,
+  run_key text not null default '',
+  status text not null default 'queued',
+  current_step text not null default '',
+  message text not null default '',
+  step_results jsonb not null default '{}'::jsonb,
+  result jsonb not null default '{}'::jsonb,
+  source_type text not null default '',
+  source_run_id text not null default '',
+  spreadsheet_id text not null default '',
+  sheet_name text not null default '',
+  capture_id text not null default '',
+  capture_url text not null default '',
+  chat_id text not null default '',
+  started_at timestamptz not null default now(),
+  finished_at timestamptz,
+  duration_ms integer not null default 0,
+  created_by text not null default '',
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists task_report_auto_runs_task_idx
+on public.task_report_auto_runs (task_id, started_at desc);
+
+create index if not exists task_report_auto_runs_queue_idx
+on public.task_report_auto_runs (status, started_at);
+
+create unique index if not exists task_report_auto_runs_unique_key_idx
+on public.task_report_auto_runs (task_id, run_key)
+where run_key <> '';
+
+create table if not exists public.task_report_auto_captures (
+  capture_id text primary key,
+  task_id text not null references public.task_report_auto_tasks(task_id) on delete cascade,
+  run_id text not null,
+  mime_type text not null default 'image/png',
+  image_base64 text not null,
+  public_token text not null unique,
+  page_url text not null default '',
+  created_by text not null default '',
+  created_at timestamptz not null
+);
+
+create index if not exists task_report_auto_captures_run_idx
+on public.task_report_auto_captures (run_id, created_at desc);
 
 create table if not exists public.login_attempts (
   username text primary key,
@@ -522,6 +609,9 @@ alter table public.system_roles enable row level security;
 alter table public.work_tasks enable row level security;
 alter table public.zalo_auto_messages enable row level security;
 alter table public.zalo_message_captures enable row level security;
+alter table public.task_report_auto_tasks enable row level security;
+alter table public.task_report_auto_runs enable row level security;
+alter table public.task_report_auto_captures enable row level security;
 alter table public.login_attempts enable row level security;
 alter table public.sql_reports enable row level security;
 alter table public.onebss_reports enable row level security;
@@ -535,6 +625,9 @@ alter table public.dashboard_chart_cache enable row level security;
 grant select, insert, update, delete on public.work_tasks to anon, authenticated, service_role;
 grant select, insert, update, delete on public.zalo_auto_messages to service_role;
 grant select, insert, update, delete on public.zalo_message_captures to service_role;
+grant select, insert, update, delete on public.task_report_auto_tasks to service_role;
+grant select, insert, update, delete on public.task_report_auto_runs to service_role;
+grant select, insert, update, delete on public.task_report_auto_captures to service_role;
 grant select, insert, update, delete on public.login_attempts to anon, authenticated, service_role;
 grant select, insert, update, delete on public.sql_reports to anon, authenticated, service_role;
 grant usage, select on sequence public.sql_reports_id_seq to anon, authenticated, service_role;
@@ -574,6 +667,48 @@ begin
   ) then
     create policy "backend service can manage zalo message captures"
     on public.zalo_message_captures
+    for all
+    to service_role
+    using (true)
+    with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'task_report_auto_tasks'
+      and policyname = 'backend service can manage task report auto tasks'
+  ) then
+    create policy "backend service can manage task report auto tasks"
+    on public.task_report_auto_tasks
+    for all
+    to service_role
+    using (true)
+    with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'task_report_auto_runs'
+      and policyname = 'backend service can manage task report auto runs'
+  ) then
+    create policy "backend service can manage task report auto runs"
+    on public.task_report_auto_runs
+    for all
+    to service_role
+    using (true)
+    with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'task_report_auto_captures'
+      and policyname = 'backend service can manage task report auto captures'
+  ) then
+    create policy "backend service can manage task report auto captures"
+    on public.task_report_auto_captures
     for all
     to service_role
     using (true)

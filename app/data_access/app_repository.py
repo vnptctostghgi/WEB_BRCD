@@ -35,6 +35,7 @@ FEATURE_ROWS = [
     ("daodulieuonebss", "Đào dữ liệu OneBSS", "baocaomoi", 37),
     ("daodulieuftp", "Đào dữ liệu FTP", "baocaomoi", 38),
     ("linkbaocao", "Link báo cáo", "baocaomoi", 39),
+    ("taskreportauto", "Task report auto", "baocaomoi", 40),
     *PUBLIC_MESSAGES_FEATURE_ROWS,
     ("taikhoanweb", "Tài khoản web", "quantriweb", 40),
     ("xemdanhsachtaikhoan", "Xem danh sách tài khoản", "taikhoanweb", 41),
@@ -621,6 +622,88 @@ class AppRepository:
 
                 CREATE INDEX IF NOT EXISTS data_mining_runs_schedule_idx
                 ON data_mining_runs (schedule_id, started_at DESC);
+
+                CREATE TABLE IF NOT EXISTS task_report_auto_tasks (
+                    task_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    source_type TEXT NOT NULL DEFAULT 'onebss',
+                    source_code TEXT NOT NULL DEFAULT '',
+                    source_config_json TEXT NOT NULL DEFAULT '{}',
+                    schedule_type TEXT NOT NULL DEFAULT 'Daily',
+                    time_slots_json TEXT NOT NULL DEFAULT '[]',
+                    run_time TEXT NOT NULL DEFAULT '07:00',
+                    weekday TEXT NOT NULL DEFAULT '',
+                    month_day INTEGER NOT NULL DEFAULT 1,
+                    spreadsheet_id TEXT NOT NULL DEFAULT '',
+                    spreadsheet_url TEXT NOT NULL DEFAULT '',
+                    sheet_name TEXT NOT NULL DEFAULT 'DATA',
+                    public_url TEXT NOT NULL DEFAULT '',
+                    public_wait_selector TEXT NOT NULL DEFAULT '',
+                    target_type TEXT NOT NULL DEFAULT 'group',
+                    chat_id TEXT NOT NULL DEFAULT '',
+                    chat_name TEXT NOT NULL DEFAULT '',
+                    caption TEXT NOT NULL DEFAULT '',
+                    retry_limit INTEGER NOT NULL DEFAULT 2,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    last_run_key TEXT NOT NULL DEFAULT '',
+                    last_success_key TEXT NOT NULL DEFAULT '',
+                    last_run_at TEXT NOT NULL DEFAULT '',
+                    last_success_at TEXT NOT NULL DEFAULT '',
+                    last_status TEXT NOT NULL DEFAULT '',
+                    last_error TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS task_report_auto_runs (
+                    run_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    run_key TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    current_step TEXT NOT NULL DEFAULT '',
+                    message TEXT NOT NULL DEFAULT '',
+                    step_results_json TEXT NOT NULL DEFAULT '{}',
+                    result_json TEXT NOT NULL DEFAULT '{}',
+                    source_type TEXT NOT NULL DEFAULT '',
+                    source_run_id TEXT NOT NULL DEFAULT '',
+                    spreadsheet_id TEXT NOT NULL DEFAULT '',
+                    sheet_name TEXT NOT NULL DEFAULT '',
+                    capture_id TEXT NOT NULL DEFAULT '',
+                    capture_url TEXT NOT NULL DEFAULT '',
+                    chat_id TEXT NOT NULL DEFAULT '',
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT NOT NULL DEFAULT '',
+                    duration_ms INTEGER NOT NULL DEFAULT 0,
+                    created_by TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT '',
+                    FOREIGN KEY(task_id) REFERENCES task_report_auto_tasks(task_id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS task_report_auto_runs_task_idx
+                ON task_report_auto_runs (task_id, started_at DESC);
+
+                CREATE INDEX IF NOT EXISTS task_report_auto_runs_queue_idx
+                ON task_report_auto_runs (status, started_at);
+
+                CREATE UNIQUE INDEX IF NOT EXISTS task_report_auto_runs_unique_key_idx
+                ON task_report_auto_runs (task_id, run_key)
+                WHERE run_key <> '';
+
+                CREATE TABLE IF NOT EXISTS task_report_auto_captures (
+                    capture_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    mime_type TEXT NOT NULL DEFAULT 'image/png',
+                    image_base64 TEXT NOT NULL,
+                    public_token TEXT NOT NULL UNIQUE,
+                    page_url TEXT NOT NULL DEFAULT '',
+                    created_by TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(task_id) REFERENCES task_report_auto_tasks(task_id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS task_report_auto_captures_run_idx
+                ON task_report_auto_captures (run_id, created_at DESC);
 
                 CREATE TABLE IF NOT EXISTS login_attempts (
                     username TEXT PRIMARY KEY COLLATE NOCASE,
@@ -2691,6 +2774,418 @@ class AppRepository:
         with self.connect() as connection:
             rows = connection.execute(query, params).fetchall()
             return [self._decode_data_mining_run(dict(row)) for row in rows]
+
+    def list_task_report_auto_tasks(self, active_only: bool = False) -> list[dict[str, Any]]:
+        query = "SELECT * FROM task_report_auto_tasks"
+        if active_only:
+            query += " WHERE is_active = 1"
+        query += " ORDER BY run_time, task_id"
+        with self.connect() as connection:
+            rows = connection.execute(query).fetchall()
+            return [self._decode_task_report_auto_task(dict(row)) for row in rows]
+
+    def get_task_report_auto_task(self, task_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM task_report_auto_tasks WHERE task_id=?", (task_id,)).fetchone()
+            return self._decode_task_report_auto_task(dict(row)) if row else None
+
+    def generate_task_report_auto_task_id(self) -> str:
+        with self.connect() as connection:
+            rows = connection.execute("SELECT task_id FROM task_report_auto_tasks WHERE task_id LIKE 'TRA%'").fetchall()
+        max_number = 0
+        for row in rows:
+            suffix = str(row["task_id"])[3:]
+            if suffix.isdigit():
+                max_number = max(max_number, int(suffix))
+        return f"TRA{max_number + 1:04d}"
+
+    def save_task_report_auto_task(self, payload: dict[str, Any]) -> None:
+        now = self._now()
+        task_id = str(payload["task_id"]).strip()
+        source_config = payload.get("source_config") if isinstance(payload.get("source_config"), dict) else {}
+        time_slots = payload.get("time_slots") if isinstance(payload.get("time_slots"), list) else []
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO task_report_auto_tasks
+                (task_id, name, source_type, source_code, source_config_json, schedule_type,
+                 time_slots_json, run_time, weekday, month_day, spreadsheet_id, spreadsheet_url,
+                 sheet_name, public_url, public_wait_selector, target_type, chat_id, chat_name,
+                 caption, retry_limit, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(task_id) DO UPDATE SET
+                  name=excluded.name,
+                  source_type=excluded.source_type,
+                  source_code=excluded.source_code,
+                  source_config_json=excluded.source_config_json,
+                  schedule_type=excluded.schedule_type,
+                  time_slots_json=excluded.time_slots_json,
+                  run_time=excluded.run_time,
+                  weekday=excluded.weekday,
+                  month_day=excluded.month_day,
+                  spreadsheet_id=excluded.spreadsheet_id,
+                  spreadsheet_url=excluded.spreadsheet_url,
+                  sheet_name=excluded.sheet_name,
+                  public_url=excluded.public_url,
+                  public_wait_selector=excluded.public_wait_selector,
+                  target_type=excluded.target_type,
+                  chat_id=excluded.chat_id,
+                  chat_name=excluded.chat_name,
+                  caption=excluded.caption,
+                  retry_limit=excluded.retry_limit,
+                  is_active=excluded.is_active,
+                  updated_at=excluded.updated_at
+                """,
+                (
+                    task_id,
+                    str(payload.get("name", "")).strip(),
+                    str(payload.get("source_type", "onebss")).strip().lower(),
+                    str(payload.get("source_code", "")).strip().upper(),
+                    json.dumps(source_config, ensure_ascii=False),
+                    str(payload.get("schedule_type", "Daily")).strip() or "Daily",
+                    json.dumps(time_slots, ensure_ascii=False),
+                    str(payload.get("run_time", "07:00")).strip() or "07:00",
+                    str(payload.get("weekday", "")).strip(),
+                    int(payload.get("month_day") or 1),
+                    str(payload.get("spreadsheet_id", "")).strip(),
+                    str(payload.get("spreadsheet_url", "")).strip(),
+                    str(payload.get("sheet_name", "DATA")).strip() or "DATA",
+                    str(payload.get("public_url", "")).strip(),
+                    str(payload.get("public_wait_selector", "")).strip(),
+                    str(payload.get("target_type", "group")).strip() or "group",
+                    str(payload.get("chat_id", "")).strip(),
+                    str(payload.get("chat_name", "")).strip(),
+                    str(payload.get("caption", "")).strip(),
+                    int(payload.get("retry_limit") or 0),
+                    int(bool(payload.get("is_active", True))),
+                    now,
+                    now,
+                ),
+            )
+
+    def delete_task_report_auto_task(self, task_id: str) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM task_report_auto_captures WHERE task_id=?", (task_id,))
+            connection.execute("DELETE FROM task_report_auto_runs WHERE task_id=?", (task_id,))
+            connection.execute("DELETE FROM task_report_auto_tasks WHERE task_id=?", (task_id,))
+
+    def create_task_report_auto_run(
+        self,
+        task_id: str,
+        run_key: str = "",
+        *,
+        created_by: str = "",
+        status: str = "queued",
+        message: str = "",
+    ) -> dict[str, Any]:
+        task = self.get_task_report_auto_task(task_id) or {}
+        now = self._now()
+        run = {
+            "run_id": f"TRA_RUN{uuid.uuid4().hex[:16].upper()}",
+            "task_id": task_id,
+            "run_key": run_key,
+            "status": str(status or "queued")[:50],
+            "current_step": "",
+            "message": str(message or "")[:1000],
+            "step_results": {},
+            "result": {},
+            "source_type": task.get("source_type") or "",
+            "source_run_id": "",
+            "spreadsheet_id": task.get("spreadsheet_id") or "",
+            "sheet_name": task.get("sheet_name") or "",
+            "capture_id": "",
+            "capture_url": "",
+            "chat_id": task.get("chat_id") or "",
+            "started_at": now,
+            "finished_at": "",
+            "duration_ms": 0,
+            "created_by": created_by or "",
+            "updated_at": now,
+        }
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO task_report_auto_runs
+                (run_id, task_id, run_key, status, current_step, message, step_results_json,
+                 result_json, source_type, source_run_id, spreadsheet_id, sheet_name,
+                 capture_id, capture_url, chat_id, started_at, finished_at, duration_ms,
+                 created_by, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run["run_id"],
+                    run["task_id"],
+                    run["run_key"],
+                    run["status"],
+                    run["current_step"],
+                    run["message"],
+                    json.dumps(run["step_results"], ensure_ascii=False),
+                    json.dumps(run["result"], ensure_ascii=False),
+                    run["source_type"],
+                    run["source_run_id"],
+                    run["spreadsheet_id"],
+                    run["sheet_name"],
+                    run["capture_id"],
+                    run["capture_url"],
+                    run["chat_id"],
+                    run["started_at"],
+                    run["finished_at"],
+                    run["duration_ms"],
+                    run["created_by"],
+                    run["updated_at"],
+                ),
+            )
+        return run
+
+    def claim_next_task_report_auto_run(self) -> dict[str, Any] | None:
+        now = self._now()
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM task_report_auto_runs
+                WHERE status='queued'
+                ORDER BY started_at ASC, run_id ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            if not row:
+                return None
+            run_id = str(row["run_id"])
+            connection.execute(
+                """
+                UPDATE task_report_auto_runs
+                SET status='running', current_step='queued', message=?, updated_at=?
+                WHERE run_id=? AND status='queued'
+                """,
+                ("Task report auto da nhan hang doi va dang chay.", now, run_id),
+            )
+            claimed = connection.execute("SELECT * FROM task_report_auto_runs WHERE run_id=?", (run_id,)).fetchone()
+            return self._decode_task_report_auto_run(dict(claimed)) if claimed else None
+
+    def get_task_report_auto_run(self, run_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM task_report_auto_runs WHERE run_id=?", (run_id,)).fetchone()
+            return self._decode_task_report_auto_run(dict(row)) if row else None
+
+    def update_task_report_auto_run(self, run_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+        allowed = {
+            "status",
+            "current_step",
+            "message",
+            "step_results",
+            "result",
+            "source_run_id",
+            "spreadsheet_id",
+            "sheet_name",
+            "capture_id",
+            "capture_url",
+            "chat_id",
+            "finished_at",
+            "duration_ms",
+            "updated_at",
+        }
+        values: dict[str, Any] = {}
+        for key, value in updates.items():
+            if key not in allowed:
+                continue
+            column = f"{key}_json" if key in {"step_results", "result"} else key
+            values[column] = json.dumps(value, ensure_ascii=False) if key in {"step_results", "result"} else value
+        values["updated_at"] = str(values.get("updated_at") or self._now())
+        if not values:
+            return self.get_task_report_auto_run(run_id)
+        assignments = ", ".join(f"{key}=:{key}" for key in values)
+        values["run_id"] = run_id
+        with self.connect() as connection:
+            connection.execute(f"UPDATE task_report_auto_runs SET {assignments} WHERE run_id=:run_id", values)
+        return self.get_task_report_auto_run(run_id)
+
+    def append_task_report_auto_run_step(self, run_id: str, step: str, entry: dict[str, Any]) -> None:
+        run = self.get_task_report_auto_run(run_id) or {}
+        steps = run.get("step_results") if isinstance(run.get("step_results"), dict) else {}
+        items = steps.get(step) if isinstance(steps.get(step), list) else []
+        items.append(entry)
+        steps[step] = items
+        self.update_task_report_auto_run(run_id, {"step_results": steps})
+
+    def mark_task_report_auto_task_run(self, task_id: str, run_key: str, ok: bool | None, result: dict[str, Any]) -> None:
+        now = self._now()
+        status_text = str(result.get("status") or ("success" if ok else "queued" if ok is None else "failed"))[:50]
+        error_text = "" if ok or ok is None else str(result.get("message") or result.get("error") or "")[:500]
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE task_report_auto_tasks
+                SET last_run_key=?,
+                    last_success_key=CASE WHEN ? THEN ? ELSE last_success_key END,
+                    last_run_at=?,
+                    last_success_at=CASE WHEN ? THEN ? ELSE last_success_at END,
+                    last_status=?,
+                    last_error=?,
+                    updated_at=?
+                WHERE task_id=?
+                """,
+                (
+                    run_key,
+                    int(bool(ok)),
+                    run_key,
+                    now,
+                    int(bool(ok)),
+                    now,
+                    status_text,
+                    error_text,
+                    now,
+                    task_id,
+                ),
+            )
+
+    def list_task_report_auto_runs(self, task_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+        limit = min(max(int(limit or 50), 1), 200)
+        query = "SELECT * FROM task_report_auto_runs"
+        params: tuple[Any, ...] = ()
+        if task_id:
+            query += " WHERE task_id=?"
+            params = (task_id,)
+        query += " ORDER BY started_at DESC LIMIT ?"
+        params = (*params, limit)
+        with self.connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+            return [self._decode_task_report_auto_run(dict(row)) for row in rows]
+
+    def save_task_report_auto_capture(
+        self,
+        task_id: str,
+        run_id: str,
+        image_base64: str,
+        mime_type: str,
+        page_url: str = "",
+        created_by: str = "",
+    ) -> dict[str, Any]:
+        now = self._now()
+        row = {
+            "capture_id": f"TRACAP{uuid.uuid4().hex[:14].upper()}",
+            "task_id": task_id,
+            "run_id": run_id,
+            "mime_type": mime_type or "image/png",
+            "image_base64": image_base64,
+            "public_token": secrets.token_urlsafe(24),
+            "page_url": page_url or "",
+            "created_by": created_by or "",
+            "created_at": now,
+        }
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO task_report_auto_captures
+                (capture_id, task_id, run_id, mime_type, image_base64, public_token,
+                 page_url, created_by, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row["capture_id"],
+                    row["task_id"],
+                    row["run_id"],
+                    row["mime_type"],
+                    row["image_base64"],
+                    row["public_token"],
+                    row["page_url"],
+                    row["created_by"],
+                    row["created_at"],
+                ),
+            )
+        return self._decode_task_report_auto_capture(row, include_image=False)
+
+    def get_task_report_auto_capture(self, capture_id: str) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM task_report_auto_captures WHERE capture_id=?", (capture_id,)).fetchone()
+            return self._decode_task_report_auto_capture(dict(row), include_image=True) if row else None
+
+    @staticmethod
+    def _decode_json_value(value: Any, fallback: Any) -> Any:
+        if isinstance(value, (dict, list)):
+            return value
+        try:
+            return json.loads(value or json.dumps(fallback))
+        except (TypeError, json.JSONDecodeError):
+            return fallback
+
+    @classmethod
+    def _decode_task_report_auto_task(cls, row: dict[str, Any]) -> dict[str, Any]:
+        source_config = cls._decode_json_value(row.get("source_config_json"), {})
+        time_slots = cls._decode_json_value(row.get("time_slots_json"), [])
+        return {
+            "task_id": row.get("task_id"),
+            "name": row.get("name") or "",
+            "source_type": row.get("source_type") or "onebss",
+            "source_code": row.get("source_code") or "",
+            "source_config": source_config if isinstance(source_config, dict) else {},
+            "schedule_type": row.get("schedule_type") or "Daily",
+            "time_slots": time_slots if isinstance(time_slots, list) else [],
+            "run_time": row.get("run_time") or "07:00",
+            "weekday": row.get("weekday") or "",
+            "month_day": int(row.get("month_day") or 1),
+            "spreadsheet_id": row.get("spreadsheet_id") or "",
+            "spreadsheet_url": row.get("spreadsheet_url") or "",
+            "sheet_name": row.get("sheet_name") or "DATA",
+            "public_url": row.get("public_url") or "",
+            "public_wait_selector": row.get("public_wait_selector") or "",
+            "target_type": row.get("target_type") or "group",
+            "chat_id": row.get("chat_id") or "",
+            "chat_name": row.get("chat_name") or "",
+            "caption": row.get("caption") or "",
+            "retry_limit": int(row.get("retry_limit") or 0),
+            "is_active": bool(row.get("is_active")),
+            "last_run_key": row.get("last_run_key") or "",
+            "last_success_key": row.get("last_success_key") or "",
+            "last_run_at": row.get("last_run_at") or "",
+            "last_success_at": row.get("last_success_at") or "",
+            "last_status": row.get("last_status") or "",
+            "last_error": row.get("last_error") or "",
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        }
+
+    @classmethod
+    def _decode_task_report_auto_run(cls, row: dict[str, Any]) -> dict[str, Any]:
+        step_results = cls._decode_json_value(row.get("step_results_json"), {})
+        result = cls._decode_json_value(row.get("result_json"), {})
+        return {
+            "run_id": row.get("run_id"),
+            "task_id": row.get("task_id") or "",
+            "run_key": row.get("run_key") or "",
+            "status": row.get("status") or "",
+            "current_step": row.get("current_step") or "",
+            "message": row.get("message") or "",
+            "step_results": step_results if isinstance(step_results, dict) else {},
+            "result": result if isinstance(result, dict) else {},
+            "source_type": row.get("source_type") or "",
+            "source_run_id": row.get("source_run_id") or "",
+            "spreadsheet_id": row.get("spreadsheet_id") or "",
+            "sheet_name": row.get("sheet_name") or "",
+            "capture_id": row.get("capture_id") or "",
+            "capture_url": row.get("capture_url") or "",
+            "chat_id": row.get("chat_id") or "",
+            "started_at": row.get("started_at") or "",
+            "finished_at": row.get("finished_at") or "",
+            "duration_ms": int(row.get("duration_ms") or 0),
+            "created_by": row.get("created_by") or "",
+            "updated_at": row.get("updated_at") or "",
+        }
+
+    @staticmethod
+    def _decode_task_report_auto_capture(row: dict[str, Any], include_image: bool = False) -> dict[str, Any]:
+        payload = {
+            "capture_id": row.get("capture_id"),
+            "task_id": row.get("task_id") or "",
+            "run_id": row.get("run_id") or "",
+            "mime_type": row.get("mime_type") or "image/png",
+            "public_token": row.get("public_token") or "",
+            "page_url": row.get("page_url") or "",
+            "created_by": row.get("created_by") or "",
+            "created_at": row.get("created_at"),
+        }
+        if include_image:
+            payload["image_base64"] = row.get("image_base64") or ""
+        return payload
 
     @staticmethod
     def _decode_connection(row: dict[str, Any]) -> dict[str, Any]:

@@ -124,11 +124,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=224" in public_response.text
+        assert "/static/app.js?v=225" in public_response.text
         assert "/static/styles.css?v=136" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
-        public_js = client.get("/static/app.js?v=224")
+        public_js = client.get("/static/app.js?v=225")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -1065,7 +1065,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=224" in page.text
+        assert "/static/app.js?v=225" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -2276,6 +2276,135 @@ def test_data_mining_scheduler_runs_due_schedule_once(monkeypatch) -> None:
         refreshed = routes.build_app_repository().get_data_mining_schedule(schedule_id)
         assert refreshed["last_status"] == "success"
         assert refreshed["last_file_name"] == "scheduler_0711_08072026.xlsx"
+
+
+def test_admin_can_manage_task_report_auto_and_queue_run() -> None:
+    with TestClient(app) as client:
+        login(client)
+        created = client.post(
+            "/api/admin/task-report-auto/tasks",
+            json={
+                "name": "Auto SQL sang",
+                "source_type": "sql",
+                "source_code": "BC_AUTO_SQL",
+                "source_config": {"filters": {"P_THANG": "202608"}},
+                "schedule_type": "TimeWindow",
+                "time_slots": ["07:00", "11:30"],
+                "run_time": "07:00",
+                "spreadsheet_url": "https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz1234567890/edit#gid=0",
+                "sheet_name": "DATA",
+                "public_url": "https://example.com/report",
+                "public_wait_selector": "#report-root",
+                "target_type": "group",
+                "chat_id": "zalo-group-001",
+                "chat_name": "Bao cao",
+                "caption": "Bao cao auto",
+                "retry_limit": 2,
+                "is_active": True,
+            },
+        )
+        assert created.status_code == 200
+        task = created.json()["task"]
+        assert task["task_id"].startswith("TRA")
+        assert task["source_type"] == "sql"
+        assert task["spreadsheet_id"] == "1AbCdEfGhIjKlMnOpQrStUvWxYz1234567890"
+        assert task["time_slots"] == ["07:00", "11:30"]
+
+        page = client.get("/taskreportauto")
+        assert page.status_code == 200
+        assert 'id="view-task-report-auto"' in page.text
+        assert "/static/task-report-auto.js?v=1" in client.get("/static/app.js?v=225").text
+
+        queued = client.post(f"/api/admin/task-report-auto/tasks/{task['task_id']}/run-now", json={"source_config": {}})
+        assert queued.status_code == 200
+        assert queued.json()["run"]["status"] == "queued"
+
+        runs = client.get(f"/api/admin/task-report-auto/runs?task_id={task['task_id']}").json()["runs"]
+        assert len(runs) == 1
+        assert runs[0]["task_id"] == task["task_id"]
+        assert runs[0]["status"] == "queued"
+
+        assert client.delete(f"/api/admin/task-report-auto/tasks/{task['task_id']}").status_code == 200
+        assert client.get(f"/api/admin/task-report-auto/runs?task_id={task['task_id']}").json()["runs"] == []
+
+
+def test_task_report_auto_runner_sql_writes_sheet_captures_and_sends_zalo(monkeypatch) -> None:
+    from app.application import task_report_auto_service as service
+    from app.application.task_report_auto_service import TaskReportAutoRunner
+
+    class FakeDatabaseService:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def export_dynamic_report(self, **kwargs):
+            return {
+                "ok": True,
+                "message": "Da lay SQL.",
+                "columns": ["MA_TB", "DOANH_THU"],
+                "rows": [{"MA_TB": "TB001", "DOANH_THU": 120000}],
+            }
+
+    written_values = []
+    sent_photos = []
+
+    def fake_write_values(settings, repository, spreadsheet_id, sheet_name, values):
+        written_values.append((spreadsheet_id, sheet_name, values))
+        return {"updated_cells": sum(len(row) for row in values)}
+
+    class FakeZaloBotClient:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def send_photo(self, chat_id, photo_url, caption):
+            sent_photos.append((chat_id, photo_url, caption))
+            return True
+
+    monkeypatch.setattr(service, "DatabaseService", FakeDatabaseService)
+    monkeypatch.setattr(service, "write_values_to_google_sheet", fake_write_values)
+    monkeypatch.setattr(service, "capture_public_web_screenshot_bytes", lambda *args, **kwargs: b"\x89PNG\r\n\x1a\n" + b"x" * 200)
+    monkeypatch.setattr(service, "ZaloBotClient", FakeZaloBotClient)
+
+    repository = routes.build_app_repository()
+    task_id = repository.generate_task_report_auto_task_id()
+    repository.save_task_report_auto_task(
+        {
+            "task_id": task_id,
+            "name": "Runner SQL",
+            "source_type": "sql",
+            "source_code": "BC_RUNNER_SQL",
+            "source_config": {"filters": {"P": "1"}},
+            "schedule_type": "Daily",
+            "time_slots": [],
+            "run_time": "07:00",
+            "weekday": "",
+            "month_day": 1,
+            "spreadsheet_id": "sheet-runner-001",
+            "spreadsheet_url": "",
+            "sheet_name": "DATA",
+            "public_url": "https://example.com/dashboard",
+            "public_wait_selector": "",
+            "target_type": "group",
+            "chat_id": "zalo-runner-001",
+            "chat_name": "Runner",
+            "caption": "Caption runner",
+            "retry_limit": 1,
+            "is_active": True,
+        }
+    )
+    run = repository.create_task_report_auto_run(task_id, "manual:test-runner", created_by="pytest", status="running")
+
+    settings = get_settings().model_copy(update={"app_public_url": "https://vnptcto.com"})
+    result = TaskReportAutoRunner(repository, settings, step_wait_seconds=0).run_claimed(run)
+
+    assert result["ok"] is True
+    assert written_values == [("sheet-runner-001", "DATA", [["MA_TB", "DOANH_THU"], ["TB001", 120000]])]
+    assert sent_photos
+    assert sent_photos[0][0] == "zalo-runner-001"
+    assert sent_photos[0][1].startswith("https://vnptcto.com/api/task-report-auto/captures/")
+    assert sent_photos[0][2] == "Caption runner"
+    finished = repository.get_task_report_auto_run(run["run_id"])
+    assert finished["status"] == "success"
+    assert set(finished["step_results"]) == {"mine", "sheet", "capture", "zalo"}
 
 
 def test_admin_can_manage_work_tasks() -> None:
@@ -7797,16 +7926,16 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         home = client.get("/")
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
-        assert "/static/shell.js?v=38" in home.text
-        assert "/static/app.js?v=224" not in home.text
-        shell_js = client.get("/static/shell.js?v=38")
+        assert "/static/shell.js?v=39" in home.text
+        assert "/static/app.js?v=225" not in home.text
+        shell_js = client.get("/static/shell.js?v=39")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
         assert "function dedupeFeaturesForDisplay" in shell_js.text
         assert "function readCachedNavigation" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=224" in shell_js.text
+        assert "/static/app.js?v=225" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -7819,8 +7948,8 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
-        assert "/static/shell.js?v=38" in dashboard.text
-        assert "/static/app.js?v=224" not in dashboard.text
+        assert "/static/shell.js?v=39" in dashboard.text
+        assert "/static/app.js?v=225" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -7840,49 +7969,49 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "dynamic-report-body" not in reports.text
         assert "dynamic-report-prev" not in reports.text
         assert "dynamic-report-next" not in reports.text
-        assert "/static/app.js?v=224" in reports.text
+        assert "/static/app.js?v=225" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=224" in workstation.text
+        assert "/static/app.js?v=225" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=224" in work_tasks.text
+        assert "/static/app.js?v=225" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=224" in report_links.text
+        assert "/static/app.js?v=225" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=224" in system.text
+        assert "/static/app.js?v=225" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=224" in onebss_mining.text
+        assert "/static/app.js?v=225" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 
         ftp_mining = client.get("/daodulieuftp")
         assert ftp_mining.status_code == 200
         assert "view-ftp-mining" in ftp_mining.text
-        assert "/static/app.js?v=224" in ftp_mining.text
+        assert "/static/app.js?v=225" in ftp_mining.text
         assert "/static/ftp-mining.js" not in ftp_mining.text
         assert ftp_mining.text.count('class="app-view') == 1
 
@@ -7981,7 +8110,7 @@ def test_viewer_feature_permissions_unlock_mining_pages_and_runtime_apis() -> No
             assert page.status_code == 200
             assert marker in page.text
             assert "app-shell-placeholder" not in page.text
-            assert "/static/app.js?v=224" in page.text
+            assert "/static/app.js?v=225" in page.text
 
         report_configs = client.get("/api/reports/configs")
         assert report_configs.status_code == 200
@@ -8055,7 +8184,7 @@ def test_viewer_with_user_management_feature_can_manage_users() -> None:
         page = client.get("/quantringuoidung")
         assert page.status_code == 200
         assert 'id="view-users"' in page.text
-        assert "/static/app.js?v=224" in page.text
+        assert "/static/app.js?v=225" in page.text
         assert client.get("/api/admin/users").status_code == 200
         managed = client.post(
             "/api/admin/users",

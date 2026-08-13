@@ -16,6 +16,7 @@ from app.application.task_scheduler import (
     dashboard_chart_cache_scheduler,
     data_mining_scheduler,
     internal_email_sync_scheduler,
+    task_report_auto_scheduler,
     work_task_scheduler,
     zalo_auto_message_scheduler,
 )
@@ -104,6 +105,8 @@ async def lifespan(_: FastAPI):
         zalo_auto_message_scheduler.start()
         data_mining_scheduler.configure(repository, settings)
         data_mining_scheduler.start()
+        task_report_auto_scheduler.configure(repository, settings)
+        task_report_auto_scheduler.start()
         internal_email_sync_scheduler.configure(repository, settings)
         internal_email_sync_scheduler.start()
         schedulers_started = True
@@ -129,6 +132,7 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         internal_email_sync_scheduler.stop()
+        task_report_auto_scheduler.stop()
         data_mining_scheduler.stop()
         zalo_auto_message_scheduler.stop()
         dashboard_chart_cache_scheduler.stop()

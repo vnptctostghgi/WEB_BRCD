@@ -67,6 +67,7 @@ from app.application.onebss_report_service import (
     run_onebss_report_request,
     start_onebss_otp_mobile_gateway_request,
 )
+from app.application.task_report_auto_service import is_task_report_auto_created_by, normalize_task_report_auto_payload
 from app.application.zalo_auto_message_service import capture_page_screenshot_bytes, capture_public_url, send_zalo_auto_message
 from app.application.zalo_bot import ZaloBotClient
 from app.data_access.app_repository import (
@@ -734,6 +735,34 @@ class DataMiningRunPayload(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
 
 
+class TaskReportAutoPayload(BaseModel):
+    task_id: str = ""
+    name: str = ""
+    source_type: Literal["onebss", "sql", "ftp"] = "onebss"
+    source_code: str = ""
+    source_config: dict[str, Any] = Field(default_factory=dict)
+    schedule_type: Literal["TimeWindow", "Daily", "Weekly", "Monthly"] = "Daily"
+    time_slots: list[str] = Field(default_factory=list)
+    run_time: str = "07:00"
+    weekday: str = ""
+    month_day: int = 1
+    spreadsheet_id: str = ""
+    spreadsheet_url: str = ""
+    sheet_name: str = "DATA"
+    public_url: str = ""
+    public_wait_selector: str = ""
+    target_type: Literal["person", "group"] = "group"
+    chat_id: str = ""
+    chat_name: str = ""
+    caption: str = ""
+    retry_limit: int = 2
+    is_active: bool = True
+
+
+class TaskReportAutoRunPayload(BaseModel):
+    source_config: dict[str, Any] = Field(default_factory=dict)
+
+
 class PageCapturePayload(BaseModel):
     page_url: str = "/"
 
@@ -876,6 +905,15 @@ def raise_data_mining_schema_error(error: RuntimeError) -> None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Supabase chua co bang data_mining_schedules/data_mining_runs. Hay chay lai file sql/supabase_upgrade_admin_modules.sql.",
+        ) from error
+    raise error
+
+
+def raise_task_report_auto_schema_error(error: RuntimeError) -> None:
+    if "task_report_auto" in str(error):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Supabase chua co bang task_report_auto_tasks/runs/captures. Hay chay lai file sql/supabase_upgrade_admin_modules.sql.",
         ) from error
     raise error
 
@@ -3345,6 +3383,7 @@ ROUTE_VIEW_BY_FEATURE_CODE = {
     "thietkelayoutbaocao": "dashboard-builder",
     "daodulieuonebss": "onebss-mining",
     "daodulieuftp": "ftp-mining",
+    "taskreportauto": "task-report-auto",
     "linkbaocao": "report-links",
     "publicmessages": "public-messages",
     "dashboard": "dashboard",
@@ -7241,7 +7280,7 @@ def claim_ftp_worker_task(request: Request, payload: FtpWorkerClaimPayload) -> d
             },
         )
         return {"ok": False, "task": None, "message": message}
-    folder_id = google_drive_folder_id(get_settings(), "", repository)
+    folder_id = "" if is_task_report_auto_created_by(run.get("created_by")) else google_drive_folder_id(get_settings(), "", repository)
     return {
         "ok": True,
         "task": {
@@ -7320,7 +7359,7 @@ async def upload_ftp_worker_task_file(request: Request, run_id: str, file: Uploa
     worker_id = str(run.get("worker_id") or "")
     message = _message_with_workstation(worker_id, "Da nhan file ket qua FTP tu may tram.")
     settings = get_settings()
-    storage_target = google_drive_folder_id(settings, "", repository)
+    storage_target = "" if is_task_report_auto_created_by(run.get("created_by")) else google_drive_folder_id(settings, "", repository)
     if storage_target:
         storage_result = save_downloaded_file(settings, target_file, storage_target, repository)
         if storage_result.get("ok") and str(storage_result.get("storage_status") or "").startswith("uploaded_google_drive"):
@@ -7797,7 +7836,7 @@ def claim_onebss_worker_task(request: Request, payload: OneBssWorkerClaimPayload
             },
         )
         return {"ok": False, "task": None, "message": message}
-    folder_id = google_drive_folder_id(get_settings(), "", repository)
+    folder_id = "" if is_task_report_auto_created_by(run.get("created_by")) else google_drive_folder_id(get_settings(), "", repository)
     return {
         "ok": True,
         "task": {
@@ -7922,7 +7961,7 @@ async def upload_onebss_worker_task_file(request: Request, run_id: str, file: Up
     storage_message = _message_with_workstation(worker_id, "Da nhan file ket qua tu may tram.")
     settings = get_settings()
     report = repository.get_onebss_report_by_code(str(run.get("ma_bao_cao") or "")) or {}
-    storage_target = google_drive_folder_id(settings, "", repository)
+    storage_target = "" if is_task_report_auto_created_by(run.get("created_by")) else google_drive_folder_id(settings, "", repository)
     if storage_target:
         storage_result = save_downloaded_file(settings, target_file, storage_target, repository)
         if storage_result.get("ok") and str(storage_result.get("storage_status") or "").startswith("uploaded_google_drive:"):
@@ -8405,6 +8444,108 @@ def run_data_mining_schedule_now(request: Request, schedule_id: str, payload: Da
         "schedule": refreshed_schedule,
         "message": "Da dua yeu cau dao du lieu OneBSS vao hang doi.",
     }
+
+
+@router.get("/api/admin/task-report-auto/tasks")
+def list_task_report_auto_tasks(request: Request) -> dict:
+    require_feature(request, "taskreportauto")
+    repository = build_app_repository()
+    try:
+        return {"tasks": repository.list_task_report_auto_tasks()}
+    except RuntimeError as error:
+        raise_task_report_auto_schema_error(error)
+
+
+@router.post("/api/admin/task-report-auto/tasks")
+def save_task_report_auto_task(request: Request, payload: TaskReportAutoPayload) -> dict:
+    actor = require_feature(request, "taskreportauto")
+    repository = build_app_repository()
+    try:
+        task_id = payload.task_id.strip() or repository.generate_task_report_auto_task_id()
+        try:
+            task_payload = normalize_task_report_auto_payload(payload, task_id)
+        except ValueError as error:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+        repository.save_task_report_auto_task(task_payload)
+        task = repository.get_task_report_auto_task(task_id)
+    except RuntimeError as error:
+        raise_task_report_auto_schema_error(error)
+    repository.add_audit_log(actor["username"], "task_report_auto_saved", f"Luu Task report auto {task_id}")
+    return {"ok": True, "task": task}
+
+
+@router.delete("/api/admin/task-report-auto/tasks/{task_id}")
+def delete_task_report_auto_task(request: Request, task_id: str) -> dict:
+    actor = require_feature(request, "taskreportauto")
+    repository = build_app_repository()
+    task_id = task_id.strip()
+    try:
+        if not repository.get_task_report_auto_task(task_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay Task report auto.")
+        repository.delete_task_report_auto_task(task_id)
+    except RuntimeError as error:
+        raise_task_report_auto_schema_error(error)
+    repository.add_audit_log(actor["username"], "task_report_auto_deleted", f"Xoa Task report auto {task_id}")
+    return {"ok": True}
+
+
+@router.get("/api/admin/task-report-auto/runs")
+def list_task_report_auto_runs(request: Request, task_id: str = "", limit: int = 50) -> dict:
+    require_feature(request, "taskreportauto")
+    repository = build_app_repository()
+    try:
+        return {"runs": repository.list_task_report_auto_runs(task_id=task_id.strip(), limit=limit)}
+    except RuntimeError as error:
+        raise_task_report_auto_schema_error(error)
+
+
+@router.post("/api/admin/task-report-auto/tasks/{task_id}/run-now")
+def run_task_report_auto_now(request: Request, task_id: str, payload: TaskReportAutoRunPayload) -> dict:
+    actor = require_feature(request, "taskreportauto")
+    repository = build_app_repository()
+    task_id = task_id.strip()
+    try:
+        task = repository.get_task_report_auto_task(task_id)
+        if not task:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay Task report auto.")
+        run_key = f"manual:{datetime.now(UTC).isoformat(timespec='seconds')}:{uuid.uuid4().hex[:8]}"
+        run = repository.create_task_report_auto_run(
+            task_id,
+            run_key,
+            created_by=actor["username"],
+            status="queued",
+            message="Da dua Task report auto vao hang doi chay thu.",
+        )
+        repository.mark_task_report_auto_task_run(
+            task_id,
+            run_key,
+            None,
+            {"status": "queued", "message": "Da dua Task report auto vao hang doi chay thu."},
+        )
+    except RuntimeError as error:
+        raise_task_report_auto_schema_error(error)
+    repository.add_audit_log(actor["username"], "task_report_auto_manual_run", f"Chay thu Task report auto {task_id}: {run.get('run_id')}")
+    return {"ok": True, "task": task, "run": run}
+
+
+@router.get("/api/task-report-auto/captures/{capture_id}")
+def get_task_report_auto_capture(capture_id: str, token: str = "") -> Response:
+    repository = build_app_repository()
+    try:
+        capture = repository.get_task_report_auto_capture(capture_id)
+    except RuntimeError as error:
+        raise_task_report_auto_schema_error(error)
+    if not capture or not hmac.compare_digest(str(token or ""), str(capture.get("public_token") or "")):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay anh.")
+    try:
+        image_bytes = base64.b64decode(str(capture.get("image_base64") or ""), validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Anh khong hop le.") from error
+    return Response(
+        content=image_bytes,
+        media_type=str(capture.get("mime_type") or "image/png"),
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.get("/api/admin/work-tasks")

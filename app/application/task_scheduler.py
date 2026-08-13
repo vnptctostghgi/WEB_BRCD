@@ -8,6 +8,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.application.onebss_data_mining_service import run_data_mining_schedule
+from app.application.task_report_auto_service import TaskReportAutoRunner
 from app.application.zalo_auto_message_service import send_zalo_auto_message
 from app.application.database_service import DatabaseService
 from app.data_access.internal_api_client import InternalApiClient
@@ -384,6 +385,134 @@ class DataMiningScheduler:
 
 
 data_mining_scheduler = DataMiningScheduler()
+
+
+class TaskReportAutoScheduler:
+    """Queue and run Task report auto pipelines one at a time."""
+
+    def __init__(self) -> None:
+        self.repository: Any | None = None
+        self.settings: Settings | None = None
+        self.scan_thread: threading.Thread | None = None
+        self.worker_thread: threading.Thread | None = None
+        self.stop_event = threading.Event()
+        self.interval_seconds = 30
+        self.idle_worker_seconds = 5
+        self.schema_warning_logged = False
+        self.worker_schema_warning_logged = False
+
+    def configure(self, repository: Any, settings: Settings) -> None:
+        self.repository = repository
+        self.settings = settings
+
+    def start(self) -> None:
+        if not self.repository or not self.settings:
+            raise RuntimeError("TaskReportAutoScheduler chua duoc configure.")
+        if self.scan_thread and self.scan_thread.is_alive():
+            return
+        self.stop_event.clear()
+        self.scan_thread = threading.Thread(target=self._scan_loop, name="task-report-auto-scheduler", daemon=True)
+        self.worker_thread = threading.Thread(target=self._worker_loop, name="task-report-auto-worker", daemon=True)
+        self.scan_thread.start()
+        self.worker_thread.start()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        for thread in (self.worker_thread, self.scan_thread):
+            if thread and thread.is_alive():
+                thread.join(timeout=5)
+
+    def _scan_loop(self) -> None:
+        while not self.stop_event.is_set():
+            try:
+                self.check_due_tasks()
+            except Exception:
+                logger.exception("Task report auto scheduler failed")
+            self.stop_event.wait(self.interval_seconds)
+
+    def _worker_loop(self) -> None:
+        assert self.repository is not None
+        assert self.settings is not None
+        runner = TaskReportAutoRunner(self.repository, self.settings)
+        while not self.stop_event.is_set():
+            try:
+                result = runner.run_next_once()
+                if not result:
+                    self.stop_event.wait(self.idle_worker_seconds)
+            except RuntimeError as error:
+                if "task_report_auto" in str(error) and not self.worker_schema_warning_logged:
+                    logger.warning("Bang task_report_auto chua ton tai. Hay chay sql/supabase_upgrade_admin_modules.sql tren Supabase.")
+                    self.worker_schema_warning_logged = True
+                else:
+                    logger.exception("Task report auto worker failed")
+                self.stop_event.wait(self.idle_worker_seconds)
+            except Exception:
+                logger.exception("Task report auto worker failed")
+                self.stop_event.wait(self.idle_worker_seconds)
+
+    def check_due_tasks(self, now: datetime | None = None) -> int:
+        assert self.repository is not None
+        current = now or datetime.now(LOCAL_TIMEZONE)
+        queued_count = 0
+        try:
+            tasks = self.repository.list_task_report_auto_tasks(active_only=True)
+        except RuntimeError as error:
+            if "task_report_auto" in str(error) and not self.schema_warning_logged:
+                logger.warning("Bang task_report_auto_tasks chua ton tai. Hay chay sql/supabase_upgrade_admin_modules.sql tren Supabase.")
+                self.schema_warning_logged = True
+            return 0
+        for task in tasks:
+            run_key = self._due_run_key(task, current)
+            if not run_key:
+                continue
+            try:
+                self.repository.create_task_report_auto_run(
+                    str(task.get("task_id") or ""),
+                    run_key,
+                    created_by="task_report_auto_scheduler",
+                    status="queued",
+                    message="Da dua Task report auto vao hang doi.",
+                )
+                self.repository.mark_task_report_auto_task_run(
+                    str(task.get("task_id") or ""),
+                    run_key,
+                    None,
+                    {"status": "queued", "message": "Da dua Task report auto vao hang doi."},
+                )
+                queued_count += 1
+            except Exception:
+                logger.exception("Cannot queue Task report auto: %s", task.get("task_id"))
+        return queued_count
+
+    @classmethod
+    def _due_run_key(cls, task: dict[str, Any], current: datetime) -> str:
+        if not task.get("is_active"):
+            return ""
+        schedule_type = str(task.get("schedule_type") or "Daily").strip().lower()
+        current_time = current.strftime("%H:%M")
+        configured_time = str(task.get("run_time") or "07:00")[:5]
+        run_key = ""
+        if schedule_type in {"timewindow", "time_window", "window"}:
+            slots = {str(slot or "").strip()[:5] for slot in (task.get("time_slots") or []) if str(slot or "").strip()}
+            if current_time in slots:
+                run_key = f"{current.date().isoformat()}:{current_time}"
+        elif schedule_type == "daily":
+            if current_time == configured_time:
+                run_key = current.date().isoformat()
+        elif schedule_type == "weekly":
+            if current_time == configured_time and WorkTaskScheduler._weekday_matches(task.get("weekday"), current.weekday()):
+                iso_year, iso_week, _ = current.isocalendar()
+                run_key = f"{iso_year}-W{iso_week:02d}-{current.weekday()}"
+        elif schedule_type == "monthly":
+            month_day = ZaloAutoMessageScheduler._safe_month_day(task.get("month_day"), current)
+            if current_time == configured_time and current.day == month_day:
+                run_key = current.strftime("%Y-%m")
+        if not run_key or task.get("last_run_key") == run_key:
+            return ""
+        return run_key
+
+
+task_report_auto_scheduler = TaskReportAutoScheduler()
 
 
 class InternalEmailSyncScheduler:
