@@ -124,11 +124,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=225" in public_response.text
-        assert "/static/styles.css?v=136" in public_response.text
+        assert "/static/app.js?v=226" in public_response.text
+        assert "/static/styles.css?v=137" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
-        public_js = client.get("/static/app.js?v=225")
+        public_js = client.get("/static/app.js?v=226")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -202,7 +202,7 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert "/api/admin/public-messages/feed?limit=100" not in public_js.text
         assert "const PUBLIC_MESSAGES_LIMIT = 10" in public_js.text
         assert 'params.set("after", publicMessagesCursor)' in public_js.text
-        public_css = client.get("/static/styles.css?v=136")
+        public_css = client.get("/static/styles.css?v=137")
         assert public_css.status_code == 200
         assert ".sql-progress-hint" in public_css.text
         assert "Compact desktop rail" in public_css.text
@@ -1065,7 +1065,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=225" in page.text
+        assert "/static/app.js?v=226" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -2313,7 +2313,7 @@ def test_admin_can_manage_task_report_auto_and_queue_run() -> None:
         page = client.get("/taskreportauto")
         assert page.status_code == 200
         assert 'id="view-task-report-auto"' in page.text
-        assert "/static/task-report-auto.js?v=1" in client.get("/static/app.js?v=225").text
+        assert "/static/task-report-auto.js?v=1" in client.get("/static/app.js?v=226").text
 
         queued = client.post(f"/api/admin/task-report-auto/tasks/{task['task_id']}/run-now", json={"source_config": {}})
         assert queued.status_code == 200
@@ -7926,16 +7926,16 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         home = client.get("/")
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
-        assert "/static/shell.js?v=39" in home.text
-        assert "/static/app.js?v=225" not in home.text
-        shell_js = client.get("/static/shell.js?v=39")
+        assert "/static/shell.js?v=40" in home.text
+        assert "/static/app.js?v=226" not in home.text
+        shell_js = client.get("/static/shell.js?v=40")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
         assert "function dedupeFeaturesForDisplay" in shell_js.text
         assert "function readCachedNavigation" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=225" in shell_js.text
+        assert "/static/app.js?v=226" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -7948,8 +7948,8 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
-        assert "/static/shell.js?v=39" in dashboard.text
-        assert "/static/app.js?v=225" not in dashboard.text
+        assert "/static/shell.js?v=40" in dashboard.text
+        assert "/static/app.js?v=226" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -7969,49 +7969,49 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "dynamic-report-body" not in reports.text
         assert "dynamic-report-prev" not in reports.text
         assert "dynamic-report-next" not in reports.text
-        assert "/static/app.js?v=225" in reports.text
+        assert "/static/app.js?v=226" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=225" in workstation.text
+        assert "/static/app.js?v=226" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=225" in work_tasks.text
+        assert "/static/app.js?v=226" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=225" in report_links.text
+        assert "/static/app.js?v=226" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=225" in system.text
+        assert "/static/app.js?v=226" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=225" in onebss_mining.text
+        assert "/static/app.js?v=226" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 
         ftp_mining = client.get("/daodulieuftp")
         assert ftp_mining.status_code == 200
         assert "view-ftp-mining" in ftp_mining.text
-        assert "/static/app.js?v=225" in ftp_mining.text
+        assert "/static/app.js?v=226" in ftp_mining.text
         assert "/static/ftp-mining.js" not in ftp_mining.text
         assert ftp_mining.text.count('class="app-view') == 1
 
@@ -8110,7 +8110,7 @@ def test_viewer_feature_permissions_unlock_mining_pages_and_runtime_apis() -> No
             assert page.status_code == 200
             assert marker in page.text
             assert "app-shell-placeholder" not in page.text
-            assert "/static/app.js?v=225" in page.text
+            assert "/static/app.js?v=226" in page.text
 
         report_configs = client.get("/api/reports/configs")
         assert report_configs.status_code == 200
@@ -8184,7 +8184,7 @@ def test_viewer_with_user_management_feature_can_manage_users() -> None:
         page = client.get("/quantringuoidung")
         assert page.status_code == 200
         assert 'id="view-users"' in page.text
-        assert "/static/app.js?v=225" in page.text
+        assert "/static/app.js?v=226" in page.text
         assert client.get("/api/admin/users").status_code == 200
         managed = client.post(
             "/api/admin/users",

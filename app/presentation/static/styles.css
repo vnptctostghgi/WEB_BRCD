@@ -3890,18 +3890,35 @@ legend {
 
 .sql-report-editor-card {
   display: grid;
-  gap: .85rem;
-  border: 1px solid rgba(125, 211, 252, .26);
-  border-radius: 18px;
-  background: rgba(2, 6, 23, .18);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 14px 32px rgba(15, 23, 42, .08);
+  color: var(--text-primary);
   padding: 1rem;
 }
 
 .sql-report-editor-card h3 {
   margin: .15rem 0 0;
-  color: #fff;
+  color: var(--text-primary);
   font-size: 1.05rem;
   font-weight: 900;
+}
+
+.sql-report-editor-card > .section-heading,
+.sql-report-editor-card > .onebss-parameter-converter,
+.sql-report-editor-card > label:has(.inline-admin-params),
+.sql-report-editor-card > label:has([data-inline-onebss-field="report_url"]) {
+  grid-column: 1 / -1;
+}
+
+.sql-report-editor-card > label,
+.onebss-parameter-converter label {
+  display: grid;
+  gap: .4rem;
+  min-width: 0;
 }
 
 .sql-report-editor-code {
@@ -3913,17 +3930,28 @@ legend {
 .onebss-parameter-converter {
   display: grid;
   gap: .85rem;
+  align-items: start;
 }
 
 @media (min-width: 920px) {
   .onebss-parameter-converter {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    align-items: start;
   }
 }
 
+.onebss-date-hint {
+  grid-column: 1 / -1;
+  border: 1px solid rgba(14, 165, 233, .22);
+  border-radius: 8px;
+  background: rgba(14, 165, 233, .07);
+  color: var(--text-secondary);
+  padding: .55rem .7rem;
+}
+
 .onebss-parameter-converter textarea {
-  min-height: 14rem;
+  width: 100%;
+  min-height: 12rem;
+  max-height: 28rem;
   resize: vertical;
 }
 
@@ -3945,18 +3973,36 @@ legend {
 
 .connection-editor-card {
   display: grid;
-  gap: .85rem;
-  border: 1px solid rgba(125, 211, 252, .26);
-  border-radius: 18px;
-  background: rgba(2, 6, 23, .18);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 14px 32px rgba(15, 23, 42, .08);
+  color: var(--text-primary);
   padding: 1rem;
 }
 
 .connection-editor-card h3 {
   margin: .15rem 0 0;
-  color: #fff;
+  color: var(--text-primary);
   font-size: 1.05rem;
   font-weight: 900;
+}
+
+.connection-editor-card > .section-heading,
+.connection-editor-card > .drive-oauth-panel,
+.connection-editor-card > .connection-type-panel,
+.connection-editor-card > label:has(.connection-variable-list),
+.connection-editor-card > label:has(textarea),
+.connection-editor-card > .cell-note {
+  grid-column: 1 / -1;
+}
+
+.connection-editor-card > label {
+  display: grid;
+  gap: .4rem;
+  min-width: 0;
 }
 
 .connection-editor-code {
@@ -3994,6 +4040,38 @@ legend {
 
 .connection-form-grid label {
   min-width: 0;
+}
+
+#connection-dialog {
+  width: min(760px, calc(100% - 24px));
+}
+
+.connection-dialog-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.connection-dialog-form .dialog-heading,
+.connection-dialog-form .connection-dialog-json,
+.connection-dialog-form .result,
+.connection-dialog-form .btn-primary {
+  grid-column: 1 / -1;
+}
+
+.connection-dialog-form label {
+  display: grid;
+  gap: .4rem;
+  min-width: 0;
+}
+
+.connection-dialog-form textarea[name="config_json"] {
+  min-height: 13rem;
+  resize: vertical;
+}
+
+@media (max-width: 720px) {
+  .connection-dialog-form {
+    grid-template-columns: 1fr;
+  }
 }
 
 .drive-oauth-panel {
@@ -5020,6 +5098,8 @@ legend {
 @media (max-width: 900px) {
   .dashboard-page-form,
   .admin-inline-toolbar,
+  .sql-report-editor-card,
+  .connection-editor-card,
   .dynamic-report-controls,
   .dynamic-report-filter-row,
   .onebss-run-form,
