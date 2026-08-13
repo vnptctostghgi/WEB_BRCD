@@ -7,16 +7,29 @@
   const isDataFresh = app.isDataFresh || (() => false);
   const markDataFresh = app.markDataFresh || (() => {});
   const markDataStale = app.markDataStale || (() => {});
+  const repairDataEncoding = app.repairDataEncoding || ((value) => value);
   const setButtonLoading = app.setButtonLoading || (() => {});
   const setTableLoading = app.setTableLoading || (() => {});
   const showMessage = app.showMessage || (() => {});
   const showToast = app.showToast || (() => {});
+
   let tasks = [];
   let runs = [];
   let eventsBound = false;
   let pollTimer = 0;
+  let sourceReports = { onebss: [], sql: [], ftp: [] };
+  let sourceReportErrors = {};
+  let sourceReportsLoaded = false;
+  let sourceReportsPromise = null;
 
   const activeStatuses = new Set(["queued", "running"]);
+  const sourceLabels = { onebss: "OneBSS", sql: "SQL", ftp: "FTP" };
+  const scheduleFields = {
+    Daily: ["run_time"],
+    TimeWindow: ["time_slots"],
+    Weekly: ["run_time", "weekday"],
+    Monthly: ["run_time", "month_day"],
+  };
 
   async function loadTaskReportAuto({ force = false } = {}) {
     bindEvents();
@@ -43,6 +56,7 @@
       renderTasks();
       renderRuns();
       schedulePoll();
+      loadSourceReports({ force }).catch(() => {});
     } catch (error) {
       taskTable.innerHTML = emptyRow(7, "Khong tai duoc Task report auto", error.message);
       runTable.innerHTML = emptyRow(5, "Khong tai duoc lich su chay", error.message);
@@ -135,52 +149,220 @@
     return [...nested, ...keys].slice(0, 4).join(", ");
   }
 
+  async function loadSourceReports({ force = false } = {}) {
+    if (!api) return sourceReports;
+    if (!force && sourceReportsLoaded) return sourceReports;
+    if (!force && sourceReportsPromise) return sourceReportsPromise;
+    sourceReportsPromise = api("/api/admin/task-report-auto/source-configs")
+      .then((data) => {
+        const reports = data.reports || {};
+        sourceReports = {
+          onebss: normalizeReports(reports.onebss),
+          sql: normalizeReports(reports.sql),
+          ftp: normalizeReports(reports.ftp),
+        };
+        sourceReportErrors = data.errors || {};
+        sourceReportsLoaded = true;
+        return sourceReports;
+      })
+      .catch((error) => {
+        sourceReportErrors = { all: error.message };
+        throw error;
+      })
+      .finally(() => {
+        sourceReportsPromise = null;
+      });
+    return sourceReportsPromise;
+  }
+
+  function normalizeReports(value) {
+    const repaired = repairDataEncoding(value);
+    return Array.isArray(repaired) ? repaired.filter((item) => item && typeof item === "object") : [];
+  }
+
+  function reportCode(report) {
+    return String(report?.ma_bao_cao || report?.code || report?.report_code || "").trim();
+  }
+
+  function reportName(report) {
+    return String(report?.ten_bao_cao || report?.name || reportCode(report)).trim();
+  }
+
+  function reportLabel(report) {
+    const code = reportCode(report);
+    const name = reportName(report);
+    if (code && name && code !== name) return `${code} - ${name}`;
+    return code || name || "Khong co ma";
+  }
+
+  function reportSummary(report, sourceType) {
+    if (!report) return "";
+    const parts = [];
+    const params = sourceType === "sql" ? report.cac_tham_so : report.danh_sach_bien;
+    if (Array.isArray(params) && params.length) parts.push(`Bien: ${params.slice(0, 8).join(", ")}`);
+    if (sourceType === "ftp" && report.folder_path) parts.push(`Thu muc: ${report.folder_path}`);
+    if (sourceType === "ftp" && report.file_name_template) parts.push(`File: ${report.file_name_template}`);
+    if (report.connection_code) parts.push(`Ket noi: ${report.connection_code}`);
+    if (report.otp_service_code) parts.push(`OTP: ${report.otp_service_code}`);
+    return parts.join(" | ");
+  }
+
+  function selectedReport(form) {
+    const type = form.elements.namedItem("source_type")?.value || "onebss";
+    const code = form.elements.namedItem("source_code")?.value || "";
+    return (sourceReports[type] || []).find((report) => reportCode(report) === code) || null;
+  }
+
+  function refreshSourceReportSelect(form, selectedCode = "") {
+    const select = form.elements.namedItem("source_code");
+    const type = form.elements.namedItem("source_type")?.value || "onebss";
+    if (!select) return;
+    const reports = sourceReports[type] || [];
+    const currentCode = selectedCode || select.value || "";
+    select.innerHTML = "";
+    const placeholder = new Option(sourceReportsLoaded ? `Chon lenh ${sourceLabels[type] || type}` : "Dang tai danh sach...", "");
+    select.add(placeholder);
+    reports.forEach((report) => {
+      const code = reportCode(report);
+      if (!code) return;
+      select.add(new Option(reportLabel(report), code));
+    });
+    if (currentCode && !reports.some((report) => reportCode(report) === currentCode)) {
+      select.add(new Option(`${currentCode} (dang dung)`, currentCode));
+    }
+    select.value = currentCode;
+    updateSourceReportNote(form);
+  }
+
+  function updateSourceReportNote(form, { updateName = false } = {}) {
+    const note = $("#task-report-auto-source-note");
+    const type = form.elements.namedItem("source_type")?.value || "onebss";
+    const reports = sourceReports[type] || [];
+    const report = selectedReport(form);
+    if (!note) return;
+    if (sourceReportErrors.all || sourceReportErrors[type]) {
+      note.textContent = sourceReportErrors[type] || sourceReportErrors.all;
+      note.className = "task-auto-report-note error";
+      return;
+    }
+    if (!sourceReportsLoaded) {
+      note.textContent = "Dang tai danh sach lenh da cau hinh...";
+      note.className = "task-auto-report-note";
+      return;
+    }
+    if (!form.elements.namedItem("source_code")?.value) {
+      note.textContent = reports.length ? `${reports.length} lenh ${sourceLabels[type] || type} da cau hinh.` : `Chua co lenh ${sourceLabels[type] || type} dang bat.`;
+      note.className = reports.length ? "task-auto-report-note" : "task-auto-report-note warning";
+      return;
+    }
+    const summary = reportSummary(report, type);
+    note.textContent = summary || "Lenh da duoc chon.";
+    note.className = "task-auto-report-note";
+    if (updateName && report && !form.elements.namedItem("name")?.value.trim()) {
+      form.elements.namedItem("name").value = reportName(report);
+    }
+  }
+
+  function updateScheduleFields(form) {
+    const type = form.elements.namedItem("schedule_type")?.value || "Daily";
+    const visible = new Set(scheduleFields[type] || scheduleFields.Daily);
+    form.querySelectorAll("[data-schedule-field]").forEach((field) => {
+      field.classList.toggle("hidden", !visible.has(field.dataset.scheduleField));
+    });
+  }
+
+  function shouldOpenAdvanced(task) {
+    if (!task) return false;
+    const config = task.source_config && typeof task.source_config === "object" ? task.source_config : {};
+    return Boolean(
+      Object.keys(config).length
+      || task.public_wait_selector
+      || Number(task.retry_limit ?? 2) !== 2
+      || !task.is_active
+    );
+  }
+
   function ensureDialog() {
     if ($("#task-report-auto-dialog")) return;
     const dialog = document.createElement("dialog");
     dialog.id = "task-report-auto-dialog";
     dialog.innerHTML = `
-      <form id="task-report-auto-form" class="dialog-form">
+      <form id="task-report-auto-form" class="dialog-form task-auto-form">
         <input type="hidden" name="task_id" />
-        <div class="dialog-heading"><div><p class="eyebrow">Task report auto</p><h2 id="task-report-auto-dialog-title">Them task</h2></div><button class="dialog-close" type="button" data-close-task-report-auto>&times;</button></div>
-        <div class="form-grid two">
-          <label>Ten task<input class="form-control" name="name" /></label>
-          <label>Nguon<select class="form-control" name="source_type"><option value="onebss">OneBSS</option><option value="sql">SQL</option><option value="ftp">FTP</option></select></label>
-          <label>Ma bao cao<input class="form-control" name="source_code" /></label>
-          <label>Lich<select class="form-control" name="schedule_type"><option value="Daily">Daily</option><option value="TimeWindow">TimeWindow</option><option value="Weekly">Weekly</option><option value="Monthly">Monthly</option></select></label>
-          <label>Gio chay<input class="form-control" name="run_time" type="time" value="07:00" /></label>
-          <label>Khung gio<input class="form-control" name="time_slots" placeholder="07:00, 11:30, 17:00" /></label>
-          <label>Thu<input class="form-control" name="weekday" placeholder="mon, tue, thu 2..." /></label>
-          <label>Ngay thang<input class="form-control" name="month_day" type="number" min="1" max="31" value="1" /></label>
-          <label>Google Sheet URL/ID<input class="form-control" name="spreadsheet_url" /></label>
-          <label>Ten tab<input class="form-control" name="sheet_name" value="DATA" /></label>
-          <label>Public web<input class="form-control" name="public_url" /></label>
-          <label>Wait selector<input class="form-control" name="public_wait_selector" placeholder="#report-root" /></label>
-          <label>Zalo type<select class="form-control" name="target_type"><option value="group">group</option><option value="person">person</option></select></label>
-          <label>Zalo chat_id<input class="form-control" name="chat_id" /></label>
-          <label>Zalo name<input class="form-control" name="chat_name" /></label>
-          <label>Retry<input class="form-control" name="retry_limit" type="number" min="0" max="5" value="2" /></label>
+        <div class="dialog-heading">
+          <div><p class="eyebrow">Task report auto</p><h2 id="task-report-auto-dialog-title">Them task</h2></div>
+          <button class="icon-button" type="button" data-close-task-report-auto>&times;</button>
         </div>
-        <label>Caption<textarea class="form-control" name="caption" rows="2"></textarea></label>
-        <label>Source config JSON<textarea class="form-control font-mono text-xs" name="source_config_json" rows="7" placeholder='{"parameters":{},"filters":{}}'></textarea></label>
-        <label class="checkbox-row"><input name="is_active" type="checkbox" checked /> Bat task</label>
+        <div class="task-auto-dialog-body">
+          <fieldset class="task-auto-section">
+            <legend>Nguon du lieu</legend>
+            <div class="task-auto-form-grid">
+              <label class="task-auto-wide">Ten task<input class="form-control" name="name" required /></label>
+              <label>Nguon<select class="form-control" name="source_type"><option value="onebss">OneBSS</option><option value="sql">SQL</option><option value="ftp">FTP</option></select></label>
+              <label>Lenh da cau hinh<select class="form-control" name="source_code" required></select></label>
+              <div class="task-auto-report-note task-auto-wide" id="task-report-auto-source-note"></div>
+            </div>
+          </fieldset>
+          <fieldset class="task-auto-section">
+            <legend>Lich chay</legend>
+            <div class="task-auto-form-grid">
+              <label>Loai lich<select class="form-control" name="schedule_type"><option value="Daily">Daily</option><option value="TimeWindow">TimeWindow</option><option value="Weekly">Weekly</option><option value="Monthly">Monthly</option></select></label>
+              <label data-schedule-field="run_time">Gio chay<input class="form-control" name="run_time" type="time" value="07:00" /></label>
+              <label data-schedule-field="time_slots">Khung gio<input class="form-control" name="time_slots" placeholder="07:00, 11:30, 17:00" /></label>
+              <label data-schedule-field="weekday">Thu<input class="form-control" name="weekday" placeholder="mon, tue, thu 2..." /></label>
+              <label data-schedule-field="month_day">Ngay thang<input class="form-control" name="month_day" type="number" min="1" max="31" value="1" /></label>
+            </div>
+          </fieldset>
+          <fieldset class="task-auto-section">
+            <legend>Sheet va anh</legend>
+            <div class="task-auto-form-grid">
+              <label class="task-auto-wide">Google Sheet URL/ID<input class="form-control" name="spreadsheet_url" required /></label>
+              <label>Ten tab<input class="form-control" name="sheet_name" value="DATA" required /></label>
+              <label>Public web<input class="form-control" name="public_url" required /></label>
+            </div>
+          </fieldset>
+          <fieldset class="task-auto-section">
+            <legend>Zalo</legend>
+            <div class="task-auto-form-grid">
+              <label>Loai dich<select class="form-control" name="target_type"><option value="group">group</option><option value="person">person</option></select></label>
+              <label>Chat ID<input class="form-control" name="chat_id" required /></label>
+              <label class="task-auto-wide">Ten dich<input class="form-control" name="chat_name" /></label>
+              <label class="task-auto-wide">Caption<textarea class="form-control" name="caption" rows="2"></textarea></label>
+            </div>
+          </fieldset>
+          <details class="task-auto-advanced">
+            <summary>Nang cao</summary>
+            <div class="task-auto-form-grid">
+              <label>Wait selector<input class="form-control" name="public_wait_selector" placeholder="#report-root" /></label>
+              <label>Retry<input class="form-control" name="retry_limit" type="number" min="0" max="5" value="2" /></label>
+              <label class="task-auto-wide">Source config JSON<textarea class="form-control font-mono text-xs" name="source_config_json" rows="7" placeholder='{"parameters":{},"filters":{}}'></textarea></label>
+              <label class="checkbox-row task-auto-wide"><input name="is_active" type="checkbox" checked /> Bat task</label>
+            </div>
+          </details>
+        </div>
         <div class="result hidden" id="task-report-auto-form-message"></div>
         <div class="dialog-actions"><button class="btn-secondary" type="button" data-close-task-report-auto>Dong</button><button class="btn-primary" id="save-task-report-auto-button" type="submit"><span class="button-label">Luu task</span><span class="spinner"></span></button></div>
       </form>`;
     document.body.appendChild(dialog);
+    const form = dialog.querySelector("#task-report-auto-form");
     dialog.querySelectorAll("[data-close-task-report-auto]").forEach((button) => button.addEventListener("click", () => dialog.close()));
-    dialog.querySelector("#task-report-auto-form")?.addEventListener("submit", saveTask);
+    form?.addEventListener("submit", saveTask);
+    form?.elements.namedItem("source_type")?.addEventListener("change", () => {
+      refreshSourceReportSelect(form, "");
+    });
+    form?.elements.namedItem("source_code")?.addEventListener("change", () => updateSourceReportNote(form, { updateName: true }));
+    form?.elements.namedItem("schedule_type")?.addEventListener("change", () => updateScheduleFields(form));
   }
 
-  function openTask(taskId = "") {
+  async function openTask(taskId = "") {
     ensureDialog();
     const task = tasks.find((item) => item.task_id === taskId);
     const form = $("#task-report-auto-form");
     if (!form) return;
+    const sourceCode = task?.source_code || "";
     form.elements.namedItem("task_id").value = task?.task_id || "";
     form.elements.namedItem("name").value = task?.name || "";
     form.elements.namedItem("source_type").value = task?.source_type || "onebss";
-    form.elements.namedItem("source_code").value = task?.source_code || "";
     form.elements.namedItem("schedule_type").value = task?.schedule_type || "Daily";
     form.elements.namedItem("run_time").value = task?.run_time || "07:00";
     form.elements.namedItem("time_slots").value = Array.isArray(task?.time_slots) ? task.time_slots.join(", ") : "";
@@ -197,9 +379,20 @@
     form.elements.namedItem("retry_limit").value = task?.retry_limit ?? 2;
     form.elements.namedItem("source_config_json").value = JSON.stringify(task?.source_config || {}, null, 2);
     form.elements.namedItem("is_active").checked = task ? Boolean(task.is_active) : true;
+    form.querySelector(".task-auto-advanced").open = shouldOpenAdvanced(task);
     $("#task-report-auto-dialog-title").textContent = task ? "Sua task" : "Them task";
     $("#task-report-auto-form-message").className = "result hidden";
+    refreshSourceReportSelect(form, sourceCode);
+    updateScheduleFields(form);
     $("#task-report-auto-dialog")?.showModal();
+    try {
+      await loadSourceReports();
+      refreshSourceReportSelect(form, sourceCode);
+      updateSourceReportNote(form, { updateName: !task });
+    } catch (error) {
+      refreshSourceReportSelect(form, sourceCode);
+      showMessage($("#task-report-auto-form-message"), error.message, "error");
+    }
   }
 
   async function saveTask(event) {
@@ -220,7 +413,7 @@
       source_code: data.source_code || "",
       source_config: sourceConfig,
       schedule_type: data.schedule_type || "Daily",
-      time_slots: parseSlots(data.time_slots),
+      time_slots: data.schedule_type === "TimeWindow" ? parseSlots(data.time_slots) : [],
       run_time: data.run_time || "07:00",
       weekday: data.weekday || "",
       month_day: Number(data.month_day || 1),

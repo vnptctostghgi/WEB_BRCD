@@ -165,7 +165,7 @@ const dashboardBuilderLayoutCache = new Map();
 const DASHBOARD_VIEWER_REFRESH_POLL_MS = 4000;
 const DATA_CACHE_TTL_MS = 2 * 60 * 1000;
 const NAVIGATION_CLIENT_CACHE_TTL_MS = 60 * 1000;
-const NAVIGATION_CLIENT_CACHE_VERSION = "2026-08-13-task-report-auto-v36";
+const NAVIGATION_CLIENT_CACHE_VERSION = "2026-08-13-task-report-auto-v37";
 const TABLE_PAGE_SIZE = 20;
 const PUBLIC_MESSAGES_LIMIT = 10;
 const TABLE_SHORT_PAGE_SIZE = 10;
@@ -338,7 +338,7 @@ function ensureTaskReportAutoScriptLoaded() {
   if (taskReportAutoScriptPromise) return taskReportAutoScriptPromise;
   taskReportAutoScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/task-report-auto.js?v=1";
+    script.src = "/static/task-report-auto.js?v=2";
     script.defer = true;
     script.dataset.taskReportAuto = "true";
     script.addEventListener("load", () => {

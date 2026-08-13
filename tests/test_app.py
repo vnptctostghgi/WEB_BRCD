@@ -124,11 +124,11 @@ def test_feature_path_opens_current_app_shell() -> None:
         public_response = client.get("/publicmessages")
         assert public_response.status_code == 200
         assert 'id="view-public-messages"' in public_response.text
-        assert "/static/app.js?v=226" in public_response.text
-        assert "/static/styles.css?v=137" in public_response.text
+        assert "/static/app.js?v=227" in public_response.text
+        assert "/static/styles.css?v=138" in public_response.text
         assert "fonts.googleapis.com" not in public_response.text
         assert 'href="/api/navigation"' not in public_response.text
-        public_js = client.get("/static/app.js?v=226")
+        public_js = client.get("/static/app.js?v=227")
         assert public_js.status_code == 200
         assert "function bindPublicMessagesEvents" in public_js.text
         assert "function renderPublicMessages" in public_js.text
@@ -202,7 +202,7 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert "/api/admin/public-messages/feed?limit=100" not in public_js.text
         assert "const PUBLIC_MESSAGES_LIMIT = 10" in public_js.text
         assert 'params.set("after", publicMessagesCursor)' in public_js.text
-        public_css = client.get("/static/styles.css?v=137")
+        public_css = client.get("/static/styles.css?v=138")
         assert public_css.status_code == 200
         assert ".sql-progress-hint" in public_css.text
         assert "Compact desktop rail" in public_css.text
@@ -339,8 +339,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert 'Set-UserEnvironment "SQL_WORKER_MAX_CONCURRENT_TASKS" $sqlWorkerMaxTasks' in setup_script
         assert 'Set-UserEnvironment "FTP_WORKER_MAX_CONCURRENT_TASKS" $ftpWorkerMaxTasks' in setup_script
         assert "ONEBSS_TASK_TIMEOUT_SECONDS" in start_worker_script
-        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION.endswith("v40")
-        assert 'WORKER_VERSION = "2026.08.13-sql-run-direct-fallback-v40"' in worker_script
+        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION.endswith("v41")
+        assert 'WORKER_VERSION = "2026.08.13-task-auto-sql-all-pages-v41"' in worker_script
         assert "WorkerConcurrencyTracker" in worker_script
         assert "WorkerTaskDispatcher" in worker_script
         assert "normalize_ftp_variable_value" in worker_script
@@ -879,6 +879,81 @@ def test_sql_worker_queue_invalidates_empty_claim_cache(monkeypatch: pytest.Monk
         routes.invalidate_worker_claim_empty_cache()
 
 
+def test_task_report_auto_sql_worker_claim_collects_all_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    report_code = f"TASK_AUTO_SQL_{uuid.uuid4().hex[:8].upper()}"
+    job_id = f"task-auto-sql-{uuid.uuid4().hex}"
+    headers = {"Authorization": "Bearer test-worker-token"}
+    prepared_args = {}
+
+    class FakeDatabaseService:
+        def prepare_dynamic_report_query(self, **kwargs):
+            prepared_args.update(kwargs)
+            return {
+                "ok": True,
+                "ten_bao_cao": "Task auto all pages",
+                "ma_bao_cao": kwargs["ma_bao_cao"],
+                "cau_lenh_sql": "SELECT ma_tb FROM css_cto.rpt_task_auto",
+                "tham_so": kwargs.get("filters") or {},
+                "page": kwargs.get("page"),
+                "page_size": kwargs.get("page_size"),
+                "report": {"ma_bao_cao": kwargs["ma_bao_cao"], "ten_bao_cao": "Task auto all pages"},
+            }
+
+    monkeypatch.setattr(routes, "build_database_service", lambda: FakeDatabaseService())
+    monkeypatch.setattr(routes, "_next_dynamic_report_export_worker_job", lambda *args, **kwargs: None)
+    monkeypatch.setattr(routes, "_next_dashboard_refresh_worker_job", lambda: None)
+    routes.invalidate_worker_claim_empty_cache("sql")
+    with routes.DYNAMIC_REPORT_RUN_JOBS_LOCK:
+        routes.DYNAMIC_REPORT_RUN_JOBS.clear()
+    with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+        routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
+    with routes.DASHBOARD_REFRESH_JOBS_LOCK:
+        routes.DASHBOARD_REFRESH_JOBS.clear()
+    with routes.WORKSTATION_HEARTBEATS_LOCK:
+        routes.WORKSTATION_HEARTBEATS.clear()
+    try:
+        with TestClient(app) as client:
+            queued_at = time.time() + 100000
+            with routes.DYNAMIC_REPORT_RUN_JOBS_LOCK:
+                routes.DYNAMIC_REPORT_RUN_JOBS[job_id] = {
+                    "job_id": job_id,
+                    "status": "queued_worker",
+                    "created_at": queued_at,
+                    "updated_at": queued_at,
+                    "created_by": "pytest",
+                    "report_code": report_code,
+                    "report_name": "Task auto all pages",
+                    "payload": {
+                        "ma_bao_cao": report_code,
+                        "filters": {},
+                        "page": 1,
+                        "page_size": 20000,
+                        "collect_all_pages": True,
+                        "max_rows": 50000,
+                    },
+                }
+
+            claim = client.post("/api/sql-worker/tasks/claim", json={"worker_id": "ws-task-auto-sql"}, headers=headers)
+            assert claim.status_code == 200
+            task = claim.json()["task"]
+            assert task["run_id"] == job_id
+            assert task["task_type"] == "dynamic_report_load"
+            assert task["query"]["pagination"] == {"page": 1, "page_size": 20000}
+            assert task["query"]["collect_all_pages"] is True
+            assert task["query"]["max_rows"] == 50000
+            assert prepared_args["page_size"] == 20000
+    finally:
+        with routes.DYNAMIC_REPORT_RUN_JOBS_LOCK:
+            routes.DYNAMIC_REPORT_RUN_JOBS.pop(job_id, None)
+        with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+            routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
+        with routes.DASHBOARD_REFRESH_JOBS_LOCK:
+            routes.DASHBOARD_REFRESH_JOBS.clear()
+        with routes.WORKSTATION_HEARTBEATS_LOCK:
+            routes.WORKSTATION_HEARTBEATS.clear()
+        routes.invalidate_worker_claim_empty_cache()
+
+
 def test_workstation_priority_blocks_lower_priority_onebss_claim() -> None:
     primary_id = f"ws-primary-{uuid.uuid4().hex[:8]}"
     secondary_id = f"ws-secondary-{uuid.uuid4().hex[:8]}"
@@ -1095,7 +1170,7 @@ def test_viewer_navigation_includes_parent_for_granted_child_dashboard() -> None
 
         page = client.get(f"/{feature_code}")
         assert page.status_code == 200
-        assert "/static/app.js?v=226" in page.text
+        assert "/static/app.js?v=227" in page.text
         assert "dashboard-designed-section" in page.text
 
         detail = client.get("/api/dashboard-layouts/DASHBOARD_VIEWER_CHILD")
@@ -2311,12 +2386,55 @@ def test_data_mining_scheduler_runs_due_schedule_once(monkeypatch) -> None:
 def test_admin_can_manage_task_report_auto_and_queue_run() -> None:
     with TestClient(app) as client:
         login(client)
+        source_code = f"BC_AUTO_SQL_{uuid.uuid4().hex[:8].upper()}"
+        onebss_code = f"ONEBSS_AUTO_{uuid.uuid4().hex[:8].upper()}"
+        ftp_code = f"FTP_AUTO_{uuid.uuid4().hex[:8].upper()}"
+        assert client.post(
+            "/api/admin/sql-reports",
+            json={
+                "ten_bao_cao": "Auto SQL source",
+                "ma_bao_cao": source_code,
+                "cau_lenh_sql": "SELECT :P_THANG AS P_THANG FROM dual;",
+                "cac_tham_so": ["P_THANG"],
+            },
+        ).status_code == 200
+        assert client.post(
+            "/api/admin/onebss-reports",
+            json={
+                "ten_bao_cao": "Auto OneBSS source",
+                "ma_bao_cao": onebss_code,
+                "danh_sach_bien": ["P_TUNGAY", "P_DENNGAY"],
+                "parameters": {"P_TUNGAY": "{{month_start}}", "P_DENNGAY": "{{today}}"},
+                "otp_service_code": "onebss",
+                "report_url": "https://onebss.vnpt.vn/#/report/bi?path=TEST&name=Test",
+                "storage_link": "",
+            },
+        ).status_code == 200
+        assert client.post(
+            "/api/admin/ftp-reports",
+            json={
+                "ten_bao_cao": "Auto FTP source",
+                "ma_bao_cao": ftp_code,
+                "folder_path": "/reports",
+                "file_name_template": "report_{yyyymmdd}.xlsx",
+                "connection_code": "ftp_storage",
+                "is_active": True,
+            },
+        ).status_code == 200
+
+        source_configs = client.get("/api/admin/task-report-auto/source-configs")
+        assert source_configs.status_code == 200
+        source_payload = source_configs.json()["reports"]
+        assert source_code in {report["ma_bao_cao"] for report in source_payload["sql"]}
+        assert onebss_code in {report["ma_bao_cao"] for report in source_payload["onebss"]}
+        assert ftp_code in {report["ma_bao_cao"] for report in source_payload["ftp"]}
+
         created = client.post(
             "/api/admin/task-report-auto/tasks",
             json={
                 "name": "Auto SQL sang",
                 "source_type": "sql",
-                "source_code": "BC_AUTO_SQL",
+                "source_code": source_code,
                 "source_config": {"filters": {"P_THANG": "202608"}},
                 "schedule_type": "TimeWindow",
                 "time_slots": ["07:00", "11:30"],
@@ -2343,7 +2461,14 @@ def test_admin_can_manage_task_report_auto_and_queue_run() -> None:
         page = client.get("/taskreportauto")
         assert page.status_code == 200
         assert 'id="view-task-report-auto"' in page.text
-        assert "/static/task-report-auto.js?v=1" in client.get("/static/app.js?v=226").text
+        app_js = client.get("/static/app.js?v=227").text
+        assert "/static/task-report-auto.js?v=2" in app_js
+        task_auto_js = client.get("/static/task-report-auto.js?v=2")
+        assert task_auto_js.status_code == 200
+        assert "/api/admin/task-report-auto/source-configs" in task_auto_js.text
+        assert 'name="source_code" required></select>' in task_auto_js.text
+        assert "task-auto-advanced" in task_auto_js.text
+        assert 'data-schedule-field="time_slots"' in task_auto_js.text
 
         queued = client.post(f"/api/admin/task-report-auto/tasks/{task['task_id']}/run-now", json={"source_config": {}})
         assert queued.status_code == 200
@@ -3386,6 +3511,44 @@ def test_dynamic_report_define_date_accepts_bare_filter_name_and_time_suffix() -
     assert "DENNGAY" not in prepared["cau_lenh_sql"]
     assert "'01/08/2026' || ' 00:00:00'" in prepared["cau_lenh_sql"]
     assert "'31/08/2026' || ' 00:00:00'" in prepared["cau_lenh_sql"]
+
+
+def test_dynamic_report_prepare_keeps_large_worker_page_size() -> None:
+    class FakeInternalApi:
+        settings = get_settings()
+
+    class FakeRepository:
+        def get_sql_report_by_code(self, code):
+            return {
+                "ten_bao_cao": "Large page",
+                "ma_bao_cao": "LARGE_PAGE",
+                "cau_lenh_sql": "SELECT :P_THANG AS P_THANG FROM dual;",
+                "cac_tham_so": ["P_THANG"],
+            }
+
+        def get_sql_report_by_id(self, report_id):
+            return None
+
+        def list_sql_reports(self):
+            return []
+
+    service = DatabaseService(FakeInternalApi(), FakeRepository())
+    prepared = service.prepare_dynamic_report_query(
+        ma_bao_cao="LARGE_PAGE",
+        filters={"P_THANG": "202608"},
+        page=1,
+        page_size=20000,
+    )
+    capped = service.prepare_dynamic_report_query(
+        ma_bao_cao="LARGE_PAGE",
+        filters={"P_THANG": "202608"},
+        page=1,
+        page_size=50000,
+    )
+
+    assert prepared["ok"] is True
+    assert prepared["page_size"] == 20000
+    assert capped["page_size"] == 20000
 
 
 def test_admin_can_manage_and_run_onebss_report(monkeypatch) -> None:
@@ -6215,6 +6378,71 @@ def test_sql_worker_posts_result_to_web(monkeypatch) -> None:
     assert payload["pagination"]["total"] == 1
 
 
+def test_sql_worker_collects_all_pages_before_posting_result(monkeypatch) -> None:
+    from scripts import onebss_workstation_worker as worker
+
+    calls = []
+    queried_pages = []
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"ok": True}
+
+    class FakeClient:
+        def request(self, method: str, path: str, **kwargs):
+            calls.append({"method": method, "path": path, "json": kwargs.get("json") or {}})
+            return FakeResponse()
+
+    def fake_run_sql_worker_query(task: dict) -> dict:
+        pagination = task["query"]["pagination"]
+        page = int(pagination["page"])
+        queried_pages.append(page)
+        rows_by_page = {
+            1: [{"MA_TB": "TB001"}, {"MA_TB": "TB002"}],
+            2: [{"MA_TB": "TB003"}, {"MA_TB": "TB004"}],
+            3: [{"MA_TB": "TB005"}],
+        }
+        return {
+            "ok": True,
+            "columns": ["MA_TB"],
+            "rows": rows_by_page.get(page, []),
+            "total": 5,
+            "pagination": {"page": page, "page_size": 2, "total": 5},
+            "message": f"page {page}",
+        }
+
+    monkeypatch.setattr(worker, "run_sql_worker_query", fake_run_sql_worker_query)
+
+    worker.process_sql_task(
+        FakeClient(),
+        {
+            "run_id": "SQL-ALL-PAGES",
+            "report_code": "BC_SQL_ALL",
+            "query": {
+                "action": "run_sql_report",
+                "collect_all_pages": True,
+                "max_rows": 50000,
+                "pagination": {"page": 1, "page_size": 2},
+            },
+        },
+        "ws-sql",
+    )
+
+    result_calls = [call for call in calls if call["path"] == "/api/sql-worker/tasks/SQL-ALL-PAGES/result"]
+    assert queried_pages == [1, 2, 3]
+    assert len(result_calls) == 1
+    payload = result_calls[0]["json"]
+    assert payload["ok"] is True
+    assert payload["rows"] == [{"MA_TB": "TB001"}, {"MA_TB": "TB002"}, {"MA_TB": "TB003"}, {"MA_TB": "TB004"}, {"MA_TB": "TB005"}]
+    assert payload["pagination"]["total"] == 5
+    assert payload["pagination"]["fetched_rows"] == 5
+    assert payload["pagination"]["truncated"] is False
+    assert payload["details"]["collect_all_pages"] is True
+
+
 def test_workstation_worker_claims_onebss_before_sql(monkeypatch) -> None:
     from scripts import onebss_workstation_worker as worker
 
@@ -7956,16 +8184,16 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         home = client.get("/")
         assert home.status_code == 200
         assert "app-shell-placeholder" in home.text
-        assert "/static/shell.js?v=40" in home.text
-        assert "/static/app.js?v=226" not in home.text
-        shell_js = client.get("/static/shell.js?v=40")
+        assert "/static/shell.js?v=41" in home.text
+        assert "/static/app.js?v=227" not in home.text
+        shell_js = client.get("/static/shell.js?v=41")
         assert shell_js.status_code == 200
         assert "function collapseNavigationTree" in shell_js.text
         assert "function dedupeFeaturesForDisplay" in shell_js.text
         assert "function readCachedNavigation" in shell_js.text
         assert "async function logoutFromClient" in shell_js.text
         assert 'window.location.replace("/login")' in shell_js.text
-        assert "/static/app.js?v=226" in shell_js.text
+        assert "/static/app.js?v=227" in shell_js.text
         assert "dashboard-designed-section" not in home.text
         assert "create-user-dialog" not in home.text
 
@@ -7978,8 +8206,8 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         dashboard = client.get("/dashboard")
         assert dashboard.status_code == 200
         assert "app-shell-placeholder" in dashboard.text
-        assert "/static/shell.js?v=40" in dashboard.text
-        assert "/static/app.js?v=226" not in dashboard.text
+        assert "/static/shell.js?v=41" in dashboard.text
+        assert "/static/app.js?v=227" not in dashboard.text
         assert "view-dashboard-builder" not in dashboard.text
         assert "dashboard-designed-section" not in dashboard.text
 
@@ -7999,49 +8227,49 @@ def test_viewer_cannot_access_dashboard_builder_api_or_report_runner() -> None:
         assert "dynamic-report-body" not in reports.text
         assert "dynamic-report-prev" not in reports.text
         assert "dynamic-report-next" not in reports.text
-        assert "/static/app.js?v=226" in reports.text
+        assert "/static/app.js?v=227" in reports.text
         assert "/static/reports-runtime.js" not in reports.text
         assert reports.text.count('class="app-view') == 1
 
         workstation = client.get("/maytram")
         assert workstation.status_code == 200
         assert "view-workstation" in workstation.text
-        assert "/static/app.js?v=226" in workstation.text
+        assert "/static/app.js?v=227" in workstation.text
         assert "/static/workstation.js" not in workstation.text
         assert workstation.text.count('class="app-view') == 1
 
         work_tasks = client.get("/quanlycongviec")
         assert work_tasks.status_code == 200
         assert "view-work-tasks" in work_tasks.text
-        assert "/static/app.js?v=226" in work_tasks.text
+        assert "/static/app.js?v=227" in work_tasks.text
         assert "/static/work-tasks.js" not in work_tasks.text
         assert work_tasks.text.count('class="app-view') == 1
 
         report_links = client.get("/linkbaocao")
         assert report_links.status_code == 200
         assert "view-report-links" in report_links.text
-        assert "/static/app.js?v=226" in report_links.text
+        assert "/static/app.js?v=227" in report_links.text
         assert "/static/report-links.js" not in report_links.text
         assert report_links.text.count('class="app-view') == 1
 
         system = client.get("/quantriketnoi")
         assert system.status_code == 200
         assert "view-system" in system.text
-        assert "/static/app.js?v=226" in system.text
+        assert "/static/app.js?v=227" in system.text
         assert "/static/data-mining.js" not in system.text
         assert system.text.count('class="app-view') == 1
 
         onebss_mining = client.get("/daodulieuonebss")
         assert onebss_mining.status_code == 200
         assert "view-onebss-mining" in onebss_mining.text
-        assert "/static/app.js?v=226" in onebss_mining.text
+        assert "/static/app.js?v=227" in onebss_mining.text
         assert "/static/reports-runtime.js" not in onebss_mining.text
         assert onebss_mining.text.count('class="app-view') == 1
 
         ftp_mining = client.get("/daodulieuftp")
         assert ftp_mining.status_code == 200
         assert "view-ftp-mining" in ftp_mining.text
-        assert "/static/app.js?v=226" in ftp_mining.text
+        assert "/static/app.js?v=227" in ftp_mining.text
         assert "/static/ftp-mining.js" not in ftp_mining.text
         assert ftp_mining.text.count('class="app-view') == 1
 
@@ -8140,7 +8368,7 @@ def test_viewer_feature_permissions_unlock_mining_pages_and_runtime_apis() -> No
             assert page.status_code == 200
             assert marker in page.text
             assert "app-shell-placeholder" not in page.text
-            assert "/static/app.js?v=226" in page.text
+            assert "/static/app.js?v=227" in page.text
 
         report_configs = client.get("/api/reports/configs")
         assert report_configs.status_code == 200
@@ -8214,7 +8442,7 @@ def test_viewer_with_user_management_feature_can_manage_users() -> None:
         page = client.get("/quantringuoidung")
         assert page.status_code == 200
         assert 'id="view-users"' in page.text
-        assert "/static/app.js?v=226" in page.text
+        assert "/static/app.js?v=227" in page.text
         assert client.get("/api/admin/users").status_code == 200
         managed = client.post(
             "/api/admin/users",

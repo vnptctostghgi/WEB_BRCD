@@ -151,7 +151,7 @@ WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_w
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260813-sql-run-direct-fallback-v40"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260813-task-auto-sql-all-pages-v41"
 WORKSTATION_CONNECTION_PREFIX = "workstation_"
 WORKSTATION_DEFAULT_PRIORITY = 100
 WORKSTATION_SETUP_INCLUDE_PATHS = (
@@ -6023,6 +6023,12 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
             },
         }
     elif task_kind == "load":
+        raw_payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
+        collect_all_pages = bool(raw_payload.get("collect_all_pages"))
+        try:
+            max_rows = int(raw_payload.get("max_rows") or get_settings().dynamic_report_export_max_rows or 1000000)
+        except (TypeError, ValueError):
+            max_rows = 1000000
         updated = _set_dynamic_report_run_job(
             job_id,
             status="running_worker",
@@ -6048,6 +6054,9 @@ def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> d
                 "page_size": int(prepared.get("page_size") or 20),
             },
         }
+        if collect_all_pages:
+            query["collect_all_pages"] = True
+            query["max_rows"] = max(1, max_rows)
     else:
         updated = _set_dashboard_refresh_job(
             job_id,
@@ -8454,6 +8463,60 @@ def list_task_report_auto_tasks(request: Request) -> dict:
         return {"tasks": repository.list_task_report_auto_tasks()}
     except RuntimeError as error:
         raise_task_report_auto_schema_error(error)
+
+
+@router.get("/api/admin/task-report-auto/source-configs")
+def list_task_report_auto_source_configs(request: Request) -> dict:
+    require_feature(request, "taskreportauto")
+    repository = build_app_repository()
+    errors: dict[str, str] = {}
+    reports: dict[str, list[dict[str, Any]]] = {"onebss": [], "sql": [], "ftp": []}
+
+    try:
+        reports["sql"] = [
+            {
+                "id": report.get("id"),
+                "ten_bao_cao": report.get("ten_bao_cao") or "",
+                "ma_bao_cao": report.get("ma_bao_cao") or "",
+                "cac_tham_so": report.get("cac_tham_so") or [],
+            }
+            for report in repository.list_sql_reports()
+        ]
+    except RuntimeError as error:
+        errors["sql"] = str(error)
+
+    try:
+        reports["onebss"] = [
+            {
+                "id": report.get("id"),
+                "ten_bao_cao": report.get("ten_bao_cao") or "",
+                "ma_bao_cao": report.get("ma_bao_cao") or "",
+                "danh_sach_bien": report.get("danh_sach_bien") or [],
+                "parameters": report.get("parameters") if isinstance(report.get("parameters"), dict) else {},
+                "otp_service_code": report.get("otp_service_code") or "",
+            }
+            for report in repository.list_onebss_reports()
+        ]
+    except RuntimeError as error:
+        errors["onebss"] = str(error)
+
+    try:
+        reports["ftp"] = [
+            {
+                "id": report.get("id"),
+                "ten_bao_cao": report.get("ten_bao_cao") or "",
+                "ma_bao_cao": report.get("ma_bao_cao") or "",
+                "folder_path": report.get("folder_path") or "",
+                "file_name_template": report.get("file_name_template") or "",
+                "connection_code": report.get("connection_code") or "",
+                "is_active": bool(report.get("is_active", True)),
+            }
+            for report in repository.list_ftp_reports(active_only=True)
+        ]
+    except RuntimeError as error:
+        errors["ftp"] = str(error)
+
+    return {"reports": reports, "errors": errors}
 
 
 @router.post("/api/admin/task-report-auto/tasks")

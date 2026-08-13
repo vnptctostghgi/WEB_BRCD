@@ -40,7 +40,7 @@ class FtpTaskCancelled(Exception):
 
 
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.08.13-sql-run-direct-fallback-v40"
+WORKER_VERSION = "2026.08.13-task-auto-sql-all-pages-v41"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -1038,6 +1038,92 @@ def run_sql_worker_query(task: dict[str, Any]) -> dict[str, Any]:
     return {"ok": False, "message": "API du lieu local khong tra ket qua."}
 
 
+def int_from_values(*values: Any, default: int = 0) -> int:
+    for value in values:
+        if isinstance(value, list):
+            return len(value)
+        try:
+            if value not in (None, ""):
+                return int(value)
+        except (TypeError, ValueError):
+            continue
+    return default
+
+
+def run_sql_worker_query_all_pages(task: dict[str, Any], progress_callback=None) -> dict[str, Any]:
+    query = dict(task.get("query") if isinstance(task.get("query"), dict) else {})
+    pagination = dict(query.get("pagination") if isinstance(query.get("pagination"), dict) else {})
+    page_size = max(1, min(int_from_values(pagination.get("page_size"), default=20000), 20000))
+    start_page = max(1, int_from_values(pagination.get("page"), default=1))
+    max_rows = max(1, int_from_values(query.get("max_rows"), os.getenv("EXPORT_MAX_ROWS", "1000000"), default=1000000))
+    rows: list[dict[str, Any]] = []
+    columns: list[str] = []
+    total = 0
+    page = start_page
+    last_result: dict[str, Any] = {}
+
+    while len(rows) < max_rows:
+        page_query = {
+            **query,
+            "collect_all_pages": False,
+            "pagination": {**pagination, "page": page, "page_size": page_size},
+        }
+        page_task = {**task, "query": page_query}
+        result = run_sql_worker_query(page_task)
+        last_result = result if isinstance(result, dict) else {}
+        if last_result.get("ok") is False:
+            return last_result
+        page_rows = last_result.get("rows") or last_result.get("data") or []
+        if not isinstance(page_rows, list):
+            page_rows = []
+        if not columns:
+            columns = last_result.get("columns") if isinstance(last_result.get("columns"), list) else []
+            if not columns and page_rows and isinstance(page_rows[0], dict):
+                columns = list(page_rows[0].keys())
+        if not total:
+            total = int_from_values(last_result.get("total"), (last_result.get("pagination") or {}).get("total") if isinstance(last_result.get("pagination"), dict) else None)
+        remaining = max_rows - len(rows)
+        rows.extend(page_rows[:remaining])
+        if progress_callback:
+            progress_callback(
+                f"May tram da lay {len(rows)}"
+                + (f"/{total}" if total else "")
+                + " dong SQL de nap Sheet."
+            )
+        if not page_rows:
+            break
+        if total and len(rows) >= total:
+            break
+        if len(page_rows) < page_size and not total:
+            break
+        page += 1
+
+    details = last_result.get("details") if isinstance(last_result.get("details"), dict) else {}
+    return {
+        **last_result,
+        "ok": bool(last_result.get("ok", True)),
+        "message": last_result.get("message") or f"May tram da tai {len(rows)} dong SQL qua API local.",
+        "columns": columns,
+        "rows": rows,
+        "total": total or len(rows),
+        "page": start_page,
+        "page_size": page_size,
+        "pagination": {
+            "page": start_page,
+            "page_size": page_size,
+            "total": total or len(rows),
+            "fetched_rows": len(rows),
+            "truncated": bool(total and len(rows) < total) or (not total and len(rows) >= max_rows),
+        },
+        "details": {
+            **details,
+            "collect_all_pages": True,
+            "fetched_rows": len(rows),
+            "max_rows": max_rows,
+        },
+    }
+
+
 def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str) -> None:
     run_id = str(task.get("run_id") or task.get("job_id") or "")
     started = time.monotonic()
@@ -1108,21 +1194,16 @@ def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
                 details={"step": "received", "report": report_code, "api_urls": internal_sql_api_urls()},
             )
         try:
-            result = run_sql_worker_query(task)
+            if action == "run_sql_report" and bool(query.get("collect_all_pages")):
+                result = run_sql_worker_query_all_pages(task, send_progress)
+            else:
+                result = run_sql_worker_query(task)
         finally:
             if export_heartbeat is not None:
                 export_heartbeat.set()
 
         def result_int(*values: Any) -> int:
-            for value in values:
-                if isinstance(value, list):
-                    return len(value)
-                try:
-                    if value not in (None, ""):
-                        return int(value)
-                except (TypeError, ValueError):
-                    continue
-            return 0
+            return int_from_values(*values)
 
         if action == "export_sql_report_to_drive":
             columns = result.get("columns") if isinstance(result.get("columns"), list) else []
@@ -1180,11 +1261,15 @@ def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
         columns = result.get("columns") if isinstance(result.get("columns"), list) else []
         if not columns and rows and isinstance(rows[0], dict):
             columns = list(rows[0].keys())
+        result_pagination = result.get("pagination") if isinstance(result.get("pagination"), dict) else {}
         pagination = {
-            "page": int(result.get("page") or ((task.get("query") or {}).get("pagination") or {}).get("page") or 1),
-            "page_size": int(result.get("page_size") or ((task.get("query") or {}).get("pagination") or {}).get("page_size") or len(rows) or 20),
-            "total": int(result.get("total") or len(rows)),
+            "page": int(result.get("page") or result_pagination.get("page") or ((task.get("query") or {}).get("pagination") or {}).get("page") or 1),
+            "page_size": int(result.get("page_size") or result_pagination.get("page_size") or ((task.get("query") or {}).get("pagination") or {}).get("page_size") or len(rows) or 20),
+            "total": int(result.get("total") or result_pagination.get("total") or len(rows)),
         }
+        for key in ("fetched_rows", "truncated"):
+            if key in result_pagination:
+                pagination[key] = result_pagination[key]
         details = result.get("details") if isinstance(result.get("details"), dict) else {}
         details = {**details, "duration_ms": int((time.monotonic() - started) * 1000)}
         finish_response = request_json(

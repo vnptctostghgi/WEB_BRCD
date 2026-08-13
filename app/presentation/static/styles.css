@@ -7425,3 +7425,101 @@ body.view-loading::before {
     grid-template-columns: minmax(30rem, 33rem) minmax(0, 1fr) !important;
   }
 }
+
+#task-report-auto-dialog {
+  width: min(980px, calc(100% - 24px));
+}
+
+#task-report-auto-dialog .task-auto-form {
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+
+.task-auto-dialog-body {
+  display: grid;
+  gap: .8rem;
+}
+
+.task-auto-section,
+.task-auto-advanced {
+  margin: 0;
+  border: 1px solid var(--border, var(--app-border));
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-secondary, rgba(248, 252, 255, .72));
+  padding: .85rem;
+}
+
+.task-auto-section legend {
+  padding: 0 .35rem;
+  color: var(--text-secondary, var(--app-muted));
+  font-size: .78rem;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.task-auto-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .75rem;
+}
+
+.task-auto-wide {
+  grid-column: 1 / -1;
+}
+
+.task-auto-report-note {
+  min-height: 34px;
+  border: 1px dashed rgba(11, 99, 182, .28);
+  border-radius: var(--radius-sm, 6px);
+  background: rgba(239, 246, 255, .62);
+  padding: .45rem .6rem;
+  color: var(--text-secondary, #475569);
+  font-size: .78rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.task-auto-report-note.warning {
+  border-color: rgba(217, 119, 6, .35);
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.task-auto-report-note.error {
+  border-color: rgba(220, 38, 38, .32);
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.task-auto-advanced summary {
+  cursor: pointer;
+  color: var(--text-primary, var(--app-text));
+  font-size: .86rem;
+  font-weight: 900;
+}
+
+.task-auto-advanced[open] summary {
+  margin-bottom: .75rem;
+}
+
+#task-report-auto-dialog textarea[name="source_config_json"] {
+  min-height: 9rem;
+}
+
+#task-report-auto-dialog .dialog-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: flex-end;
+  gap: .6rem;
+  margin: .1rem -.2rem -.2rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), var(--surface, #fff) 35%);
+  padding: .85rem .2rem .2rem;
+}
+
+@media (max-width: 760px) {
+  .task-auto-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

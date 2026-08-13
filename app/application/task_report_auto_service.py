@@ -439,6 +439,7 @@ class TaskReportAutoRunner:
     def _queue_sql_worker_source(self, task: dict[str, Any], run: dict[str, Any], config: dict[str, Any], filters: dict[str, Any]) -> dict[str, Any]:
         service = DatabaseService(InternalApiClient.from_repository(self.settings, self.repository), self.repository)
         page_size = int(config.get("page_size") or getattr(self.settings, "dynamic_report_export_page_size", 20000) or 20000)
+        max_rows = int(config.get("max_rows") or getattr(self.settings, "dynamic_report_export_max_rows", 1000000) or 1000000)
         prepared = service.prepare_dynamic_report_query(
             ma_bao_cao=str(task.get("source_code") or "").strip().upper(),
             filters=filters,
@@ -457,6 +458,8 @@ class TaskReportAutoRunner:
             "filters": filters,
             "page": 1,
             "page_size": page_size,
+            "collect_all_pages": True,
+            "max_rows": max_rows,
             "search": str(config.get("search") or ""),
             "search_columns": config.get("search_columns") if isinstance(config.get("search_columns"), list) else [],
             "report_id": config.get("report_id") if config.get("report_id") not in (None, "") else None,
