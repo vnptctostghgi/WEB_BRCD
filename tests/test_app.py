@@ -339,8 +339,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert 'Set-UserEnvironment "SQL_WORKER_MAX_CONCURRENT_TASKS" $sqlWorkerMaxTasks' in setup_script
         assert 'Set-UserEnvironment "FTP_WORKER_MAX_CONCURRENT_TASKS" $ftpWorkerMaxTasks' in setup_script
         assert "ONEBSS_TASK_TIMEOUT_SECONDS" in start_worker_script
-        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION.endswith("v39")
-        assert 'WORKER_VERSION = "2026.08.11-sql-ftp-parallel-files-v39"' in worker_script
+        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION.endswith("v40")
+        assert 'WORKER_VERSION = "2026.08.13-sql-run-direct-fallback-v40"' in worker_script
         assert "WorkerConcurrencyTracker" in worker_script
         assert "WorkerTaskDispatcher" in worker_script
         assert "normalize_ftp_variable_value" in worker_script
@@ -610,6 +610,36 @@ def test_api_middleware_reads_service_account_base64_with_utf8_bom(monkeypatch: 
     monkeypatch.delenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE", raising=False)
 
     assert module.load_service_account_info()["client_email"] == info["client_email"]
+
+
+def test_api_middleware_run_sql_falls_back_when_paged_wrapper_has_duplicate_columns() -> None:
+    module = load_api_middleware_module()
+
+    class FakeCursor:
+        def __init__(self) -> None:
+            self.description: list[tuple[str]] = []
+            self.executed: list[tuple[str, dict]] = []
+            self.direct_rows = [("skip-left", "skip-right", "skip-name"), ("left", "right", "name")]
+
+        def execute(self, sql: str, binds: dict) -> None:
+            self.executed.append((sql, binds))
+            if "OFFSET" in sql:
+                raise Exception("ORA-00918: column ambiguously defined")
+            self.description = [("ID",), ("ID",), ("TEN_TB",)]
+
+        def fetchmany(self, size: int) -> list[tuple]:
+            rows = self.direct_rows[:size]
+            self.direct_rows = self.direct_rows[size:]
+            return rows
+
+    cursor = FakeCursor()
+    columns, rows = module.fetch_page(cursor, "SELECT a.id, b.id, b.ten_tb FROM rpt", {"P": "1"}, page=2, page_size=1)
+
+    assert columns == ["ID", "ID_2", "TEN_TB"]
+    assert rows == [{"ID": "left", "ID_2": "right", "TEN_TB": "name"}]
+    assert len(cursor.executed) == 2
+    assert "OFFSET" in cursor.executed[0][0]
+    assert cursor.executed[1] == ("SELECT a.id, b.id, b.ten_tb FROM rpt", {"P": "1"})
 
 
 def test_api_middleware_streams_excel_export_without_count_or_offset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

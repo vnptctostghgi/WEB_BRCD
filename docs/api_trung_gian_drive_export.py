@@ -30,7 +30,7 @@ app = FastAPI(title="API trung gian VNPT CTO")
 
 EXCEL_MAX_ROWS_PER_SHEET = 1_048_576
 GOOGLE_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
-API_MIDDLEWARE_VERSION = "2026.08.11-parallel-safe-export"
+API_MIDDLEWARE_VERSION = "2026.08.13-sql-run-direct-fallback"
 ORACLE_DATE_INPUT_FORMATS = ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%Y/%m/%d", "%d.%m.%Y", "%Y%m%d")
 ORACLE_DSN_ENV_KEYS = (
     "DB_DSN",
@@ -490,6 +490,47 @@ def count_rows(cursor, sql: str, binds: dict[str, Any]) -> int:
         return 0
 
 
+def unique_column_names(columns: list[str]) -> list[str]:
+    seen: dict[str, int] = {}
+    result: list[str] = []
+    for index, column in enumerate(columns, start=1):
+        base = str(column or f"COL{index}").strip() or f"COL{index}"
+        count = seen.get(base.upper(), 0) + 1
+        seen[base.upper()] = count
+        result.append(base if count == 1 else f"{base}_{count}")
+    return result
+
+
+def rows_as_dicts(columns: list[str], rows: list[Any]) -> list[dict[str, Any]]:
+    safe_columns = unique_column_names(columns)
+    return [dict(zip(safe_columns, row)) for row in rows]
+
+
+def is_ambiguous_column_error(error: Exception) -> bool:
+    text = str(error).lower()
+    return "ora-00918" in text or "column ambiguously defined" in text
+
+
+def fetch_page_direct(cursor, sql: str, binds: dict[str, Any], page: int, page_size: int) -> tuple[list[str], list[dict[str, Any]]]:
+    safe_page = max(1, int(page or 1))
+    safe_page_size = max(1, min(int(page_size or 20), 20000))
+    offset = (safe_page - 1) * safe_page_size
+    try:
+        cursor.arraysize = min(max(safe_page_size, 100), 5000)
+        cursor.prefetchrows = min(max(safe_page_size, 100), 5000)
+    except Exception:
+        pass
+    cursor.execute(sql, binds)
+    while offset > 0:
+        skipped = cursor.fetchmany(min(offset, 5000))
+        if not skipped:
+            break
+        offset -= len(skipped)
+    columns = [item[0] for item in (cursor.description or [])]
+    rows = cursor.fetchmany(safe_page_size)
+    return unique_column_names(columns), rows_as_dicts(columns, rows)
+
+
 def fetch_page(cursor, sql: str, binds: dict[str, Any], page: int, page_size: int) -> tuple[list[str], list[dict[str, Any]]]:
     safe_page = max(1, int(page or 1))
     safe_page_size = max(1, min(int(page_size or 20), 20000))
@@ -499,13 +540,18 @@ SELECT *
 FROM ({sql}) Q
 OFFSET :PAGING_OFFSET ROWS FETCH NEXT :PAGING_LIMIT ROWS ONLY
 """
-    cursor.execute(
-        paged_sql,
-        {**binds, "PAGING_OFFSET": offset, "PAGING_LIMIT": safe_page_size},
-    )
+    try:
+        cursor.execute(
+            paged_sql,
+            {**binds, "PAGING_OFFSET": offset, "PAGING_LIMIT": safe_page_size},
+        )
+    except Exception as error:
+        if is_ambiguous_column_error(error):
+            return fetch_page_direct(cursor, sql, binds, safe_page, safe_page_size)
+        raise
     columns = [item[0] for item in (cursor.description or [])]
-    rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
-    return columns, rows
+    rows = cursor.fetchall()
+    return unique_column_names(columns), rows_as_dicts(columns, rows)
 
 
 def write_export_to_excel(cursor, sql: str, binds: dict[str, Any], target_path: Path, page_size: int, max_rows: int) -> dict[str, Any]:
