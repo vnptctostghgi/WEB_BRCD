@@ -205,6 +205,10 @@ alter table public.onebss_report_runs
 add column if not exists claimed_at timestamptz;
 alter table public.onebss_report_runs
 add column if not exists updated_at timestamptz not null default now();
+alter table public.onebss_report_runs
+alter column finished_at drop not null;
+alter table public.onebss_report_runs
+alter column claimed_at drop not null;
 
 create index if not exists onebss_report_runs_report_idx
 on public.onebss_report_runs (ma_bao_cao, started_at desc);
@@ -230,6 +234,10 @@ create table if not exists public.ftp_report_runs (
   claimed_at timestamptz,
   updated_at timestamptz not null default now()
 );
+alter table public.ftp_report_runs
+alter column finished_at drop not null;
+alter table public.ftp_report_runs
+alter column claimed_at drop not null;
 
 create index if not exists ftp_report_runs_report_idx
 on public.ftp_report_runs (ma_bao_cao, started_at desc);
@@ -490,6 +498,8 @@ create table if not exists public.task_report_auto_runs (
   created_by text not null default '',
   updated_at timestamptz not null default now()
 );
+alter table public.task_report_auto_runs
+alter column finished_at drop not null;
 
 create index if not exists task_report_auto_runs_task_idx
 on public.task_report_auto_runs (task_id, started_at desc);

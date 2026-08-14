@@ -7155,6 +7155,39 @@ def test_supabase_onebss_queued_run_sends_null_optional_timestamps(monkeypatch) 
     assert run["claimed_at"] == ""
 
 
+def test_supabase_onebss_run_retries_legacy_not_null_timestamps(monkeypatch) -> None:
+    attempts = []
+    repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
+
+    def fake_insert(table, payload):
+        attempts.append((table, dict(payload)))
+        if len(attempts) == 1:
+            raise RuntimeError('Supabase REST loi 400: {"code":"23502","message":"null value in column \\"finished_at\\" of relation \\"onebss_report_runs\\" violates not-null constraint"}')
+        if len(attempts) == 2:
+            raise RuntimeError('Supabase REST loi 400: {"code":"23502","message":"null value in column \\"claimed_at\\" of relation \\"onebss_report_runs\\" violates not-null constraint"}')
+        if len(attempts) == 3:
+            raise RuntimeError('Supabase REST loi 400: {"code":"23502","message":"null value in column \\"created_at\\" of relation \\"onebss_report_runs\\" violates not-null constraint"}')
+        return payload
+
+    monkeypatch.setattr(repository, "_insert", fake_insert)
+    run = repository.save_onebss_report_run({
+        "ma_bao_cao": "TEST",
+        "ten_bao_cao": "Test",
+        "status": "queued",
+        "parameters": {"P_TUNGAY": "{{month_start}}"},
+    })
+
+    assert [item[0] for item in attempts] == ["onebss_report_runs"] * 4
+    started_at = attempts[0][1]["started_at"]
+    assert attempts[0][1]["finished_at"] is None
+    assert attempts[1][1]["finished_at"] == started_at
+    assert attempts[2][1]["claimed_at"] == started_at
+    assert attempts[3][1]["created_at"] == started_at
+    assert run["status"] == "queued"
+    assert run["finished_at"] == started_at
+    assert run["claimed_at"] == started_at
+
+
 def test_supabase_ftp_report_run_uses_ftp_table(monkeypatch) -> None:
     captured = {}
     repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
@@ -7179,6 +7212,57 @@ def test_supabase_ftp_report_run_uses_ftp_table(monkeypatch) -> None:
     assert captured["payload"]["finished_at"] is None
     assert captured["payload"]["claimed_at"] is None
     assert run["file_name_template"] == "test_{yyyymmdd}.xlsx"
+
+
+def test_supabase_ftp_run_retries_legacy_not_null_finished_at(monkeypatch) -> None:
+    attempts = []
+    repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
+
+    def fake_insert(table, payload):
+        attempts.append((table, dict(payload)))
+        if len(attempts) == 1:
+            raise RuntimeError('Supabase REST loi 400: {"code":"23502","message":"null value in column \\"finished_at\\" of relation \\"ftp_report_runs\\" violates not-null constraint"}')
+        return payload
+
+    monkeypatch.setattr(repository, "_insert", fake_insert)
+    run = repository.save_ftp_report_run({
+        "run_id": "FTP-RUN-001",
+        "ma_bao_cao": "FTP0001",
+        "ten_bao_cao": "FTP test",
+        "status": "queued",
+    })
+
+    assert [item[0] for item in attempts] == ["ftp_report_runs", "ftp_report_runs"]
+    assert attempts[0][1]["finished_at"] is None
+    assert attempts[1][1]["finished_at"] == attempts[0][1]["started_at"]
+    assert run["finished_at"] == attempts[0][1]["started_at"]
+
+
+def test_supabase_task_report_auto_run_retries_legacy_not_null_finished_at(monkeypatch) -> None:
+    attempts = []
+    repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
+
+    def fake_insert(table, payload):
+        attempts.append((table, dict(payload)))
+        if len(attempts) == 1:
+            raise RuntimeError('Supabase REST loi 400: {"code":"23502","message":"null value in column \\"finished_at\\" of relation \\"task_report_auto_runs\\" violates not-null constraint"}')
+        return payload
+
+    monkeypatch.setattr(repository, "get_task_report_auto_task", lambda task_id: {"task_id": task_id, "source_type": "onebss"})
+    monkeypatch.setattr(repository, "_insert", fake_insert)
+
+    run = repository.create_task_report_auto_run(
+        "TASK01",
+        "2026-08-14",
+        status="queued",
+        message="Cho chay",
+        created_by="admin",
+    )
+
+    assert [item[0] for item in attempts] == ["task_report_auto_runs", "task_report_auto_runs"]
+    assert attempts[0][1]["finished_at"] is None
+    assert attempts[1][1]["finished_at"] == attempts[0][1]["started_at"]
+    assert run["status"] == "queued"
 
 
 def test_supabase_run_updates_send_null_for_blank_optional_timestamps(monkeypatch) -> None:

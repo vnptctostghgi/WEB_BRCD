@@ -82,6 +82,7 @@ RUN_FINAL_STATUSES = {
     "google_drive_not_configured",
     "google_drive_upload_failed",
 }
+LEGACY_RUN_TIMESTAMP_COLUMNS = {"finished_at", "claimed_at", "created_at"}
 
 FEATURE_ROWS.append({"code": "quantrisql", "name": "Quản trị SQL", "parent_code": "quantriketnoi", "sort_order": 23})
 FEATURE_ROWS.append({"code": "quantridulieuonebss", "name": "Quản trị dữ liệu OneBSS", "parent_code": "quantriketnoi", "sort_order": 24})
@@ -1155,12 +1156,24 @@ class SupabaseRepository:
             "claimed_at": self._optional_timestamp(payload.get("claimed_at")),
             "updated_at": self._required_timestamp(payload.get("updated_at")),
         }
-        try:
-            self._insert("ftp_report_runs", row)
-        except RuntimeError as error:
-            if self._is_missing_ftp_table_error(error):
-                return self._ftp_fallback_save_run(row)
-            raise
+        insert_row = dict(row)
+        last_error: RuntimeError | None = None
+        for _ in range(4):
+            try:
+                self._insert("ftp_report_runs", insert_row)
+                row = insert_row
+                break
+            except RuntimeError as error:
+                last_error = error
+                retry_row = self._legacy_not_null_timestamp_retry_payload(insert_row, error)
+                if retry_row is not None:
+                    insert_row = retry_row
+                    continue
+                if self._is_missing_ftp_table_error(error):
+                    return self._ftp_fallback_save_run(insert_row)
+                raise
+        else:
+            raise last_error or RuntimeError("Khong the luu lich su FTP vao Supabase.")
         return self._decode_ftp_report_run(row)
 
     def get_ftp_report_run(self, run_id: str) -> dict[str, Any] | None:
@@ -1437,14 +1450,27 @@ class SupabaseRepository:
             "claimed_at": self._optional_timestamp(payload.get("claimed_at")),
             "updated_at": self._required_timestamp(payload.get("updated_at")),
         }
-        try:
-            self._insert("onebss_report_runs", row)
-        except RuntimeError as error:
-            if not self._is_missing_onebss_worker_column(error):
+        insert_row = dict(row)
+        legacy_worker_payload = False
+        last_error: RuntimeError | None = None
+        for _ in range(6):
+            try:
+                self._insert("onebss_report_runs", insert_row)
+                row = insert_row
+                break
+            except RuntimeError as error:
+                last_error = error
+                retry_row = self._legacy_not_null_timestamp_retry_payload(insert_row, error)
+                if retry_row is not None:
+                    insert_row = retry_row
+                    continue
+                if not legacy_worker_payload and self._is_missing_onebss_worker_column(error):
+                    insert_row = self._onebss_legacy_run_payload(insert_row)
+                    legacy_worker_payload = True
+                    continue
                 raise
-            legacy_row = self._onebss_legacy_run_payload(row)
-            self._insert("onebss_report_runs", legacy_row)
-            row = legacy_row
+        else:
+            raise last_error or RuntimeError("Khong the luu lich su OneBSS vao Supabase.")
         return self._decode_onebss_report_run(row)
 
     def get_onebss_report_run(self, run_id: str) -> dict[str, Any] | None:
@@ -2073,7 +2099,21 @@ class SupabaseRepository:
             "created_by": created_by or "",
             "updated_at": now,
         }
-        inserted = self._insert("task_report_auto_runs", row)
+        insert_row = dict(row)
+        last_error: RuntimeError | None = None
+        for _ in range(3):
+            try:
+                inserted = self._insert("task_report_auto_runs", insert_row)
+                break
+            except RuntimeError as error:
+                last_error = error
+                retry_row = self._legacy_not_null_timestamp_retry_payload(insert_row, error)
+                if retry_row is not None:
+                    insert_row = retry_row
+                    continue
+                raise
+        else:
+            raise last_error or RuntimeError("Khong the tao lich su task report auto tren Supabase.")
         return self._decode_task_report_auto_run(inserted)
 
     def claim_next_task_report_auto_run(self) -> dict[str, Any] | None:
@@ -2489,6 +2529,28 @@ class SupabaseRepository:
             and "onebss_report_runs" in text
             and any(column in text for column in ONEBSS_WORKER_COLUMNS)
         )
+
+    @staticmethod
+    def _not_null_constraint_column(error: Exception) -> str:
+        text = str(error)
+        if "23502" not in text and "not-null" not in text.lower():
+            return ""
+        for column in LEGACY_RUN_TIMESTAMP_COLUMNS:
+            if f'column "{column}"' in text or f'column \\"{column}\\"' in text:
+                return column
+        match = re.search(r"null value in column\\?\"([^\"\\]+)\\?\"", text)
+        return match.group(1) if match else ""
+
+    def _legacy_not_null_timestamp_retry_payload(
+        self,
+        row: dict[str, Any],
+        error: Exception,
+    ) -> dict[str, Any] | None:
+        column = self._not_null_constraint_column(error)
+        if column not in LEGACY_RUN_TIMESTAMP_COLUMNS or row.get(column):
+            return None
+        fallback_timestamp = self._required_timestamp(row.get("started_at") or row.get("updated_at"))
+        return {**row, column: fallback_timestamp}
 
     @staticmethod
     def _onebss_parameters_with_worker_meta(parameters: Any, worker_values: dict[str, Any]) -> dict[str, Any]:
