@@ -2673,10 +2673,29 @@ class SupabaseRepository:
         if response.status_code == 409:
             raise sqlite3.IntegrityError(response.text)
         if response.status_code >= 400:
-            raise RuntimeError(f"Supabase REST loi {response.status_code}: {response.text[:300]}")
+            raise RuntimeError(f"Supabase REST loi {response.status_code}: {self._format_error_response(response)}")
         if response.text:
             return response.json()
         return None
+
+    @staticmethod
+    def _format_error_response(response: httpx.Response) -> str:
+        text = response.text or ""
+        try:
+            body = response.json()
+        except ValueError:
+            return text[:1000]
+        if not isinstance(body, dict):
+            return text[:1000]
+        normalized: dict[str, Any] = {}
+        for key in ("code", "message", "details", "hint"):
+            value = body.get(key)
+            if value is None:
+                continue
+            if isinstance(value, str) and len(value) > 700:
+                value = f"{value[:700]}..."
+            normalized[key] = value
+        return json.dumps(normalized or body, ensure_ascii=False)
 
     def _get(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
         return self._request("GET", table, params=params) or []

@@ -7109,6 +7109,87 @@ def test_supabase_requests_reuse_shared_http_client(monkeypatch) -> None:
     assert client.calls[1][1].endswith("/mobile_sms_messages")
 
 
+def test_supabase_error_message_keeps_column_name_after_long_details(monkeypatch) -> None:
+    from app.data_access import supabase_repository as supabase_module
+
+    class FakeResponse:
+        status_code = 400
+
+        def __init__(self) -> None:
+            self.body = {
+                "code": "23502",
+                "details": f"Failing row contains ({'x' * 900})",
+                "hint": None,
+                "message": 'null value in column "finished_at" of relation "onebss_report_runs" violates not-null constraint',
+            }
+            self.text = json.dumps(self.body)
+
+        def json(self):
+            return self.body
+
+    class FakeClient:
+        def request(self, method, url, **kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr(supabase_module, "SUPABASE_HTTP_CLIENT", FakeClient())
+    repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
+
+    with pytest.raises(RuntimeError) as exc_info:
+        repository._request("POST", "onebss_report_runs", json={"finished_at": None})
+
+    text = str(exc_info.value)
+    assert "23502" in text
+    assert "finished_at" in text
+    assert text.index("message") < text.index("details")
+
+
+def test_supabase_onebss_run_retries_formatted_not_null_rest_error(monkeypatch) -> None:
+    from app.data_access import supabase_repository as supabase_module
+
+    class FakeResponse:
+        def __init__(self, status_code, body) -> None:
+            self.status_code = status_code
+            self.body = body
+            self.text = json.dumps(body)
+
+        def json(self):
+            return self.body
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.payloads = []
+
+        def request(self, method, url, **kwargs):
+            payload = kwargs.get("json") or {}
+            self.payloads.append(dict(payload))
+            if len(self.payloads) == 1:
+                return FakeResponse(
+                    400,
+                    {
+                        "code": "23502",
+                        "details": f"Failing row contains ({'x' * 900})",
+                        "message": 'null value in column "finished_at" of relation "onebss_report_runs" violates not-null constraint',
+                    },
+                )
+            return FakeResponse(201, [payload])
+
+    client = FakeClient()
+    monkeypatch.setattr(supabase_module, "SUPABASE_HTTP_CLIENT", client)
+    repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
+
+    run = repository.save_onebss_report_run({
+        "ma_bao_cao": "PTM_CHUAHT_NGAYYC",
+        "ten_bao_cao": "Phat trien moi",
+        "status": "queued",
+        "parameters": {"P_TUNGAY": "{{month_start}}"},
+    })
+
+    assert len(client.payloads) == 2
+    assert client.payloads[0]["finished_at"] is None
+    assert client.payloads[1]["finished_at"] == client.payloads[0]["started_at"]
+    assert run["status"] == "queued"
+
+
 def test_supabase_onebss_run_uses_parameters_json_column(monkeypatch) -> None:
     captured = {}
     repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
