@@ -74,6 +74,14 @@ ONEBSS_WORKER_COLUMNS = {
     "updated_at",
 }
 FTP_FALLBACK_STORE_KEY = "secret_ftp_report_store"
+RUN_FINAL_STATUSES = {
+    "success",
+    "failed",
+    "cancelled",
+    "storage_failed",
+    "google_drive_not_configured",
+    "google_drive_upload_failed",
+}
 
 FEATURE_ROWS.append({"code": "quantrisql", "name": "Quản trị SQL", "parent_code": "quantriketnoi", "sort_order": 23})
 FEATURE_ROWS.append({"code": "quantridulieuonebss", "name": "Quản trị dữ liệu OneBSS", "parent_code": "quantriketnoi", "sort_order": 24})
@@ -1122,11 +1130,15 @@ class SupabaseRepository:
 
     def save_ftp_report_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         run_id = str(payload.get("run_id") or f"FTPRUN{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}{secrets.token_hex(3).upper()}")
+        status_value = str(payload.get("status") or "failed")
+        finished_at = self._optional_timestamp(payload.get("finished_at"))
+        if finished_at is None and status_value.lower() in RUN_FINAL_STATUSES:
+            finished_at = self._now()
         row = {
             "run_id": run_id,
             "ma_bao_cao": str(payload.get("ma_bao_cao") or ""),
             "ten_bao_cao": str(payload.get("ten_bao_cao") or ""),
-            "status": str(payload.get("status") or "failed"),
+            "status": status_value,
             "message": str(payload.get("message") or ""),
             "folder_path": str(payload.get("folder_path") or ""),
             "file_name_template": str(payload.get("file_name_template") or ""),
@@ -1135,13 +1147,13 @@ class SupabaseRepository:
             "file_path": str(payload.get("file_path") or ""),
             "storage_link": str(payload.get("storage_link") or ""),
             "storage_status": str(payload.get("storage_status") or ""),
-            "started_at": str(payload.get("started_at") or self._now()),
-            "finished_at": str(payload.get("finished_at") or self._now()),
+            "started_at": self._required_timestamp(payload.get("started_at")),
+            "finished_at": finished_at,
             "duration_ms": int(payload.get("duration_ms") or 0),
             "created_by": str(payload.get("created_by") or ""),
             "worker_id": str(payload.get("worker_id") or ""),
-            "claimed_at": str(payload.get("claimed_at") or ""),
-            "updated_at": str(payload.get("updated_at") or self._now()),
+            "claimed_at": self._optional_timestamp(payload.get("claimed_at")),
+            "updated_at": self._required_timestamp(payload.get("updated_at")),
         }
         try:
             self._insert("ftp_report_runs", row)
@@ -1203,7 +1215,10 @@ class SupabaseRepository:
             "updated_at",
         }
         payload = {key: value for key, value in updates.items() if key in allowed}
-        payload["updated_at"] = str(payload.get("updated_at") or self._now())
+        for key in ("finished_at", "claimed_at"):
+            if key in payload:
+                payload[key] = self._optional_timestamp(payload.get(key))
+        payload["updated_at"] = self._required_timestamp(payload.get("updated_at"))
         if payload:
             try:
                 self._patch("ftp_report_runs", {"run_id": f"eq.{run_id}"}, payload)
@@ -1398,8 +1413,8 @@ class SupabaseRepository:
     def save_onebss_report_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         run_id = str(payload.get("run_id") or f"OBRUN{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}{secrets.token_hex(3).upper()}")
         status_value = str(payload.get("status") or "failed")
-        finished_at = str(payload.get("finished_at") or "")
-        if not finished_at and status_value.lower() in {"success", "failed", "cancelled", "storage_failed", "google_drive_not_configured", "google_drive_upload_failed"}:
+        finished_at = self._optional_timestamp(payload.get("finished_at"))
+        if finished_at is None and status_value.lower() in RUN_FINAL_STATUSES:
             finished_at = self._now()
         row = {
             "run_id": run_id,
@@ -1412,15 +1427,15 @@ class SupabaseRepository:
             "storage_link": str(payload.get("storage_link") or ""),
             "storage_status": str(payload.get("storage_status") or ""),
             "parameters_json": payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {},
-            "started_at": str(payload.get("started_at") or self._now()),
+            "started_at": self._required_timestamp(payload.get("started_at")),
             "finished_at": finished_at,
             "duration_ms": int(payload.get("duration_ms") or 0),
             "created_by": str(payload.get("created_by") or ""),
             "worker_id": str(payload.get("worker_id") or ""),
             "worker_session_id": str(payload.get("worker_session_id") or ""),
             "otp_request_id": str(payload.get("otp_request_id") or ""),
-            "claimed_at": str(payload.get("claimed_at") or ""),
-            "updated_at": str(payload.get("updated_at") or self._now()),
+            "claimed_at": self._optional_timestamp(payload.get("claimed_at")),
+            "updated_at": self._required_timestamp(payload.get("updated_at")),
         }
         try:
             self._insert("onebss_report_runs", row)
@@ -1487,7 +1502,10 @@ class SupabaseRepository:
                 payload["parameters_json"] = value
             elif key in allowed:
                 payload[key] = value
-        payload["updated_at"] = str(payload.get("updated_at") or self._now())
+        for key in ("finished_at", "claimed_at"):
+            if key in payload:
+                payload[key] = self._optional_timestamp(payload.get(key))
+        payload["updated_at"] = self._required_timestamp(payload.get("updated_at"))
         if payload:
             try:
                 self._patch("onebss_report_runs", {"run_id": f"eq.{run_id}"}, payload)
@@ -2098,7 +2116,10 @@ class SupabaseRepository:
             "updated_at",
         }
         payload = {key: value for key, value in updates.items() if key in allowed}
-        payload["updated_at"] = str(payload.get("updated_at") or self._now())
+        for key in ("finished_at", "claimed_at"):
+            if key in payload:
+                payload[key] = self._optional_timestamp(payload.get(key))
+        payload["updated_at"] = self._required_timestamp(payload.get("updated_at"))
         if payload:
             self._patch("task_report_auto_runs", {"run_id": f"eq.{run_id}"}, payload)
         return self.get_task_report_auto_run(run_id)
@@ -2638,3 +2659,13 @@ class SupabaseRepository:
     @staticmethod
     def _now() -> str:
         return datetime.now(UTC).isoformat(timespec="seconds")
+
+    @staticmethod
+    def _optional_timestamp(value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+    def _required_timestamp(self, value: Any) -> str:
+        return self._optional_timestamp(value) or self._now()

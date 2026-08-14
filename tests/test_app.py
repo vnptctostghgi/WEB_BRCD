@@ -7131,7 +7131,7 @@ def test_supabase_onebss_run_uses_parameters_json_column(monkeypatch) -> None:
     assert run["parameters"] == {"P_TUNGAY": "01/07/2026"}
 
 
-def test_supabase_onebss_queued_run_keeps_finished_at_empty(monkeypatch) -> None:
+def test_supabase_onebss_queued_run_sends_null_optional_timestamps(monkeypatch) -> None:
     captured = {}
     repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
 
@@ -7149,8 +7149,10 @@ def test_supabase_onebss_queued_run_keeps_finished_at_empty(monkeypatch) -> None
     })
 
     assert captured["table"] == "onebss_report_runs"
-    assert captured["payload"]["finished_at"] == ""
+    assert captured["payload"]["finished_at"] is None
+    assert captured["payload"]["claimed_at"] is None
     assert run["finished_at"] == ""
+    assert run["claimed_at"] == ""
 
 
 def test_supabase_ftp_report_run_uses_ftp_table(monkeypatch) -> None:
@@ -7174,7 +7176,43 @@ def test_supabase_ftp_report_run_uses_ftp_table(monkeypatch) -> None:
     assert captured["table"] == "ftp_report_runs"
     assert captured["payload"]["run_id"] == "FTP-RUN-001"
     assert captured["payload"]["folder_path"] == "/reports"
+    assert captured["payload"]["finished_at"] is None
+    assert captured["payload"]["claimed_at"] is None
     assert run["file_name_template"] == "test_{yyyymmdd}.xlsx"
+
+
+def test_supabase_run_updates_send_null_for_blank_optional_timestamps(monkeypatch) -> None:
+    patches = []
+    repository = SupabaseRepository("https://example.supabase.co/rest/v1", "secret")
+
+    def fake_patch(table, params, payload):
+        patches.append((table, params, payload))
+
+    def fake_get(table, params):
+        if table == "onebss_report_runs":
+            return [{"run_id": "ONEBSS-RUN-001", "parameters_json": {}, "updated_at": patches[-1][2]["updated_at"]}]
+        if table == "ftp_report_runs":
+            return [{"run_id": "FTP-RUN-001", "updated_at": patches[-1][2]["updated_at"]}]
+        return []
+
+    monkeypatch.setattr(repository, "_patch", fake_patch)
+    monkeypatch.setattr(repository, "_get", fake_get)
+
+    onebss = repository.update_onebss_report_run("ONEBSS-RUN-001", {"finished_at": "", "claimed_at": "", "updated_at": ""})
+    ftp = repository.update_ftp_report_run("FTP-RUN-001", {"finished_at": "", "claimed_at": "", "updated_at": ""})
+
+    assert patches[0][0] == "onebss_report_runs"
+    assert patches[0][2]["finished_at"] is None
+    assert patches[0][2]["claimed_at"] is None
+    assert patches[0][2]["updated_at"]
+    assert onebss["finished_at"] == ""
+    assert onebss["claimed_at"] == ""
+    assert patches[1][0] == "ftp_report_runs"
+    assert patches[1][2]["finished_at"] is None
+    assert patches[1][2]["claimed_at"] is None
+    assert patches[1][2]["updated_at"]
+    assert ftp["finished_at"] == ""
+    assert ftp["claimed_at"] == ""
 
 
 def test_supabase_ftp_fallback_uses_protected_connection_config(monkeypatch) -> None:
