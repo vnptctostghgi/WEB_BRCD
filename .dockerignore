@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.venv
+.venv-*
+__pycache__
+.pytest_cache
+*.pyc
+*.pyo
+*.log
+data
+tests
+ONEBSS_WORKER_PACKAGE.zip
+ONEBSS_WORKER_SECRET_CONFIG.zip
+_onebss_secret_config
+
