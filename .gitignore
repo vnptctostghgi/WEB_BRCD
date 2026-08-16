@@ -1,4 +1,5 @@
 .env
+.env.server
 .venv/
 .venv-onebss-worker/
 ONEBSS_WORKER_PACKAGE.zip
