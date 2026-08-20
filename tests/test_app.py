@@ -339,8 +339,8 @@ def test_admin_can_open_workstation_overview_and_download_setup_package() -> Non
         assert 'Set-UserEnvironment "SQL_WORKER_MAX_CONCURRENT_TASKS" $sqlWorkerMaxTasks' in setup_script
         assert 'Set-UserEnvironment "FTP_WORKER_MAX_CONCURRENT_TASKS" $ftpWorkerMaxTasks' in setup_script
         assert "ONEBSS_TASK_TIMEOUT_SECONDS" in start_worker_script
-        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION.endswith("v41")
-        assert 'WORKER_VERSION = "2026.08.13-task-auto-sql-all-pages-v41"' in worker_script
+        assert routes.WORKSTATION_SETUP_PACKAGE_VERSION.endswith("v42")
+        assert 'WORKER_VERSION = "2026.08.20-sql-cancel-v42"' in worker_script
         assert "WorkerConcurrencyTracker" in worker_script
         assert "WorkerTaskDispatcher" in worker_script
         assert "normalize_ftp_variable_value" in worker_script
@@ -3077,6 +3077,49 @@ def test_dynamic_report_export_worker_queue_can_cancel_waiting_job(monkeypatch, 
         cancelled_body = cancelled.json()
         assert cancelled_body["status"] == "cancelled"
         assert cancelled_body["can_cancel"] is False
+
+
+def test_running_sql_export_cancel_is_not_overwritten_by_worker_updates(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(routes, "DYNAMIC_REPORT_EXPORT_DIR", tmp_path / "exports")
+    monkeypatch.setattr(routes, "DYNAMIC_REPORT_EXPORT_JOB_DIR", tmp_path / "exports" / "jobs")
+    monkeypatch.setattr(routes, "google_drive_folder_id", lambda settings, storage_link="", repository=None: "")
+    with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+        routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
+
+    with TestClient(app) as client:
+        login(client)
+        report_code = f"CANCEL_SQL_{uuid.uuid4().hex[:8].upper()}"
+        assert client.post(
+            "/api/admin/sql-reports",
+            json={"ten_bao_cao": "Cancel SQL", "ma_bao_cao": report_code, "cau_lenh_sql": "SELECT 1 FROM dual;", "cac_tham_so": []},
+        ).status_code == 200
+        job_id = client.post(
+            "/api/reports/export-jobs",
+            json={"ma_bao_cao": report_code, "filters": {}, "page": 1, "page_size": 20},
+        ).json()["job_id"]
+        headers = {"Authorization": "Bearer test-worker-token"}
+        assert client.post("/api/sql-worker/tasks/claim", json={"worker_id": "ws-sql"}, headers=headers).status_code == 200
+        cancelled = client.delete(f"/api/reports/export-jobs/{job_id}")
+        assert cancelled.json()["status"] == "cancel_requested"
+
+        heartbeat = client.post(
+            f"/api/sql-worker/tasks/{job_id}/status",
+            json={"status": "running_worker", "message": "still running", "worker_id": "ws-sql"},
+            headers=headers,
+        )
+        assert heartbeat.status_code == 200
+        assert heartbeat.json()["cancelled"] is True
+        assert heartbeat.json()["status"] == "cancelled"
+        assert heartbeat.json()["run"]["status"] == "cancelled"
+
+        late_result = client.post(
+            f"/api/sql-worker/tasks/{job_id}/result",
+            json={"ok": True, "status": "success", "drive_url": "https://drive.google.com/file/d/late/view"},
+            headers=headers,
+        )
+        assert late_result.status_code == 200
+        assert late_result.json()["cancelled"] is True
+        assert late_result.json()["run"]["status"] == "cancelled"
 
 
 def test_dynamic_report_export_job_can_return_drive_link(monkeypatch, tmp_path) -> None:
@@ -6774,6 +6817,7 @@ def test_sql_worker_posts_drive_export_result_to_web(monkeypatch) -> None:
             "drive_url": "https://drive.google.com/file/d/drive-file-001/view",
         },
     )
+    monkeypatch.setattr(worker, "run_sql_worker_query_cancellable", lambda task, progress_callback: worker.run_sql_worker_query(task))
 
     worker.process_sql_task(
         FakeClient(),

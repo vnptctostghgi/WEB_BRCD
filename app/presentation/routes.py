@@ -151,7 +151,7 @@ WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_w
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
 WORKSTATION_SETUP_PACKAGE_ROOT = "VNPTCTO_WORKSTATION_SETUP"
-WORKSTATION_SETUP_PACKAGE_VERSION = "20260813-task-auto-sql-all-pages-v41"
+WORKSTATION_SETUP_PACKAGE_VERSION = "20260820-sql-cancel-v42"
 WORKSTATION_CONNECTION_PREFIX = "workstation_"
 WORKSTATION_DEFAULT_PRIORITY = 100
 WORKSTATION_SETUP_INCLUDE_PATHS = (
@@ -6142,6 +6142,23 @@ def update_sql_worker_task_status(request: Request, run_id: str, payload: SqlWor
     export_job = _get_dynamic_report_export_job(run_id)
     if not export_job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khong tim thay task SQL.")
+    export_status = str(export_job.get("status") or "").lower()
+    if export_status in {"cancel_requested", "cancelled"}:
+        if export_status == "cancel_requested":
+            _set_dynamic_report_export_job(
+                run_id,
+                status="cancelled",
+                message="Lenh lay du lieu SQL da duoc ngung tren may tram.",
+                progress={},
+            )
+            export_job = _get_dynamic_report_export_job(run_id) or export_job
+        return {
+            "ok": False,
+            "cancelled": True,
+            "status": "cancelled",
+            "message": export_job.get("message") or "Lenh lay du lieu SQL da bi ngung.",
+            "run": _dynamic_report_export_job_response(run_id, export_job),
+        }
     worker_id = payload.worker_id or export_job.get("worker_id") or ""
     message = _message_with_workstation(worker_id, payload.message, "May tram dang lay du lieu SQL va upload Google Drive.")
     _record_workstation_heartbeat(
@@ -6174,6 +6191,23 @@ def finish_sql_worker_task(request: Request, run_id: str, payload: SqlWorkerResu
     pagination = payload.pagination if isinstance(payload.pagination, dict) else {}
     report = payload.report if isinstance(payload.report, dict) else {}
     if export_job:
+        export_status = str(export_job.get("status") or "").lower()
+        if export_status in {"cancel_requested", "cancelled"}:
+            if export_status == "cancel_requested":
+                _set_dynamic_report_export_job(
+                    run_id,
+                    status="cancelled",
+                    message="Lenh lay du lieu SQL da duoc ngung tren may tram.",
+                    progress={},
+                )
+                export_job = _get_dynamic_report_export_job(run_id) or export_job
+            return {
+                "ok": False,
+                "cancelled": True,
+                "status": "cancelled",
+                "message": export_job.get("message") or "Lenh lay du lieu SQL da bi ngung.",
+                "run": _dynamic_report_export_job_response(run_id, export_job),
+            }
         run_payload = _dynamic_report_export_payload_from_job(export_job)
         if not report:
             report = {

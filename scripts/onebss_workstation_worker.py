@@ -39,8 +39,12 @@ class FtpTaskCancelled(Exception):
     pass
 
 
+class SqlTaskCancelled(Exception):
+    pass
+
+
 TRANSIENT_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
-WORKER_VERSION = "2026.08.13-task-auto-sql-all-pages-v41"
+WORKER_VERSION = "2026.08.20-sql-cancel-v42"
 LOCAL_INTERNAL_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 LOCAL_DRIVE_UPLOAD_API_URL = "http://127.0.0.1:8000/api/du-lieu-web"
 PUBLIC_DRIVE_UPLOAD_API_URL = "https://api.vnptcto.com/api/du-lieu-web"
@@ -290,7 +294,10 @@ def worker_process_details() -> dict[str, Any]:
 
 
 def response_is_cancelled(data: dict[str, Any]) -> bool:
-    return bool(data.get("cancelled")) or str(data.get("status") or "").lower() == "cancelled"
+    if bool(data.get("cancelled")) or str(data.get("status") or "").lower() in {"cancel_requested", "cancelled"}:
+        return True
+    run = data.get("run")
+    return isinstance(run, dict) and str(run.get("status") or "").lower() in {"cancel_requested", "cancelled"}
 
 
 def describe_request_error(error: Exception) -> str:
@@ -1124,12 +1131,65 @@ def run_sql_worker_query_all_pages(task: dict[str, Any], progress_callback=None)
     }
 
 
+def _run_sql_worker_query_child(result_queue: mp.Queue, task: dict[str, Any]) -> None:
+    try:
+        result_queue.put({"ok": True, "result": run_sql_worker_query(task)})
+    except Exception as error:
+        result_queue.put({"ok": False, "error": str(error)[:1000], "error_type": error.__class__.__name__})
+
+
+def run_sql_worker_query_cancellable(task: dict[str, Any], progress_callback) -> dict[str, Any]:
+    """Run the blocking local SQL export in a process that can be stopped by the web job."""
+    timeout_seconds = float(os.getenv("SQL_WORKER_TIMEOUT_SECONDS", "1800") or "1800")
+    result_queue: mp.Queue = mp.Queue()
+    process = mp.Process(target=_run_sql_worker_query_child, args=(result_queue, task), daemon=True)
+    started = time.monotonic()
+    last_status_check = 0.0
+    payload: dict[str, Any] = {}
+    try:
+        process.start()
+        while process.is_alive():
+            process.join(timeout=1.0)
+            now = time.monotonic()
+            if now - started >= timeout_seconds:
+                raise TimeoutError(f"Task SQL vuot qua {int(timeout_seconds / 60)} phut nen worker da tu dung.")
+            if now - last_status_check >= 3.0:
+                last_status_check = now
+                response = progress_callback(
+                    f"May tram van dang truy van SQL, da chay {int(now - started)} giay.",
+                    details={"step": "oracle_export_drive", "elapsed_seconds": int(now - started)},
+                )
+                if response_is_cancelled(response):
+                    raise SqlTaskCancelled(str(response.get("message") or "Lenh lay du lieu SQL da bi ngung."))
+        for _ in range(20):
+            try:
+                payload = result_queue.get_nowait()
+                break
+            except queue.Empty:
+                time.sleep(0.1)
+        if payload.get("ok") and isinstance(payload.get("result"), dict):
+            return payload["result"]
+        message = str(payload.get("error") or "").strip()
+        if not message:
+            message = f"Worker SQL dung bat thuong voi ma {process.exitcode}."
+        raise RuntimeError(message)
+    except Exception:
+        terminate_process(process)
+        raise
+    finally:
+        try:
+            result_queue.close()
+            result_queue.join_thread()
+        except Exception:
+            pass
+
+
 def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str) -> None:
     run_id = str(task.get("run_id") or task.get("job_id") or "")
     started = time.monotonic()
 
-    def send_progress(message: str, status: str = "running_worker", details: dict[str, Any] | None = None) -> None:
-        request_json(
+    def send_progress(message: str, status: str = "running_worker", details: dict[str, Any] | None = None) -> dict[str, Any]:
+        response = request_json(
             client,
             "POST",
             f"/api/sql-worker/tasks/{run_id}/status",
@@ -1146,6 +1206,9 @@ def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
             _retry_forever=False,
             _max_attempts=1,
         )
+        if response_is_cancelled(response):
+            raise SqlTaskCancelled(str(response.get("message") or "Lenh lay du lieu SQL da bi ngung."))
+        return response
 
     def start_export_heartbeat(report_code: str) -> threading.Event:
         stop_event = threading.Event()
@@ -1197,7 +1260,11 @@ def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
             if action == "run_sql_report" and bool(query.get("collect_all_pages")):
                 result = run_sql_worker_query_all_pages(task, send_progress)
             else:
-                result = run_sql_worker_query(task)
+                result = (
+                    run_sql_worker_query_cancellable(task, send_progress)
+                    if action == "export_sql_report_to_drive"
+                    else run_sql_worker_query(task)
+                )
         finally:
             if export_heartbeat is not None:
                 export_heartbeat.set()
@@ -1289,6 +1356,9 @@ def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
         )
         if response_is_cancelled(finish_response):
             return
+    except SqlTaskCancelled as error:
+        print(f"Task SQL da ngung: {error}", flush=True)
+        return
     except Exception as error:
         message = str(error)[:500] or error.__class__.__name__
         print(f"Task SQL loi: {message}", file=sys.stderr)
