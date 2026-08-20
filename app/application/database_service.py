@@ -17,7 +17,10 @@ logger = logging.getLogger(__name__)
 
 DEFINE_PATTERN = re.compile(r"^\s*define\s+([A-Za-z][A-Za-z0-9_$#]*)\s*=\s*(.+?)\s*$", re.IGNORECASE)
 IN_LIST_BIND_PATTERN = re.compile(r"\bin\s*\(\s*:([A-Za-z][A-Za-z0-9_$#]*)\s*\)", re.IGNORECASE)
-ORACLE_DATE_INPUT_FORMATS = ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%Y/%m/%d", "%d.%m.%Y", "%Y%m%d")
+ORACLE_DATE_INPUT_FORMATS = (
+    "%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%Y/%m/%d", "%d.%m.%Y", "%Y%m%d",
+    "%Y-%m", "%m/%Y",
+)
 REPORT_NOT_PROVIDED = object()
 
 
@@ -820,6 +823,13 @@ class DatabaseService:
 
     @staticmethod
     def _oracle_date_mask_for_define(sql: str, name: str) -> str:
+        month_pattern = re.compile(
+            rf"\bto_(?:date|timestamp)\s*\(\s*'\s*\d{{1,2}}\s*/\s*&{re.escape(name)}\s*'\s*,\s*'(?P<mask>DD\s*/\s*MM\s*/\s*(?:YYYY|RRRR|YY|RR))'",
+            re.IGNORECASE,
+        )
+        month_match = month_pattern.search(sql or "")
+        if month_match:
+            return re.sub(r"^DD\s*/\s*", "", month_match.group("mask"), flags=re.IGNORECASE)
         pattern = re.compile(
             rf"\bto_(?:date|timestamp)\s*\(\s*(?P<expression>[^,]*&{re.escape(name)}\b[^,]*)\s*,\s*'(?P<mask>[^']+)'",
             re.IGNORECASE,
@@ -834,6 +844,14 @@ class DatabaseService:
         mask = str(oracle_mask or "").strip()
         if not mask:
             return ""
+        # The SQL supplies the day itself (for example '01/&THANG'), so the
+        # report parameter only contains the month and year.
+        if re.search(r"'\s*\d{1,2}\s*/\s*&[A-Za-z]", str(expression or ""), re.IGNORECASE) and re.match(
+            r"^DD\s*/\s*MM\s*/\s*(?:YYYY|RRRR|YY|RR)$",
+            mask,
+            re.IGNORECASE,
+        ):
+            return re.sub(r"^DD\s*/\s*", "", mask, flags=re.IGNORECASE)
         if re.search(r"\|\|\s*'\s*\d{1,2}:\d{2}(?::\d{2})?\s*'", str(expression or "")) and re.search(
             r"\bHH(?:24)?\b|\bMI\b|\bSS\b",
             mask,

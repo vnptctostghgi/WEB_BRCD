@@ -81,6 +81,10 @@ function renderDynamicReportFilters() {
   container.classList.remove("hidden");
   container.innerHTML = params.map((param) => {
     const lower = param.toLowerCase();
+    if (lower === "thang" || lower.includes("month")) {
+      const currentMonth = new Date().toISOString().slice(0, 7);
+      return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter" name="${escapeHtml(param)}" type="month" value="${currentMonth}" required /></label>`;
+    }
     if (lower.includes("ngay") || lower.includes("date")) {
       return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter" name="${escapeHtml(param)}" type="date" /></label>`;
     }

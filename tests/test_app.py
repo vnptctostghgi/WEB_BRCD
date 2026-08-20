@@ -3515,6 +3515,41 @@ def test_dynamic_report_define_date_uses_oracle_mask() -> None:
     assert "01/07/2026" not in prepared["cau_lenh_sql"]
 
 
+def test_dynamic_report_month_define_does_not_duplicate_literal_day() -> None:
+    class FakeInternalApi:
+        settings = get_settings()
+
+    class FakeRepository:
+        def get_sql_report_by_code(self, code):
+            return {
+                "ten_bao_cao": "Month define",
+                "ma_bao_cao": "MONTH_DEFINE",
+                "cau_lenh_sql": (
+                    "DEFINE thang = :THANG\n"
+                    "SELECT * FROM dual WHERE ngay >= TO_DATE('01/&thang', 'DD/MM/YYYY');"
+                ),
+                "cac_tham_so": ["THANG"],
+            }
+
+        def get_sql_report_by_id(self, report_id):
+            return None
+
+        def list_sql_reports(self):
+            return []
+
+    service = DatabaseService(FakeInternalApi(), FakeRepository())
+    prepared = service.prepare_dynamic_report_query(
+        ma_bao_cao="MONTH_DEFINE",
+        filters={"THANG": "2026-08"},
+        page=1,
+        page_size=20,
+    )
+
+    assert prepared["ok"] is True
+    assert "TO_DATE('01/08/2026', 'DD/MM/YYYY')" in prepared["cau_lenh_sql"]
+    assert "01/01/08/2026" not in prepared["cau_lenh_sql"]
+
+
 def test_dynamic_report_define_date_accepts_bare_filter_name_and_time_suffix() -> None:
     class FakeInternalApi:
         settings = get_settings()
