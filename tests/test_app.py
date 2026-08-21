@@ -5149,6 +5149,30 @@ def test_onebss_each_parameter_builds_multiple_payloads() -> None:
     assert all("$each" not in run.parameters["P_PHANVUNG_ID"] for run in runs)
 
 
+def test_onebss_tinh_each_parameter_automatically_enables_excel_merge() -> None:
+    from app.application.onebss_report_service import build_onebss_parameter_runs
+
+    runs, merge_config, each_keys = build_onebss_parameter_runs(
+        {
+            "P_TINH": {"$each": ["13", "47", "66"]},
+            "P_LOAIKHO": "0",
+        }
+    )
+
+    assert each_keys == ["P_TINH"]
+    assert merge_config == {"sheet": "DATA", "source_column": "P_TINH"}
+    assert [run.parameters["P_TINH"] for run in runs] == ["13", "47", "66"]
+
+
+def test_onebss_non_region_each_parameter_does_not_automatically_merge() -> None:
+    from app.application.onebss_report_service import build_onebss_parameter_runs
+
+    _, merge_config, each_keys = build_onebss_parameter_runs({"P_LOAIKHO": {"$each": ["0", "1"]}})
+
+    assert each_keys == ["P_LOAIKHO"]
+    assert merge_config == {}
+
+
 def test_onebss_report_id_uses_configured_meta_value() -> None:
     from app.application.onebss_report_service import OneBssApiToken, onebss_export_parameters, onebss_report_id
 

@@ -2065,6 +2065,15 @@ def build_onebss_parameter_runs(parameters: dict[str, Any]) -> tuple[list[OneBss
             continue
         base_parameters[key] = value
 
+    if not merge_config:
+        region_each_keys = [
+            str(key)
+            for key, _ in each_items
+            if "PHANVUNG" in str(key).upper() or str(key).upper() == "P_TINH"
+        ]
+        if len(region_each_keys) == 1:
+            merge_config = {"sheet": "DATA", "source_column": region_each_keys[0]}
+
     if not each_items:
         return [OneBssParameterRun(parameters=base_parameters, source_values={})], merge_config, []
 
