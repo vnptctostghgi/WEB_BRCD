@@ -6666,7 +6666,7 @@ def test_workstation_worker_concurrency_limits_and_tracker(monkeypatch: pytest.M
     assert worker.worker_concurrency_limits() == {
         "total": 4,
         worker.TASK_KIND_ONEBSS: 2,
-        worker.TASK_KIND_SQL: 2,
+        worker.TASK_KIND_SQL: 1,
         worker.TASK_KIND_FTP: 2,
     }
 

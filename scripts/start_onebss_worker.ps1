@@ -216,7 +216,7 @@ if ([string]::IsNullOrWhiteSpace($env:ONEBSS_WORKER_MAX_ONEBSS_TASKS)) {
   $env:ONEBSS_WORKER_MAX_ONEBSS_TASKS = "2"
 }
 if ([string]::IsNullOrWhiteSpace($env:SQL_WORKER_MAX_CONCURRENT_TASKS)) {
-  $env:SQL_WORKER_MAX_CONCURRENT_TASKS = "2"
+  $env:SQL_WORKER_MAX_CONCURRENT_TASKS = "1"
 }
 if ([string]::IsNullOrWhiteSpace($env:FTP_WORKER_MAX_CONCURRENT_TASKS)) {
   $env:FTP_WORKER_MAX_CONCURRENT_TASKS = "2"

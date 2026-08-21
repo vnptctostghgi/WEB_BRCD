@@ -82,7 +82,7 @@ def worker_concurrency_limits() -> dict[str, int]:
     return {
         "total": total,
         TASK_KIND_ONEBSS: min(env_int("ONEBSS_WORKER_MAX_ONEBSS_TASKS", 2, minimum=1, maximum=4), total),
-        TASK_KIND_SQL: min(env_int(["SQL_WORKER_MAX_CONCURRENT_TASKS", "SQL_WORKER_MAX_TASKS"], 2, minimum=1, maximum=4), total),
+        TASK_KIND_SQL: min(env_int(["SQL_WORKER_MAX_CONCURRENT_TASKS", "SQL_WORKER_MAX_TASKS"], 1, minimum=1, maximum=4), total),
         TASK_KIND_FTP: min(env_int(["FTP_WORKER_MAX_CONCURRENT_TASKS", "FTP_WORKER_MAX_TASKS"], 2, minimum=1, maximum=6), total),
     }
 

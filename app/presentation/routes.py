@@ -147,6 +147,7 @@ WORKSTATION_PROFILE_CACHE: dict[str, Any] = {"expires_at": 0.0, "profiles": {}}
 WORKER_CLAIM_EMPTY_CACHE_TTL_SECONDS = {"onebss": 12.0, "sql": 18.0, "ftp": 45.0}
 WORKER_CLAIM_EMPTY_CACHE_LOCK = threading.Lock()
 WORKER_CLAIM_EMPTY_CACHE: dict[str, float] = {}
+SQL_WORKER_CLAIM_LOCK = threading.Lock()
 WORKSTATION_DEFAULT_ROLES = ["onebss_worker", "sql_report_worker", "sql_export_worker", "ftp_report_worker", "excel_export", "drive_upload"]
 WORKSTATION_SQL_ROLE_CODES = {"sql_report_worker", "sql_export_worker"}
 WORKSTATION_ONEBSS_ROLE_CODES = {"onebss_worker"}
@@ -5881,6 +5882,11 @@ def _next_dynamic_report_export_worker_job(*, recover_from_history: bool = True)
 @router.post("/api/sql-worker/tasks/claim")
 def claim_sql_worker_task(request: Request, payload: SqlWorkerClaimPayload) -> dict:
     onebss_worker_token(request)
+    with SQL_WORKER_CLAIM_LOCK:
+        return _claim_sql_worker_task_locked(payload)
+
+
+def _claim_sql_worker_task_locked(payload: SqlWorkerClaimPayload) -> dict:
     claim_details = {"claim": "sql", **(payload.details or {})}
     if payload.version.strip():
         claim_details["worker_version"] = payload.version.strip()
