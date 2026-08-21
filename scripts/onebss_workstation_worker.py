@@ -1138,13 +1138,14 @@ def _run_sql_worker_query_child(result_queue: mp.Queue, task: dict[str, Any]) ->
         result_queue.put({"ok": False, "error": str(error)[:1000], "error_type": error.__class__.__name__})
 
 
-def run_sql_worker_query_cancellable(task: dict[str, Any], progress_callback) -> dict[str, Any]:
+def run_sql_worker_query_cancellable(task: dict[str, Any], progress_callback, cancel_callback=None) -> dict[str, Any]:
     """Run the blocking local SQL export in a process that can be stopped by the web job."""
     timeout_seconds = float(os.getenv("SQL_WORKER_TIMEOUT_SECONDS", "1800") or "1800")
     result_queue: mp.Queue = mp.Queue()
     process = mp.Process(target=_run_sql_worker_query_child, args=(result_queue, task), daemon=True)
     started = time.monotonic()
-    last_status_check = 0.0
+    last_cancel_check = 0.0
+    last_progress_update = 0.0
     payload: dict[str, Any] = {}
     try:
         process.start()
@@ -1153,8 +1154,13 @@ def run_sql_worker_query_cancellable(task: dict[str, Any], progress_callback) ->
             now = time.monotonic()
             if now - started >= timeout_seconds:
                 raise TimeoutError(f"Task SQL vuot qua {int(timeout_seconds / 60)} phut nen worker da tu dung.")
-            if now - last_status_check >= 3.0:
-                last_status_check = now
+            if cancel_callback and now - last_cancel_check >= 2.0:
+                last_cancel_check = now
+                response = cancel_callback()
+                if response_is_cancelled(response):
+                    raise SqlTaskCancelled(str(response.get("message") or "Lenh lay du lieu SQL da bi ngung."))
+            if now - last_progress_update >= 15.0:
+                last_progress_update = now
                 response = progress_callback(
                     f"May tram van dang truy van SQL, da chay {int(now - started)} giay.",
                     details={"step": "oracle_export_drive", "elapsed_seconds": int(now - started)},
@@ -1210,37 +1216,20 @@ def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
             raise SqlTaskCancelled(str(response.get("message") or "Lenh lay du lieu SQL da bi ngung."))
         return response
 
-    def start_export_heartbeat(report_code: str) -> threading.Event:
-        stop_event = threading.Event()
-
-        def heartbeat_loop() -> None:
-            while not stop_event.wait(25):
-                elapsed_seconds = int(time.monotonic() - started)
-                try:
-                    send_progress(
-                        f"May tram van dang xuat Excel/upload Drive, da chay {elapsed_seconds} giay.",
-                        details={
-                            "step": "oracle_export_drive",
-                            "report": report_code,
-                            "elapsed_seconds": elapsed_seconds,
-                            "worker_version": WORKER_VERSION,
-                        },
-                    )
-                except Exception as error:
-                    print(f"Khong cap nhat duoc tien trinh SQL: {describe_request_error(error)}", file=sys.stderr)
-
-        threading.Thread(
-            target=heartbeat_loop,
-            name=f"vnptcto-sql-export-{run_id or 'task'}",
-            daemon=True,
-        ).start()
-        return stop_event
+    def check_cancel() -> dict[str, Any]:
+        return request_json(
+            client,
+            "GET",
+            f"/api/sql-worker/tasks/{run_id}/control",
+            timeout=5.0,
+            _retry_forever=False,
+            _max_attempts=1,
+        )
 
     try:
         query = task.get("query") if isinstance(task.get("query"), dict) else {}
         action = str(query.get("action") or "").strip()
         report_code = str(task.get("report_code") or query.get("ma_bao_cao") or "")
-        export_heartbeat: threading.Event | None = None
         if action == "export_sql_report_to_drive":
             send_progress(
                 "May tram da nhan lenh lay du lieu SQL. Dang chuan bi ket noi Oracle noi bo.",
@@ -1250,24 +1239,19 @@ def process_sql_task(client: httpx.Client, task: dict[str, Any], worker_id: str)
                 "Dang ket noi Oracle noi bo, xuat Excel va upload Google Drive.",
                 details={"step": "oracle_export_drive", "report": report_code, "api_urls": internal_sql_api_urls()},
             )
-            export_heartbeat = start_export_heartbeat(report_code)
         else:
             send_progress(
                 "May tram da nhan task SQL. Dang goi API du lieu local.",
                 details={"step": "received", "report": report_code, "api_urls": internal_sql_api_urls()},
             )
-        try:
-            if action == "run_sql_report" and bool(query.get("collect_all_pages")):
-                result = run_sql_worker_query_all_pages(task, send_progress)
-            else:
-                result = (
-                    run_sql_worker_query_cancellable(task, send_progress)
-                    if action == "export_sql_report_to_drive"
-                    else run_sql_worker_query(task)
-                )
-        finally:
-            if export_heartbeat is not None:
-                export_heartbeat.set()
+        if action == "run_sql_report" and bool(query.get("collect_all_pages")):
+            result = run_sql_worker_query_all_pages(task, send_progress)
+        else:
+            result = (
+                run_sql_worker_query_cancellable(task, send_progress, check_cancel)
+                if action == "export_sql_report_to_drive"
+                else run_sql_worker_query(task)
+            )
 
         def result_int(*values: Any) -> int:
             return int_from_values(*values)

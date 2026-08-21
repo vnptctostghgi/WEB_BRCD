@@ -4938,6 +4938,11 @@ def _set_dynamic_report_export_job(job_id: str, **updates: Any) -> None:
             job = dict(loaded)
             DYNAMIC_REPORT_EXPORT_JOBS[job_id] = job
         updates = dict(updates)
+        current_status = str(job.get("status") or "").strip().lower()
+        incoming_status = str(updates.get("status") or current_status).strip().lower()
+        protected_statuses = {*DYNAMIC_REPORT_EXPORT_FINAL_STATUSES, "cancel_requested"}
+        if current_status in protected_statuses and incoming_status not in protected_statuses:
+            return
         if "message" in updates and "progress_steps" not in updates:
             updates["progress_steps"] = _dynamic_report_progress_steps(
                 job,
@@ -6182,6 +6187,22 @@ def update_sql_worker_task_status(request: Request, run_id: str, payload: SqlWor
     )
     updated_export = _get_dynamic_report_export_job(run_id) or export_job
     return {"ok": True, "run": _dynamic_report_export_job_response(run_id, updated_export)}
+
+
+@router.get("/api/sql-worker/tasks/{run_id}/control")
+def get_sql_worker_task_control(request: Request, run_id: str) -> dict:
+    onebss_worker_token(request)
+    export_job = _get_dynamic_report_export_job(run_id.strip())
+    if not export_job:
+        return {"ok": False, "cancelled": True, "status": "cancelled", "message": "Task SQL khong con ton tai."}
+    status_value = str(export_job.get("status") or "").strip().lower()
+    cancelled = status_value in {"cancel_requested", "cancelled"}
+    return {
+        "ok": not cancelled,
+        "cancelled": cancelled,
+        "status": "cancelled" if cancelled else status_value,
+        "message": export_job.get("message") or "",
+    }
 
 
 @router.post("/api/sql-worker/tasks/{run_id}/result")

@@ -3105,6 +3105,18 @@ def test_running_sql_export_cancel_is_not_overwritten_by_worker_updates(monkeypa
         cancelled = client.delete(f"/api/reports/export-jobs/{job_id}")
         assert cancelled.json()["status"] == "cancel_requested"
 
+        routes._set_dynamic_report_export_job(
+            job_id,
+            status="running_worker",
+            message="late heartbeat must not overwrite cancel",
+        )
+        assert routes._get_dynamic_report_export_job(job_id)["status"] == "cancel_requested"
+
+        control = client.get(f"/api/sql-worker/tasks/{job_id}/control", headers=headers)
+        assert control.status_code == 200
+        assert control.json()["cancelled"] is True
+        assert control.json()["status"] == "cancelled"
+
         heartbeat = client.post(
             f"/api/sql-worker/tasks/{job_id}/status",
             json={"status": "running_worker", "message": "still running", "worker_id": "ws-sql"},
@@ -3123,6 +3135,24 @@ def test_running_sql_export_cancel_is_not_overwritten_by_worker_updates(monkeypa
         assert late_result.status_code == 200
         assert late_result.json()["cancelled"] is True
         assert late_result.json()["run"]["status"] == "cancelled"
+
+
+def test_sql_export_cancel_state_is_monotonic_against_late_heartbeat(monkeypatch) -> None:
+    job_id = "sql-cancel-race"
+    monkeypatch.setattr(routes, "_persist_dynamic_report_export_job", lambda *args, **kwargs: None)
+    with routes.DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
+        routes.DYNAMIC_REPORT_EXPORT_JOBS.clear()
+        routes.DYNAMIC_REPORT_EXPORT_JOBS[job_id] = {
+            "job_id": job_id,
+            "status": "cancel_requested",
+            "message": "Dang ngung",
+        }
+
+    routes._set_dynamic_report_export_job(job_id, status="running_worker", message="late heartbeat")
+
+    current = routes._get_dynamic_report_export_job(job_id)
+    assert current["status"] == "cancel_requested"
+    assert current["message"] == "Dang ngung"
 
 
 def test_dynamic_report_export_job_can_return_drive_link(monkeypatch, tmp_path) -> None:
