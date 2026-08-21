@@ -3155,6 +3155,26 @@ def test_sql_export_cancel_state_is_monotonic_against_late_heartbeat(monkeypatch
     assert current["message"] == "Dang ngung"
 
 
+def test_sql_export_history_recovery_does_not_requeue_running_job(monkeypatch) -> None:
+    class FakeRepository:
+        def list_audit_logs(self, limit=800):
+            return [{"id": 1}]
+
+        def get_report_run(self, run_id):
+            return {"run_id": run_id, "status": "running_worker"}
+
+    monkeypatch.setattr(routes, "build_app_repository", lambda: FakeRepository())
+    monkeypatch.setattr(routes, "_parse_dynamic_report_history_log", lambda row: {"job_id": "already-running"})
+    monkeypatch.setattr(
+        routes,
+        "_dynamic_report_export_job_from_history_item",
+        lambda item, now: {"job_id": "already-running", "status": "queued_worker"},
+    )
+    monkeypatch.setattr(routes, "_persist_dynamic_report_export_job", lambda *args, **kwargs: None)
+
+    assert routes._recover_dynamic_report_export_job_from_history() is None
+
+
 def test_dynamic_report_export_job_can_return_drive_link(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(routes, "DYNAMIC_REPORT_EXPORT_DIR", tmp_path / "exports")
     monkeypatch.setattr(routes, "DYNAMIC_REPORT_EXPORT_JOB_DIR", tmp_path / "exports" / "jobs")

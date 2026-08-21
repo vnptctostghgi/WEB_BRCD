@@ -4894,7 +4894,8 @@ def _recover_dynamic_report_export_job_from_history(
     latest_by_id: dict[str, dict[str, Any]] = {}
     skipped = {str(item or "").strip() for item in (skip_job_ids or set()) if str(item or "").strip()}
     try:
-        rows = build_app_repository().list_audit_logs(limit=min(max(int(audit_limit or 800), 50), 800))
+        repository = build_app_repository()
+        rows = repository.list_audit_logs(limit=min(max(int(audit_limit or 800), 50), 800))
     except Exception:
         logger.exception("Cannot read dynamic report export history for recovery")
         return None
@@ -4919,6 +4920,14 @@ def _recover_dynamic_report_export_job_from_history(
         recovered_id = str(recovered.get("job_id") or "").strip()
         if not recovered_id:
             continue
+        try:
+            durable_run = repository.get_report_run(recovered_id)
+        except Exception:
+            durable_run = None
+        if durable_run:
+            durable_status = str(durable_run.get("status") or "").strip().lower()
+            if durable_status != "queued_worker":
+                continue
         with DYNAMIC_REPORT_EXPORT_JOBS_LOCK:
             DYNAMIC_REPORT_EXPORT_JOBS[recovered_id] = dict(recovered)
         _persist_dynamic_report_export_job(recovered_id, recovered)
