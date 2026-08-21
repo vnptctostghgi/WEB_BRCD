@@ -6584,17 +6584,22 @@ function oneBssParameterVariables(parameters) {
   });
 }
 
+function oneBssIsRegionParameterKey(key) {
+  const text = String(key || "").trim();
+  return /PHANVUNG/i.test(text) || /^P_TINH$/i.test(text);
+}
+
 function buildOneBssDirectParametersFromSample(sample) {
   const source = oneBssFindParameterCandidate(sample);
   const output = {};
   Object.entries(source || {}).forEach(([key, value]) => {
     const paramKey = String(key || "").trim();
     if (!paramKey || paramKey.startsWith("$")) return;
-    output[paramKey] = /PHANVUNG/i.test(paramKey)
+    output[paramKey] = oneBssIsRegionParameterKey(paramKey)
       ? { $each: [...oneBssDefaultRegionValues] }
       : normalizeOneBssSampleValue(value);
   });
-  const regionKey = Object.keys(output).find((key) => /PHANVUNG/i.test(key));
+  const regionKey = Object.keys(output).find(oneBssIsRegionParameterKey);
   if (regionKey && !output.$merge_excel) {
     output.$merge_excel = { sheet: "DATA", source_column: regionKey };
   }
@@ -6659,7 +6664,7 @@ function renderOneBssReportEditor(report, isDraft = false) {
       <div class="onebss-parameter-converter">
         <small class="cell-note onebss-date-hint">Bien ngay ho tro: {{today}}, {today;yyyyMMdd}, {today;MM/yyyy}, {today-7d;dd/MM/yyyy}.</small>
         <label>JSON mẫu từ trình duyệt<textarea class="form-control inline-admin-input font-mono text-xs onebss-sample-json" data-onebss-sample-json rows="10" placeholder='{p_phanvung_id: "66", p_nhanvienkd_id: "0", p_nhanvienkt_id: "0"}'></textarea><small class="cell-note" data-onebss-sample-status>Dán JSON chuẩn hoặc mẫu object copy từ trình duyệt để tự tách biến và tạo tham số chạy.</small></label>
-        <label>Tham số xuất trực tiếp JSON<textarea class="form-control inline-admin-input font-mono text-xs" data-inline-onebss-field="parameters" rows="10" placeholder='{"P_PHANVUNG_ID":{"$each":["13","47","66"]},"P_TUNGAY":"{{month_start}}","P_DENNGAY":"{{today}}"}'>${escapeHtml(parameterJson === "{}" ? "" : parameterJson)}</textarea><small class="cell-note">JSON này là tham số chạy thật. P_PHANVUNG_ID sẽ chạy lần lượt 13, 47, 66 khi được sinh từ mẫu.</small></label>
+        <label>Tham số xuất trực tiếp JSON<textarea class="form-control inline-admin-input font-mono text-xs" data-inline-onebss-field="parameters" rows="10" placeholder='{"P_PHANVUNG_ID":{"$each":["13","47","66"]},"P_TUNGAY":"{{month_start}}","P_DENNGAY":"{{today}}"}'>${escapeHtml(parameterJson === "{}" ? "" : parameterJson)}</textarea><small class="cell-note">JSON này là tham số chạy thật. P_PHANVUNG_ID hoặc P_TINH sẽ chạy lần lượt 13, 47, 66 khi được sinh từ mẫu.</small></label>
       </div>
       <label>Danh sách biến<input class="form-control inline-admin-input inline-admin-params" data-inline-onebss-field="danh_sach_bien" value="${escapeHtml(params)}" placeholder="P_PHANVUNG_ID, P_LOAI_NGAY, P_TUNGAY, P_DENNGAY, P_LOAI_BAOCAO, P_LOAI_BIENDONG" readonly /><small class="cell-note">Tự tách từ JSON mẫu hoặc từ JSON tham số xuất trực tiếp.</small></label>
       <label>Link lấy báo cáo<input class="form-control inline-admin-input" data-inline-onebss-field="report_url" value="${escapeHtml(report.report_url || "")}" placeholder="https://onebss.vnpt.vn/#/report/bi?..." /></label>

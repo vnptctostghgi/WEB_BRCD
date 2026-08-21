@@ -151,6 +151,9 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert "function normalizeMenuSearchText" in public_js.text
         assert "function fillDynamicReportSelect()" in public_js.text
         assert "function fillOneBssRunSelect()" in public_js.text
+        assert "function oneBssIsRegionParameterKey(key)" in public_js.text
+        assert '|| /^P_TINH$/i.test(text)' in public_js.text
+        assert "Object.keys(output).find(oneBssIsRegionParameterKey)" in public_js.text
         assert '$("#new-dashboard-page")?.addEventListener("click", createDashboardPage)' in public_js.text
         assert 'event.target.closest("#save-dashboard-layout")' in public_js.text
         assert "await saveDashboardLayout(button)" in public_js.text
@@ -164,8 +167,8 @@ def test_feature_path_opens_current_app_shell() -> None:
         assert 'data-inline-onebss-field="storage_link"' not in public_js.text
         assert "/static/workstation.js?v=6" in public_js.text
         assert "window.VNPTReportsRuntime?.fillOneBssRunSelect?.()" in public_js.text
-        assert "/static/reports-runtime.js?v=14" in public_js.text
-        reports_runtime_js = client.get("/static/reports-runtime.js?v=14")
+        assert "/static/reports-runtime.js?v=15" in public_js.text
+        reports_runtime_js = client.get("/static/reports-runtime.js?v=15")
         assert reports_runtime_js.status_code == 200
         assert "fillDynamicReportSelect, fillOneBssRunSelect }" in reports_runtime_js.text
         assert "fillOneBssRunSelect }" in reports_runtime_js.text
