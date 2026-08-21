@@ -2053,6 +2053,7 @@ def build_onebss_parameter_runs(parameters: dict[str, Any]) -> tuple[list[OneBss
     merge_config = parameters.get("$merge_excel") if isinstance(parameters.get("$merge_excel"), dict) else {}
     base_parameters: dict[str, Any] = {}
     each_items: list[tuple[str, list[Any]]] = []
+    dependent_items: list[tuple[str, dict[str, Any]]] = []
     for key, value in parameters.items():
         key_text = str(key)
         if key_text.startswith("$") or key_text in ONEBSS_API_META_KEYS:
@@ -2062,6 +2063,9 @@ def build_onebss_parameter_runs(parameters: dict[str, Any]) -> tuple[list[OneBss
             if not isinstance(each_values, list) or not each_values:
                 raise OneBssDownloadError(f"Bien {key} dung $each nhung danh sach gia tri dang rong hoac khong hop le.")
             each_items.append((key, each_values))
+            continue
+        if isinstance(value, dict) and "$by" in value and isinstance(value.get("values"), dict):
+            dependent_items.append((key, value))
             continue
         base_parameters[key] = value
 
@@ -2084,6 +2088,14 @@ def build_onebss_parameter_runs(parameters: dict[str, Any]) -> tuple[list[OneBss
         for (key, _), value in zip(each_items, values):
             run_parameters[key] = value
             source_values[key] = value
+        for key, rule in dependent_items:
+            source_key = str(rule.get("$by") or "").strip()
+            source_value = next(
+                (candidate for candidate_key, candidate in run_parameters.items() if str(candidate_key).lower() == source_key.lower()),
+                None,
+            )
+            mapped_values = rule.get("values") or {}
+            run_parameters[key] = mapped_values.get(str(source_value), rule.get("default", ""))
         runs.append(OneBssParameterRun(parameters=run_parameters, source_values=source_values))
     return runs, merge_config, [item[0] for item in each_items]
 

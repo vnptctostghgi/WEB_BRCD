@@ -6603,6 +6603,23 @@ function buildOneBssDirectParametersFromSample(sample) {
   if (regionKey && !output.$merge_excel) {
     output.$merge_excel = { sheet: "DATA", source_column: regionKey };
   }
+  const tinhKey = Object.keys(output).find((key) => /^P_TINH$/i.test(key));
+  const usernameKey = Object.keys(output).find((key) => /^USERNAME$/i.test(key));
+  if (tinhKey && usernameKey && typeof output[usernameKey] === "string") {
+    const username = output[usernameKey].trim();
+    const baseUsername = username.replace(/_(?:13|47|66)$/i, "");
+    if (baseUsername) {
+      output[usernameKey] = {
+        $by: tinhKey,
+        values: {
+          13: baseUsername,
+          47: `${baseUsername}_47`,
+          66: `${baseUsername}_66`,
+        },
+        default: username,
+      };
+    }
+  }
   return output;
 }
 

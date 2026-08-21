@@ -5164,6 +5164,27 @@ def test_onebss_tinh_each_parameter_automatically_enables_excel_merge() -> None:
     assert [run.parameters["P_TINH"] for run in runs] == ["13", "47", "66"]
 
 
+def test_onebss_tinh_each_parameter_maps_username_per_region() -> None:
+    from app.application.onebss_report_service import build_onebss_parameter_runs
+
+    runs, _, _ = build_onebss_parameter_runs(
+        {
+            "p_tinh": {"$each": ["13", "47", "66"]},
+            "USERNAME": {
+                "$by": "p_tinh",
+                "values": {"13": "quyennt.cto", "47": "quyennt.cto_47", "66": "quyennt.cto_66"},
+                "default": "quyennt.cto",
+            },
+        }
+    )
+
+    assert [(run.parameters["p_tinh"], run.parameters["USERNAME"]) for run in runs] == [
+        ("13", "quyennt.cto"),
+        ("47", "quyennt.cto_47"),
+        ("66", "quyennt.cto_66"),
+    ]
+
+
 def test_onebss_non_region_each_parameter_does_not_automatically_merge() -> None:
     from app.application.onebss_report_service import build_onebss_parameter_runs
 
