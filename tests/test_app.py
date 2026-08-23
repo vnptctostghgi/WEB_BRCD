@@ -2273,6 +2273,8 @@ def test_data_mining_dynamic_date_parameters() -> None:
             "P_THANG": "{today;MM/yyyy}",
             "P_YMD": "{today;yyyyMMdd}",
             "P_OFFSET_FMT": "{today-7d;dd/MM/yyyy}",
+            "P_3_MONTHS": "{today-3m;dd/MM/yyyy}",
+            "P_3_MONTH_START": "{month_start-3m;dd/MM/yyyy}",
             "P_LAST_MONTH": "{{last_month_start;MM/yyyy}}",
             "P_STATIC": "13",
             "P_UNKNOWN": "{not_a_date;MM/yyyy}",
@@ -2287,9 +2289,17 @@ def test_data_mining_dynamic_date_parameters() -> None:
     assert params["P_THANG"] == "07/2026"
     assert params["P_YMD"] == "20260708"
     assert params["P_OFFSET_FMT"] == "01/07/2026"
+    assert params["P_3_MONTHS"] == "08/04/2026"
+    assert params["P_3_MONTH_START"] == "01/04/2026"
     assert params["P_LAST_MONTH"] == "06/2026"
     assert params["P_STATIC"] == "13"
     assert params["P_UNKNOWN"] == "{not_a_date;MM/yyyy}"
+
+    end_of_month = resolve_dynamic_parameters(
+        {"P_3_MONTHS": "{today-3m;dd/MM/yyyy}"},
+        datetime(2024, 5, 31, 9, 30, tzinfo=LOCAL_TIMEZONE),
+    )
+    assert end_of_month["P_3_MONTHS"] == "29/02/2024"
 
 
 def test_data_mining_run_resolves_parameters_before_download(monkeypatch) -> None:

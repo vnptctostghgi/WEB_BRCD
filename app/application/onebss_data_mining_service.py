@@ -4,6 +4,7 @@ import logging
 import re
 import shutil
 import time
+from calendar import monthrange
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -35,13 +36,13 @@ DATE_TOKEN_PATTERN = re.compile(
     r"""
     \{\{\s*
         (?P<double_token>[a-zA-Z_][a-zA-Z0-9_]*)
-        (?:\s*(?P<double_sign>[+-])\s*(?P<double_amount>\d+)\s*d)?
+        (?:\s*(?P<double_sign>[+-])\s*(?P<double_amount>\d+)\s*(?P<double_unit>[dDmM]))?
         (?:\s*;\s*(?P<double_format>[^{}]+?)\s*)?
     \}\}
     |
     \{\s*
         (?P<single_token>[a-zA-Z_][a-zA-Z0-9_]*)
-        (?:\s*(?P<single_sign>[+-])\s*(?P<single_amount>\d+)\s*d)?
+        (?:\s*(?P<single_sign>[+-])\s*(?P<single_amount>\d+)\s*(?P<single_unit>[dDmM]))?
         \s*;\s*(?P<single_format>[^{}]+?)\s*
     \}
     """,
@@ -419,14 +420,24 @@ def format_date_token(match: re.Match[str], current: datetime) -> str:
         day = day.replace(day=1) - timedelta(days=1)
     sign = match.group("double_sign") or match.group("single_sign")
     amount = int(match.group("double_amount") or match.group("single_amount") or 0)
-    if sign == "+":
-        day = day + timedelta(days=amount)
-    elif sign == "-":
-        day = day - timedelta(days=amount)
+    unit = (match.group("double_unit") or match.group("single_unit") or "d").lower()
+    signed_amount = amount if sign == "+" else -amount
+    if sign and unit == "m":
+        day = shift_date_by_months(day, signed_amount)
+    elif sign:
+        day = day + timedelta(days=signed_amount)
     fmt = (match.group("double_format") or match.group("single_format") or "").strip()
     if not fmt:
         return day.strftime("%d/%m/%Y")
     return format_date_with_user_pattern(day, current, fmt)
+
+
+def shift_date_by_months(day: Any, months: int) -> Any:
+    month_index = (day.year * 12) + day.month - 1 + months
+    target_year, zero_based_month = divmod(month_index, 12)
+    target_month = zero_based_month + 1
+    target_day = min(day.day, monthrange(target_year, target_month)[1])
+    return day.replace(year=target_year, month=target_month, day=target_day)
 
 
 def format_date_with_user_pattern(day: Any, current: datetime, fmt: str) -> str:
