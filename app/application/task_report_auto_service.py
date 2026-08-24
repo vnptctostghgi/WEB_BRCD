@@ -762,7 +762,35 @@ def capture_public_web_screenshot_bytes(public_url: str, *, selector: str = "") 
                             page.wait_for_selector("body", state="visible", timeout=30000)
                             page.wait_for_function("() => document.body && document.body.innerText.trim().length > 0", timeout=30000)
                             page.wait_for_timeout(1200)
-                            image = page.screenshot(type="png", full_page=True)
+                            clip_script = """
+                                () => {
+                                  const cells = [...document.querySelectorAll('table.waffle td')]
+                                    .filter((cell) => (cell.innerText || cell.textContent || '').trim());
+                                  if (!cells.length) return null;
+                                  const boxes = cells.map((cell) => cell.getBoundingClientRect())
+                                    .filter((box) => box.width > 0 && box.height > 0);
+                                  if (!boxes.length) return null;
+                                  const padding = 8;
+                                  const left = Math.max(0, Math.min(...boxes.map((box) => box.left + window.scrollX)) - padding);
+                                  const top = Math.max(0, Math.min(...boxes.map((box) => box.top + window.scrollY)) - padding);
+                                  const right = Math.max(...boxes.map((box) => box.right + window.scrollX)) + padding;
+                                  const bottom = Math.max(...boxes.map((box) => box.bottom + window.scrollY)) + padding;
+                                  return {x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top)};
+                                }
+                                """
+                            content_clip = page.evaluate(clip_script)
+                            sheet_frame = next((frame for frame in page.frames if "/pubhtml/sheet" in frame.url), None)
+                            if sheet_frame:
+                                frame_clip = sheet_frame.evaluate(clip_script)
+                                frame_box = sheet_frame.frame_element().bounding_box()
+                                if frame_clip and frame_box:
+                                    content_clip = {
+                                        "x": frame_box["x"] + frame_clip["x"],
+                                        "y": frame_box["y"] + frame_clip["y"],
+                                        "width": frame_clip["width"],
+                                        "height": frame_clip["height"],
+                                    }
+                            image = page.screenshot(type="png", clip=content_clip) if content_clip else page.screenshot(type="png", full_page=True)
                     except PlaywrightTimeoutError:
                         raise RuntimeError("Public web chua load xong de chup anh.") from None
                     if len(image) < 100:
