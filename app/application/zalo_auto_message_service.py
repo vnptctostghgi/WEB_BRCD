@@ -132,7 +132,7 @@ def schedule_page_url(settings: Settings, schedule: dict[str, Any]) -> tuple[str
     parsed_base = urlparse(base_url)
     parsed_page = urlparse(raw_page_url)
     if parsed_page.scheme and parsed_page.netloc:
-        if parsed_page.scheme != parsed_base.scheme or parsed_page.netloc != parsed_base.netloc:
+        if parsed_page.scheme not in {"http", "https"}:
             return "", ""
         path = parsed_page.path or "/"
         if parsed_page.query:
@@ -175,6 +175,11 @@ def dashboard_page_id_for_schedule(repository: Any, schedule: dict[str, Any]) ->
 
 
 def refresh_schedule_data(repository: Any, settings: Settings, schedule: dict[str, Any]) -> dict[str, Any]:
+    raw_page_url = str(schedule.get("page_url") or "").strip()
+    parsed_page = urlparse(raw_page_url)
+    parsed_base = urlparse(public_base_url(settings))
+    if parsed_page.scheme in {"http", "https"} and parsed_page.netloc != parsed_base.netloc:
+        return {"ok": True, "status": "skipped_external_page", "message": "Du lieu do lich bao cao lien ket cap nhat."}
     page_id = dashboard_page_id_for_schedule(repository, schedule)
     result = DatabaseService(InternalApiClient.from_repository(settings, repository), repository).refresh_dashboard_chart_cache(page_id=page_id)
     result["page_id"] = page_id
@@ -284,6 +289,12 @@ def capture_page_screenshot_bytes(repository: Any, settings: Settings, page_url:
     target_url, _path = schedule_page_url(settings, schedule)
     if not target_url:
         raise RuntimeError("Chua cau hinh APP_PUBLIC_URL/ZALO_WEBHOOK_URL hop le de chup anh.")
+    parsed_target = urlparse(target_url)
+    parsed_base = urlparse(public_base_url(settings))
+    if parsed_target.netloc != parsed_base.netloc:
+        from app.application.task_report_auto_service import capture_public_web_screenshot_bytes
+
+        return capture_public_web_screenshot_bytes(target_url)
     admin_user = capture_admin_user(repository, settings)
     if not admin_user:
         raise RuntimeError("Chua co tai khoan admin hoat dong de chup anh.")

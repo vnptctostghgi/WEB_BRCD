@@ -1905,6 +1905,22 @@ def test_zalo_auto_capture_uses_dashboard_area(monkeypatch) -> None:
         get_settings.cache_clear()
 
 
+def test_zalo_auto_capture_accepts_external_public_page(monkeypatch) -> None:
+    from app.application import task_report_auto_service
+    from app.application import zalo_auto_message_service as service
+
+    monkeypatch.setenv("APP_PUBLIC_URL", "https://vnptcto.com")
+    get_settings.cache_clear()
+    monkeypatch.setattr(task_report_auto_service, "capture_public_web_screenshot_bytes", lambda url: b"external-image")
+    try:
+        settings = get_settings()
+        schedule = {"page_url": "https://docs.google.com/spreadsheets/d/example/pubhtml"}
+        assert service.capture_page_screenshot_bytes(object(), settings, schedule["page_url"]) == b"external-image"
+        assert service.refresh_schedule_data(object(), settings, schedule)["status"] == "skipped_external_page"
+    finally:
+        get_settings.cache_clear()
+
+
 def test_zalo_auto_message_scheduler_sends_due_photo(monkeypatch) -> None:
     from app.application.task_scheduler import LOCAL_TIMEZONE, ZaloAutoMessageScheduler
 
