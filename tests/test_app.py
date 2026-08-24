@@ -1475,9 +1475,12 @@ def test_admin_can_view_zalo_message_logs(monkeypatch) -> None:
             login(client)
             logs_response = client.get("/api/admin/zalo/message-logs?limit=20")
             assert logs_response.status_code == 200
-            logs = logs_response.json()["logs"]
+            response_payload = logs_response.json()
+            logs = response_payload["logs"]
             assert any(log["direction"] == "in" and log["chat_id"] == "group-log-001" and "ghi log" in log["text"] for log in logs)
             assert any(log["direction"] == "out" and log["chat_id"] == "group-log-001" and log["ok"] is True for log in logs)
+            assert any(contact["target_type"] == "person" and contact["chat_id"] == "user-log-001" for contact in response_payload["contacts"])
+            assert any(contact["target_type"] == "group" and contact["chat_id"] == "group-log-001" for contact in response_payload["contacts"])
     finally:
         get_settings.cache_clear()
 

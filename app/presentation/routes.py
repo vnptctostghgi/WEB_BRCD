@@ -8234,15 +8234,40 @@ async def zalo_webhook(request: Request) -> dict:
 def list_zalo_message_logs(request: Request, limit: int = 100) -> dict:
     require_any_feature(request, "quantriketnoi", "taskreportauto")
     safe_limit = min(max(int(limit or 100), 1), 500)
-    rows = build_app_repository().list_audit_logs(limit=min(max(safe_limit * 4, 100), 500))
+    rows = build_app_repository().list_audit_logs(limit=2000)
     logs = []
+    contacts = []
+    seen_contacts = set()
     for row in rows:
         parsed = parse_zalo_message_log(row)
-        if parsed:
+        if parsed and len(logs) < safe_limit:
             logs.append(parsed)
-        if len(logs) >= safe_limit:
-            break
-    return {"logs": logs}
+        if not parsed or parsed.get("direction") != "in":
+            continue
+        sender_id = str(parsed.get("sender_id") or "").strip()
+        chat_id = str(parsed.get("chat_id") or "").strip()
+        chat_type = str(parsed.get("chat_type") or "").strip()
+        if sender_id and sender_id not in seen_contacts:
+            seen_contacts.add(sender_id)
+            contacts.append({
+                "chat_id": sender_id,
+                "target_type": "person",
+                "chat_name": parsed.get("sender_name") or sender_id,
+                "chat_type": "PERSON",
+                "source_chat_id": chat_id,
+                "last_seen_at": parsed.get("created_at") or "",
+            })
+        if chat_id and chat_id not in seen_contacts:
+            seen_contacts.add(chat_id)
+            contacts.append({
+                "chat_id": chat_id,
+                "target_type": "group" if "group" in chat_type.lower() else "person",
+                "chat_name": parsed.get("sender_name") or chat_id,
+                "chat_type": chat_type,
+                "source_chat_id": chat_id,
+                "last_seen_at": parsed.get("created_at") or "",
+            })
+    return {"logs": logs, "contacts": contacts}
 
 
 @router.post("/api/admin/zalo/send-test-message")

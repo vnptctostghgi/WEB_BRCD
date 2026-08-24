@@ -14,6 +14,7 @@ let connections = [];
 let systemRoles = [];
 let zaloAutoMessages = [];
 let zaloMessageLogs = [];
+let zaloContacts = [];
 let publicMessages = [];
 let publicMessagesRefreshTimer = null;
 let publicMessagesCursor = "";
@@ -5421,6 +5422,7 @@ async function loadTaskReportAuto(options = {}) {
   const [result] = await Promise.all([
     window.VNPTTaskReportAuto.loadTaskReportAuto(options),
     loadZaloAutoMessages(options),
+    loadZaloMessageLogs(options),
   ]);
   return result;
 }
@@ -5901,8 +5903,21 @@ function zaloChatTargetName(log) {
 }
 
 function uniqueZaloChatTargets() {
+  if (zaloContacts.length) return zaloContacts;
   const seen = new Set();
   return zaloMessageLogs.reduce((targets, log) => {
+    const senderId = String(log.sender_id || "").trim();
+    if (log.direction === "in" && senderId && !seen.has(senderId)) {
+      seen.add(senderId);
+      targets.push({
+        chat_id: senderId,
+        target_type: "person",
+        chat_name: String(log.sender_name || senderId).trim(),
+        chat_type: "PERSON",
+        source_chat_id: String(log.chat_id || "").trim(),
+        last_seen_at: log.created_at || "",
+      });
+    }
     const chatId = String(log.chat_id || "").trim();
     if (!chatId || seen.has(chatId)) return targets;
     seen.add(chatId);
@@ -5911,6 +5926,8 @@ function uniqueZaloChatTargets() {
       target_type: normalizeZaloTargetType(log.chat_type),
       chat_name: zaloChatTargetName(log),
       chat_type: String(log.chat_type || "").trim(),
+      source_chat_id: chatId,
+      last_seen_at: log.created_at || "",
     });
     return targets;
   }, []);
@@ -6099,26 +6116,41 @@ async function deleteZaloAutoMessage(scheduleId) {
 
 async function loadZaloMessageLogs({ force = false } = {}) {
   const table = $("#zalo-message-logs-table");
-  if (!table) return;
   if (!force && isDataFresh("zaloMessageLogs")) {
-    table.innerHTML = zaloMessageLogs.length
+    if (table) table.innerHTML = zaloMessageLogs.length
       ? zaloMessageLogs.map((log) => renderZaloMessageLog(log)).join("")
       : emptyRow(5, "Chưa có tin nhắn Zalo", "Khi người dùng mention hoặc trả lời bot trong nhóm, log sẽ xuất hiện ở đây.");
+    renderZaloContacts();
     fillZaloChatTargetOptions();
     return;
   }
-  setTableLoading("#zalo-message-logs-table", 5, "Đang tải nhật ký Zalo Bot...");
+  if (table) setTableLoading("#zalo-message-logs-table", 5, "Đang tải nhật ký Zalo Bot...");
   try {
     const data = await api(`/api/admin/zalo/message-logs?limit=${TABLE_PAGE_SIZE}`);
     zaloMessageLogs = data.logs || [];
+    zaloContacts = data.contacts || [];
     markDataFresh("zaloMessageLogs");
-    table.innerHTML = zaloMessageLogs.length
+    if (table) table.innerHTML = zaloMessageLogs.length
       ? zaloMessageLogs.map((log) => renderZaloMessageLog(log)).join("")
       : emptyRow(5, "Chưa có tin nhắn Zalo", "Khi người dùng mention hoặc trả lời bot trong nhóm, log sẽ xuất hiện ở đây.");
+    renderZaloContacts();
     fillZaloChatTargetOptions();
   } catch (error) {
-    table.innerHTML = emptyRow(5, "Không tải được nhật ký Zalo", error.message);
+    if (table) table.innerHTML = emptyRow(5, "Không tải được nhật ký Zalo", error.message);
   }
+}
+
+function renderZaloContacts() {
+  const table = $("#zalo-contacts-table");
+  if (!table) return;
+  const contacts = uniqueZaloChatTargets();
+  table.innerHTML = contacts.length ? contacts.map((contact) => `
+    <tr>
+      <td><strong>${escapeHtml(contact.chat_name || "-")}</strong><small class="cell-note">${contact.target_type === "group" ? "Nhóm" : "Cá nhân"}</small></td>
+      <td><code>${escapeHtml(contact.chat_id)}</code></td>
+      <td><code>${escapeHtml(contact.source_chat_id || "-")}</code></td>
+      <td>${contact.last_seen_at ? escapeHtml(new Date(contact.last_seen_at).toLocaleString("vi-VN")) : "-"}</td>
+    </tr>`).join("") : emptyRow(4, "Chưa ghi nhận tài khoản Zalo", "Hãy nhắn riêng hoặc mention bot trong nhóm.");
 }
 
 function renderZaloMessageLog(log) {
