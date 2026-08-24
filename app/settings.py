@@ -69,6 +69,8 @@ class Settings(BaseSettings):
     zalo_webhook_url: str = ""
     zalo_webhook_secret: SecretStr = Field(default=SecretStr(""))
     zalo_auto_reply_enabled: bool = True
+    gemini_api_key: SecretStr = Field(default=SecretStr(""))
+    gemini_model: str = "gemini-3.6-flash"
     onebss_login_url: str = "https://onebss.vnpt.vn/"
     onebss_username: str = ""
     onebss_password: SecretStr = Field(default=SecretStr(""))

@@ -1842,6 +1842,8 @@ class SupabaseRepository:
         row = {
             "schedule_id": str(payload["schedule_id"]).strip(),
             "linked_task_id": str(payload.get("linked_task_id", "")).strip(),
+            "gemini_enabled": bool(payload.get("gemini_enabled", False)),
+            "gemini_prompt": str(payload.get("gemini_prompt", "")).strip(),
             "name": str(payload.get("name", "")).strip(),
             "page_url": str(payload.get("page_url", "/")).strip() or "/",
             "page_label": str(payload.get("page_label", "")).strip(),
@@ -2385,6 +2387,8 @@ class SupabaseRepository:
         return {
             "schedule_id": row.get("schedule_id"),
             "linked_task_id": row.get("linked_task_id") or "",
+            "gemini_enabled": bool(row.get("gemini_enabled")),
+            "gemini_prompt": row.get("gemini_prompt") or "",
             "name": row.get("name") or "",
             "page_url": row.get("page_url") or "/",
             "page_label": row.get("page_label") or "",

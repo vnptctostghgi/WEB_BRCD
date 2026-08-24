@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import quote, unquote, urljoin, urlparse
 
 from itsdangerous import TimestampSigner
+import httpx
 
 from app.application.database_service import DatabaseService
 from app.application.zalo_bot import ZaloBotClient
@@ -398,8 +399,46 @@ def send_zalo_auto_message(repository: Any, settings: Settings, schedule: dict[s
     if parsed.scheme != "https":
         return {"ok": False, "message": "URL anh gui Zalo phai dung HTTPS.", "chat_id": chat_id, "photo_url": photo_url}
     caption = auto_message_caption(schedule)
+    if schedule.get("gemini_enabled"):
+        try:
+            capture_id = str((latest_capture or {}).get("capture_id") or "")
+            stored_capture = repository.get_zalo_message_capture(capture_id) if capture_id else None
+            image_base64 = str((stored_capture or {}).get("image_base64") or "")
+            caption = gemini_image_assessment(settings, schedule, image_base64) or caption
+        except Exception:
+            logger.exception("Cannot generate Gemini assessment for Zalo schedule %s", schedule.get("schedule_id"))
     sent = ZaloBotClient(settings).send_photo(chat_id, photo_url, caption)
     log_zalo_auto_message(repository, schedule, chat_id, caption, sent, photo_url)
     if not sent:
         return {"ok": False, "message": "Khong gui duoc anh qua Zalo.", "chat_id": chat_id, "photo_url": photo_url}
     return {"ok": True, "message": "Da gui anh qua Zalo.", "chat_id": chat_id, "photo_url": photo_url, "caption": caption}
+
+
+def gemini_image_assessment(settings: Settings, schedule: dict[str, Any], image_base64: str) -> str:
+    api_key = settings.gemini_api_key.get_secret_value().strip()
+    if not api_key or not image_base64:
+        return ""
+    prompt = str(schedule.get("gemini_prompt") or "").strip() or (
+        "Đọc bảng trong ảnh và viết nhận xét tiếng Việt ngắn gọn để gửi Zalo. "
+        "Nêu tổng quan, các đơn vị nổi bật, các đơn vị cần chú ý; không suy đoán số liệu không nhìn thấy. "
+        "Không dùng bảng Markdown và tối đa 1200 ký tự."
+    )
+    model = settings.gemini_model.strip() or "gemini-3.6-flash"
+    response = httpx.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+        json={"contents": [{"parts": [
+            {"inline_data": {"mime_type": "image/png", "data": image_base64}},
+            {"text": prompt},
+        ]}], "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": 3000,
+            "thinkingConfig": {"thinkingLevel": "MINIMAL"},
+        }},
+        timeout=60,
+    )
+    response.raise_for_status()
+    data = response.json()
+    parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+    text = "\n".join(str(part.get("text") or "").strip() for part in parts if part.get("text")).strip()
+    return text[:1900]

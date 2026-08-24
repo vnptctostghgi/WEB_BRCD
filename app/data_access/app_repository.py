@@ -543,6 +543,8 @@ class AppRepository:
                 CREATE TABLE IF NOT EXISTS zalo_auto_messages (
                     schedule_id TEXT PRIMARY KEY,
                     linked_task_id TEXT NOT NULL DEFAULT '',
+                    gemini_enabled INTEGER NOT NULL DEFAULT 0,
+                    gemini_prompt TEXT NOT NULL DEFAULT '',
                     name TEXT NOT NULL,
                     page_url TEXT NOT NULL DEFAULT '/',
                     page_label TEXT NOT NULL DEFAULT '',
@@ -836,6 +838,14 @@ class AppRepository:
                 connection.execute("ALTER TABLE zalo_auto_messages ADD COLUMN linked_task_id TEXT NOT NULL DEFAULT ''")
             except sqlite3.OperationalError:
                 pass
+            for statement in (
+                "ALTER TABLE zalo_auto_messages ADD COLUMN gemini_enabled INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE zalo_auto_messages ADD COLUMN gemini_prompt TEXT NOT NULL DEFAULT ''",
+            ):
+                try:
+                    connection.execute(statement)
+                except sqlite3.OperationalError:
+                    pass
             self._ensure_onebss_report_run_worker_columns(connection)
             legacy_menu = connection.execute(
                 "SELECT 1 FROM features WHERE code IN ('admin', 'admin.connections.test', 'admin.menu', 'new_reports') LIMIT 1"
@@ -2469,12 +2479,14 @@ class AppRepository:
             connection.execute(
                 """
                 INSERT INTO zalo_auto_messages
-                (schedule_id, linked_task_id, name, page_url, page_label, schedule_type, time_slots_json, run_time,
+                (schedule_id, linked_task_id, gemini_enabled, gemini_prompt, name, page_url, page_label, schedule_type, time_slots_json, run_time,
                  weekday, month_day, target_type, chat_id, chat_name, caption, photo_url,
                  is_active, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(schedule_id) DO UPDATE SET
                   linked_task_id=excluded.linked_task_id,
+                  gemini_enabled=excluded.gemini_enabled,
+                  gemini_prompt=excluded.gemini_prompt,
                   name=excluded.name,
                   page_url=excluded.page_url,
                   page_label=excluded.page_label,
@@ -2494,6 +2506,8 @@ class AppRepository:
                 (
                     schedule_id,
                     str(payload.get("linked_task_id", "")).strip(),
+                    int(bool(payload.get("gemini_enabled", False))),
+                    str(payload.get("gemini_prompt", "")).strip(),
                     str(payload.get("name", "")).strip(),
                     str(payload.get("page_url", "/")).strip() or "/",
                     str(payload.get("page_label", "")).strip(),
@@ -3269,6 +3283,8 @@ class AppRepository:
         return {
             "schedule_id": row.get("schedule_id"),
             "linked_task_id": row.get("linked_task_id") or "",
+            "gemini_enabled": bool(row.get("gemini_enabled")),
+            "gemini_prompt": row.get("gemini_prompt") or "",
             "name": row.get("name") or "",
             "page_url": row.get("page_url") or "/",
             "page_label": row.get("page_label") or "",

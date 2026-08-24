@@ -6006,6 +6006,7 @@ function openZaloAutoMessage(scheduleId = "") {
   const schedule = zaloAutoMessages.find((item) => item.schedule_id === scheduleId);
   const form = $("#zalo-auto-message-form");
   ensureZaloLinkedTaskField();
+  ensureZaloGeminiFields();
   fillZaloLinkedTaskOptions(schedule?.linked_task_id || "");
   fillZaloChatTargetOptions();
   if (!zaloMessageLogs.length) loadZaloMessageLogs();
@@ -6022,6 +6023,8 @@ function openZaloAutoMessage(scheduleId = "") {
   form.elements.namedItem("chat_id").value = schedule?.chat_id || "";
   form.elements.namedItem("chat_name").value = schedule?.chat_name || "";
   form.elements.namedItem("caption").value = schedule?.caption || "";
+  form.elements.namedItem("gemini_enabled").checked = Boolean(schedule?.gemini_enabled);
+  form.elements.namedItem("gemini_prompt").value = schedule?.gemini_prompt || "";
   form.elements.namedItem("photo_url").value = schedule?.photo_url || "";
   form.elements.namedItem("capture_file").value = "";
   form.elements.namedItem("is_active").checked = schedule ? Boolean(schedule.is_active) : true;
@@ -6052,6 +6055,8 @@ async function saveZaloAutoMessage(event) {
     const response = await api("/api/admin/zalo/auto-messages", { method: "POST", body: JSON.stringify({
       schedule_id: data.schedule_id || "",
       linked_task_id: data.linked_task_id || "",
+      gemini_enabled: Boolean(form.elements.namedItem("gemini_enabled")?.checked),
+      gemini_prompt: data.gemini_prompt || "",
       name: data.name || "",
       page_url: data.page_url || "/",
       page_label: data.page_label || "",
@@ -6630,6 +6635,20 @@ function ensureZaloLinkedTaskField() {
   const label = document.createElement("label");
   label.innerHTML = 'Lịch báo cáo liên kết<select class="form-control" name="linked_task_id"><option value="">Không liên kết</option></select>';
   form.elements.namedItem("name")?.closest("label")?.insertAdjacentElement("afterend", label);
+}
+
+function ensureZaloGeminiFields() {
+  const form = $("#zalo-auto-message-form");
+  if (!form || form.elements.namedItem("gemini_enabled")) return;
+  const captionLabel = form.elements.namedItem("caption")?.closest("label");
+  if (!captionLabel) return;
+  const enabled = document.createElement("label");
+  enabled.className = "checkbox-label";
+  enabled.innerHTML = '<input type="checkbox" name="gemini_enabled" /> Dùng Gemini nhận xét ảnh thay cho nội dung cố định';
+  captionLabel.insertAdjacentElement("afterend", enabled);
+  const prompt = document.createElement("label");
+  prompt.innerHTML = 'Yêu cầu nhận xét Gemini<textarea class="form-control min-h-32" name="gemini_prompt" rows="6" placeholder="Nêu tổng quan, đơn vị nổi bật và đơn vị cần chú ý..."></textarea>';
+  enabled.insertAdjacentElement("afterend", prompt);
 }
 
 async function fillZaloLinkedTaskOptions(selected = "") {

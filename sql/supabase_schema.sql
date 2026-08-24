@@ -366,6 +366,8 @@ create table if not exists public.work_tasks (
 create table if not exists public.zalo_auto_messages (
   schedule_id text primary key,
   linked_task_id text not null default '',
+  gemini_enabled boolean not null default false,
+  gemini_prompt text not null default '',
   name text not null,
   page_url text not null default '/',
   page_label text not null default '',
@@ -390,6 +392,8 @@ create table if not exists public.zalo_auto_messages (
 
 alter table public.zalo_auto_messages
 add column if not exists linked_task_id text not null default '';
+alter table public.zalo_auto_messages add column if not exists gemini_enabled boolean not null default false;
+alter table public.zalo_auto_messages add column if not exists gemini_prompt text not null default '';
 
 create table if not exists public.zalo_message_captures (
   capture_id text primary key,

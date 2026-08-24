@@ -695,6 +695,8 @@ class ZaloSendMessagePayload(BaseModel):
 class ZaloAutoMessagePayload(BaseModel):
     schedule_id: str = ""
     linked_task_id: str = ""
+    gemini_enabled: bool = False
+    gemini_prompt: str = ""
     name: str
     page_url: str = "/"
     page_label: str = ""
@@ -1532,6 +1534,8 @@ def normalize_zalo_auto_message_payload(payload: ZaloAutoMessagePayload, schedul
     return {
         "schedule_id": schedule_id,
         "linked_task_id": payload.linked_task_id.strip(),
+        "gemini_enabled": payload.gemini_enabled,
+        "gemini_prompt": payload.gemini_prompt.strip(),
         "name": name,
         "page_url": normalize_zalo_page_url(payload.page_url),
         "page_label": payload.page_label.strip(),
