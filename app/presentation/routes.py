@@ -694,6 +694,7 @@ class ZaloSendMessagePayload(BaseModel):
 
 class ZaloAutoMessagePayload(BaseModel):
     schedule_id: str = ""
+    linked_task_id: str = ""
     name: str
     page_url: str = "/"
     page_label: str = ""
@@ -1530,6 +1531,7 @@ def normalize_zalo_auto_message_payload(payload: ZaloAutoMessagePayload, schedul
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Lich hang tuan can nhap thu trong tuan.")
     return {
         "schedule_id": schedule_id,
+        "linked_task_id": payload.linked_task_id.strip(),
         "name": name,
         "page_url": normalize_zalo_page_url(payload.page_url),
         "page_label": payload.page_label.strip(),

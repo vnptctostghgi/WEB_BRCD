@@ -1967,6 +1967,48 @@ def test_zalo_auto_message_scheduler_sends_due_photo(monkeypatch) -> None:
         get_settings.cache_clear()
 
 
+def test_zalo_auto_message_scheduler_waits_for_linked_report(monkeypatch) -> None:
+    from app.application.task_scheduler import LOCAL_TIMEZONE, ZaloAutoMessageScheduler
+
+    class FakeRepository:
+        def __init__(self):
+            self.last_success_key = ""
+            self.marked = []
+
+        def list_zalo_auto_messages(self, active_only=True):
+            return [{
+                "schedule_id": "ZALO-LINKED",
+                "linked_task_id": "TRA-LINKED",
+                "schedule_type": "Daily",
+                "run_time": "07:05",
+                "last_run_key": "",
+                "is_active": True,
+            }]
+
+        def get_task_report_auto_task(self, task_id):
+            return {"task_id": task_id, "last_success_key": self.last_success_key}
+
+        def mark_zalo_auto_message_run(self, schedule_id, run_key, success, error):
+            self.marked.append((schedule_id, run_key, success, error))
+
+    repository = FakeRepository()
+    scheduler = ZaloAutoMessageScheduler()
+    scheduler.configure(repository, get_settings())
+    now = datetime(2026, 1, 5, 7, 5, tzinfo=LOCAL_TIMEZONE)
+    sends = []
+    monkeypatch.setattr(
+        "app.application.task_scheduler.send_zalo_auto_message",
+        lambda *args: sends.append(args) or {"ok": True},
+    )
+
+    assert scheduler.check_due_messages(now) == 0
+    assert sends == []
+    repository.last_success_key = "2026-01-05:07:00"
+    assert scheduler.check_due_messages(now) == 1
+    assert len(sends) == 1
+    assert repository.marked[0][1] == "2026-01-05:07:05"
+
+
 def test_zalo_auto_message_requires_explicit_chat_id(monkeypatch) -> None:
     from app.application import zalo_auto_message_service as service
 
@@ -2496,7 +2538,7 @@ def test_admin_can_manage_task_report_auto_and_queue_run() -> None:
         assert client.get(f"/api/admin/task-report-auto/runs?task_id={task['task_id']}").json()["runs"] == []
 
 
-def test_task_report_auto_runner_sql_writes_sheet_captures_and_sends_zalo(monkeypatch) -> None:
+def test_task_report_auto_runner_sql_writes_sheet_without_capture_or_zalo(monkeypatch) -> None:
     from app.application import task_report_auto_service as service
     from app.application.task_report_auto_service import TaskReportAutoRunner
 
@@ -2566,13 +2608,12 @@ def test_task_report_auto_runner_sql_writes_sheet_captures_and_sends_zalo(monkey
 
     assert result["ok"] is True
     assert written_values == [("sheet-runner-001", "DATA", [["MA_TB", "DOANH_THU"], ["TB001", 120000]])]
-    assert sent_photos
-    assert sent_photos[0][0] == "zalo-runner-001"
-    assert sent_photos[0][1].startswith("https://vnptcto.com/api/task-report-auto/captures/")
-    assert sent_photos[0][2] == "Caption runner"
+    assert sent_photos == []
+    assert result["capture"]["status"] == "separate_schedule"
+    assert result["zalo"]["status"] == "separate_schedule"
     finished = repository.get_task_report_auto_run(run["run_id"])
     assert finished["status"] == "success"
-    assert set(finished["step_results"]) == {"mine", "sheet", "capture", "zalo"}
+    assert set(finished["step_results"]) == {"mine", "sheet"}
 
 
 def test_admin_can_manage_work_tasks() -> None:

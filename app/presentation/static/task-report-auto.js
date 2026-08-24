@@ -314,26 +314,15 @@
             </div>
           </fieldset>
           <fieldset class="task-auto-section">
-            <legend>Sheet va anh</legend>
+            <legend>Dich nap du lieu</legend>
             <div class="task-auto-form-grid">
               <label class="task-auto-wide">Google Sheet URL/ID<input class="form-control" name="spreadsheet_url" required /></label>
               <label>Ten tab<input class="form-control" name="sheet_name" value="DATA" required /></label>
-              <label>Public web (tùy chọn)<input class="form-control" name="public_url" /></label>
-            </div>
-          </fieldset>
-          <fieldset class="task-auto-section">
-            <legend>Zalo</legend>
-            <div class="task-auto-form-grid">
-              <label>Loai dich<select class="form-control" name="target_type"><option value="group">group</option><option value="person">person</option></select></label>
-              <label>Chat ID (tùy chọn)<input class="form-control" name="chat_id" /></label>
-              <label class="task-auto-wide">Ten dich<input class="form-control" name="chat_name" /></label>
-              <label class="task-auto-wide">Caption<textarea class="form-control" name="caption" rows="2"></textarea></label>
             </div>
           </fieldset>
           <details class="task-auto-advanced">
             <summary>Nang cao</summary>
             <div class="task-auto-form-grid">
-              <label>Wait selector<input class="form-control" name="public_wait_selector" placeholder="#report-root" /></label>
               <label>Retry<input class="form-control" name="retry_limit" type="number" min="0" max="5" value="2" /></label>
               <label class="task-auto-wide">Source config JSON<textarea class="form-control font-mono text-xs" name="source_config_json" rows="7" placeholder='{"parameters":{},"filters":{}}'></textarea></label>
               <label class="checkbox-row task-auto-wide"><input name="is_active" type="checkbox" checked /> Bat task</label>
@@ -370,12 +359,6 @@
     form.elements.namedItem("month_day").value = task?.month_day || 1;
     form.elements.namedItem("spreadsheet_url").value = task?.spreadsheet_url || task?.spreadsheet_id || "";
     form.elements.namedItem("sheet_name").value = task?.sheet_name || "DATA";
-    form.elements.namedItem("public_url").value = task?.public_url || "";
-    form.elements.namedItem("public_wait_selector").value = task?.public_wait_selector || "";
-    form.elements.namedItem("target_type").value = task?.target_type || "group";
-    form.elements.namedItem("chat_id").value = task?.chat_id || "";
-    form.elements.namedItem("chat_name").value = task?.chat_name || "";
-    form.elements.namedItem("caption").value = task?.caption || "";
     form.elements.namedItem("retry_limit").value = task?.retry_limit ?? 2;
     form.elements.namedItem("source_config_json").value = JSON.stringify(task?.source_config || {}, null, 2);
     form.elements.namedItem("is_active").checked = task ? Boolean(task.is_active) : true;
@@ -419,12 +402,12 @@
       month_day: Number(data.month_day || 1),
       spreadsheet_url: data.spreadsheet_url || "",
       sheet_name: data.sheet_name || "DATA",
-      public_url: data.public_url || "",
-      public_wait_selector: data.public_wait_selector || "",
-      target_type: data.target_type || "group",
-      chat_id: data.chat_id || "",
-      chat_name: data.chat_name || "",
-      caption: data.caption || "",
+      public_url: "",
+      public_wait_selector: "",
+      target_type: "group",
+      chat_id: "",
+      chat_name: "",
+      caption: "",
       retry_limit: Number(data.retry_limit || 0),
       is_active: Boolean(form.elements.namedItem("is_active")?.checked),
     };

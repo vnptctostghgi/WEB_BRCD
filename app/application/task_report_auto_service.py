@@ -216,13 +216,8 @@ class TaskReportAutoRunner:
             self._wait_between_steps()
             sheet = self._run_step(run_id, task, "sheet", lambda: self._upload_source_to_sheet(task, source))
             self._wait_between_steps()
-            capture = {"ok": True, "status": "skipped", "message": "Khong cau hinh buoc chup web."}
-            zalo = {"ok": True, "status": "skipped", "message": "Khong cau hinh buoc gui Zalo."}
-            if str(task.get("public_url") or "").strip():
-                capture = self._run_step(run_id, task, "capture", lambda: self._capture_public_web(task, run_id))
-                self._wait_between_steps()
-            if str(task.get("chat_id") or "").strip():
-                zalo = self._run_step(run_id, task, "zalo", lambda: self._send_zalo(task, run, capture))
+            capture = {"ok": True, "status": "separate_schedule", "message": "Buoc chup anh duoc cau hinh tai Lich gui Zalo."}
+            zalo = {"ok": True, "status": "separate_schedule", "message": "Buoc gui tin duoc cau hinh tai Lich gui Zalo."}
             result = {
                 "ok": True,
                 "status": "success",

@@ -542,6 +542,7 @@ class AppRepository:
 
                 CREATE TABLE IF NOT EXISTS zalo_auto_messages (
                     schedule_id TEXT PRIMARY KEY,
+                    linked_task_id TEXT NOT NULL DEFAULT '',
                     name TEXT NOT NULL,
                     page_url TEXT NOT NULL DEFAULT '/',
                     page_label TEXT NOT NULL DEFAULT '',
@@ -829,6 +830,10 @@ class AppRepository:
                 pass
             try:
                 connection.execute("ALTER TABLE onebss_reports ADD COLUMN otp_service_code TEXT NOT NULL DEFAULT 'onebss'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                connection.execute("ALTER TABLE zalo_auto_messages ADD COLUMN linked_task_id TEXT NOT NULL DEFAULT ''")
             except sqlite3.OperationalError:
                 pass
             self._ensure_onebss_report_run_worker_columns(connection)
@@ -2464,11 +2469,12 @@ class AppRepository:
             connection.execute(
                 """
                 INSERT INTO zalo_auto_messages
-                (schedule_id, name, page_url, page_label, schedule_type, time_slots_json, run_time,
+                (schedule_id, linked_task_id, name, page_url, page_label, schedule_type, time_slots_json, run_time,
                  weekday, month_day, target_type, chat_id, chat_name, caption, photo_url,
                  is_active, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(schedule_id) DO UPDATE SET
+                  linked_task_id=excluded.linked_task_id,
                   name=excluded.name,
                   page_url=excluded.page_url,
                   page_label=excluded.page_label,
@@ -2487,6 +2493,7 @@ class AppRepository:
                 """,
                 (
                     schedule_id,
+                    str(payload.get("linked_task_id", "")).strip(),
                     str(payload.get("name", "")).strip(),
                     str(payload.get("page_url", "/")).strip() or "/",
                     str(payload.get("page_label", "")).strip(),
@@ -3261,6 +3268,7 @@ class AppRepository:
             time_slots = []
         return {
             "schedule_id": row.get("schedule_id"),
+            "linked_task_id": row.get("linked_task_id") or "",
             "name": row.get("name") or "",
             "page_url": row.get("page_url") or "/",
             "page_label": row.get("page_label") or "",

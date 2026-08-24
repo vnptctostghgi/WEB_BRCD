@@ -230,6 +230,12 @@ class ZaloAutoMessageScheduler:
             run_key = self._due_run_key(schedule, current)
             if not run_key:
                 continue
+            linked_task_id = str(schedule.get("linked_task_id") or "").strip()
+            if linked_task_id:
+                linked_task = self.repository.get_task_report_auto_task(linked_task_id)
+                last_success_key = str((linked_task or {}).get("last_success_key") or "")
+                if not linked_task or not last_success_key.startswith(current.date().isoformat()):
+                    continue
             result = send_zalo_auto_message(self.repository, self.settings, schedule)
             self.repository.mark_zalo_auto_message_run(
                 str(schedule.get("schedule_id") or ""),
@@ -254,7 +260,7 @@ class ZaloAutoMessageScheduler:
                 run_key = f"{current.date().isoformat()}:{current_time}"
         elif schedule_type == "daily":
             if current_time == str(schedule.get("run_time") or "07:00")[:5]:
-                run_key = current.date().isoformat()
+                run_key = f"{current.date().isoformat()}:{current_time}"
         elif schedule_type == "weekly":
             if current_time == str(schedule.get("run_time") or "07:00")[:5] and WorkTaskScheduler._weekday_matches(schedule.get("weekday"), current.weekday()):
                 iso_year, iso_week, _ = current.isocalendar()
@@ -498,7 +504,7 @@ class TaskReportAutoScheduler:
                 run_key = f"{current.date().isoformat()}:{current_time}"
         elif schedule_type == "daily":
             if current_time == configured_time:
-                run_key = current.date().isoformat()
+                run_key = f"{current.date().isoformat()}:{configured_time}"
         elif schedule_type == "weekly":
             if current_time == configured_time and WorkTaskScheduler._weekday_matches(task.get("weekday"), current.weekday()):
                 iso_year, iso_week, _ = current.isocalendar()

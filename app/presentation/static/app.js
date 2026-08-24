@@ -5855,6 +5855,7 @@ function openDataMiningSchedule(scheduleId = "") {
 }
 
 async function loadZaloAutoMessages({ force = false } = {}) {
+  ensureZaloLinkedTaskField();
   const table = $("#zalo-auto-messages-table");
   if (!table) return;
   if (!force && isDataFresh("zaloAutoMessages")) {
@@ -5971,7 +5972,7 @@ function renderZaloAutoMessageRow(schedule) {
   const lastSent = schedule.last_sent_at ? new Date(schedule.last_sent_at).toLocaleString("vi-VN") : "";
   return `
     <tr>
-      <td><strong>${escapeHtml(schedule.name || schedule.schedule_id)}</strong><small class="cell-note">${escapeHtml(schedule.page_label || schedule.page_url || "/")}</small></td>
+      <td><strong>${escapeHtml(schedule.name || schedule.schedule_id)}</strong><small class="cell-note">${escapeHtml(schedule.page_label || schedule.page_url || "/")}</small>${schedule.linked_task_id ? `<small class="cell-note">Báo cáo: ${escapeHtml(schedule.linked_task_id)}</small>` : ""}</td>
       <td>${escapeHtml(zaloScheduleText(schedule))}</td>
       <td><code>${escapeHtml(targetText)}</code></td>
       <td>${escapeHtml(imageText)}${schedule.latest_capture?.created_at ? `<small class="cell-note">${escapeHtml(new Date(schedule.latest_capture.created_at).toLocaleString("vi-VN"))}</small>` : ""}</td>
@@ -5983,6 +5984,8 @@ function renderZaloAutoMessageRow(schedule) {
 function openZaloAutoMessage(scheduleId = "") {
   const schedule = zaloAutoMessages.find((item) => item.schedule_id === scheduleId);
   const form = $("#zalo-auto-message-form");
+  ensureZaloLinkedTaskField();
+  fillZaloLinkedTaskOptions(schedule?.linked_task_id || "");
   fillZaloChatTargetOptions();
   if (!zaloMessageLogs.length) loadZaloMessageLogs();
   form.elements.namedItem("schedule_id").value = schedule?.schedule_id || "";
@@ -6027,6 +6030,7 @@ async function saveZaloAutoMessage(event) {
   try {
     const response = await api("/api/admin/zalo/auto-messages", { method: "POST", body: JSON.stringify({
       schedule_id: data.schedule_id || "",
+      linked_task_id: data.linked_task_id || "",
       name: data.name || "",
       page_url: data.page_url || "/",
       page_label: data.page_label || "",
@@ -6582,6 +6586,30 @@ function oneBssParameterVariables(parameters) {
     const text = String(key || "").trim();
     return text && !text.startsWith("$");
   });
+}
+
+function ensureZaloLinkedTaskField() {
+  const form = $("#zalo-auto-message-form");
+  if (!form || form.elements.namedItem("linked_task_id")) return;
+  const label = document.createElement("label");
+  label.innerHTML = 'Lịch báo cáo liên kết<select class="form-control" name="linked_task_id"><option value="">Không liên kết</option></select>';
+  form.elements.namedItem("name")?.closest("label")?.insertAdjacentElement("afterend", label);
+}
+
+async function fillZaloLinkedTaskOptions(selected = "") {
+  ensureZaloLinkedTaskField();
+  const select = $("#zalo-auto-message-form [name='linked_task_id']");
+  if (!select) return;
+  try {
+    const data = await api("/api/admin/task-report-auto/tasks");
+    const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+    select.innerHTML = '<option value="">Không liên kết</option>' + tasks.map((task) =>
+      `<option value="${escapeHtml(task.task_id || "")}">${escapeHtml(`${task.task_id || ""} - ${task.name || ""}`)}</option>`
+    ).join("");
+    select.value = selected || "";
+  } catch (error) {
+    select.innerHTML = `<option value="${escapeHtml(selected)}">${escapeHtml(selected || "Không tải được lịch báo cáo")}</option>`;
+  }
 }
 
 function oneBssIsRegionParameterKey(key) {

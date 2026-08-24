@@ -197,6 +197,7 @@ create table if not exists public.work_tasks (
 
 create table if not exists public.zalo_auto_messages (
   schedule_id text primary key,
+  linked_task_id text not null default '',
   name text not null,
   page_url text not null default '/',
   page_label text not null default '',
@@ -218,6 +219,9 @@ create table if not exists public.zalo_auto_messages (
   created_at timestamptz not null,
   updated_at timestamptz not null
 );
+
+alter table public.zalo_auto_messages
+add column if not exists linked_task_id text not null default '';
 
 create table if not exists public.zalo_message_captures (
   capture_id text primary key,
