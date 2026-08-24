@@ -318,14 +318,14 @@
             <div class="task-auto-form-grid">
               <label class="task-auto-wide">Google Sheet URL/ID<input class="form-control" name="spreadsheet_url" required /></label>
               <label>Ten tab<input class="form-control" name="sheet_name" value="DATA" required /></label>
-              <label>Public web<input class="form-control" name="public_url" required /></label>
+              <label>Public web (tùy chọn)<input class="form-control" name="public_url" /></label>
             </div>
           </fieldset>
           <fieldset class="task-auto-section">
             <legend>Zalo</legend>
             <div class="task-auto-form-grid">
               <label>Loai dich<select class="form-control" name="target_type"><option value="group">group</option><option value="person">person</option></select></label>
-              <label>Chat ID<input class="form-control" name="chat_id" required /></label>
+              <label>Chat ID (tùy chọn)<input class="form-control" name="chat_id" /></label>
               <label class="task-auto-wide">Ten dich<input class="form-control" name="chat_name" /></label>
               <label class="task-auto-wide">Caption<textarea class="form-control" name="caption" rows="2"></textarea></label>
             </div>

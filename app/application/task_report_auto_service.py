@@ -21,7 +21,7 @@ from app.application.google_drive_service import (
     google_drive_oauth_credentials,
     load_service_account_info,
 )
-from app.application.onebss_data_mining_service import safe_filename_part
+from app.application.onebss_data_mining_service import resolve_dynamic_parameters, safe_filename_part
 from app.application.zalo_auto_message_service import (
     install_playwright_chromium,
     playwright_needs_browser_install,
@@ -76,10 +76,10 @@ def normalize_task_report_auto_payload(payload: Any, task_id: str) -> dict[str, 
         raise ValueError("Chua nhap link/ID Google Sheet dich.")
     if not str(data.get("sheet_name") or "").strip():
         raise ValueError("Chua nhap ten sheet/tab dich.")
-    if not str(data.get("public_url") or "").strip():
-        raise ValueError("Chua nhap link public web de chup anh.")
-    if not str(data.get("chat_id") or "").strip():
-        raise ValueError("Chua nhap chat_id Zalo.")
+    public_url = str(data.get("public_url") or "").strip()
+    chat_id = str(data.get("chat_id") or "").strip()
+    if chat_id and not public_url:
+        raise ValueError("Can nhap link public web de chup anh truoc khi gui Zalo.")
     retry_limit = int(data.get("retry_limit") or 0)
     return {
         "task_id": task_id,
@@ -95,10 +95,10 @@ def normalize_task_report_auto_payload(payload: Any, task_id: str) -> dict[str, 
         "spreadsheet_id": spreadsheet_id,
         "spreadsheet_url": str(data.get("spreadsheet_url") or "").strip(),
         "sheet_name": str(data.get("sheet_name") or "DATA").strip() or "DATA",
-        "public_url": str(data.get("public_url") or "").strip(),
+        "public_url": public_url,
         "public_wait_selector": str(data.get("public_wait_selector") or "").strip(),
         "target_type": str(data.get("target_type") or "group").strip() or "group",
-        "chat_id": str(data.get("chat_id") or "").strip(),
+        "chat_id": chat_id,
         "chat_name": str(data.get("chat_name") or "").strip(),
         "caption": str(data.get("caption") or "").strip(),
         "retry_limit": min(max(retry_limit, 0), 5),
@@ -216,9 +216,13 @@ class TaskReportAutoRunner:
             self._wait_between_steps()
             sheet = self._run_step(run_id, task, "sheet", lambda: self._upload_source_to_sheet(task, source))
             self._wait_between_steps()
-            capture = self._run_step(run_id, task, "capture", lambda: self._capture_public_web(task, run_id))
-            self._wait_between_steps()
-            zalo = self._run_step(run_id, task, "zalo", lambda: self._send_zalo(task, run, capture))
+            capture = {"ok": True, "status": "skipped", "message": "Khong cau hinh buoc chup web."}
+            zalo = {"ok": True, "status": "skipped", "message": "Khong cau hinh buoc gui Zalo."}
+            if str(task.get("public_url") or "").strip():
+                capture = self._run_step(run_id, task, "capture", lambda: self._capture_public_web(task, run_id))
+                self._wait_between_steps()
+            if str(task.get("chat_id") or "").strip():
+                zalo = self._run_step(run_id, task, "zalo", lambda: self._send_zalo(task, run, capture))
             result = {
                 "ok": True,
                 "status": "success",
@@ -407,6 +411,7 @@ class TaskReportAutoRunner:
         filters = config.get("filters") if isinstance(config.get("filters"), dict) else {}
         if not filters and isinstance(config.get("parameters"), dict):
             filters = config["parameters"]
+        filters = resolve_dynamic_parameters(filters)
         service = DatabaseService(InternalApiClient.from_repository(self.settings, self.repository), self.repository)
         if not bool(config.get("force_worker")):
             result = service.export_dynamic_report(
@@ -668,7 +673,11 @@ def sheet_cell_value(value: Any) -> Any:
 
 
 def google_sheets_credentials(settings: Settings, repository: Any) -> Any:
-    oauth_credentials = google_drive_oauth_credentials(settings, repository)
+    try:
+        oauth_credentials = google_drive_oauth_credentials(settings, repository)
+    except GoogleDriveConfigurationError as error:
+        logger.warning("Google Drive OAuth is unavailable; falling back to the configured service account: %s", error)
+        oauth_credentials = None
     if oauth_credentials:
         credentials, _ = oauth_credentials
         try:
