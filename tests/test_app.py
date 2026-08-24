@@ -2532,6 +2532,9 @@ def test_admin_can_manage_task_report_auto_and_queue_run() -> None:
         page = client.get("/taskreportauto")
         assert page.status_code == 200
         assert 'id="view-task-report-auto"' in page.text
+        assert 'id="task-report-auto-tasks-table"' in page.text
+        assert 'id="zalo-auto-messages-table"' in page.text
+        assert "Liên kết lịch báo cáo là tùy chọn" in page.text
         app_js = client.get("/static/app.js?v=227").text
         assert "/static/task-report-auto.js?v=2" in app_js
         task_auto_js = client.get("/static/task-report-auto.js?v=2")

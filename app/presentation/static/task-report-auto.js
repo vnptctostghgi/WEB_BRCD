@@ -43,7 +43,7 @@
       schedulePoll();
       return;
     }
-    setTableLoading("#task-report-auto-tasks-table", 7, "Dang tai Task report auto...");
+    setTableLoading("#task-report-auto-tasks-table", 6, "Dang tai Task report auto...");
     setTableLoading("#task-report-auto-runs-table", 5, "Dang tai lich su chay...");
     try {
       const [taskData, runData] = await Promise.all([
@@ -58,7 +58,7 @@
       schedulePoll();
       loadSourceReports({ force }).catch(() => {});
     } catch (error) {
-      taskTable.innerHTML = emptyRow(7, "Khong tai duoc Task report auto", error.message);
+      taskTable.innerHTML = emptyRow(6, "Khong tai duoc Task report auto", error.message);
       runTable.innerHTML = emptyRow(5, "Khong tai duoc lich su chay", error.message);
     }
   }
@@ -68,7 +68,7 @@
     if (!table) return;
     table.innerHTML = tasks.length
       ? tasks.map(renderTaskRow).join("")
-      : emptyRow(7, "Chua co Task report auto", "Bam Them task de tao lich moi.");
+      : emptyRow(6, "Chua co Task report auto", "Bam Them task de tao lich moi.");
     document.querySelectorAll("[data-edit-task-report-auto]").forEach((button) => {
       button.addEventListener("click", () => openTask(button.dataset.editTaskReportAuto));
     });
@@ -97,7 +97,6 @@
         <td><code>${escapeHtml(source)}</code><small class="cell-note">${escapeHtml(configSummary(task.source_config))}</small></td>
         <td>${escapeHtml(scheduleText(task))}<small class="cell-note">${task.is_active ? "Dang bat" : "Tam tat"}</small></td>
         <td><code>${escapeHtml(task.sheet_name || "DATA")}</code><small class="cell-note">${escapeHtml(sheet)}</small></td>
-        <td><code>${escapeHtml(task.chat_id || "")}</code><small class="cell-note">${escapeHtml(task.chat_name || task.target_type || "")}</small></td>
         <td>${escapeHtml(last)}${lastStatus}${lastError}</td>
       </tr>`;
   }

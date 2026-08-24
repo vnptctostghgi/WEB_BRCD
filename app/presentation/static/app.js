@@ -5418,7 +5418,11 @@ async function loadFtpMining(options = {}) {
 async function loadTaskReportAuto(options = {}) {
   await ensureTaskReportAutoScriptLoaded();
   if (!window.VNPTTaskReportAuto?.loadTaskReportAuto) throw new Error("Module Task report auto chua san sang.");
-  return window.VNPTTaskReportAuto.loadTaskReportAuto(options);
+  const [result] = await Promise.all([
+    window.VNPTTaskReportAuto.loadTaskReportAuto(options),
+    loadZaloAutoMessages(options),
+  ]);
+  return result;
 }
 
 async function loadConnections({ force = false } = {}) {

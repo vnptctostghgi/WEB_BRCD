@@ -8232,7 +8232,7 @@ async def zalo_webhook(request: Request) -> dict:
 
 @router.get("/api/admin/zalo/message-logs")
 def list_zalo_message_logs(request: Request, limit: int = 100) -> dict:
-    require_feature(request, "quantriketnoi")
+    require_any_feature(request, "quantriketnoi", "taskreportauto")
     safe_limit = min(max(int(limit or 100), 1), 500)
     rows = build_app_repository().list_audit_logs(limit=min(max(safe_limit * 4, 100), 500))
     logs = []
@@ -8273,7 +8273,7 @@ def send_zalo_test_message(request: Request, payload: ZaloSendMessagePayload) ->
 
 @router.get("/api/admin/zalo/auto-messages")
 def list_zalo_auto_messages(request: Request) -> dict:
-    require_feature(request, "quantriketnoi")
+    require_any_feature(request, "quantriketnoi", "taskreportauto")
     repository = build_app_repository()
     try:
         schedules = repository.list_zalo_auto_messages()
@@ -8284,7 +8284,7 @@ def list_zalo_auto_messages(request: Request) -> dict:
 
 @router.post("/api/admin/zalo/auto-messages")
 def save_zalo_auto_message(request: Request, payload: ZaloAutoMessagePayload) -> dict:
-    actor = require_feature(request, "quantriketnoi")
+    actor = require_any_feature(request, "quantriketnoi", "taskreportauto")
     repository = build_app_repository()
     try:
         schedule_id = payload.schedule_id.strip() or repository.generate_zalo_auto_message_id()
@@ -8299,7 +8299,7 @@ def save_zalo_auto_message(request: Request, payload: ZaloAutoMessagePayload) ->
 
 @router.delete("/api/admin/zalo/auto-messages/{schedule_id}")
 def delete_zalo_auto_message(request: Request, schedule_id: str) -> dict:
-    actor = require_feature(request, "quantriketnoi")
+    actor = require_any_feature(request, "quantriketnoi", "taskreportauto")
     repository = build_app_repository()
     try:
         if not repository.get_zalo_auto_message(schedule_id):
@@ -8313,7 +8313,7 @@ def delete_zalo_auto_message(request: Request, schedule_id: str) -> dict:
 
 @router.post("/api/admin/zalo/auto-messages/{schedule_id}/captures")
 def upload_zalo_auto_message_capture(request: Request, schedule_id: str, payload: ZaloCapturePayload) -> dict:
-    actor = require_feature(request, "quantriketnoi")
+    actor = require_any_feature(request, "quantriketnoi", "taskreportauto")
     repository = build_app_repository()
     try:
         schedule = repository.get_zalo_auto_message(schedule_id)
@@ -8352,7 +8352,7 @@ def capture_dashboard_page(request: Request, payload: PageCapturePayload) -> dic
 
 @router.post("/api/admin/zalo/auto-messages/{schedule_id}/send-now")
 def send_zalo_auto_message_now(request: Request, schedule_id: str) -> dict:
-    actor = require_feature(request, "quantriketnoi")
+    actor = require_any_feature(request, "quantriketnoi", "taskreportauto")
     repository = build_app_repository()
     try:
         schedule = repository.get_zalo_auto_message(schedule_id)
