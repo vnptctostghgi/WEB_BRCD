@@ -7741,6 +7741,41 @@ body.view-loading::before {
   content: "";
 }
 
+.dashboard-total-column-map {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .65rem;
+}
+
+.dashboard-total-column-map label {
+  display: grid;
+  align-content: start;
+  gap: .35rem;
+}
+
+.dashboard-total-column-map label > small {
+  color: var(--app-muted);
+  font-size: .68rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.dashboard-config-note {
+  display: block;
+  border-left: 3px solid #38a4df;
+  border-radius: 0 8px 8px 0;
+  background: rgba(225, 243, 255, .72);
+  color: #345b7c !important;
+  line-height: 1.45;
+  padding: .5rem .65rem;
+}
+
+@media (max-width: 900px) {
+  .dashboard-total-column-map {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 760px) {
   #view-dashboard .dashboard-runtime-home {
     padding: .25rem;

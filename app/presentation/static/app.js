@@ -3855,12 +3855,21 @@ function renderDashboardWidgetAdvancedConfig(widget) {
       <label>Ghi chú thẻ<textarea class="form-control" name="text_content" rows="2" placeholder="Dòng ghi chú dưới số liệu">${escapeHtml(widget.text_content || "")}</textarea></label>
     </div>
     <div class="dashboard-widget-config ${type === "total_data_card" ? "active" : ""}" data-config-for="total_data_card">
-      <div class="grid gap-2 md:grid-cols-3">
-        <label>Cột TH<input class="form-control" name="actual_column" value="${dashboardConfigValue(widget, "actual_column", "TH")}" placeholder="TH" /></label>
-        <label>Cột KH<input class="form-control" name="target_column" value="${dashboardConfigValue(widget, "target_column", "KH")}" placeholder="KH" /></label>
-        <label>Cột TLHT<input class="form-control" name="completion_column" value="${dashboardConfigValue(widget, "completion_column", "Tỷ lệ hoàn thành")}" placeholder="Tỷ lệ hoàn thành hoặc TLHT" /></label>
+      <div class="dashboard-total-column-map">
+        <label>Cột thực hiện (TH)
+          <input class="form-control" name="actual_column" value="${dashboardConfigValue(widget, "actual_column")}" placeholder="Để trống để tự nhận diện" />
+          <small>Tên cột SQL chứa số đã thực hiện.</small>
+        </label>
+        <label>Cột kế hoạch (KH)
+          <input class="form-control" name="target_column" value="${dashboardConfigValue(widget, "target_column")}" placeholder="Để trống để tự nhận diện" />
+          <small>Tên cột SQL chứa chỉ tiêu kế hoạch.</small>
+        </label>
+        <label>Cột tỷ lệ hoàn thành
+          <input class="form-control" name="completion_column" value="${dashboardConfigValue(widget, "completion_column")}" placeholder="Không bắt buộc" />
+          <small>Để trống, hệ thống tự tính TH ÷ KH × 100%.</small>
+        </label>
       </div>
-      <small>SQL nên trả 1 dòng gồm TH, KH và Tỷ lệ hoàn thành. Nếu thiếu TLHT, hệ thống tự tính từ TH/KH.</small>
+      <small class="dashboard-config-note">Chỉ nhập khi hệ thống nhận sai cột. Thông thường bạn có thể để trống cả 3 ô.</small>
     </div>
     <div class="dashboard-widget-config ${type === "google_sheet_embed" ? "active" : ""}" data-config-for="google_sheet_embed">
       <label>Link Google Sheet xuất bản lên web<input class="form-control" name="embed_url" value="${dashboardConfigValue(widget, "embed_url")}" placeholder="https://docs.google.com/spreadsheets/d/e/.../pubhtml" /></label>
@@ -4335,7 +4344,7 @@ function renderRuntimeTotalDataCardWidget(widget, result) {
     targetColumn ? "" : "KH",
     completionColumn || Number.isFinite(completionValue) ? "" : "TLHT",
   ].filter(Boolean);
-  const note = missingColumns.length ? `Thiếu cột ${missingColumns.join(", ")}` : `${actualColumn || "TH"}/${targetColumn || "KH"} · ${completionColumn || "Tự tính TLHT"}`;
+  const warning = missingColumns.length ? `<small class="runtime-total-data-card-note">Thiếu dữ liệu ${escapeHtml(missingColumns.join(", "))}</small>` : "";
   return `
     <article class="runtime-widget-card runtime-total-data-card">
       <div class="runtime-total-data-card-main">
@@ -4345,7 +4354,7 @@ function renderRuntimeTotalDataCardWidget(widget, result) {
           <i>/</i>
           <strong>${formatDashboardNumber(targetValue)}</strong>
         </div>
-        <small class="runtime-total-data-card-note">${escapeHtml(note)}</small>
+        ${warning}
       </div>
       <div class="runtime-total-data-card-rate">
         <span>TLHT</span>
