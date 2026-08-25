@@ -4341,7 +4341,6 @@ function renderRuntimeTotalDataCardWidget(widget, result) {
     completionValue = actualValue / targetValue * 100;
   }
   const completionTone = !Number.isFinite(completionValue) ? "neutral" : completionValue >= 100 ? "success" : completionValue >= 80 ? "good" : completionValue >= 50 ? "warning" : "danger";
-  const completionStatus = !Number.isFinite(completionValue) ? "Chưa xác định" : completionValue >= 100 ? "Hoàn thành" : completionValue >= 80 ? "Gần đạt" : completionValue >= 50 ? "Cần thúc đẩy" : "Cần tập trung";
   const progressWidth = Number.isFinite(completionValue) ? Math.min(Math.max(completionValue, 0), 100) : 0;
   const missingColumns = [
     actualColumn ? "" : "TH",
@@ -4362,7 +4361,6 @@ function renderRuntimeTotalDataCardWidget(widget, result) {
       </div>
       <div class="runtime-total-data-card-rate">
         <span>TLHT</span>
-        <small>${completionStatus}</small>
         <strong>${formatDashboardPercent(completionValue)}</strong>
       </div>
       <div class="runtime-total-progress" aria-label="Tiến độ ${formatDashboardPercent(completionValue)}">

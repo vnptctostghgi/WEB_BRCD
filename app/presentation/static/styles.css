@@ -7829,15 +7829,6 @@ body.view-loading::before {
   color: var(--kpi-accent, #1685df) !important;
 }
 
-#view-dashboard .runtime-total-data-card-rate small {
-  color: var(--kpi-accent, #1685df) !important;
-  font-size: .64rem;
-  font-weight: 900;
-  letter-spacing: .055em;
-  line-height: 1.1;
-  text-transform: uppercase;
-}
-
 #view-dashboard .runtime-total-data-card-value {
   flex-wrap: nowrap;
   white-space: nowrap;

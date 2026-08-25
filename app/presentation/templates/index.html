@@ -10,10 +10,10 @@
     {% if shell_only %}
     <link rel="preload" href="/static/shell.js?v=41" as="script" />
     {% else %}
-    <link rel="preload" href="/static/app.js?v=229" as="script" />
+    <link rel="preload" href="/static/app.js?v=230" as="script" />
     {% endif %}
     <link rel="stylesheet" href="/static/tailwind-built.css?v=1" />
-    <link rel="stylesheet" href="/static/styles.css?v=140" />
+    <link rel="stylesheet" href="/static/styles.css?v=141" />
   </head>
   <body class="app-booting min-h-screen bg-sky-50 text-slate-900 antialiased" data-role="{{ user.role }}" data-nav-cache-key="{{ user.id }}:{{ user.role }}:{{ user.permissions|length }}" data-must-change="{{ user.must_change_password }}" data-billing-blocked="{{ user.billing_access_blocked }}" data-can-manage-vault="{{ can_use('themvasuataikhoan') }}" data-can-reveal-vault="{{ can_use('xemmatkhaudaluu') }}">
     <svg class="icon-sprite" aria-hidden="true">
@@ -1036,7 +1036,7 @@
     {% if shell_only %}
     <script defer src="/static/shell.js?v=41"></script>
     {% else %}
-    <script defer src="/static/app.js?v=229"></script>
+    <script defer src="/static/app.js?v=230"></script>
     {% endif %}
   </body>
 </html>
