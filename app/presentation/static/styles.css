@@ -7776,6 +7776,102 @@ body.view-loading::before {
   }
 }
 
+#view-dashboard .runtime-viewer-spacer {
+  width: 100%;
+  min-height: 1px;
+}
+
+#view-dashboard .runtime-total-data-card {
+  grid-template-rows: 1fr auto;
+  border-color: var(--kpi-border, #bdd7ef) !important;
+  background: linear-gradient(145deg, #ffffff 0%, var(--kpi-soft, #f4f9ff) 100%) !important;
+}
+
+#view-dashboard .runtime-total-data-card.tone-success {
+  --kpi-accent: #059669;
+  --kpi-border: #a7e2cf;
+  --kpi-soft: #ecfdf5;
+}
+
+#view-dashboard .runtime-total-data-card.tone-good {
+  --kpi-accent: #078a80;
+  --kpi-border: #a9ddd8;
+  --kpi-soft: #edfcfa;
+}
+
+#view-dashboard .runtime-total-data-card.tone-warning {
+  --kpi-accent: #d97706;
+  --kpi-border: #f3d29d;
+  --kpi-soft: #fff9eb;
+}
+
+#view-dashboard .runtime-total-data-card.tone-danger {
+  --kpi-accent: #dc4c3f;
+  --kpi-border: #f1bdb7;
+  --kpi-soft: #fff4f2;
+}
+
+#view-dashboard .runtime-total-data-card.tone-neutral {
+  --kpi-accent: #64748b;
+}
+
+#view-dashboard .runtime-total-data-card::after {
+  background: var(--kpi-accent, #1685df);
+}
+
+#view-dashboard .runtime-total-data-card-rate {
+  border-color: color-mix(in srgb, var(--kpi-accent, #1685df) 28%, white);
+  background: color-mix(in srgb, var(--kpi-accent, #1685df) 9%, white);
+}
+
+#view-dashboard .runtime-total-data-card-rate span,
+#view-dashboard .runtime-total-data-card-rate strong {
+  color: var(--kpi-accent, #1685df) !important;
+}
+
+#view-dashboard .runtime-total-data-card-rate small {
+  color: var(--kpi-accent, #1685df) !important;
+  font-size: .64rem;
+  font-weight: 900;
+  letter-spacing: .055em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+#view-dashboard .runtime-total-data-card-value {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+#view-dashboard .runtime-total-data-card-value strong {
+  font-size: clamp(1.35rem, 1.65vw, 1.8rem);
+  overflow-wrap: normal;
+}
+
+#view-dashboard .runtime-total-progress {
+  position: absolute;
+  right: 1rem;
+  bottom: .72rem;
+  left: 1rem;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, .2);
+}
+
+#view-dashboard .runtime-total-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--kpi-accent, #1685df);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--kpi-accent, #1685df) 38%, transparent);
+}
+
+#view-dashboard .runtime-total-data-card-main,
+#view-dashboard .runtime-total-data-card-rate {
+  margin-bottom: .45rem;
+}
+
 @media (max-width: 760px) {
   #view-dashboard .dashboard-runtime-home {
     padding: .25rem;

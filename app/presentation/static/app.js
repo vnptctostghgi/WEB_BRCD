@@ -1466,7 +1466,7 @@ function renderDashboardViewer() {
       const position = cellIndex + 1;
       const widget = widgetsByPosition.get(position);
       const data = dataByWidget.get(`${row.row_id}:${position}`);
-      return `<div class="dashboard-layout-cell" style="${dashboardCellStyle(row.layout_type, cellIndex)}">${renderRuntimeWidget(widget, data, `dashboard-viewer-${rowIndex}-${position}`, { chartHeight: rowChartHeight })}</div>`;
+      return `<div class="dashboard-layout-cell" style="${dashboardCellStyle(row.layout_type, cellIndex)}">${renderRuntimeWidget(widget, data, `dashboard-viewer-${rowIndex}-${position}`, { chartHeight: rowChartHeight, hideEmpty: true })}</div>`;
     }).join("");
     return `<section class="${dashboardGridClass(row.layout_type)}" style="${dashboardGridStyle(row.layout_type)}">${cells}</section>`;
   }).join("") : `
@@ -4161,6 +4161,7 @@ function renderDashboardPreview() {
 
 function renderRuntimeWidget(widget, widgetData, elementId, options = {}) {
   if (!widget) {
+    if (options.hideEmpty) return `<div class="runtime-viewer-spacer" aria-hidden="true"></div>`;
     return `<article class="runtime-widget-card"><div class="runtime-widget-empty">Ô trống</div></article>`;
   }
   const title = widget.title || widget.sql_code || "Tiêu đề";
@@ -4339,6 +4340,9 @@ function renderRuntimeTotalDataCardWidget(widget, result) {
   if (!Number.isFinite(completionValue) && Number.isFinite(actualValue) && Number.isFinite(targetValue) && targetValue !== 0) {
     completionValue = actualValue / targetValue * 100;
   }
+  const completionTone = !Number.isFinite(completionValue) ? "neutral" : completionValue >= 100 ? "success" : completionValue >= 80 ? "good" : completionValue >= 50 ? "warning" : "danger";
+  const completionStatus = !Number.isFinite(completionValue) ? "Chưa xác định" : completionValue >= 100 ? "Hoàn thành" : completionValue >= 80 ? "Gần đạt" : completionValue >= 50 ? "Cần thúc đẩy" : "Cần tập trung";
+  const progressWidth = Number.isFinite(completionValue) ? Math.min(Math.max(completionValue, 0), 100) : 0;
   const missingColumns = [
     actualColumn ? "" : "TH",
     targetColumn ? "" : "KH",
@@ -4346,7 +4350,7 @@ function renderRuntimeTotalDataCardWidget(widget, result) {
   ].filter(Boolean);
   const warning = missingColumns.length ? `<small class="runtime-total-data-card-note">Thiếu dữ liệu ${escapeHtml(missingColumns.join(", "))}</small>` : "";
   return `
-    <article class="runtime-widget-card runtime-total-data-card">
+    <article class="runtime-widget-card runtime-total-data-card tone-${completionTone}">
       <div class="runtime-total-data-card-main">
         <span class="runtime-total-data-card-label">${escapeHtml(widget.title || widget.sql_code || "Thẻ dữ liệu tổng")}</span>
         <div class="runtime-total-data-card-value">
@@ -4358,7 +4362,11 @@ function renderRuntimeTotalDataCardWidget(widget, result) {
       </div>
       <div class="runtime-total-data-card-rate">
         <span>TLHT</span>
+        <small>${completionStatus}</small>
         <strong>${formatDashboardPercent(completionValue)}</strong>
+      </div>
+      <div class="runtime-total-progress" aria-label="Tiến độ ${formatDashboardPercent(completionValue)}">
+        <span style="width:${progressWidth.toFixed(2)}%"></span>
       </div>
     </article>
   `;
