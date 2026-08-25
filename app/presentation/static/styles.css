@@ -7523,3 +7523,254 @@ body.view-loading::before {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Dashboard viewer: keep the published view compact and presentation-ready. */
+#view-dashboard .dashboard-runtime-home {
+  padding: .75rem;
+}
+
+#view-dashboard #dashboard-designed-section {
+  overflow: hidden;
+  border: 1px solid #c8def4 !important;
+  border-radius: 20px;
+  background: linear-gradient(145deg, #ffffff 0%, #f7fbff 100%) !important;
+  padding: 1.15rem 1.25rem 1.35rem;
+  box-shadow: 0 18px 48px rgba(31, 92, 151, .1) !important;
+}
+
+#view-dashboard #dashboard-designed-section > .section-heading {
+  align-items: center;
+  border-bottom: 1px solid #d9e8f7;
+  margin: -.2rem 0 0;
+  padding: .25rem 0 1rem;
+}
+
+#view-dashboard #dashboard-viewer-title {
+  color: #102a43 !important;
+  font-size: clamp(1.1rem, 1.5vw, 1.45rem);
+  letter-spacing: -.02em;
+}
+
+#view-dashboard #dashboard-viewer-loaded-at {
+  margin-top: .3rem;
+  color: #64748b !important;
+  font-size: .78rem;
+}
+
+#view-dashboard #refresh-dashboard-viewer-tab {
+  min-height: 40px;
+  border-radius: 11px;
+  background: #f7fbff !important;
+  padding-inline: .9rem;
+}
+
+#view-dashboard .dashboard-runtime-tabs {
+  gap: .25rem;
+  margin-top: 1rem;
+  border: 0 !important;
+  border-bottom: 1px solid #cfe1f3 !important;
+  border-radius: 0;
+  background: transparent !important;
+  padding: 0;
+}
+
+#view-dashboard .runtime-tab {
+  min-height: 42px;
+  border: 0 !important;
+  border-bottom: 3px solid transparent !important;
+  border-radius: 0;
+  font-size: .9rem;
+  padding: .55rem .9rem;
+}
+
+#view-dashboard .runtime-tab.active {
+  border-bottom-color: #1677d2 !important;
+  color: #0b63b6 !important;
+}
+
+#view-dashboard .dashboard-runtime-view {
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+#view-dashboard .runtime-widget-card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-color: #c8def4 !important;
+  border-radius: 16px;
+  background: linear-gradient(155deg, #ffffff 0%, #f8fbff 100%) !important;
+  box-shadow: 0 8px 24px rgba(31, 92, 151, .08) !important;
+  transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease;
+}
+
+#view-dashboard .runtime-widget-card::before {
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  right: 0;
+  width: 7rem;
+  height: 7rem;
+  border-radius: 0 0 0 100%;
+  background: radial-gradient(circle at top right, rgba(37, 145, 235, .11), transparent 68%);
+  content: "";
+  pointer-events: none;
+}
+
+@media (hover: hover) {
+  #view-dashboard .runtime-widget-card:hover {
+    border-color: #8ebce7 !important;
+    box-shadow: 0 14px 34px rgba(31, 92, 151, .14) !important;
+    transform: translateY(-2px);
+  }
+}
+
+#view-dashboard .runtime-widget-card h3 {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: .8rem;
+  color: #15324d !important;
+  font-size: clamp(.9rem, 1.2vw, 1.05rem);
+  line-height: 1.3;
+}
+
+#view-dashboard .runtime-widget-card h3::before {
+  width: .32rem;
+  height: 1.1rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #1685df, #25b6b2);
+  content: "";
+}
+
+#view-dashboard .runtime-total-data-card {
+  min-height: 138px;
+  padding: 1rem 1.05rem;
+}
+
+#view-dashboard .runtime-total-data-card::after,
+#view-dashboard .runtime-data-card::after,
+#view-dashboard .runtime-widget-card:has(.metric-preview)::after {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  border-radius: 16px 0 0 16px;
+  background: linear-gradient(180deg, #1889e3, #2bc4b6);
+  content: "";
+}
+
+#view-dashboard .runtime-total-data-card-label,
+#view-dashboard .metric-preview span,
+#view-dashboard .runtime-data-card span {
+  color: #3c6285 !important;
+  font-size: clamp(.7rem, .85vw, .8rem);
+  letter-spacing: .055em;
+}
+
+#view-dashboard .runtime-total-data-card-value strong {
+  font-size: clamp(1.65rem, 2.2vw, 2.15rem);
+}
+
+#view-dashboard .runtime-total-data-card-rate {
+  border-color: #b8ddf2;
+  background: linear-gradient(145deg, #e9f7ff, #e7fbf8);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9);
+}
+
+#view-dashboard .runtime-total-data-card-rate strong {
+  color: #087f72 !important;
+  font-size: clamp(1.45rem, 2vw, 1.9rem);
+}
+
+#view-dashboard .metric-preview {
+  min-height: 112px;
+  justify-items: start;
+  padding: .25rem .45rem;
+  text-align: left;
+}
+
+#view-dashboard .metric-preview strong {
+  color: #102a43 !important;
+  font-size: clamp(1.8rem, 3vw, 2.65rem);
+}
+
+#view-dashboard .runtime-chart-box {
+  overflow: hidden;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(240, 248, 255, .5), rgba(255, 255, 255, .2));
+  padding: .25rem;
+}
+
+#view-dashboard .table-scroll {
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px rgba(190, 215, 239, .5);
+}
+
+#view-dashboard .table-scroll th {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  background: #eaf5ff !important;
+  color: #234563 !important;
+}
+
+#view-dashboard .runtime-widget-card:has(> .runtime-widget-empty) {
+  min-height: 138px;
+  border-style: dashed !important;
+  background: rgba(247, 251, 255, .72) !important;
+  box-shadow: none !important;
+}
+
+#view-dashboard .runtime-widget-empty {
+  min-height: 108px;
+  border: 0;
+  color: #7891aa !important;
+  font-size: .78rem;
+  font-weight: 800;
+}
+
+#view-dashboard .runtime-widget-empty::before {
+  display: block;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin: 0 auto .45rem;
+  border: 1px solid #bed7ed;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #e8f4ff, #f8fbff);
+  content: "";
+}
+
+@media (max-width: 760px) {
+  #view-dashboard .dashboard-runtime-home {
+    padding: .25rem;
+  }
+
+  #view-dashboard #dashboard-designed-section {
+    border-radius: 15px;
+    padding: .9rem;
+  }
+
+  #view-dashboard #dashboard-designed-section > .section-heading {
+    align-items: stretch;
+    gap: .75rem;
+  }
+
+  #view-dashboard .dashboard-viewer-actions,
+  #view-dashboard #refresh-dashboard-viewer-tab {
+    width: 100%;
+  }
+
+  #view-dashboard .runtime-widget-card,
+  #view-dashboard .runtime-total-data-card {
+    min-height: 124px;
+    padding: .85rem;
+  }
+
+  #view-dashboard .runtime-total-data-card-rate {
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    justify-items: start;
+  }
+
+}
