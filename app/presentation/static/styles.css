@@ -7788,15 +7788,15 @@ body.view-loading::before {
 }
 
 #view-dashboard .runtime-total-data-card.tone-success {
-  --kpi-accent: #059669;
-  --kpi-border: #a7e2cf;
-  --kpi-soft: #ecfdf5;
+  --kpi-accent: #075fb8;
+  --kpi-border: #9cc8f2;
+  --kpi-soft: #edf6ff;
 }
 
 #view-dashboard .runtime-total-data-card.tone-good {
-  --kpi-accent: #078a80;
-  --kpi-border: #a9ddd8;
-  --kpi-soft: #edfcfa;
+  --kpi-accent: #2385dc;
+  --kpi-border: #add4f5;
+  --kpi-soft: #f0f8ff;
 }
 
 #view-dashboard .runtime-total-data-card.tone-warning {
