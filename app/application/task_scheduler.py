@@ -3,6 +3,7 @@ from __future__ import annotations
 import calendar
 from datetime import datetime, timedelta, timezone
 import logging
+import queue
 import threading
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -184,9 +185,13 @@ class ZaloAutoMessageScheduler:
         self.repository: Any | None = None
         self.settings: Settings | None = None
         self.thread: threading.Thread | None = None
+        self.worker_thread: threading.Thread | None = None
         self.stop_event = threading.Event()
         self.interval_seconds = 30
         self.schema_warning_logged = False
+        self.message_queue: queue.Queue[tuple[dict[str, Any], str]] = queue.Queue()
+        self.queued_keys: set[tuple[str, str]] = set()
+        self.queue_lock = threading.Lock()
 
     def configure(self, repository: Any, settings: Settings) -> None:
         self.repository = repository
@@ -198,6 +203,8 @@ class ZaloAutoMessageScheduler:
         if self.thread and self.thread.is_alive():
             return
         self.stop_event.clear()
+        self.worker_thread = threading.Thread(target=self._worker_loop, name="zalo-auto-message-worker", daemon=True)
+        self.worker_thread.start()
         self.thread = threading.Thread(target=self._run_loop, name="zalo-auto-message-scheduler", daemon=True)
         self.thread.start()
 
@@ -205,27 +212,66 @@ class ZaloAutoMessageScheduler:
         self.stop_event.set()
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=5)
+        if self.worker_thread and self.worker_thread.is_alive():
+            self.worker_thread.join(timeout=5)
 
     def _run_loop(self) -> None:
         while not self.stop_event.is_set():
             try:
-                self.check_due_messages()
+                self.enqueue_due_messages()
             except Exception:
                 logger.exception("Zalo auto message scheduler failed")
             self.stop_event.wait(self.interval_seconds)
+
+    def _worker_loop(self) -> None:
+        while not self.stop_event.is_set() or not self.message_queue.empty():
+            try:
+                schedule, run_key = self.message_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            queue_key = (str(schedule.get("schedule_id") or ""), run_key)
+            try:
+                self._send_scheduled_message(schedule, run_key)
+            except Exception:
+                logger.exception("Zalo queued message failed: %s", queue_key[0])
+            finally:
+                with self.queue_lock:
+                    self.queued_keys.discard(queue_key)
+                self.message_queue.task_done()
+
+    def enqueue_due_messages(self, now: datetime | None = None) -> int:
+        current = now or datetime.now(LOCAL_TIMEZONE)
+        queued_count = 0
+        for schedule, run_key in self._due_messages(current):
+            queue_key = (str(schedule.get("schedule_id") or ""), run_key)
+            with self.queue_lock:
+                if queue_key in self.queued_keys:
+                    continue
+                self.queued_keys.add(queue_key)
+            self.message_queue.put((schedule, run_key))
+            queued_count += 1
+        return queued_count
 
     def check_due_messages(self, now: datetime | None = None) -> int:
         assert self.repository is not None
         assert self.settings is not None
         current = now or datetime.now(LOCAL_TIMEZONE)
         sent_count = 0
+        for schedule, run_key in self._due_messages(current):
+            if self._send_scheduled_message(schedule, run_key):
+                sent_count += 1
+        return sent_count
+
+    def _due_messages(self, current: datetime) -> list[tuple[dict[str, Any], str]]:
+        assert self.repository is not None
+        due_messages: list[tuple[dict[str, Any], str]] = []
         try:
             schedules = self.repository.list_zalo_auto_messages(active_only=True)
         except RuntimeError as error:
             if "zalo_auto_messages" in str(error) and not self.schema_warning_logged:
                 logger.warning("Bang zalo_auto_messages chua ton tai. Hay chay sql/supabase_upgrade_admin_modules.sql tren Supabase.")
                 self.schema_warning_logged = True
-            return 0
+            return due_messages
         for schedule in schedules:
             run_key = self._due_run_key(schedule, current)
             if not run_key:
@@ -236,16 +282,20 @@ class ZaloAutoMessageScheduler:
                 last_success_key = str((linked_task or {}).get("last_success_key") or "")
                 if not linked_task or not last_success_key.startswith(current.date().isoformat()):
                     continue
-            result = send_zalo_auto_message(self.repository, self.settings, schedule)
-            self.repository.mark_zalo_auto_message_run(
-                str(schedule.get("schedule_id") or ""),
-                run_key,
-                bool(result.get("ok")),
-                "" if result.get("ok") else str(result.get("message") or ""),
-            )
-            if result.get("ok"):
-                sent_count += 1
-        return sent_count
+            due_messages.append((schedule, run_key))
+        return due_messages
+
+    def _send_scheduled_message(self, schedule: dict[str, Any], run_key: str) -> bool:
+        assert self.repository is not None
+        assert self.settings is not None
+        result = send_zalo_auto_message(self.repository, self.settings, schedule)
+        self.repository.mark_zalo_auto_message_run(
+            str(schedule.get("schedule_id") or ""),
+            run_key,
+            bool(result.get("ok")),
+            "" if result.get("ok") else str(result.get("message") or ""),
+        )
+        return bool(result.get("ok"))
 
     @classmethod
     def _due_run_key(cls, schedule: dict[str, Any], current: datetime) -> str:

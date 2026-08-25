@@ -2028,6 +2028,27 @@ def test_zalo_auto_message_scheduler_waits_for_linked_report(monkeypatch) -> Non
     assert repository.marked[0][1] == "2026-01-05:07:05"
 
 
+def test_zalo_auto_message_scheduler_queues_same_time_without_duplicates(monkeypatch) -> None:
+    from app.application.task_scheduler import LOCAL_TIMEZONE, ZaloAutoMessageScheduler
+
+    class FakeRepository:
+        def list_zalo_auto_messages(self, active_only=True):
+            return [
+                {"schedule_id": "ZALO-A", "schedule_type": "Daily", "run_time": "07:05", "last_run_key": "", "is_active": True},
+                {"schedule_id": "ZALO-B", "schedule_type": "Daily", "run_time": "07:05", "last_run_key": "", "is_active": True},
+            ]
+
+    scheduler = ZaloAutoMessageScheduler()
+    scheduler.configure(FakeRepository(), get_settings())
+    now = datetime(2026, 1, 5, 7, 5, tzinfo=LOCAL_TIMEZONE)
+
+    assert scheduler.enqueue_due_messages(now) == 2
+    assert scheduler.enqueue_due_messages(now) == 0
+    assert scheduler.message_queue.qsize() == 2
+    assert scheduler.message_queue.get_nowait()[0]["schedule_id"] == "ZALO-A"
+    assert scheduler.message_queue.get_nowait()[0]["schedule_id"] == "ZALO-B"
+
+
 def test_zalo_auto_message_requires_explicit_chat_id(monkeypatch) -> None:
     from app.application import zalo_auto_message_service as service
 
