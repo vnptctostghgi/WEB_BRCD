@@ -770,7 +770,7 @@ def capture_public_web_screenshot_bytes(public_url: str, *, selector: str = "") 
                                   const boxes = cells.map((cell) => cell.getBoundingClientRect())
                                     .filter((box) => box.width > 0 && box.height > 0);
                                   if (!boxes.length) return null;
-                                  const padding = 8;
+                                  const padding = 0;
                                   const left = Math.max(0, Math.min(...boxes.map((box) => box.left + window.scrollX)) - padding);
                                   const top = Math.max(0, Math.min(...boxes.map((box) => box.top + window.scrollY)) - padding);
                                   const right = Math.max(...boxes.map((box) => box.right + window.scrollX)) + padding;
