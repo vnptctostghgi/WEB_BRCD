@@ -762,26 +762,68 @@ def capture_public_web_screenshot_bytes(public_url: str, *, selector: str = "") 
                             page.wait_for_selector("body", state="visible", timeout=30000)
                             page.wait_for_function("() => document.body && document.body.innerText.trim().length > 0", timeout=30000)
                             page.wait_for_timeout(1200)
-                            clip_script = """
+                            clip_script = r"""
                                 () => {
                                   const cells = [...document.querySelectorAll('table.waffle td')]
                                     .filter((cell) => (cell.innerText || cell.textContent || '').trim());
                                   if (!cells.length) return null;
-                                  const boxes = cells.map((cell) => cell.getBoundingClientRect())
-                                    .filter((box) => box.width > 0 && box.height > 0);
+                                  const intervals = cells.filter((cell) => cell.colSpan === 1)
+                                    .map((cell) => cell.getBoundingClientRect())
+                                    .filter((box) => box.width > 0 && box.height > 0)
+                                    .sort((a, b) => a.left - b.left);
+                                  const clusters = [];
+                                  for (const interval of intervals) {
+                                    const current = clusters[clusters.length - 1];
+                                    if (!current || interval.left - current.right > 80) {
+                                      clusters.push({left: interval.left, right: interval.right});
+                                    } else {
+                                      current.right = Math.max(current.right, interval.right);
+                                    }
+                                  }
+                                  // Published sheets sometimes keep a raw-data block hundreds of
+                                  // pixels to the right of the formatted report.  Do not let that
+                                  // detached block pull a large blank area into the Zalo image.
+                                  const cutoff = clusters.length > 1 && clusters[1].left - clusters[0].right > 120
+                                    ? clusters[0].right + 4
+                                    : Number.POSITIVE_INFINITY;
+                                  const visibleCells = cells.filter((cell) => cell.getBoundingClientRect().left < cutoff);
+                                  const boxes = visibleCells.flatMap((cell) => {
+                                    const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+                                    const textBoxes = [];
+                                    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                                      const value = node.nodeValue || '';
+                                      const first = value.search(/\S/);
+                                      if (first < 0) continue;
+                                      const last = value.search(/\s*$/);
+                                      const range = document.createRange();
+                                      range.setStart(node, first);
+                                      range.setEnd(node, last);
+                                      textBoxes.push(...range.getClientRects());
+                                    }
+                                    return textBoxes;
+                                  }).filter((box) => box.width > 0 && box.height > 0);
                                   if (!boxes.length) return null;
-                                  const padding = 0;
+                                  const padding = 4;
                                   const left = Math.max(0, Math.min(...boxes.map((box) => box.left + window.scrollX)) - padding);
                                   const top = Math.max(0, Math.min(...boxes.map((box) => box.top + window.scrollY)) - padding);
-                                  const right = Math.max(...boxes.map((box) => box.right + window.scrollX)) + padding;
+                                  const right = Math.min(cutoff, Math.max(...boxes.map((box) => box.right + window.scrollX)) + padding);
                                   const bottom = Math.max(...boxes.map((box) => box.bottom + window.scrollY)) + padding;
                                   return {x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top)};
                                 }
                                 """
                             content_clip = page.evaluate(clip_script)
                             sheet_frame = next((frame for frame in page.frames if "/pubhtml/sheet" in frame.url), None)
+                            screenshot_scale = "device"
                             if sheet_frame:
                                 frame_clip = sheet_frame.evaluate(clip_script)
+                                if frame_clip:
+                                    viewport = page.viewport_size or {"width": 1920, "height": 1080}
+                                    required_width = min(8000, max(viewport["width"], int(frame_clip["x"] + frame_clip["width"] + 8)))
+                                    required_height = min(8000, max(viewport["height"], int(frame_clip["y"] + frame_clip["height"] + 8)))
+                                    if required_width != viewport["width"] or required_height != viewport["height"]:
+                                        page.set_viewport_size({"width": required_width, "height": required_height})
+                                        page.wait_for_timeout(250)
+                                        frame_clip = sheet_frame.evaluate(clip_script)
                                 frame_box = sheet_frame.frame_element().bounding_box()
                                 if frame_clip and frame_box:
                                     content_clip = {
@@ -790,7 +832,9 @@ def capture_public_web_screenshot_bytes(public_url: str, *, selector: str = "") 
                                         "width": frame_clip["width"],
                                         "height": frame_clip["height"],
                                     }
-                            image = page.screenshot(type="png", clip=content_clip) if content_clip else page.screenshot(type="png", full_page=True)
+                                    if content_clip["width"] * 2 > 4096 or content_clip["height"] * 2 > 4096:
+                                        screenshot_scale = "css"
+                            image = page.screenshot(type="png", clip=content_clip, scale=screenshot_scale) if content_clip else page.screenshot(type="png", full_page=True)
                     except PlaywrightTimeoutError:
                         raise RuntimeError("Public web chua load xong de chup anh.") from None
                     if len(image) < 100:
