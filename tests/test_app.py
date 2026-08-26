@@ -1903,7 +1903,7 @@ def test_zalo_auto_capture_uses_dashboard_area(monkeypatch) -> None:
         assert result["ok"] is True
         assert calls["capture"] == {"page_url": "/dashboardtest", "selector": service.DASHBOARD_CAPTURE_SELECTOR}
         assert calls["saved"]["image_base64"] == "iVBORw0K"
-        assert result["capture_url"] == "https://vnptcto.com/api/zalo/auto-message-captures/CAPTEST?token=token"
+        assert result["capture_url"] == "https://vnptcto.com/api/zalo/auto-message-captures/CAPTEST.png?token=token"
     finally:
         get_settings.cache_clear()
 

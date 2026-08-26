@@ -8399,8 +8399,9 @@ def send_zalo_auto_message_now(request: Request, schedule_id: str) -> dict:
 @router.get("/api/zalo/auto-message-captures/{capture_id}")
 def get_zalo_auto_message_capture(capture_id: str, token: str = "") -> Response:
     repository = build_app_repository()
+    normalized_capture_id = capture_id[:-4] if capture_id.lower().endswith(".png") else capture_id
     try:
-        capture = repository.get_zalo_message_capture(capture_id)
+        capture = repository.get_zalo_message_capture(normalized_capture_id)
     except RuntimeError as error:
         raise_zalo_auto_message_schema_error(error)
     if not capture or not hmac.compare_digest(str(token or ""), str(capture.get("public_token") or "")):

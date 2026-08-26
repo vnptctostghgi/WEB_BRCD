@@ -62,7 +62,7 @@ def capture_public_url(settings: Settings, capture: dict[str, Any] | None) -> st
     token = str(capture.get("public_token") or "").strip()
     if not base_url or not capture_id or not token:
         return ""
-    return f"{base_url}/api/zalo/auto-message-captures/{quote(capture_id)}?token={quote(token)}"
+    return f"{base_url}/api/zalo/auto-message-captures/{quote(capture_id)}.png?token={quote(token)}"
 
 
 def latest_zalo_chat_id_from_logs(repository: Any) -> str:
