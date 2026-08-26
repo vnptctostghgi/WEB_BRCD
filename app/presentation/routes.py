@@ -281,7 +281,6 @@ DASHBOARD_LAYOUT_EXCLUDED_FEATURE_CODES = {
     "linkbaocao",
 }
 DASHBOARD_LAYOUT_PARENT_EXCLUDED_FEATURE_CODES = {
-    "dashboard",
     "quanlycongviec",
     "truyvansql",
     "reports",

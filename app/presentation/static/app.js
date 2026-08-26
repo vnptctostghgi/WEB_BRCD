@@ -2492,13 +2492,13 @@ async function syncPermissionTreeForSelectedUsers() {
   }
 }
 
-const dashboardParentExcludedFeatureCodes = new Set(["dashboard", "quanlycongviec", "truyvansql", "reports", "new_reports"]);
+const dashboardParentExcludedFeatureCodes = new Set(["quanlycongviec", "truyvansql", "reports", "new_reports"]);
 
 function dashboardParentMenuCandidates(sourceFeatures = features) {
   return sortFeaturesForTree((sourceFeatures || []).filter((feature) => {
     const code = String(feature?.code || "");
     if (!code || feature.parent_code || dashboardParentExcludedFeatureCodes.has(code)) return false;
-    if (navFeatureConfig[code]?.view) return false;
+    if (code !== "dashboard" && navFeatureConfig[code]?.view) return false;
     return true;
   }));
 }
