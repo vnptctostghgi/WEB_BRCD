@@ -385,7 +385,7 @@ function ensureReportsRuntimeScriptLoaded() {
   if (reportsRuntimeScriptPromise) return reportsRuntimeScriptPromise;
   reportsRuntimeScriptPromise = new Promise((resolve, reject) => {
     const script = existingScript || document.createElement("script");
-    script.src = "/static/reports-runtime.js?v=16";
+    script.src = "/static/reports-runtime.js?v=17";
     script.defer = true;
     script.dataset.reportsRuntime = "true";
     script.addEventListener("load", () => {

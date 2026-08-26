@@ -3763,6 +3763,41 @@ def test_dynamic_report_defaults_date_named_bind_to_ddmmyyyy() -> None:
     assert details["date_bind_formats"] == {"P_TUNGAY": "DD/MM/YYYY", "END_DATE": "DD/MM/YYYY"}
 
 
+def test_dynamic_report_define_month_with_concatenated_day_keeps_mmyyyy() -> None:
+    class FakeInternalApi:
+        settings = get_settings()
+
+    class FakeRepository:
+        def get_sql_report_by_code(self, code):
+            return {
+                "ten_bao_cao": "Month concatenation",
+                "ma_bao_cao": "MONTH_CONCAT",
+                "cau_lenh_sql": (
+                    "DEFINE thang = :THANG\n"
+                    "SELECT * FROM dual WHERE ngay >= TO_DATE("
+                    "'01/' || NVL(TRIM('&thang'), TO_CHAR(SYSDATE, 'MM/YYYY')), 'DD/MM/YYYY')"
+                ),
+                "cac_tham_so": ["THANG"],
+            }
+
+        def get_sql_report_by_id(self, report_id):
+            return None
+
+        def list_sql_reports(self):
+            return []
+
+    prepared = DatabaseService(FakeInternalApi(), FakeRepository()).prepare_dynamic_report_query(
+        ma_bao_cao="MONTH_CONCAT",
+        filters={"THANG": "01/08/2026"},
+        page=1,
+        page_size=20,
+    )
+
+    assert prepared["ok"] is True
+    assert "TRIM('08/2026')" in prepared["cau_lenh_sql"]
+    assert "01/01/08/2026" not in prepared["cau_lenh_sql"]
+
+
 def test_dynamic_report_prepare_keeps_large_worker_page_size() -> None:
     class FakeInternalApi:
         settings = get_settings()

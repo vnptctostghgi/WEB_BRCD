@@ -830,6 +830,13 @@ class DatabaseService:
 
     @staticmethod
     def _oracle_date_mask_for_define(sql: str, name: str) -> str:
+        concatenated_month_pattern = re.compile(
+            rf"\bto_(?:date|timestamp)\s*\(\s*'\s*\d{{1,2}}\s*/\s*'\s*\|\|[\s\S]{{0,600}}?&{re.escape(name)}\b[\s\S]{{0,600}}?,\s*'(?P<mask>DD\s*/\s*MM\s*/\s*(?:YYYY|RRRR|YY|RR))'\s*\)",
+            re.IGNORECASE,
+        )
+        concatenated_month_match = concatenated_month_pattern.search(sql or "")
+        if concatenated_month_match:
+            return re.sub(r"^DD\s*/\s*", "", concatenated_month_match.group("mask"), flags=re.IGNORECASE)
         month_pattern = re.compile(
             rf"\bto_(?:date|timestamp)\s*\(\s*'\s*\d{{1,2}}\s*/\s*&{re.escape(name)}\s*'\s*,\s*'(?P<mask>DD\s*/\s*MM\s*/\s*(?:YYYY|RRRR|YY|RR))'",
             re.IGNORECASE,
@@ -853,7 +860,7 @@ class DatabaseService:
             return ""
         # The SQL supplies the day itself (for example '01/&THANG'), so the
         # report parameter only contains the month and year.
-        if re.search(r"'\s*\d{1,2}\s*/\s*&[A-Za-z]", str(expression or ""), re.IGNORECASE) and re.match(
+        if re.search(r"'\s*\d{1,2}\s*/\s*'[^&]*&[A-Za-z]|'\s*\d{1,2}\s*/\s*&[A-Za-z]", str(expression or ""), re.IGNORECASE) and re.match(
             r"^DD\s*/\s*MM\s*/\s*(?:YYYY|RRRR|YY|RR)$",
             mask,
             re.IGNORECASE,

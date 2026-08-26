@@ -81,6 +81,20 @@ function normalizeSqlDateFilterValue(value) {
   return `${match[1]}/${match[2]}/${match[3]}`;
 }
 
+function normalizeSqlMonthFilterValue(value) {
+  const text = String(value || "").trim();
+  let match = text.match(/^\d{2}\/(\d{2})\/(\d{4})$/);
+  if (!match) match = text.match(/^(\d{2})\/(\d{4})$/);
+  if (!match) {
+    const iso = text.match(/^(\d{4})-(\d{2})$/);
+    if (iso) match = [iso[0], iso[2], iso[1]];
+  }
+  if (!match || Number(match[1]) < 1 || Number(match[1]) > 12) {
+    throw new Error(`Tháng "${text}" phải có định dạng dd/MM/yyyy.`);
+  }
+  return {display: `01/${match[1]}/${match[2]}`, payload: `${match[1]}/${match[2]}`};
+}
+
 function renderDynamicReportFilters() {
   const container = $("#dynamic-report-filters");
   const select = $("#dynamic-report-select");
@@ -101,8 +115,7 @@ function renderDynamicReportFilters() {
   container.innerHTML = params.map((param) => {
     const lower = param.toLowerCase();
     if (lower === "thang" || lower.includes("month")) {
-      const currentMonth = new Date().toISOString().slice(0, 7);
-      return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter" name="${escapeHtml(param)}" type="month" value="${currentMonth}" required /></label>`;
+      return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter dynamic-month-date-filter" name="${escapeHtml(param)}" type="text" maxlength="10" placeholder="dd/MM/yyyy" autocomplete="off" required /></label>`;
     }
     if (lower.includes("ngay") || lower.includes("date")) {
       return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter dynamic-date-filter" name="${escapeHtml(param)}" type="text" inputmode="numeric" maxlength="10" placeholder="dd/MM/yyyy" autocomplete="off" /></label>`;
@@ -118,9 +131,13 @@ function dynamicReportFilters() {
   const filters = {};
   document.querySelectorAll(".dynamic-filter").forEach((input) => {
     if (!input.value) return;
-    const value = input.classList.contains("dynamic-date-filter")
-      ? normalizeSqlDateFilterValue(input.value)
-      : input.value;
+    if (input.classList.contains("dynamic-month-date-filter")) {
+      const month = normalizeSqlMonthFilterValue(input.value);
+      input.value = month.display;
+      filters[input.name] = month.payload;
+      return;
+    }
+    const value = input.classList.contains("dynamic-date-filter") ? normalizeSqlDateFilterValue(input.value) : input.value;
     input.value = value;
     filters[input.name] = value;
   });
