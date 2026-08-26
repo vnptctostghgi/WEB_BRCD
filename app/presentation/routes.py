@@ -8413,7 +8413,11 @@ def get_zalo_auto_message_capture(capture_id: str, token: str = "") -> Response:
     return Response(
         content=image_bytes,
         media_type=str(capture.get("mime_type") or "image/png"),
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "Content-Disposition": f'inline; filename="{normalized_capture_id}.png"',
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
