@@ -7782,6 +7782,7 @@ body.view-loading::before {
 }
 
 #view-dashboard .runtime-total-data-card {
+  column-gap: .55rem;
   grid-template-rows: 1fr auto;
   border-color: var(--kpi-border, #bdd7ef) !important;
   background: linear-gradient(145deg, #ffffff 0%, var(--kpi-soft, #f4f9ff) 100%) !important;
@@ -7830,13 +7831,40 @@ body.view-loading::before {
 }
 
 #view-dashboard .runtime-total-data-card-value {
+  min-width: 0;
   flex-wrap: nowrap;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.025em;
   white-space: nowrap;
 }
 
+@media (min-width: 768px) {
+  #view-dashboard .runtime-total-data-card {
+    grid-template-columns: minmax(0, 1fr) minmax(6.5rem, 37%);
+  }
+}
+
 #view-dashboard .runtime-total-data-card-value strong {
-  font-size: clamp(1.35rem, 1.65vw, 1.8rem);
+  flex: 0 1 auto;
+  font-size: clamp(1.05rem, 1.35vw, 1.55rem);
   overflow-wrap: normal;
+}
+
+#view-dashboard .runtime-total-data-card-value i {
+  flex: 0 0 auto;
+  font-size: clamp(.9rem, 1.05vw, 1.15rem);
+}
+
+#view-dashboard .runtime-total-data-card-rate {
+  min-width: 0;
+  padding: .55rem .65rem;
+}
+
+#view-dashboard .runtime-total-data-card-rate strong {
+  max-width: 100%;
+  font-size: clamp(1.15rem, 1.65vw, 1.65rem);
+  line-height: 1;
+  white-space: nowrap;
 }
 
 #view-dashboard .runtime-total-progress {
