@@ -591,6 +591,19 @@ def test_api_middleware_formats_oracle_date_binds() -> None:
     assert binds["P_DENNGAY"] == "2026-07-30"
 
 
+def test_api_middleware_defaults_date_named_binds_to_ddmmyyyy() -> None:
+    module = load_api_middleware_module()
+    sql = "SELECT * FROM dual WHERE ngay >= :P_TUNGAY AND ngay <= :END_DATE AND status = :UPDATE_BY"
+    binds = module.normalize_binds_for_sql(
+        sql,
+        {"P_TUNGAY": "2026-08-01", "END_DATE": "2026-08-26", "UPDATE_BY": "admin"},
+    )
+
+    assert binds["P_TUNGAY"] == "01/08/2026"
+    assert binds["END_DATE"] == "26/08/2026"
+    assert binds["UPDATE_BY"] == "admin"
+
+
 def test_api_middleware_reads_json_files_with_utf8_bom(tmp_path: Path) -> None:
     module = load_api_middleware_module()
     token_file = tmp_path / "drive-oauth-token.json"
@@ -3736,6 +3749,18 @@ def test_dynamic_report_define_date_accepts_bare_filter_name_and_time_suffix() -
     assert "DENNGAY" not in prepared["cau_lenh_sql"]
     assert "'01/08/2026' || ' 00:00:00'" in prepared["cau_lenh_sql"]
     assert "'31/08/2026' || ' 00:00:00'" in prepared["cau_lenh_sql"]
+
+
+def test_dynamic_report_defaults_date_named_bind_to_ddmmyyyy() -> None:
+    filters, details = DatabaseService._normalize_oracle_date_binds(
+        "SELECT * FROM dual WHERE ngay >= :P_TUNGAY AND ngay <= :END_DATE AND owner = :UPDATE_BY",
+        {"P_TUNGAY": "2026-08-01", "END_DATE": "2026-08-26", "UPDATE_BY": "admin"},
+    )
+
+    assert filters["P_TUNGAY"] == "01/08/2026"
+    assert filters["END_DATE"] == "26/08/2026"
+    assert filters["UPDATE_BY"] == "admin"
+    assert details["date_bind_formats"] == {"P_TUNGAY": "DD/MM/YYYY", "END_DATE": "DD/MM/YYYY"}
 
 
 def test_dynamic_report_prepare_keeps_large_worker_page_size() -> None:

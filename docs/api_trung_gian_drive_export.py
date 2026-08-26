@@ -30,7 +30,7 @@ app = FastAPI(title="API trung gian VNPT CTO")
 
 EXCEL_MAX_ROWS_PER_SHEET = 1_048_576
 GOOGLE_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
-API_MIDDLEWARE_VERSION = "2026.08.13-sql-run-direct-fallback"
+API_MIDDLEWARE_VERSION = "2026.08.26-default-date-ddmmyyyy"
 ORACLE_DATE_INPUT_FORMATS = ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%Y/%m/%d", "%d.%m.%Y", "%Y%m%d")
 ORACLE_DSN_ENV_KEYS = (
     "DB_DSN",
@@ -223,6 +223,9 @@ def normalize_binds_for_sql(sql: str, binds: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(binds)
     for key, value in binds.items():
         mask = oracle_date_mask_for_bind(sql, str(key))
+        normalized_name = str(key or "").strip().lstrip(":").upper()
+        if not mask and ("NGAY" in normalized_name or re.search(r"(?:^|_)DATE(?:_|$)", normalized_name)):
+            mask = "DD/MM/YYYY"
         if mask:
             normalized[key] = format_oracle_date_value(value, mask)
     return normalized

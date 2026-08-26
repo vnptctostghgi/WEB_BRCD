@@ -62,6 +62,25 @@ function fillDynamicReportSelect() {
   if (current && sqlReports.some((report) => report.ma_bao_cao === current)) select.value = current;
 }
 
+function normalizeSqlDateFilterValue(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  let match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) {
+    const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (iso) match = [iso[0], iso[3], iso[2], iso[1]];
+  }
+  if (!match) throw new Error(`Ngày "${text}" phải có định dạng dd/MM/yyyy.`);
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) {
+    throw new Error(`Ngày "${text}" không hợp lệ.`);
+  }
+  return `${match[1]}/${match[2]}/${match[3]}`;
+}
+
 function renderDynamicReportFilters() {
   const container = $("#dynamic-report-filters");
   const select = $("#dynamic-report-select");
@@ -86,7 +105,7 @@ function renderDynamicReportFilters() {
       return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter" name="${escapeHtml(param)}" type="month" value="${currentMonth}" required /></label>`;
     }
     if (lower.includes("ngay") || lower.includes("date")) {
-      return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter" name="${escapeHtml(param)}" type="date" /></label>`;
+      return `<label>${escapeHtml(param)}<input class="form-control dynamic-filter dynamic-date-filter" name="${escapeHtml(param)}" type="text" inputmode="numeric" maxlength="10" placeholder="dd/MM/yyyy" autocomplete="off" /></label>`;
     }
     if (lower.includes("status") || lower.includes("trang_thai")) {
       return `<label>${escapeHtml(param)}<select class="form-control dynamic-filter" name="${escapeHtml(param)}"><option value="">Tất cả</option><option value="1">Đang hoạt động</option><option value="0">Không hoạt động</option></select></label>`;
@@ -98,7 +117,12 @@ function renderDynamicReportFilters() {
 function dynamicReportFilters() {
   const filters = {};
   document.querySelectorAll(".dynamic-filter").forEach((input) => {
-    if (input.value) filters[input.name] = input.value;
+    if (!input.value) return;
+    const value = input.classList.contains("dynamic-date-filter")
+      ? normalizeSqlDateFilterValue(input.value)
+      : input.value;
+    input.value = value;
+    filters[input.name] = value;
   });
   return filters;
 }

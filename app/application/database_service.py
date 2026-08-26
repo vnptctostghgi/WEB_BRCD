@@ -802,6 +802,8 @@ class DatabaseService:
         date_formats: dict[str, str] = {}
         for key, value in filters.items():
             mask = cls._oracle_date_mask_for_bind(sql, str(key))
+            if not mask and cls._is_default_date_parameter(str(key)):
+                mask = "DD/MM/YYYY"
             if not mask:
                 continue
             formatted = cls._format_oracle_date_value(value, mask)
@@ -809,6 +811,11 @@ class DatabaseService:
                 normalized[key] = formatted
                 date_formats[str(key)] = mask
         return normalized, {"date_bind_formats": date_formats} if date_formats else {}
+
+    @staticmethod
+    def _is_default_date_parameter(name: str) -> bool:
+        normalized = str(name or "").strip().lstrip(":").upper()
+        return "NGAY" in normalized or bool(re.search(r"(?:^|_)DATE(?:_|$)", normalized))
 
     @staticmethod
     def _oracle_date_mask_for_bind(sql: str, name: str) -> str:
