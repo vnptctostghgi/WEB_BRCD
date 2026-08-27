@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 OTP_PATTERN = re.compile(r"^\d{4,8}$")
 PENDING_SESSION_TTL_SECONDS = 10 * 60
 ONEBSS_API_BASE_URL = "https://api-onebss.vnpt.vn"
+ONEBSS_LEGACY_REPORT_BASE_URL = "https://report-onebss.vnpt.vn"
 ONEBSS_API_TOKEN_ID = "97388db0-6ce9-11ea-bc55-0242ac130003"
 ONEBSS_API_CLIENT_ID = "clientapp"
 ONEBSS_API_CLIENT_SECRET = "password"
@@ -1051,6 +1052,16 @@ def download_onebss_report_file_api(
         or parameters.get("$onebss_download_source")
         or "grid"
     ).strip().lower()
+    if download_source in {"legacy_grid", "legacy", "grid_viewer", "iframe_grid"}:
+        return download_onebss_legacy_grid_file_api(
+            settings,
+            token,
+            report,
+            parameters,
+            target_file=target_file,
+            source_values=source_values,
+            progress_callback=progress_callback,
+        )
     if download_source in {"excel", "export", "run_v5", "xlsx"}:
         try:
             emit_onebss_progress(progress_callback, "Dang yeu cau OneBSS xuat file Excel.")
@@ -1101,6 +1112,131 @@ def download_onebss_report_file_api(
         source_values=source_values,
         progress_callback=progress_callback,
     )
+
+
+def download_onebss_legacy_grid_file_api(
+    settings: Settings,
+    token: OneBssApiToken,
+    report: dict[str, Any],
+    parameters: dict[str, Any],
+    *,
+    target_file: Path | None = None,
+    source_values: dict[str, Any] | None = None,
+    progress_callback: OneBssProgressCallback | None = None,
+) -> OneBssDownloadedFile:
+    """Download reports rendered by report-onebss.vnpt.vn/GridViewer.aspx."""
+    report_id = onebss_report_id(report, parameters, token)
+    export_params = onebss_export_parameters(parameters)
+    timeout = onebss_api_timeout(settings, minimum_seconds=ONEBSS_EXPORT_TIMEOUT_SECONDS)
+    emit_onebss_progress(progress_callback, f"Dang mo bao cao luoi OneBSS {report_id}.")
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            landing = client.get(
+                f"{ONEBSS_LEGACY_REPORT_BASE_URL}/",
+                params={"baocao_id": report_id, "token": token.access_token},
+            )
+            landing.raise_for_status()
+            response = client.get(
+                f"{ONEBSS_LEGACY_REPORT_BASE_URL}/GridViewer.aspx",
+                params={"baocao_id": report_id, **export_params},
+            )
+            response.raise_for_status()
+    except httpx.TimeoutException as error:
+        raise OneBssDownloadError("OneBSS GridViewer tra du lieu qua lau va bi het thoi gian cho.") from error
+    except httpx.HTTPError as error:
+        raise OneBssDownloadError(f"Khong goi duoc OneBSS GridViewer: {error}") from error
+
+    rows = parse_onebss_legacy_grid_rows(response.text)
+    if not rows:
+        raise OneBssDownloadError("OneBSS GridViewer khong co du lieu.")
+    emit_onebss_progress(progress_callback, f"Da nhan {len(rows)} dong du lieu tu OneBSS GridViewer.")
+    suggested_filename = f"onebss_grid_{report_id}.xlsx"
+    if target_file is None:
+        target_file = build_target_file_path(
+            settings,
+            {
+                "report_url": normalize_onebss_report_url(report.get("report_url")),
+                "storage_link": "",
+                "file_name_template": report.get("ten_bao_cao") or report.get("ma_bao_cao") or "",
+            },
+            suggested_filename=suggested_filename,
+            report_title=str(report.get("ten_bao_cao") or ""),
+        )
+    write_onebss_grid_excel(rows, target_file, sheet_name="DATA")
+    return OneBssDownloadedFile(
+        file_path=target_file,
+        suggested_filename=suggested_filename,
+        export_info={
+            "ok": True,
+            "source": "legacy_grid_viewer",
+            "report_id": report_id,
+            "title": report.get("ten_bao_cao") or "",
+            "params": export_params,
+            "row_count": len(rows),
+        },
+        parameters=export_params,
+        source_values=source_values or {},
+    )
+
+
+def parse_onebss_legacy_grid_rows(html: str) -> list[dict[str, Any]]:
+    scripts = re.findall(r"<script(?:\s[^>]*)?>([\s\S]*?)</script>", str(html or ""), flags=re.IGNORECASE)
+    for script in scripts:
+        marker = re.search(r"proxy\s*:\s*\{[\s\S]*?\bdata\s*:\s*", script)
+        if not marker:
+            continue
+        raw_rows = extract_balanced_json_array(script, marker.end())
+        if not raw_rows:
+            continue
+        try:
+            values = json.loads(raw_rows)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(values, list):
+            continue
+        fields = {
+            int(mapping): name
+            for name, mapping in re.findall(
+                r"\{\s*name\s*:\s*['\"]([^'\"]+)['\"]\s*,\s*mapping\s*:\s*(\d+)",
+                script,
+            )
+        }
+        if not fields:
+            return [{f"COLUMN_{index + 1}": value for index, value in enumerate(row)} for row in values if isinstance(row, list)]
+        return [
+            {fields[index]: row[index] if index < len(row) else None for index in sorted(fields)}
+            for row in values
+            if isinstance(row, list)
+        ]
+    return []
+
+
+def extract_balanced_json_array(source: str, start: int) -> str:
+    begin = source.find("[", max(0, start))
+    if begin < 0:
+        return ""
+    depth = 0
+    quote = ""
+    escaped = False
+    for index in range(begin, len(source)):
+        char = source[index]
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = ""
+            continue
+        if char in {'"', "'"}:
+            quote = char
+        elif char == "[":
+            depth += 1
+        elif char == "]":
+            depth -= 1
+            if depth == 0:
+                return source[begin : index + 1]
+    return ""
 
 
 def download_onebss_report_file_api_grid_first(

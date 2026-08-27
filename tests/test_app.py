@@ -5415,6 +5415,56 @@ def test_onebss_report_id_uses_configured_meta_value() -> None:
     assert onebss_export_parameters(parameters) == {"P_PHANVUNG_ID": "13"}
 
 
+def test_onebss_legacy_grid_parser_keeps_column_names_and_rows() -> None:
+    from app.application.onebss_report_service import parse_onebss_legacy_grid_rows
+
+    html = """
+    <script>
+    Ext.create({items: [{
+      fields: [{name: 'TEN_KH',mapping: 0,},{name: 'TIEN',mapping: 1,type: 'float',}],
+      proxy: {type: 'memory',enablePaging: true,data: [["Khách [A]",324000],["Khách B",539784]]}
+    }]});
+    </script>
+    """
+
+    assert parse_onebss_legacy_grid_rows(html) == [
+        {"TEN_KH": "Khách [A]", "TIEN": 324000},
+        {"TEN_KH": "Khách B", "TIEN": 539784},
+    ]
+
+
+def test_onebss_download_source_legacy_grid_uses_grid_viewer(monkeypatch, tmp_path) -> None:
+    from app.application import onebss_report_service as service
+    from app.application.onebss_report_service import OneBssApiToken, OneBssDownloadedFile
+
+    calls = []
+    token = OneBssApiToken(
+        access_token="token",
+        token_type="Bearer",
+        username="test@vnpt.vn",
+        mobile_id="mobile",
+        device_id="device",
+        expires_at=9999999999,
+    )
+
+    def fake_legacy(settings, token_arg, report, parameters, **kwargs):
+        calls.append(dict(parameters))
+        target = tmp_path / "legacy.xlsx"
+        target.write_bytes(b"PK\x03\x04")
+        return OneBssDownloadedFile(target, "legacy.xlsx", {}, parameters, kwargs.get("source_values") or {})
+
+    monkeypatch.setattr(service, "download_onebss_legacy_grid_file_api", fake_legacy)
+    result = service.download_onebss_report_file_api(
+        get_settings(),
+        token,
+        {"report_url": "https://onebss.vnpt.vn/#/report/bi?report_id=51178", "report_id": 51178},
+        {"$download_source": "legacy_grid", "p_phanvung_id": "13"},
+    )
+
+    assert calls == [{"$download_source": "legacy_grid", "p_phanvung_id": "13"}]
+    assert result.suggested_filename == "legacy.xlsx"
+
+
 def test_onebss_download_falls_back_when_grid_has_no_rows(monkeypatch, tmp_path) -> None:
     from app.application import onebss_report_service as service
     from app.application.onebss_report_service import OneBssDownloadError, OneBssDownloadedFile, OneBssApiToken
