@@ -5465,6 +5465,24 @@ def test_onebss_download_source_legacy_grid_uses_grid_viewer(monkeypatch, tmp_pa
     assert result.suggested_filename == "legacy.xlsx"
 
 
+def test_supabase_task_report_auto_history_omits_heavy_step_results() -> None:
+    from app.data_access.supabase_repository import SupabaseRepository
+
+    repository = object.__new__(SupabaseRepository)
+    captured = {}
+
+    def fake_get(table, params):
+        captured.update({"table": table, "params": params})
+        return []
+
+    repository._get = fake_get
+    assert repository.list_task_report_auto_runs(limit=30) == []
+    assert captured["table"] == "task_report_auto_runs"
+    assert captured["params"]["limit"] == "30"
+    assert "step_results" not in captured["params"]["select"]
+    assert "result" in captured["params"]["select"]
+
+
 def test_onebss_download_falls_back_when_grid_has_no_rows(monkeypatch, tmp_path) -> None:
     from app.application import onebss_report_service as service
     from app.application.onebss_report_service import OneBssDownloadError, OneBssDownloadedFile, OneBssApiToken

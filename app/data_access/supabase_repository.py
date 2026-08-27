@@ -2189,7 +2189,18 @@ class SupabaseRepository:
         self._patch("task_report_auto_tasks", {"task_id": f"eq.{task_id}"}, payload)
 
     def list_task_report_auto_runs(self, task_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
-        params = {"order": "started_at.desc", "limit": str(min(max(int(limit or 50), 1), 200))}
+        # step_results can grow very large because every workflow step appends
+        # diagnostics.  The history table does not render it, so do not transfer
+        # or decode that JSON for the latest-runs view.
+        params = {
+            "select": (
+                "run_id,task_id,run_key,status,current_step,message,result,source_type,source_run_id,"
+                "spreadsheet_id,sheet_name,capture_id,capture_url,chat_id,started_at,finished_at,"
+                "duration_ms,created_by,updated_at"
+            ),
+            "order": "started_at.desc",
+            "limit": str(min(max(int(limit or 50), 1), 200)),
+        }
         if task_id:
             params["task_id"] = f"eq.{task_id}"
         rows = self._get("task_report_auto_runs", params)

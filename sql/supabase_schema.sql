@@ -512,6 +512,9 @@ alter column finished_at drop not null;
 create index if not exists task_report_auto_runs_task_idx
 on public.task_report_auto_runs (task_id, started_at desc);
 
+create index if not exists task_report_auto_runs_started_idx
+on public.task_report_auto_runs (started_at desc);
+
 create index if not exists task_report_auto_runs_queue_idx
 on public.task_report_auto_runs (status, started_at);
 

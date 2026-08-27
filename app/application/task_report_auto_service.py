@@ -752,7 +752,10 @@ def capture_public_web_screenshot_bytes(public_url: str, *, selector: str = "") 
                 try:
                     context = browser.new_context(viewport={"width": 1920, "height": 1080}, device_scale_factor=2, locale="vi-VN")
                     page = context.new_page()
-                    page.goto(public_url, wait_until="networkidle", timeout=90000)
+                    # Published Google Sheets keeps background requests alive,
+                    # therefore networkidle can time out even after the table is
+                    # already visible. Wait for the DOM, then the content below.
+                    page.goto(public_url, wait_until="domcontentloaded", timeout=90000)
                     try:
                         if selector:
                             page.wait_for_selector(selector, state="visible", timeout=60000)
