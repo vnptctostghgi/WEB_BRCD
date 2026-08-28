@@ -414,7 +414,13 @@ def send_zalo_auto_message(repository: Any, settings: Settings, schedule: dict[s
         config = connection.get("config") if isinstance(connection.get("config"), dict) else {}
         try:
             safe_caption = html.escape(caption).replace("\n", "<br>")
-            html_message = f"{safe_caption}<br><img src={html.escape(photo_url, quote=True)}><br><a href={html.escape(photo_url, quote=True)}>Mở ảnh</a>"
+            safe_photo_url = html.escape(photo_url, quote=True)
+            html_message = (
+                f'{safe_caption}<br>'
+                f'<img src="{safe_photo_url}" width="100%" '
+                f'style="display:block;width:100%;max-width:100%;height:auto;object-fit:contain">'
+                f'<br><a href="{safe_photo_url}">Mở ảnh đầy đủ</a>'
+            )
             result = GoConnectBotClient(config).send_message(chat_id, html_message)
             sent = bool(result.get("ok"))
         except Exception:
