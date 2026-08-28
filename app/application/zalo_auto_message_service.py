@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import html
 import logging
 import re
 import subprocess
@@ -412,7 +413,9 @@ def send_zalo_auto_message(repository: Any, settings: Settings, schedule: dict[s
         connection = repository.get_system_connection_by_code("goconnect_bot") or {}
         config = connection.get("config") if isinstance(connection.get("config"), dict) else {}
         try:
-            result = GoConnectBotClient(config).send_message(chat_id, f"{caption}\n{photo_url}".strip())
+            safe_caption = html.escape(caption).replace("\n", "<br>")
+            html_message = f"{safe_caption}<br><img src={html.escape(photo_url, quote=True)}><br><a href={html.escape(photo_url, quote=True)}>Mở ảnh</a>"
+            result = GoConnectBotClient(config).send_message(chat_id, html_message)
             sent = bool(result.get("ok"))
         except Exception:
             logger.exception("Cannot send GoConnect auto message")

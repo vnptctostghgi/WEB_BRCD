@@ -431,7 +431,7 @@
               <div class="dynamic-report-export-heading"><h2>Kết quả lấy dữ liệu</h2></div>
               <div class="table-scroll">
                 <table class="compact-admin-table inline-admin-table dynamic-report-export-table">
-                  <thead><tr><th>Thời gian</th><th>Báo cáo</th><th>Trạng thái</th><th>File / link Drive</th></tr></thead>
+                  <thead><tr><th>Thời gian</th><th>Báo cáo</th><th>Người xuất</th><th>Trạng thái</th><th>File / link Drive</th></tr></thead>
                   <tbody id="dynamic-report-export-results"></tbody>
                 </table>
               </div>
@@ -462,8 +462,8 @@
               <button class="table-action danger" id="clear-onebss-run-history" type="button">Dọn lịch sử</button>
             </div>
             <div class="table-scroll onebss-run-table-wrap">
-              <table class="compact-admin-table inline-admin-table onebss-run-table">
-                <thead><tr><th>Thời gian</th><th>Báo cáo</th><th>Kết quả</th><th>File dữ liệu</th><th>Thông báo</th></tr></thead>
+              <table class="compact-admin-table inline-admin-table onebss-run-table onebss-data-run-table">
+                <thead><tr><th>Thời gian</th><th>Báo cáo</th><th>Người xuất</th><th>Kết quả</th><th>File dữ liệu</th><th>Thông báo</th></tr></thead>
                 <tbody id="onebss-run-history"></tbody>
               </table>
             </div>
@@ -493,8 +493,8 @@
               <button class="table-action danger" id="clear-ftp-run-history" type="button">Dọn lịch sử</button>
             </div>
             <div class="table-scroll onebss-run-table-wrap">
-              <table class="compact-admin-table inline-admin-table onebss-run-table">
-                <thead><tr><th>Thời gian</th><th>Báo cáo</th><th>Trạng thái</th><th>File dữ liệu</th><th>Thông báo</th></tr></thead>
+              <table class="compact-admin-table inline-admin-table onebss-run-table ftp-data-run-table">
+                <thead><tr><th>Thời gian</th><th>Báo cáo</th><th>Người xuất</th><th>Trạng thái</th><th>File dữ liệu</th><th>Thông báo</th></tr></thead>
                 <tbody id="ftp-run-history"></tbody>
               </table>
             </div>
@@ -505,7 +505,7 @@
         {% if render_view("task-report-auto") %}
         <section class="app-view" id="view-task-report-auto">
           <div class="page-header">
-            <div><p class="eyebrow">Task report auto</p><h1>Lịch báo cáo và gửi Zalo</h1><p class="subtitle">Hai lịch độc lập, có thể liên kết khi cần gửi ảnh sau khi báo cáo hoàn tất.</p></div>
+            <div><p class="eyebrow">Task report auto</p><h1>Lịch báo cáo và gửi điểm tin</h1><p class="subtitle">Hai lịch độc lập, có thể liên kết và chọn kênh Zalo hoặc GoConnect khi cần gửi ảnh.</p></div>
             <div class="action-group">
               <button class="btn-secondary" id="refresh-task-report-auto" type="button">Lam moi</button>
               <button class="btn-primary" id="add-task-report-auto" type="button">Them task</button>
@@ -513,7 +513,7 @@
           </div>
           <section class="data-card">
             <div class="section-heading compact">
-              <div><p class="eyebrow">1. Lịch chạy báo cáo tự động</p><h2>Đào dữ liệu và nạp Google Sheet</h2><p>Chọn báo cáo có sẵn, lịch chạy và đích nạp dữ liệu. Không bắt buộc cấu hình gửi Zalo.</p></div>
+              <div><p class="eyebrow">1. Lịch chạy báo cáo tự động</p><h2>Đào dữ liệu và nạp Google Sheet</h2><p>Chọn báo cáo có sẵn, lịch chạy và đích nạp dữ liệu. Không bắt buộc cấu hình gửi điểm tin.</p></div>
             </div>
             <div id="task-report-auto-message" class="result hidden mb-4"></div>
             <div class="table-scroll">
@@ -525,7 +525,7 @@
           </section>
           <section class="data-card mt-4">
             <div class="section-heading compact">
-              <div><p class="eyebrow">2. Lịch gửi tin nhắn</p><h2>Chụp ảnh và gửi Zalo</h2><p>Chọn người nhận, link chụp ảnh, lịch gửi và nội dung. Liên kết lịch báo cáo là tùy chọn.</p></div>
+              <div><p class="eyebrow">2. Lịch gửi điểm tin</p><h2>Chụp ảnh và gửi qua Zalo/GoConnect</h2><p>Chọn kênh gửi, người nhận, link chụp ảnh, lịch gửi và nội dung. Liên kết lịch báo cáo là tùy chọn.</p></div>
               <div class="action-group"><button class="btn-primary" id="add-zalo-auto-message" type="button">Thêm lịch gửi</button><button class="btn-secondary" id="refresh-zalo-auto-messages" type="button">Làm mới</button></div>
             </div>
             <div id="zalo-auto-message-result" class="result hidden mb-4"></div>
@@ -611,7 +611,7 @@
           </section>
           <section class="data-card mt-4">
             <div class="section-heading">
-              <div><p class="eyebrow">Kết nối hệ thống</p><h2>DB, FTP, Drive, Telegram và Zalo</h2><p>Chỉnh trực tiếp cấu hình hiển thị. Secret vẫn lưu trong biến môi trường và không hiển thị trên trình duyệt.</p></div>
+              <div><p class="eyebrow">Kết nối hệ thống</p><h2>DB, FTP, Drive và Bot gửi tin</h2><p>Quản lý Telegram, Zalo và GoConnect. Token được bảo vệ và không hiển thị trên trình duyệt.</p></div>
               <div class="action-group"><button class="btn-secondary" id="telegram-test-message" type="button"><span class="button-label">Gửi thử Telegram</span><span class="spinner"></span></button><button class="btn-secondary" id="zalo-set-webhook" type="button"><span class="button-label">Cài webhook Zalo</span><span class="spinner"></span></button></div>
             </div>
             <div id="telegram-test-result" class="result hidden mb-4"></div>
@@ -657,13 +657,13 @@
               </table>
             </div>
             <div class="section-heading mt-4">
-              <div><p class="eyebrow">Gửi tin nhắn tự động</p><h2>Lịch gửi ảnh chụp Zalo</h2></div>
+              <div><p class="eyebrow">Gửi điểm tin tự động</p><h2>Lịch gửi ảnh qua Zalo/GoConnect</h2></div>
               <div class="action-group"><button class="btn-primary" id="add-zalo-auto-message" type="button">Thêm lịch</button><button class="btn-secondary" id="refresh-zalo-auto-messages" type="button">Làm mới</button></div>
             </div>
             <div id="zalo-auto-message-result" class="result hidden mb-4"></div>
             <div class="table-scroll mb-4">
               <table class="compact-admin-table inline-admin-table zalo-auto-table">
-                <thead><tr><th>Chức năng</th><th>Lịch</th><th>Đích Zalo</th><th>Ảnh</th><th>Trạng thái</th><th class="table-action-column">Chức năng</th></tr></thead>
+                <thead><tr><th>Chức năng</th><th>Lịch</th><th>Kênh và người nhận</th><th>Ảnh</th><th>Trạng thái</th><th class="table-action-column">Chức năng</th></tr></thead>
                 <tbody id="zalo-auto-messages-table"></tbody>
               </table>
             </div>

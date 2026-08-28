@@ -5900,7 +5900,7 @@ async function loadZaloAutoMessages({ force = false } = {}) {
     return;
   }
   if (zaloAutoMessages.length && !force) renderZaloAutoMessages();
-  if (!zaloAutoMessages.length || force) setTableLoading("#zalo-auto-messages-table", 6, "Đang tải lịch gửi Zalo...");
+  if (!zaloAutoMessages.length || force) setTableLoading("#zalo-auto-messages-table", 6, "Đang tải lịch gửi điểm tin...");
   try {
     const data = await api("/api/admin/zalo/auto-messages");
     zaloAutoMessages = data.schedules || [];
@@ -5908,7 +5908,7 @@ async function loadZaloAutoMessages({ force = false } = {}) {
     renderZaloAutoMessages();
     fillZaloAutoMessagePickers();
   } catch (error) {
-    table.innerHTML = emptyRow(6, "Không tải được lịch gửi Zalo", error.message);
+    table.innerHTML = emptyRow(6, "Không tải được lịch gửi điểm tin", error.message);
   }
 }
 
@@ -5920,7 +5920,7 @@ function fillZaloAutoMessagePickers() {
     .filter((schedule) => schedule.is_active)
     .map((schedule) => `<option value="${escapeHtml(schedule.schedule_id)}">${escapeHtml(schedule.name || schedule.schedule_id)}</option>`)
     .join("");
-  picker.innerHTML = `<option value="">Lịch Zalo</option>${options}`;
+  picker.innerHTML = `<option value="">Lịch gửi điểm tin</option>${options}`;
   if (current && zaloAutoMessages.some((schedule) => schedule.schedule_id === current)) picker.value = current;
 }
 
@@ -6010,14 +6010,15 @@ function renderZaloAutoMessages() {
   if (!table) return;
   table.innerHTML = zaloAutoMessages.length
     ? zaloAutoMessages.map((schedule) => renderZaloAutoMessageRow(schedule)).join("")
-    : emptyRow(6, "Chưa có lịch gửi Zalo", "Bấm Thêm lịch để cấu hình lịch gửi ảnh chụp tự động.");
+    : emptyRow(6, "Chưa có lịch gửi điểm tin", "Bấm Thêm lịch để cấu hình lịch gửi ảnh chụp tự động.");
   document.querySelectorAll("[data-edit-zalo-auto-message]").forEach((button) => button.addEventListener("click", () => openZaloAutoMessage(button.dataset.editZaloAutoMessage)));
   document.querySelectorAll("[data-send-zalo-auto-message]").forEach((button) => button.addEventListener("click", () => sendZaloAutoMessageNow(button.dataset.sendZaloAutoMessage, button)));
   document.querySelectorAll("[data-delete-zalo-auto-message]").forEach((button) => button.addEventListener("click", () => deleteZaloAutoMessage(button.dataset.deleteZaloAutoMessage)));
 }
 
 function renderZaloAutoMessageRow(schedule) {
-  const targetParts = schedule.chat_id ? [schedule.target_type === "person" ? "Cá nhân" : "Nhóm", schedule.chat_name, schedule.chat_id].filter(Boolean) : [];
+  const channelLabel = schedule.delivery_channel === "goconnect" ? "GoConnect" : "Zalo";
+  const targetParts = schedule.chat_id ? [channelLabel, schedule.target_type === "person" ? "Cá nhân" : "Nhóm", schedule.chat_name, schedule.chat_id].filter(Boolean) : [];
   const targetText = targetParts.length ? targetParts.join(" · ") : "Chưa cấu hình đích nhận";
   const imageText = schedule.latest_capture_url ? "Lần chụp gần nhất" : "Tự chụp mới khi gửi";
   const lastSent = schedule.last_sent_at ? new Date(schedule.last_sent_at).toLocaleString("vi-VN") : "";
@@ -6035,6 +6036,8 @@ function renderZaloAutoMessageRow(schedule) {
 function openZaloAutoMessage(scheduleId = "") {
   const schedule = zaloAutoMessages.find((item) => item.schedule_id === scheduleId);
   const form = $("#zalo-auto-message-form");
+  const dialogTitle = form.closest("dialog")?.querySelector(".dialog-heading h2");
+  if (dialogTitle) dialogTitle.textContent = "Cấu hình chụp ảnh và gửi điểm tin";
   if (!form.elements.namedItem("delivery_channel")) {
     const label = document.createElement("label");
     label.innerHTML = 'Điểm tin gửi qua đâu?<select class="form-control" name="delivery_channel"><option value="zalo">Zalo Bot</option><option value="goconnect">GoConnect Bot</option></select>';
@@ -6090,11 +6093,11 @@ async function saveZaloAutoMessage(event) {
   const chatId = String(data.chat_id || "").trim();
   const isActive = Boolean(form.elements.namedItem("is_active")?.checked);
   if (isActive && !chatId) {
-    showMessage(form.querySelector(".result"), "Chon 1 ca nhan hoac 1 nhom Zalo truoc khi bat lich.", "error");
+    showMessage(form.querySelector(".result"), "Chọn người nhận của kênh gửi trước khi bật lịch.", "error");
     return;
   }
   if (/[\s,;]+/.test(chatId)) {
-    showMessage(form.querySelector(".result"), "Moi lich Zalo chi duoc nhap 1 chat_id.", "error");
+    showMessage(form.querySelector(".result"), "Mỗi lịch chỉ được nhập một ID người nhận hoặc phòng.", "error");
     return;
   }
   try {
@@ -6121,8 +6124,8 @@ async function saveZaloAutoMessage(event) {
     })});
     if (file) await uploadZaloAutoMessageCapture(response.schedule.schedule_id, file, data.page_url || "/");
     $("#zalo-auto-message-dialog").close();
-    showMessage($("#zalo-auto-message-result"), "Đã lưu lịch gửi Zalo.");
-    showToast("Đã lưu lịch gửi Zalo.");
+    showMessage($("#zalo-auto-message-result"), "Đã lưu lịch gửi điểm tin.");
+    showToast("Đã lưu lịch gửi điểm tin.");
     await loadZaloAutoMessages({ force: true });
   } catch (error) {
     showMessage(form.querySelector(".result"), error.message, "error");
@@ -6156,7 +6159,7 @@ async function sendZaloAutoMessageNow(scheduleId, button) {
 }
 
 async function deleteZaloAutoMessage(scheduleId) {
-  if (!confirm(`Xóa lịch gửi Zalo ${scheduleId}?`)) return;
+  if (!confirm(`Xóa lịch gửi điểm tin ${scheduleId}?`)) return;
   try {
     await api(`/api/admin/zalo/auto-messages/${encodeURIComponent(scheduleId)}`, { method: "DELETE" });
     showMessage($("#zalo-auto-message-result"), `Đã xóa lịch ${scheduleId}.`);
