@@ -553,6 +553,7 @@ class AppRepository:
                     run_time TEXT NOT NULL DEFAULT '07:00',
                     weekday TEXT NOT NULL DEFAULT '',
                     month_day INTEGER NOT NULL DEFAULT 1,
+                    delivery_channel TEXT NOT NULL DEFAULT 'zalo',
                     target_type TEXT NOT NULL DEFAULT 'group',
                     chat_id TEXT NOT NULL DEFAULT '',
                     chat_name TEXT NOT NULL DEFAULT '',
@@ -841,6 +842,7 @@ class AppRepository:
             for statement in (
                 "ALTER TABLE zalo_auto_messages ADD COLUMN gemini_enabled INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE zalo_auto_messages ADD COLUMN gemini_prompt TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE zalo_auto_messages ADD COLUMN delivery_channel TEXT NOT NULL DEFAULT 'zalo'",
             ):
                 try:
                     connection.execute(statement)
@@ -2480,9 +2482,9 @@ class AppRepository:
                 """
                 INSERT INTO zalo_auto_messages
                 (schedule_id, linked_task_id, gemini_enabled, gemini_prompt, name, page_url, page_label, schedule_type, time_slots_json, run_time,
-                 weekday, month_day, target_type, chat_id, chat_name, caption, photo_url,
+                 weekday, month_day, delivery_channel, target_type, chat_id, chat_name, caption, photo_url,
                  is_active, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(schedule_id) DO UPDATE SET
                   linked_task_id=excluded.linked_task_id,
                   gemini_enabled=excluded.gemini_enabled,
@@ -2495,6 +2497,7 @@ class AppRepository:
                   run_time=excluded.run_time,
                   weekday=excluded.weekday,
                   month_day=excluded.month_day,
+                  delivery_channel=excluded.delivery_channel,
                   target_type=excluded.target_type,
                   chat_id=excluded.chat_id,
                   chat_name=excluded.chat_name,
@@ -2516,6 +2519,7 @@ class AppRepository:
                     str(payload.get("run_time", "07:00")).strip() or "07:00",
                     str(payload.get("weekday", "")).strip(),
                     int(payload.get("month_day") or 1),
+                    str(payload.get("delivery_channel", "zalo")).strip() or "zalo",
                     str(payload.get("target_type", "group")).strip() or "group",
                     str(payload.get("chat_id", "")).strip(),
                     str(payload.get("chat_name", "")).strip(),
@@ -3293,6 +3297,7 @@ class AppRepository:
             "run_time": row.get("run_time") or "07:00",
             "weekday": row.get("weekday") or "",
             "month_day": int(row.get("month_day") or 1),
+            "delivery_channel": row.get("delivery_channel") or "zalo",
             "target_type": row.get("target_type") or "group",
             "chat_id": row.get("chat_id") or "",
             "chat_name": row.get("chat_name") or "",

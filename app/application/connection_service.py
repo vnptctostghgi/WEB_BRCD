@@ -4,6 +4,7 @@ import httpx
 
 from app.application.database_service import DatabaseService
 from app.application.google_drive_service import test_google_drive_connection
+from app.application.goconnect_bot import GoConnectBotClient
 from app.application.telegram_notifier import TelegramNotifier
 from app.application.zalo_bot import ZaloBotClient
 from app.data_access.internal_api_client import InternalApiClient
@@ -129,6 +130,12 @@ class ConnectionService:
                 and self.settings.zalo_webhook_secret.get_secret_value()
             ),
         )
+        if not self.repository.get_system_connection_by_code("goconnect_bot"):
+            self.repository.upsert_system_connection(
+                code="goconnect_bot", name="GoConnect Bot", connection_type="goconnect",
+                description="Nhận cấu hình chứng nhận Bot dạng JSON và gửi điểm tin vào phòng GoConnect.",
+                config={}, is_active=False,
+            )
         existing_email = self.repository.get_system_connection_by_code("internal_email") or {}
         existing_email_config = existing_email.get("config") if isinstance(existing_email.get("config"), dict) else {}
         email_username = existing_email_config.get("username") or self.settings.internal_email_username
@@ -185,6 +192,9 @@ class ConnectionService:
 
         if connection["connection_type"] == "zalo":
             return self._with_connection(ZaloBotClient(self.settings).test(), connection)
+
+        if connection["connection_type"] == "goconnect":
+            return self._with_connection(GoConnectBotClient(connection.get("config") or {}).validate(), connection)
 
         if connection["connection_type"] == "ftp":
             config = connection.get("config") if isinstance(connection.get("config"), dict) else {}

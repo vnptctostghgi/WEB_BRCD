@@ -14,6 +14,7 @@ import httpx
 
 from app.application.database_service import DatabaseService
 from app.application.zalo_bot import ZaloBotClient
+from app.application.goconnect_bot import GoConnectBotClient
 from app.data_access.app_repository import DEFAULT_DASHBOARD_PAGE_ID, dashboard_feature_code_for_page, normalize_feature_code
 from app.data_access.internal_api_client import InternalApiClient
 from app.settings import Settings
@@ -407,11 +408,21 @@ def send_zalo_auto_message(repository: Any, settings: Settings, schedule: dict[s
             caption = gemini_image_assessment(settings, schedule, image_base64) or caption
         except Exception:
             logger.exception("Cannot generate Gemini assessment for Zalo schedule %s", schedule.get("schedule_id"))
-    sent = ZaloBotClient(settings).send_photo(chat_id, photo_url, caption)
+    if str(schedule.get("delivery_channel") or "zalo") == "goconnect":
+        connection = repository.get_system_connection_by_code("goconnect_bot") or {}
+        config = connection.get("config") if isinstance(connection.get("config"), dict) else {}
+        try:
+            result = GoConnectBotClient(config).send_message(chat_id, f"{caption}\n{photo_url}".strip())
+            sent = bool(result.get("ok"))
+        except Exception:
+            logger.exception("Cannot send GoConnect auto message")
+            sent = False
+    else:
+        sent = ZaloBotClient(settings).send_photo(chat_id, photo_url, caption)
     log_zalo_auto_message(repository, schedule, chat_id, caption, sent, photo_url)
     if not sent:
-        return {"ok": False, "message": "Khong gui duoc anh qua Zalo.", "chat_id": chat_id, "photo_url": photo_url}
-    return {"ok": True, "message": "Da gui anh qua Zalo.", "chat_id": chat_id, "photo_url": photo_url, "caption": caption}
+        return {"ok": False, "message": "Khong gui duoc diem tin qua kenh da chon.", "chat_id": chat_id, "photo_url": photo_url}
+    return {"ok": True, "message": "Da gui diem tin qua kenh da chon.", "chat_id": chat_id, "photo_url": photo_url, "caption": caption}
 
 
 def gemini_image_assessment(settings: Settings, schedule: dict[str, Any], image_base64: str) -> str:

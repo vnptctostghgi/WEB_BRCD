@@ -226,6 +226,7 @@ alter table public.zalo_auto_messages
 add column if not exists linked_task_id text not null default '';
 alter table public.zalo_auto_messages add column if not exists gemini_enabled boolean not null default false;
 alter table public.zalo_auto_messages add column if not exists gemini_prompt text not null default '';
+alter table public.zalo_auto_messages add column if not exists delivery_channel text not null default 'zalo';
 
 create table if not exists public.zalo_message_captures (
   capture_id text primary key,

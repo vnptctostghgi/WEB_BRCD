@@ -70,6 +70,7 @@ from app.application.onebss_report_service import (
 from app.application.task_report_auto_service import is_task_report_auto_created_by, normalize_task_report_auto_payload
 from app.application.zalo_auto_message_service import capture_page_screenshot_bytes, capture_public_url, send_zalo_auto_message
 from app.application.zalo_bot import ZaloBotClient
+from app.application.goconnect_bot import GoConnectBotClient, normalize_goconnect_config
 from app.data_access.app_repository import (
     AppRepository,
     DEFAULT_DASHBOARD_PAGE_ID,
@@ -704,6 +705,7 @@ class ZaloAutoMessagePayload(BaseModel):
     run_time: str = "07:00"
     weekday: str = ""
     month_day: int = 1
+    delivery_channel: Literal["zalo", "goconnect"] = "zalo"
     target_type: Literal["person", "group"] = "group"
     chat_id: str = ""
     chat_name: str = ""
@@ -1543,6 +1545,7 @@ def normalize_zalo_auto_message_payload(payload: ZaloAutoMessagePayload, schedul
         "run_time": run_time,
         "weekday": payload.weekday.strip(),
         "month_day": min(max(int(payload.month_day or 1), 1), 31),
+        "delivery_channel": payload.delivery_channel,
         "target_type": payload.target_type,
         "chat_id": chat_id,
         "chat_name": payload.chat_name.strip(),
@@ -4094,12 +4097,18 @@ def save_system_connection(request: Request, code: str, payload: SystemConnectio
     repository = build_app_repository()
     existing = repository.get_system_connection_by_code(code.strip()) or {}
     existing_config = existing.get("config") if isinstance(existing.get("config"), dict) else {}
+    incoming_config = payload.config
+    if payload.connection_type.strip() == "goconnect":
+        try:
+            incoming_config = normalize_goconnect_config(incoming_config)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
     repository.upsert_system_connection(
         code.strip(),
         payload.name.strip(),
         payload.connection_type.strip(),
         payload.description.strip(),
-        merge_protected_connection_config(existing_config, payload.config),
+        merge_protected_connection_config(existing_config, incoming_config),
         payload.is_active,
     )
     repository.add_audit_log(actor["username"], "system_connection_saved", f"Luu ket noi {code}")
@@ -5068,6 +5077,7 @@ def _dynamic_report_export_job_response(job_id: str, job: dict[str, Any]) -> dic
         "report_name": job.get("report_name") or "",
         "ma_bao_cao": job.get("report_code") or "",
         "ten_bao_cao": job.get("report_name") or "",
+        "created_by": job.get("created_by") or "",
         "created_at": job.get("created_at") or "",
         "updated_at": job.get("updated_at") or job.get("created_at") or "",
         "worker_id": job.get("worker_id") or "",
@@ -8231,6 +8241,30 @@ async def zalo_webhook(request: Request) -> dict:
     except Exception:
         pass
     return result
+
+
+@router.post("/api/goconnect/webhook")
+async def goconnect_webhook(request: Request) -> dict:
+    """Receive GoConnect events when the Bot portal is configured to call this URL."""
+    repository = build_app_repository()
+    connection = repository.get_system_connection_by_code("goconnect_bot") or {}
+    config = connection.get("config") if isinstance(connection.get("config"), dict) else {}
+    expected_token = str(config.get("tokenbot") or "")
+    supplied_token = str(request.headers.get("x-gcn-token") or "")
+    if not expected_token or not hmac.compare_digest(expected_token, supplied_token):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="GoConnect token không hợp lệ.")
+    try:
+        payload = await request.json()
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payload GoConnect không hợp lệ.") from error
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payload GoConnect phải là JSON object.")
+    repository.add_audit_log(
+        "goconnect_bot",
+        "goconnect_message_received",
+        json.dumps(payload, ensure_ascii=False)[:4000],
+    )
+    return {"ok": True, "received": True}
 
 
 @router.get("/api/admin/zalo/message-logs")

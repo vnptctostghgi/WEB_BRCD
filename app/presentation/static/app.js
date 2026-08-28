@@ -5621,7 +5621,7 @@ function renderConnectionEditor(connection) {
       <label>Mã<code class="compact-code">${escapeHtml(connection.code)}</code></label>
       <label>Loại
         <select class="form-control inline-admin-input" data-inline-connection-field="connection_type">
-          ${["internal_api", "supabase", "ftp", "drive", "telegram", "zalo", "internal_email"].map((type) => `<option value="${type}" ${connection.connection_type === type ? "selected" : ""}>${type}</option>`).join("")}
+          ${["internal_api", "supabase", "ftp", "drive", "telegram", "zalo", "goconnect", "internal_email"].map((type) => `<option value="${type}" ${connection.connection_type === type ? "selected" : ""}>${type}</option>`).join("")}
         </select>
       </label>
       <label class="checkbox-label inline-checkbox"><input type="checkbox" data-inline-connection-active ${connection.is_active ? "checked" : ""} /> Đang dùng</label>
@@ -5632,7 +5632,7 @@ function renderConnectionEditor(connection) {
       ${connection.connection_type === "ftp" ? renderFtpConnectionPanel(connection) : ""}
       ${connection.connection_type === "internal_email" || connection.connection_type === "ftp"
         ? `<input type="hidden" data-inline-connection-field="config_json" value="${escapeHtml(configText)}" />`
-        : `<label>Bảng lệnh / Cấu hình<textarea class="form-control inline-admin-code connection-editor-code" data-inline-connection-field="config_json" rows="14">${escapeHtml(configText)}</textarea></label>`}
+        : `<label>${connection.connection_type === "goconnect" ? "Dán JSON chứng nhận GoConnect Bot (tự nhận dạng Bot và phòng)" : "Bảng lệnh / Cấu hình"}<textarea class="form-control inline-admin-code connection-editor-code" data-inline-connection-field="config_json" rows="14">${escapeHtml(configText)}</textarea></label>`}
       <div class="cell-note" id="connection-result-${escapeHtml(connection.code)}"></div>
     </div>`;
 }
@@ -5703,6 +5703,21 @@ async function saveInlineConnection(code, button) {
     return;
   }
   const connectionType = row.querySelector('[data-inline-connection-field="connection_type"]')?.value || "internal_api";
+  if (connectionType === "goconnect") {
+    const raw = Array.isArray(config) ? config[0] : config;
+    if (!raw || typeof raw !== "object") {
+      showToast("JSON chứng nhận GoConnect Bot không hợp lệ.", "error");
+      return;
+    }
+    config = {
+      endpoint: raw.endpoint || "https://goconnect.vnpt.vn/api/v1/chatservice/bot/sendMessageByBot",
+      bot_id: raw.bot_id || raw.botId || "",
+      bot_code: raw.bot_code || raw.botCode || "",
+      bot_name: raw.bot_name || raw.botName || "",
+      tokenbot: raw.tokenbot || raw.token || "",
+      rooms: (raw.rooms || []).map((room) => ({ room_id: room.room_id || room.roomId || "", room_name: room.room_name || room.roomName || "" })),
+    };
+  }
   if (connectionType === "internal_email") {
     config = readInternalEmailConnectionConfig(row, config);
   }
@@ -6020,6 +6035,21 @@ function renderZaloAutoMessageRow(schedule) {
 function openZaloAutoMessage(scheduleId = "") {
   const schedule = zaloAutoMessages.find((item) => item.schedule_id === scheduleId);
   const form = $("#zalo-auto-message-form");
+  if (!form.elements.namedItem("delivery_channel")) {
+    const label = document.createElement("label");
+    label.innerHTML = 'Điểm tin gửi qua đâu?<select class="form-control" name="delivery_channel"><option value="zalo">Zalo Bot</option><option value="goconnect">GoConnect Bot</option></select>';
+    form.elements.namedItem("target_type").closest("label").before(label);
+    label.querySelector("select").addEventListener("change", (event) => {
+      if (event.currentTarget.value !== "goconnect") return;
+      const connection = connections.find((item) => item.code === "goconnect_bot");
+      const room = connection?.config?.rooms?.[0];
+      if (room) {
+        form.elements.namedItem("chat_id").value = room.room_id || "";
+        form.elements.namedItem("chat_name").value = room.room_name || "";
+        form.elements.namedItem("target_type").value = "group";
+      }
+    });
+  }
   ensureZaloLinkedTaskField();
   ensureZaloGeminiFields();
   fillZaloLinkedTaskOptions(schedule?.linked_task_id || "");
@@ -6034,6 +6064,7 @@ function openZaloAutoMessage(scheduleId = "") {
   form.elements.namedItem("run_time").value = schedule?.run_time || "07:00";
   form.elements.namedItem("weekday").value = schedule?.weekday || "";
   form.elements.namedItem("month_day").value = schedule?.month_day || 1;
+  form.elements.namedItem("delivery_channel").value = schedule?.delivery_channel || "zalo";
   form.elements.namedItem("target_type").value = schedule?.target_type || "group";
   form.elements.namedItem("chat_id").value = schedule?.chat_id || "";
   form.elements.namedItem("chat_name").value = schedule?.chat_name || "";
@@ -6080,6 +6111,7 @@ async function saveZaloAutoMessage(event) {
       run_time: data.run_time || "07:00",
       weekday: data.weekday || "",
       month_day: Number(data.month_day || 1),
+      delivery_channel: data.delivery_channel || "zalo",
       target_type: data.target_type || "group",
       chat_id: chatId,
       chat_name: data.chat_name || "",
