@@ -417,9 +417,12 @@ def send_zalo_auto_message(repository: Any, settings: Settings, schedule: dict[s
             safe_photo_url = html.escape(photo_url, quote=True)
             html_message = (
                 f'{safe_caption}<br>'
-                f'<img src="{safe_photo_url}" width="100%" '
-                f'style="display:block;width:100%;max-width:100%;height:auto;object-fit:contain">'
-                f'<br><a href="{safe_photo_url}">Mở ảnh đầy đủ</a>'
+                # GoConnect includes a closing quote in the fetched URL when src
+                # is quoted (visible as %22 in backend logs). A space safely
+                # terminates this token while retaining responsive attributes.
+                f'<img src={safe_photo_url} width=100% '
+                f'style=display:block;width:100%;max-width:100%;height:auto;object-fit:contain>'
+                f'<br><a href={safe_photo_url}>Mở ảnh đầy đủ</a>'
             )
             result = GoConnectBotClient(config).send_message(chat_id, html_message)
             sent = bool(result.get("ok"))
