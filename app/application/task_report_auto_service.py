@@ -763,8 +763,41 @@ def capture_public_web_screenshot_bytes(public_url: str, *, selector: str = "") 
                             image = page.locator(selector).first.screenshot(type="png")
                         else:
                             page.wait_for_selector("body", state="visible", timeout=30000)
-                            page.wait_for_function("() => document.body && document.body.innerText.trim().length > 0", timeout=30000)
-                            page.wait_for_timeout(1200)
+                            # Google Sheets publishes the shell/title before its sheet iframe
+                            # contains data.  Wait until non-empty cells exist and their
+                            # signature stays unchanged across consecutive observations.
+                            cell_state_script = """
+                                () => {
+                                  const cells = [...document.querySelectorAll('table.waffle td')]
+                                    .map((cell) => (cell.innerText || cell.textContent || '').trim())
+                                    .filter(Boolean);
+                                  const table = document.querySelector('table.waffle');
+                                  const box = table?.getBoundingClientRect();
+                                  return cells.length >= 4 && box && box.width > 80 && box.height > 40
+                                    ? `${cells.length}:${cells.join('|').length}:${Math.round(box.width)}:${Math.round(box.height)}`
+                                    : '';
+                                }
+                                """
+                            deadline = time.monotonic() + 90
+                            stable_signature = ""
+                            stable_count = 0
+                            sheet_frame = None
+                            while time.monotonic() < deadline and stable_count < 3:
+                                sheet_frame = next((frame for frame in page.frames if "/pubhtml/sheet" in frame.url), None)
+                                candidate = sheet_frame or page.main_frame
+                                try:
+                                    signature = str(candidate.evaluate(cell_state_script) or "")
+                                except Exception:
+                                    signature = ""
+                                if signature and signature == stable_signature:
+                                    stable_count += 1
+                                else:
+                                    stable_signature = signature
+                                    stable_count = 1 if signature else 0
+                                page.wait_for_timeout(700)
+                            if stable_count < 3:
+                                raise RuntimeError("Public web chua co bang du lieu on dinh de chup anh.")
+                            page.wait_for_timeout(500)
                             clip_script = r"""
                                 () => {
                                   const cells = [...document.querySelectorAll('table.waffle td')]
@@ -815,7 +848,7 @@ def capture_public_web_screenshot_bytes(public_url: str, *, selector: str = "") 
                                 }
                                 """
                             content_clip = page.evaluate(clip_script)
-                            sheet_frame = next((frame for frame in page.frames if "/pubhtml/sheet" in frame.url), None)
+                            sheet_frame = next((frame for frame in page.frames if "/pubhtml/sheet" in frame.url), sheet_frame)
                             screenshot_scale = "device"
                             if sheet_frame:
                                 frame_clip = sheet_frame.evaluate(clip_script)
