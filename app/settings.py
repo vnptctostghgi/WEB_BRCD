@@ -51,8 +51,8 @@ class Settings(BaseSettings):
     dashboard_chart_cache_enabled: bool = True
     dashboard_chart_cache_report_ids: str = "*"
     dashboard_chart_cache_report_codes: str = "*"
-    dashboard_chart_cache_ttl_seconds: int = 300
-    dashboard_chart_cache_auto_refresh_enabled: bool = False
+    dashboard_chart_cache_ttl_seconds: int = 900
+    dashboard_chart_cache_auto_refresh_enabled: bool = True
     dashboard_chart_cache_refresh_interval_seconds: int = 300
     supabase_startup_background_enabled: bool = True
     app_public_url: str = ""

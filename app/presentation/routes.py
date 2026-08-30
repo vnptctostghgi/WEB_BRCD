@@ -1655,6 +1655,34 @@ def normalize_dashboard_layout(payload: DashboardLayoutPayload) -> tuple[str, st
         if not tab_name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tên Tab không được để trống.")
 
+        normalized_sources = []
+        seen_sources: set[str] = set()
+        for source_index, source in enumerate(tab.get("data_sources") if isinstance(tab.get("data_sources"), list) else [], start=1):
+            if not isinstance(source, dict):
+                continue
+            source_code = normalize_dashboard_code(source.get("source_code") or f"SOURCE_{source_index}", "Mã nguồn dữ liệu")
+            if source_code in seen_sources:
+                raise HTTPException(status_code=400, detail=f"Mã nguồn dữ liệu {source_code} bị trùng trong Tab.")
+            seen_sources.add(source_code)
+            sql_code = str(source.get("sql_code") or "").strip()
+            if not sql_code:
+                continue
+            raw_filters = source.get("filters") if isinstance(source.get("filters"), dict) else {}
+            raw_report_id = source.get("report_id")
+            try:
+                report_id = int(raw_report_id) if raw_report_id not in (None, "") else None
+            except (TypeError, ValueError):
+                report_id = None
+            normalized_sources.append({
+                "source_code": source_code,
+                "name": str(source.get("name") or source_code).strip(),
+                "sql_code": normalize_dashboard_sql_code(sql_code),
+                "report_id": report_id,
+                "filters": {str(key).strip(): value for key, value in raw_filters.items() if str(key).strip()},
+                "cache_ttl_seconds": min(max(int(source.get("cache_ttl_seconds") or 900), 300), 86400),
+                "refresh_interval_seconds": min(max(int(source.get("refresh_interval_seconds") or 300), 60), 86400),
+            })
+
         normalized_rows = []
         grid_layout = tab.get("grid_layout") if isinstance(tab.get("grid_layout"), list) else []
         for row_index, row in enumerate(grid_layout, start=1):
@@ -1671,6 +1699,7 @@ def normalize_dashboard_layout(payload: DashboardLayoutPayload) -> tuple[str, st
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cấu trúc hiển thị không hợp lệ.")
                 widget_type = str(widget.get("type") or "").strip()
                 sql_code = str(widget.get("sql_code") or "").strip()
+                data_source_code = str(widget.get("data_source_code") or "").strip().upper()
                 title = str(widget.get("title") or "").strip()
                 text_content = str(widget.get("text_content") or "").strip()
                 raw_chart_config = widget.get("chart_config") if isinstance(widget.get("chart_config"), dict) else {}
@@ -1681,7 +1710,7 @@ def normalize_dashboard_layout(payload: DashboardLayoutPayload) -> tuple[str, st
                 elif widget_type == "google_sheet_embed":
                     if not str(chart_config.get("embed_url") or "").strip():
                         continue
-                elif not sql_code:
+                elif not sql_code and not data_source_code:
                     continue
                 if widget_type not in DASHBOARD_WIDGET_TYPES:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Loại hiển thị không hợp lệ.")
@@ -1700,6 +1729,7 @@ def normalize_dashboard_layout(payload: DashboardLayoutPayload) -> tuple[str, st
                     "type": widget_type,
                     "title": title,
                     "sql_code": normalize_dashboard_sql_code(sql_code) if sql_code else "",
+                    "data_source_code": data_source_code if data_source_code in seen_sources else "",
                     "report_id": report_id,
                     "filters": filters,
                     "chart_config": chart_config,
@@ -1716,6 +1746,7 @@ def normalize_dashboard_layout(payload: DashboardLayoutPayload) -> tuple[str, st
             "tab_id": tab_id,
             "tab_name": tab_name,
             "order": tab_index,
+            "data_sources": normalized_sources,
             "grid_layout": normalized_rows,
         })
 

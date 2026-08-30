@@ -1058,6 +1058,8 @@ class DatabaseService:
             "widget_title": widget.get("title") or sql_code,
             "widget_type": widget.get("type"),
             "filters": filters or {},
+            "cache_ttl_seconds": int(widget.get("cache_ttl_seconds") or 0),
+            "refresh_interval_seconds": int(widget.get("refresh_interval_seconds") or 0),
         }
 
     def _dashboard_cache_result(self, metadata: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1077,6 +1079,13 @@ class DatabaseService:
         if not payload:
             return None
         result = json.loads(json.dumps(payload, ensure_ascii=False, default=str))
+        expires_at = str(entry.get("expires_at") or "")
+        stale = False
+        if expires_at:
+            try:
+                stale = datetime.fromisoformat(expires_at.replace("Z", "+00:00")) <= datetime.now(UTC)
+            except ValueError:
+                stale = False
         details = result.get("details") if isinstance(result.get("details"), dict) else {}
         result["details"] = {
             **details,
@@ -1085,10 +1094,11 @@ class DatabaseService:
                 "chart_key": entry.get("chart_key"),
                 "refreshed_at": entry.get("refreshed_at"),
                 "expires_at": entry.get("expires_at"),
+                "stale": stale,
             },
         }
         result.setdefault("ok", True)
-        result.setdefault("message", "Đã tải dữ liệu biểu đồ từ cache.")
+        result["message"] = "Đang dùng cache cũ trong khi chờ làm mới." if stale else result.get("message") or "Đã tải dữ liệu biểu đồ từ cache."
         return result
 
     def _dashboard_cache_results_by_key(self, metadata_by_query_key: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -1129,6 +1139,11 @@ class DatabaseService:
     def _dashboard_reports_by_id(self, tabs: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
         report_ids: set[int] = set()
         for tab in tabs:
+            for source in tab.get("data_sources") or []:
+                if isinstance(source, dict):
+                    report_id = self._widget_report_id(source)
+                    if report_id is not None:
+                        report_ids.add(report_id)
             for row in tab.get("grid_layout") or []:
                 for widget in row.get("widgets") or []:
                     report_id = self._widget_report_id(widget)
@@ -1162,7 +1177,7 @@ class DatabaseService:
             return False
 
         now = datetime.now(UTC)
-        ttl_seconds = int(getattr(self.internal_api.settings, "dashboard_chart_cache_ttl_seconds", 300) or 300)
+        ttl_seconds = int(metadata.get("cache_ttl_seconds") or getattr(self.internal_api.settings, "dashboard_chart_cache_ttl_seconds", 900) or 900)
         rows = result.get("rows") if isinstance(result.get("rows"), list) else []
         entry = {
             **metadata,
@@ -1217,25 +1232,28 @@ class DatabaseService:
             reports_by_id = self._dashboard_reports_by_id(tabs)
             for tab in tabs:
                 tab_id = str(tab.get("tab_id") or "").strip()
+                sources = {str(item.get("source_code") or "").upper(): item for item in (tab.get("data_sources") or []) if isinstance(item, dict)}
                 for row in tab.get("grid_layout") or []:
                     row_id = row.get("row_id")
                     for widget in row.get("widgets") or []:
-                        sql_code = str(widget.get("sql_code") or "").strip().upper()
+                        source = sources.get(str(widget.get("data_source_code") or "").upper()) or {}
+                        effective_widget = {**widget, **({"report_id": source.get("report_id"), "cache_ttl_seconds": source.get("cache_ttl_seconds"), "refresh_interval_seconds": source.get("refresh_interval_seconds")} if source else {})}
+                        sql_code = str(source.get("sql_code") or widget.get("sql_code") or "").strip().upper()
                         if not sql_code:
                             continue
-                        filters = widget.get("filters") if isinstance(widget.get("filters"), dict) else {}
-                        report_id = self._widget_report_id(widget)
+                        filters = {**(source.get("filters") if isinstance(source.get("filters"), dict) else {}), **(widget.get("filters") if isinstance(widget.get("filters"), dict) else {})}
+                        report_id = self._widget_report_id(effective_widget)
                         metadata = self.dashboard_widget_cache_metadata(
                             page_id=page_id,
                             tab_id=tab_id,
                             row_id=row_id,
-                            widget=widget,
+                            widget=effective_widget,
                             sql_code=sql_code,
                             filters=filters,
                             report=reports_by_id.get(report_id) if report_id is not None else REPORT_NOT_PROVIDED,
                         )
                         if metadata:
-                            widgets.append((metadata, widget))
+                            widgets.append((metadata, effective_widget))
         return widgets
 
     def refresh_dashboard_chart_cache(self, page_id: str | None = None, dry_run: bool = False) -> dict[str, Any]:
@@ -1252,6 +1270,18 @@ class DatabaseService:
                 skipped += 1
                 continue
             seen_chart_keys.add(chart_key)
+            refresh_interval = int(metadata.get("refresh_interval_seconds") or 0)
+            if refresh_interval and not dry_run and hasattr(self.app_repository, "get_dashboard_chart_cache"):
+                existing = self.app_repository.get_dashboard_chart_cache(chart_key)
+                refreshed_at = str((existing or {}).get("refreshed_at") or "")
+                if refreshed_at:
+                    try:
+                        age = (datetime.now(UTC) - datetime.fromisoformat(refreshed_at.replace("Z", "+00:00"))).total_seconds()
+                        if age < refresh_interval:
+                            skipped += 1
+                            continue
+                    except (TypeError, ValueError):
+                        pass
 
             started = datetime.now(UTC)
             result = self.run_dynamic_report(
@@ -1325,21 +1355,24 @@ class DatabaseService:
         query_jobs: dict[str, dict[str, Any]] = {}
         query_cache_metadata: dict[str, dict[str, Any]] = {}
         reports_by_id = self._dashboard_reports_by_id([tab])
+        sources = {str(item.get("source_code") or "").upper(): item for item in (tab.get("data_sources") or []) if isinstance(item, dict)}
         all_ok = True
         for row in tab.get("grid_layout") or []:
             row_id = row.get("row_id")
             for widget in row.get("widgets") or []:
-                sql_code = str(widget.get("sql_code") or "").strip().upper()
+                source = sources.get(str(widget.get("data_source_code") or "").upper()) or {}
+                effective_widget = {**widget, **({"report_id": source.get("report_id"), "cache_ttl_seconds": source.get("cache_ttl_seconds"), "refresh_interval_seconds": source.get("refresh_interval_seconds")} if source else {})}
+                sql_code = str(source.get("sql_code") or widget.get("sql_code") or "").strip().upper()
                 if not sql_code:
                     continue
-                filters = widget.get("filters") if isinstance(widget.get("filters"), dict) else {}
-                cache_key = self._dashboard_widget_query_key(sql_code, filters, widget.get("report_id"))
-                report_id = self._widget_report_id(widget)
+                filters = {**(source.get("filters") if isinstance(source.get("filters"), dict) else {}), **(widget.get("filters") if isinstance(widget.get("filters"), dict) else {})}
+                cache_key = self._dashboard_widget_query_key(sql_code, filters, effective_widget.get("report_id"))
+                report_id = self._widget_report_id(effective_widget)
                 cache_metadata = self.dashboard_widget_cache_metadata(
                     page_id=page_id,
                     tab_id=tab_id,
                     row_id=row_id,
-                    widget=widget,
+                    widget=effective_widget,
                     sql_code=sql_code,
                     filters=filters,
                     report=reports_by_id.get(report_id) if report_id is not None else REPORT_NOT_PROVIDED,
@@ -1349,7 +1382,7 @@ class DatabaseService:
                     "filters": filters,
                     "page": 1,
                     "page_size": 50,
-                    "report_id": widget.get("report_id"),
+                    "report_id": effective_widget.get("report_id"),
                     "report_name": widget.get("title"),
                 })
                 if cache_metadata:
@@ -1362,6 +1395,7 @@ class DatabaseService:
                     "type": widget.get("type"),
                     "title": widget.get("title") or sql_code,
                     "sql_code": sql_code,
+                    "data_source_code": widget.get("data_source_code") or "",
                     "data": result,
                     "_cache_key": cache_key,
                 })

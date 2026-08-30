@@ -2980,6 +2980,7 @@ function dashboardLayoutTemplate(pageName = "Dashboard Kinh doanh", pageId = "DA
         tab_id: `tab_${Date.now()}`,
         tab_name: "Tab mới",
         order: 1,
+        data_sources: [],
         grid_layout: options.empty ? [] : [
           { row_id: 1, layout_type: "2_columns", widgets: [] },
         ],
@@ -2997,6 +2998,15 @@ function normalizeDashboardLayoutData(layout, pageName = "") {
       tab_id: String(tab.tab_id || `tab_${Date.now()}_${index}`).trim(),
       tab_name: repairTextEncoding(String(tab.tab_name || `Tab ${index + 1}`).trim()),
       order: index + 1,
+      data_sources: Array.isArray(tab.data_sources) ? tab.data_sources.map((source, sourceIndex) => ({
+        source_code: String(source.source_code || `SOURCE_${sourceIndex + 1}`).trim().toUpperCase(),
+        name: repairTextEncoding(String(source.name || source.source_code || `Nguồn ${sourceIndex + 1}`)),
+        sql_code: String(source.sql_code || "").trim().toUpperCase(),
+        report_id: source.report_id ?? null,
+        filters: source.filters && typeof source.filters === "object" && !Array.isArray(source.filters) ? source.filters : {},
+        cache_ttl_seconds: Number(source.cache_ttl_seconds || 900),
+        refresh_interval_seconds: Number(source.refresh_interval_seconds || 300),
+      })) : [],
       grid_layout: Array.isArray(tab.grid_layout) ? tab.grid_layout.map((row, rowIndex) => ({
         row_id: Number(row.row_id || rowIndex + 1),
         layout_type: dashboardLayoutColumns[row.layout_type] ? row.layout_type : "2_columns",
@@ -3005,12 +3015,13 @@ function normalizeDashboardLayoutData(layout, pageName = "") {
           type: String(widget.type || "bar_chart"),
           title: repairTextEncoding(String(widget.title || "")),
           sql_code: String(widget.sql_code || "").trim().toUpperCase(),
+          data_source_code: String(widget.data_source_code || "").trim().toUpperCase(),
           report_id: widget.report_id ?? null,
           filters: widget.filters && typeof widget.filters === "object" && !Array.isArray(widget.filters) ? widget.filters : {},
           chart_config: widget.chart_config && typeof widget.chart_config === "object" && !Array.isArray(widget.chart_config) ? widget.chart_config : {},
           text_content: repairTextEncoding(String(widget.text_content || "")),
           icon_url: String(widget.icon_url || ""),
-        })).filter((widget) => widget.sql_code || dashboardNonSqlWidgetTypes.has(widget.type)) : [],
+        })).filter((widget) => widget.sql_code || widget.data_source_code || dashboardNonSqlWidgetTypes.has(widget.type)) : [],
       })) : [],
     })) : [],
   };
@@ -3708,6 +3719,19 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
   if (parentCode) dashboardBuilderLayout.parent_code = parentCode;
   const tab = currentDashboardTab();
   if (!tab) return;
+  tab.data_sources = [...document.querySelectorAll("#dashboard-data-sources .dashboard-data-source-card")].map((card, index) => {
+    const sqlSelect = card.querySelector("[name='source_sql_code']");
+    const selectedReportId = sqlSelect?.selectedOptions?.[0]?.dataset.reportId || "";
+    return {
+      source_code: (card.querySelector("[name='source_code']")?.value || `SOURCE_${index + 1}`).trim().toUpperCase(),
+      name: (card.querySelector("[name='source_name']")?.value || `Nguồn ${index + 1}`).trim(),
+      sql_code: (sqlSelect?.value || "").trim().toUpperCase(),
+      report_id: selectedReportId ? Number(selectedReportId) : null,
+      filters: parseDashboardFilters(card.querySelector("[name='source_filters']")?.value || "", strictFilters),
+      cache_ttl_seconds: Number(card.querySelector("[name='source_ttl']")?.value || 900),
+      refresh_interval_seconds: Number(card.querySelector("[name='source_refresh']")?.value || 300),
+    };
+  }).filter((source) => source.source_code && source.sql_code);
   const rows = [...document.querySelectorAll("#dashboard-builder-workspace .builder-row")];
   tab.grid_layout = rows.map((row, index) => {
     const layoutValue = row.querySelector("[name='layout_type']")?.value || "2_columns";
@@ -3718,6 +3742,7 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
       const type = card.querySelector("[name='type']")?.value || "bar_chart";
       const sqlSelect = card.querySelector("[name='sql_code']");
       const sqlCode = sqlSelect?.value.trim().toUpperCase() || "";
+      const dataSourceCode = card.querySelector("[name='data_source_code']")?.value.trim().toUpperCase() || "";
       const selectedReportId = sqlSelect?.selectedOptions?.[0]?.dataset.reportId || "";
       const title = card.querySelector("[name='title']")?.value.trim() || "";
       const textContent = card.querySelector("[name='text_content']")?.value.trim() || "";
@@ -3742,13 +3767,14 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
         embed_width: activeConfig?.querySelector("[name='embed_width']")?.value.trim() || "",
         color_scale: Boolean(activeConfig?.querySelector("[name='color_scale']")?.checked),
       };
-      const hasDisplayConfig = title || textContent || iconUrl || sqlCode || chartConfig.embed_url;
+      const hasDisplayConfig = title || textContent || iconUrl || sqlCode || dataSourceCode || chartConfig.embed_url;
       if (!hasDisplayConfig) return null;
       return {
         position,
         type,
         title,
         sql_code: sqlCode,
+        data_source_code: dataSourceCode,
         report_id: selectedReportId ? Number(selectedReportId) : null,
         filters,
         chart_config: chartConfig,
@@ -3768,7 +3794,20 @@ function renderDashboardWorkspace() {
   const workspace = $("#dashboard-builder-workspace");
   const tab = currentDashboardTab();
   if (!workspace || !tab) return;
-  workspace.innerHTML = tab.grid_layout?.length ? tab.grid_layout.map((row, index) => renderDashboardBuilderRow(row, index)).join("") : `
+  const sourceCards = (tab.data_sources || []).map((source, index) => `
+    <article class="builder-widget-card dashboard-data-source-card" data-source-index="${index}">
+      <div class="section-heading compact"><div><p class="eyebrow">Nguồn ${index + 1}</p><strong>${escapeHtml(source.name || source.source_code)}</strong></div><button class="table-action danger" data-delete-dashboard-source="${index}" type="button">Xóa</button></div>
+      <div class="grid gap-2 md:grid-cols-2">
+        <label>Mã nguồn<input class="form-control" name="source_code" value="${escapeHtml(source.source_code || "")}" placeholder="VD: NGUON_PTM" /></label>
+        <label>Tên nguồn<input class="form-control" name="source_name" value="${escapeHtml(source.name || "")}" placeholder="Số liệu PTM tổng hợp" /></label>
+        <label>Mã SQL<select class="form-control" name="source_sql_code">${dashboardSqlOptions(source.sql_code || "", source.report_id)}</select></label>
+        <label>Bộ lọc nguồn<textarea class="form-control" name="source_filters" rows="2" placeholder='{"P_THANG":"202608"}'>${escapeHtml(dashboardFiltersToText(source.filters || {}))}</textarea></label>
+        <label>Refresh (giây)<input class="form-control" name="source_refresh" type="number" min="60" value="${Number(source.refresh_interval_seconds || 300)}" /></label>
+        <label>TTL (giây)<input class="form-control" name="source_ttl" type="number" min="300" value="${Number(source.cache_ttl_seconds || 900)}" /></label>
+      </div>
+    </article>`).join("");
+  const sourcePanel = `<section class="data-card dashboard-data-source-panel"><div class="section-heading compact"><div><p class="eyebrow">Tối ưu truy vấn</p><h3>Nguồn dữ liệu Dashboard</h3><p>Mỗi Tab nên có 1–3 nguồn; nhiều biểu đồ có thể dùng chung một nguồn và bộ lọc.</p></div><button class="table-action" data-add-dashboard-source type="button">+ Thêm nguồn</button></div><div id="dashboard-data-sources" class="grid gap-3">${sourceCards || '<small>Chưa có nguồn dùng chung. Biểu đồ hiện vẫn dùng SQL riêng.</small>'}</div></section>`;
+  workspace.innerHTML = sourcePanel + (tab.grid_layout?.length ? tab.grid_layout.map((row, index) => renderDashboardBuilderRow(row, index)).join("") : `
     <div class="dashboard-empty">
       <p class="eyebrow">Workspace Grid</p>
       <h2>Tab này chưa có Layout</h2>
@@ -3779,7 +3818,12 @@ function renderDashboardWorkspace() {
         <button class="table-action" data-add-dashboard-empty-row="4_columns" type="button">4 cột</button>
       </div>
     </div>
-  `;
+  `);
+}
+
+function dashboardDataSourceOptions(selectedCode = "") {
+  const sources = currentDashboardTab()?.data_sources || [];
+  return `<option value="">SQL riêng của biểu đồ</option>${sources.map((source) => `<option value="${escapeHtml(source.source_code)}" ${source.source_code === selectedCode ? "selected" : ""}>${escapeHtml(source.name || source.source_code)}</option>`).join("")}`;
 }
 
 function dashboardLayoutTypeOptions(selectedType) {
@@ -3898,6 +3942,7 @@ function renderDashboardBuilderRow(row, index) {
         <small>Ô ${position}</small>
         <label>Tiêu đề<input class="form-control" name="title" value="${escapeHtml(widget.title || "")}" placeholder="Tên biểu đồ, thẻ hoặc tiêu đề" /></label>
         <label>Loại hiển thị<select class="form-control" name="type">${dashboardWidgetTypeOptions(widget.type)}</select></label>
+        <label class="dashboard-sql-field ${requiresSql ? "" : "hidden"}">Nguồn dữ liệu dùng chung<select class="form-control" name="data_source_code">${dashboardDataSourceOptions(widget.data_source_code || "")}</select><small>Chọn nguồn chung để không chạy lại SQL riêng cho ô này.</small></label>
         <label class="dashboard-sql-field ${requiresSql ? "" : "hidden"}">Mã SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "", widget.report_id)}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
         <label class="dashboard-filter-field ${showFilterField ? "" : "hidden"}">Bộ lọc mặc định<textarea class="form-control dashboard-filter-json" name="filters" rows="3" placeholder='{"LOAIHINH":""}'>${escapeHtml(filterText)}</textarea></label>
         ${renderDashboardWidgetAdvancedConfig(widget)}
@@ -3930,6 +3975,24 @@ function addDashboardRow(layoutType) {
 }
 
 function handleDashboardWorkspaceClick(event) {
+  const addSourceButton = event.target.closest("[data-add-dashboard-source]");
+  if (addSourceButton) {
+    collectDashboardBuilderStateFromDom();
+    const tab = currentDashboardTab();
+    const index = (tab.data_sources || []).length + 1;
+    tab.data_sources = [...(tab.data_sources || []), { source_code: `SOURCE_${index}`, name: `Nguồn ${index}`, sql_code: "", report_id: null, filters: {}, refresh_interval_seconds: 300, cache_ttl_seconds: 900 }];
+    renderDashboardWorkspace();
+    return;
+  }
+  const deleteSourceButton = event.target.closest("[data-delete-dashboard-source]");
+  if (deleteSourceButton) {
+    collectDashboardBuilderStateFromDom();
+    const tab = currentDashboardTab();
+    const removed = tab.data_sources.splice(Number(deleteSourceButton.dataset.deleteDashboardSource), 1)[0];
+    for (const row of tab.grid_layout || []) for (const widget of row.widgets || []) if (widget.data_source_code === removed?.source_code) widget.data_source_code = "";
+    renderDashboardWorkspace();
+    return;
+  }
   const addEmptyButton = event.target.closest("[data-add-dashboard-empty-row]");
   if (addEmptyButton) {
     addDashboardRow(addEmptyButton.dataset.addDashboardEmptyRow || "2_columns");
