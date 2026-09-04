@@ -68,7 +68,12 @@ from app.application.onebss_report_service import (
     start_onebss_otp_mobile_gateway_request,
 )
 from app.application.task_report_auto_service import is_task_report_auto_created_by, normalize_task_report_auto_payload
-from app.application.zalo_auto_message_service import capture_page_screenshot_bytes, capture_public_url, send_zalo_auto_message
+from app.application.zalo_auto_message_service import (
+    capture_page_screenshot_bytes,
+    capture_public_url,
+    notify_task_report_auto_error,
+    send_zalo_auto_message,
+)
 from app.application.zalo_bot import ZaloBotClient
 from app.application.goconnect_bot import GoConnectBotClient, normalize_goconnect_config
 from app.data_access.app_repository import (
@@ -8456,6 +8461,14 @@ def send_zalo_auto_message_now(request: Request, schedule_id: str) -> dict:
         raise_zalo_auto_message_schema_error(error)
     repository.add_audit_log(actor["username"], "zalo_auto_message_manual_send", f"Gui thu lich Zalo {schedule_id}: {result.get('ok')}")
     if not result.get("ok"):
+        schedule_name = str(schedule.get("name") or schedule.get("caption") or "").strip()
+        notify_task_report_auto_error(
+            repository,
+            get_settings(),
+            feature="Gửi điểm tin thủ công",
+            item=f"{schedule_id} - {schedule_name}" if schedule_name else schedule_id,
+            error=result.get("message") or "Không gửi được điểm tin.",
+        )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.get("message") or "Khong gui duoc lich Zalo.")
     return result
 
