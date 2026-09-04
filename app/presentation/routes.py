@@ -484,6 +484,8 @@ class SqlReportPayload(BaseModel):
     ma_bao_cao: str
     cau_lenh_sql: str
     cac_tham_so: list[str] = Field(default_factory=list)
+    is_dashboard_source: bool = False
+    dashboard_refresh_minutes: int = 5
 
 
 class OneBssReportPayload(BaseModel):
@@ -4250,7 +4252,11 @@ def save_sql_report(request: Request, payload: SqlReportPayload) -> dict:
     if not ten_bao_cao or not ma_bao_cao:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tên báo cáo và mã báo cáo là bắt buộc.")
     try:
-        report_id = repository.save_sql_report(payload.id, ten_bao_cao, ma_bao_cao, cau_lenh_sql, cac_tham_so)
+        report_id = repository.save_sql_report(
+            payload.id, ten_bao_cao, ma_bao_cao, cau_lenh_sql, cac_tham_so,
+            is_dashboard_source=payload.is_dashboard_source,
+            dashboard_refresh_minutes=payload.dashboard_refresh_minutes,
+        )
     except sqlite3.IntegrityError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mã báo cáo đã tồn tại.") from error
     except RuntimeError as error:
@@ -4262,7 +4268,11 @@ def save_sql_report(request: Request, payload: SqlReportPayload) -> dict:
             report_id=report_id,
             report_codes=[ma_bao_cao, (existing_report or {}).get("ma_bao_cao")],
         )
-    return {"ok": True, "id": report_id}
+    refresh_job_id = ""
+    if payload.is_dashboard_source:
+        report = repository.get_sql_report_by_id(report_id) or {}
+        refresh_job_id = _queue_dashboard_dataset_refresh(report, actor["username"])
+    return {"ok": True, "id": report_id, "dashboard_refresh_job_id": refresh_job_id}
 
 
 @router.delete("/api/admin/sql-reports/{report_id}")
@@ -4282,6 +4292,16 @@ def delete_sql_report(request: Request, report_id: int) -> dict:
     repository.add_audit_log(actor["username"], "sql_report_deleted", f"Xóa cấu hình SQL {report_id}")
     clear_config_cache("report_configs")
     return {"ok": True}
+
+
+@router.post("/api/admin/sql-reports/{report_id}/refresh-dashboard")
+def refresh_sql_dashboard_dataset(request: Request, report_id: int) -> dict:
+    actor = require_any_feature(request, "quantriketnoi", "quantrisql", "thietkelayoutbaocao")
+    repository = build_app_repository()
+    report = repository.get_sql_report_by_id(report_id)
+    if not report or not report.get("is_dashboard_source"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SQL này chưa được bật dùng cho Dashboard.")
+    return {"ok": True, "job_id": _queue_dashboard_dataset_refresh(report, actor["username"])}
 
 
 @router.get("/api/admin/onebss-reports")
@@ -4586,7 +4606,7 @@ def list_report_configs(request: Request) -> dict:
     require_any_feature(request, "truyvansql", "thietkelayoutbaocao")
     def load() -> dict[str, Any]:
         try:
-            reports = build_app_repository().list_sql_reports()
+            reports = [report for report in build_app_repository().list_sql_reports() if not report.get("is_dashboard_source")]
         except RuntimeError as error:
             raise_sql_report_schema_error(error)
         return {
@@ -4596,6 +4616,7 @@ def list_report_configs(request: Request) -> dict:
                     "ten_bao_cao": report["ten_bao_cao"],
                     "ma_bao_cao": report["ma_bao_cao"],
                     "cac_tham_so": report.get("cac_tham_so") or [],
+                    "is_dashboard_source": bool(report.get("is_dashboard_source")),
                 }
                 for report in reports
             ]
@@ -5522,6 +5543,52 @@ def _set_dynamic_report_run_job(job_id: str, **updates: Any) -> dict[str, Any]:
     except Exception as error:
         logger.warning("Cannot persist dynamic report run job %s to Supabase: %s", job_id, error)
     return snapshot
+
+
+def _queue_dashboard_dataset_refresh(report: dict[str, Any], actor: str = "dashboard_dataset_scheduler") -> str:
+    report_id = int(report.get("id") or 0)
+    job_id = f"dataset_{report_id}_{uuid.uuid4().hex[:12]}"
+    payload = {
+        "ma_bao_cao": str(report.get("ma_bao_cao") or "").strip().upper(),
+        "filters": {}, "page": 1, "page_size": 20000, "search": "", "search_columns": [],
+        "report_id": report_id, "report_name": str(report.get("ten_bao_cao") or ""),
+    }
+    _set_dynamic_report_run_job(
+        job_id, status="queued_worker", message="Đang chờ máy trạm nạp dữ liệu Dashboard.",
+        created_by=f"dashboard_dataset:{report_id}:{actor}", report_code=payload["ma_bao_cao"],
+        report_name=payload["report_name"], payload=payload,
+    )
+    try:
+        build_app_repository().mark_dashboard_dataset_status(report_id, status="queued", error="")
+    except Exception:
+        logger.exception("Cannot mark dashboard dataset queued: %s", report_id)
+    return job_id
+
+
+def _dashboard_dataset_columns(columns: list[str], rows: list[dict[str, Any]]) -> tuple[list[dict[str, str]], list[dict[str, Any]], str]:
+    normalized_names: list[str] = []
+    used: set[str] = set()
+    for index, raw_name in enumerate(columns):
+        name = re.sub(r"[^a-z0-9_]", "_", str(raw_name or f"column_{index + 1}").strip().lower()).strip("_") or f"column_{index + 1}"
+        name = ("c_" + name if name[0].isdigit() else name)[:63]
+        base, suffix = name, 2
+        while name in used:
+            name = f"{base[:58]}_{suffix}"
+            suffix += 1
+        used.add(name); normalized_names.append(name)
+    definitions: list[dict[str, str]] = []
+    normalized_rows: list[dict[str, Any]] = []
+    for row in rows:
+        normalized_rows.append({normalized_names[i]: row.get(columns[i]) for i in range(len(columns))})
+    for index, name in enumerate(normalized_names):
+        values = [row.get(name) for row in normalized_rows if row.get(name) is not None]
+        kind = "text"
+        if values and all(isinstance(value, bool) for value in values): kind = "boolean"
+        elif values and all(isinstance(value, int) and not isinstance(value, bool) for value in values): kind = "bigint"
+        elif values and all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in values): kind = "numeric"
+        definitions.append({"name": name, "type": kind})
+    signature = hashlib.sha256(json.dumps(definitions, sort_keys=True).encode()).hexdigest()
+    return definitions, normalized_rows, signature
 
 
 def _queue_dashboard_refresh_requests(result: dict[str, Any], actor: str) -> dict[str, Any]:
@@ -6460,6 +6527,40 @@ def finish_sql_worker_task(request: Request, run_id: str, payload: SqlWorkerResu
         "pagination": pagination or {"page": run_payload.page, "page_size": run_payload.page_size, "total": len(rows)},
     }
     status_value = "complete" if payload.ok and str(payload.status or "").lower() not in {"failed", "error"} else "failed"
+    dataset_report_id = 0
+    created_by = str(job.get("created_by") or "")
+    if created_by.startswith("dashboard_dataset:"):
+        try:
+            dataset_report_id = int(created_by.split(":", 2)[1])
+        except (ValueError, IndexError):
+            dataset_report_id = 0
+    if dataset_report_id:
+        dataset_repository = build_app_repository()
+        dataset_report = dataset_repository.get_sql_report_by_id(dataset_report_id) or report or {}
+        if status_value == "complete":
+            try:
+                definitions, normalized_rows, signature = _dashboard_dataset_columns(payload.columns, rows)
+                dataset_repository.replace_dashboard_dataset(dataset_report, definitions, normalized_rows)
+                dataset_repository.mark_dashboard_dataset_status(
+                    dataset_report_id, status="success", error="", row_count=len(normalized_rows), signature=signature,
+                )
+                result["details"] = {**result["details"], "dashboard_table": dataset_report.get("dashboard_table_name"), "dashboard_rows": len(normalized_rows)}
+            except Exception as error:
+                logger.exception("Cannot replace dashboard dataset table for report %s", dataset_report_id)
+                status_value = "failed"
+                result["ok"] = False
+                result["message"] = f"Không nạp được bảng Supabase Dashboard: {str(error)[:700]}"
+                dataset_repository.mark_dashboard_dataset_status(dataset_report_id, status="failed", error=result["message"])
+                notify_task_report_auto_error(
+                    dataset_repository, get_settings(), feature="Nạp dữ liệu Dashboard vào Supabase",
+                    item=f"{dataset_report.get('ma_bao_cao')} - {dataset_report.get('ten_bao_cao')}", error=result["message"],
+                )
+        else:
+            dataset_repository.mark_dashboard_dataset_status(dataset_report_id, status="failed", error=result["message"])
+            notify_task_report_auto_error(
+                dataset_repository, get_settings(), feature="Đào dữ liệu Dashboard",
+                item=f"{dataset_report.get('ma_bao_cao')} - {dataset_report.get('ten_bao_cao')}", error=result["message"],
+            )
     updated = _set_dynamic_report_run_job(
         run_id,
         status=status_value,

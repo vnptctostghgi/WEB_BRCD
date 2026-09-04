@@ -1012,6 +1012,25 @@ class DatabaseService:
         return filtered
 
     @staticmethod
+    def _dashboard_supabase_query(report: dict[str, Any], configured_query: Any) -> str:
+        table = str(report.get("dashboard_table_name") or report.get("ma_bao_cao") or "").strip().lower()
+        if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", table):
+            raise ValueError("Tên bảng dữ liệu Dashboard không hợp lệ.")
+        query = str(configured_query or "").strip() or f"SELECT * FROM dashboard_data.{table} LIMIT 1000"
+        if not re.match(r"(?is)^select\s", query) or re.search(r";|--|/\*|\*/", query):
+            raise ValueError("SQL biểu đồ chỉ được chứa một câu SELECT.")
+        if re.search(r"(?i)\b(insert|update|delete|drop|alter|create|grant|revoke|truncate|copy|call|do|execute)\b", query):
+            raise ValueError("SQL biểu đồ chứa từ khóa không an toàn.")
+        bare_pattern = rf"(?i)(?<![a-z0-9_.]){re.escape(table)}(?![a-z0-9_])"
+        query = re.sub(bare_pattern, f"dashboard_data.{table}", query)
+        if not re.search(rf"(?i)\bdashboard_data\.{re.escape(table)}\b", query):
+            raise ValueError("SQL biểu đồ phải truy vấn đúng bảng nguồn đã chọn.")
+        referenced_tables = re.findall(r"(?i)\b(?:from|join)\s+([a-z_][a-z0-9_.]*)", query)
+        if not referenced_tables or any(name.lower() != f"dashboard_data.{table}" for name in referenced_tables):
+            raise ValueError("SQL biểu đồ chỉ được đọc bảng Supabase đã chọn, không được JOIN bảng khác.")
+        return query
+
+    @staticmethod
     def _csv_settings(value: Any) -> set[str]:
         return {
             item.strip().upper()
@@ -1396,6 +1415,28 @@ class DatabaseService:
                 filters = {**(source.get("filters") if isinstance(source.get("filters"), dict) else {}), **(widget.get("filters") if isinstance(widget.get("filters"), dict) else {})}
                 cache_key = self._dashboard_widget_query_key(sql_code, filters, effective_widget.get("report_id"))
                 report_id = self._widget_report_id(effective_widget)
+                report = reports_by_id.get(report_id) if report_id is not None else None
+                if report and report.get("is_dashboard_source") and hasattr(self.app_repository, "query_dashboard_dataset"):
+                    try:
+                        supabase_query = self._dashboard_supabase_query(report, widget.get("supabase_query"))
+                        rows = self.app_repository.query_dashboard_dataset(report, supabase_query)
+                        columns = list(rows[0].keys()) if rows else []
+                        widget_results.append({
+                            "row_id": row_id, "position": widget.get("position"), "type": widget.get("type"),
+                            "title": widget.get("title") or sql_code, "sql_code": sql_code,
+                            "data_source_code": widget.get("data_source_code") or "", "data": {
+                                "ok": True, "rows": rows, "columns": columns,
+                                "pagination": {"page": 1, "page_size": len(rows), "total": len(rows)},
+                                "details": {"source": "supabase_dataset", "table": report.get("dashboard_table_name")},
+                            },
+                        })
+                    except Exception as error:
+                        widget_results.append({
+                            "row_id": row_id, "position": widget.get("position"), "type": widget.get("type"),
+                            "title": widget.get("title") or sql_code, "sql_code": sql_code,
+                            "data_source_code": widget.get("data_source_code") or "", "data": {"ok": False, "rows": [], "columns": [], "message": str(error)},
+                        })
+                    continue
                 cache_metadata = self.dashboard_widget_cache_metadata(
                     page_id=page_id,
                     tab_id=tab_id,

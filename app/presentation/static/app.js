@@ -3020,6 +3020,7 @@ function normalizeDashboardLayoutData(layout, pageName = "") {
           report_id: widget.report_id ?? null,
           filters: widget.filters && typeof widget.filters === "object" && !Array.isArray(widget.filters) ? widget.filters : {},
           row_filters: widget.row_filters && typeof widget.row_filters === "object" && !Array.isArray(widget.row_filters) ? widget.row_filters : {},
+          supabase_query: String(widget.supabase_query || ""),
           chart_config: widget.chart_config && typeof widget.chart_config === "object" && !Array.isArray(widget.chart_config) ? widget.chart_config : {},
           text_content: repairTextEncoding(String(widget.text_content || "")),
           icon_url: String(widget.icon_url || ""),
@@ -3184,7 +3185,8 @@ function dashboardParamFiltersToText(params, existingFilters = {}) {
 function dashboardSqlOptions(selectedCode, selectedReportId = null) {
   const normalizedSelectedCode = normalizeDashboardSqlCode(selectedCode);
   const normalizedReportId = selectedReportId === null || selectedReportId === undefined || selectedReportId === "" ? "" : String(selectedReportId);
-  const options = [`<option value="">Chọn mã SQL</option>`].concat(sqlReports.map((report) => {
+  const dashboardReports = sqlReports.filter((report) => report.is_dashboard_source || normalizeDashboardSqlCode(report.ma_bao_cao) === normalizedSelectedCode);
+  const options = [`<option value="">Chọn SQL đã bật dùng cho Dashboard</option>`].concat(dashboardReports.map((report) => {
     const code = dashboardReportCode(report);
     const name = dashboardReportName(report);
     const reportId = String(report.id || "");
@@ -3782,6 +3784,7 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
         report_id: selectedReportId ? Number(selectedReportId) : null,
         filters,
         row_filters: rowFilters,
+        supabase_query: card.querySelector("[name='supabase_query']")?.value.trim() || "",
         chart_config: chartConfig,
         text_content: textContent,
         icon_url: iconUrl,
@@ -3944,6 +3947,8 @@ function renderDashboardBuilderRow(row, index) {
     const existingRowFilters = widget.row_filters && typeof widget.row_filters === "object" && !Array.isArray(widget.row_filters) ? widget.row_filters : {};
     const filterText = Object.keys(existingFilters).length ? dashboardFiltersToText(existingFilters) : dashboardParamFiltersToText(params);
     const showFilterField = requiresSql && (params.length || Object.keys(existingFilters).length);
+    const isSupabaseDataset = Boolean(report?.is_dashboard_source);
+    const datasetTable = report?.dashboard_table_name || String(report?.ma_bao_cao || "").toLowerCase();
     return `
       <div class="builder-widget-card dashboard-layout-cell" style="${dashboardCellStyle(row.layout_type, cellIndex)}" data-position="${position}">
         <small>Ô ${position}</small>
@@ -3952,6 +3957,7 @@ function renderDashboardBuilderRow(row, index) {
         <label class="dashboard-sql-field ${requiresSql ? "" : "hidden"}">Nguồn dữ liệu dùng chung<select class="form-control" name="data_source_code">${dashboardDataSourceOptions(widget.data_source_code || "")}</select><small>Chọn nguồn chung để không chạy lại SQL riêng cho ô này.</small></label>
         <label class="dashboard-sql-field ${requiresSql ? "" : "hidden"}">Mã SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "", widget.report_id)}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
         <label class="dashboard-filter-field ${showFilterField ? "" : "hidden"}">Bộ lọc mặc định<textarea class="form-control dashboard-filter-json" name="filters" rows="3" placeholder='{"LOAIHINH":""}'>${escapeHtml(filterText)}</textarea></label>
+        <label class="dashboard-sql-field ${requiresSql && isSupabaseDataset ? "" : "hidden"}">SQL lọc dữ liệu Supabase<textarea class="form-control inline-admin-code" name="supabase_query" rows="5" placeholder="SELECT * FROM ${escapeHtml(datasetTable)} WHERE ...">${escapeHtml(widget.supabase_query || (isSupabaseDataset ? `SELECT * FROM ${datasetTable} LIMIT 1000` : ""))}</textarea><small>Chỉ cho phép một câu SELECT trên bảng nguồn đã chọn.</small></label>
         <label class="dashboard-sql-field ${requiresSql && widget.data_source_code ? "" : "hidden"}">Bộ lọc dòng dữ liệu đã nạp<textarea class="form-control dashboard-filter-json" name="row_filters" rows="3" placeholder='{"MACHITIEU":"SL_FIBER_COE_V2"}'>${escapeHtml(dashboardFiltersToText(existingRowFilters))}</textarea><small>Chỉ lọc kết quả trong cache Supabase, không chạy thêm SQL.</small></label>
         ${renderDashboardWidgetAdvancedConfig(widget)}
       </div>
@@ -4064,7 +4070,7 @@ function handleDashboardWorkspaceChange(event) {
   if (sqlSelect) applyDashboardSqlSelection(sqlSelect);
   collectDashboardBuilderStateFromDom();
   delete dashboardBuilderLoadedTabs[dashboardTabCacheKey(dashboardBuilderActiveTabId)];
-  if (rowType || widgetType || dataSourceSelect) renderDashboardBuilder();
+  if (rowType || widgetType || dataSourceSelect || sqlSelect) renderDashboardBuilder();
   else renderDashboardPreview();
 }
 
@@ -6361,6 +6367,17 @@ function renderSqlReports() {
   document.querySelectorAll("[data-delete-sql-report]").forEach((button) => {
     button.addEventListener("click", () => deleteInlineSqlReport(button.dataset.deleteSqlReport));
   });
+  document.querySelectorAll("[data-refresh-dashboard-sql]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      setButtonLoading(button, true);
+      try {
+        await api(`/api/admin/sql-reports/${button.dataset.refreshDashboardSql}/refresh-dashboard`, {method: "POST"});
+        showToast("Đã đưa SQL Dashboard vào hàng đợi máy trạm.");
+        await loadSqlReports({force: true});
+      } catch (error) { showToast(error.message, "error"); }
+      finally { setButtonLoading(button, false); }
+    });
+  });
 }
 
 function renderSqlReportEditorLoading(text) {
@@ -6391,6 +6408,8 @@ function createSqlReportDraft() {
     ma_bao_cao: "",
     cau_lenh_sql: "SELECT 1 AS GIA_TRI;",
     cac_tham_so: [],
+    is_dashboard_source: false,
+    dashboard_refresh_minutes: 5,
   };
   sqlReportDrafts = [draft];
   return draft;
@@ -6403,11 +6422,14 @@ function renderSqlReportEditor(report, isDraft = false) {
     <div class="sql-report-editor-card" data-sql-row="${escapeHtml(rowKey)}" data-sql-report-id="${escapeHtml(report.id || "")}">
       <div class="section-heading">
         <div><p class="eyebrow">${isDraft ? "Thêm SQL" : "Chỉnh SQL"}</p><h3>${isDraft ? "Tạo lệnh SQL mới" : escapeHtml(report.ten_bao_cao || report.ma_bao_cao)}</h3></div>
-        <div class="action-group"><button class="table-action ${isDraft ? "" : "hidden"}" data-save-sql-report-inline="${escapeHtml(rowKey)}">Lưu</button>${isDraft ? "" : `<button class="table-action danger" data-delete-sql-report="${escapeHtml(rowKey)}">Xóa</button>`}</div>
+        <div class="action-group"><button class="table-action ${isDraft ? "" : "hidden"}" data-save-sql-report-inline="${escapeHtml(rowKey)}">Lưu</button>${isDraft ? "" : `<button class="table-action" data-refresh-dashboard-sql="${escapeHtml(report.id || "")}">Nạp Dashboard ngay</button><button class="table-action danger" data-delete-sql-report="${escapeHtml(rowKey)}">Xóa</button>`}</div>
       </div>
       <label>Tên<input class="form-control inline-admin-input" data-inline-sql-field="ten_bao_cao" value="${escapeHtml(report.ten_bao_cao || "")}" placeholder="Tên báo cáo" /></label>
       <label>Mã<input class="form-control inline-admin-input" data-inline-sql-field="ma_bao_cao" value="${escapeHtml(report.ma_bao_cao || "")}" placeholder="VD: BC_THUE_BAO" /></label>
       <label>Danh sách biến<input class="form-control inline-admin-input inline-admin-params" data-inline-sql-field="cac_tham_so" value="${escapeHtml(params)}" placeholder="LOAIHINH, MONTH, DONVI" /><small class="cell-note">Mỗi biến cách nhau bằng dấu phẩy.</small></label>
+      <label class="checkbox-label"><input type="checkbox" data-inline-sql-field="is_dashboard_source" ${report.is_dashboard_source ? "checked" : ""} /><span>Dùng SQL này để chạy Dashboard</span></label>
+      <label>Khoảng cách tự nạp dữ liệu (phút)<input class="form-control inline-admin-input" type="number" min="1" max="1440" data-inline-sql-field="dashboard_refresh_minutes" value="${Number(report.dashboard_refresh_minutes || 5)}" /></label>
+      ${report.is_dashboard_source ? `<div class="result ${report.dashboard_last_status === "failed" ? "error" : "success"}"><strong>Bảng Supabase: ${escapeHtml(report.dashboard_table_name || report.ma_bao_cao?.toLowerCase())}</strong><br>Trạng thái: ${escapeHtml(report.dashboard_last_status || "Chưa nạp")} · ${Number(report.dashboard_row_count || 0).toLocaleString("vi-VN")} dòng${report.dashboard_last_error ? `<br>${escapeHtml(report.dashboard_last_error)}` : ""}</div>` : ""}
       <label>Bảng lệnh<textarea class="form-control inline-admin-code sql-report-editor-code" data-inline-sql-field="cau_lenh_sql" rows="16" placeholder="SELECT ...;">${escapeHtml(report.cau_lenh_sql || "")}</textarea></label>
     </div>`;
 }
@@ -6437,6 +6459,8 @@ async function saveInlineSqlReport(rowKey, button) {
     ma_bao_cao: row.querySelector('[data-inline-sql-field="ma_bao_cao"]')?.value.trim() || "",
     cau_lenh_sql: row.querySelector('[data-inline-sql-field="cau_lenh_sql"]')?.value || "",
     cac_tham_so: params,
+    is_dashboard_source: Boolean(row.querySelector('[data-inline-sql-field="is_dashboard_source"]')?.checked),
+    dashboard_refresh_minutes: Number(row.querySelector('[data-inline-sql-field="dashboard_refresh_minutes"]')?.value || 5),
   };
   if (!payload.ten_bao_cao || !payload.ma_bao_cao || !payload.cau_lenh_sql.trim()) {
     showToast("Vui lòng nhập đủ tên, mã và bảng lệnh SQL.", "error");

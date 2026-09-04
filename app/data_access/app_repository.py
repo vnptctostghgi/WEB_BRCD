@@ -379,6 +379,14 @@ class AppRepository:
                     ma_bao_cao TEXT NOT NULL UNIQUE COLLATE NOCASE,
                     cau_lenh_sql TEXT NOT NULL,
                     cac_tham_so TEXT NOT NULL DEFAULT '[]',
+                    is_dashboard_source INTEGER NOT NULL DEFAULT 0,
+                    dashboard_refresh_minutes INTEGER NOT NULL DEFAULT 5,
+                    dashboard_table_name TEXT NOT NULL DEFAULT '',
+                    dashboard_last_status TEXT NOT NULL DEFAULT '',
+                    dashboard_last_error TEXT NOT NULL DEFAULT '',
+                    dashboard_last_refresh_at TEXT,
+                    dashboard_row_count INTEGER NOT NULL DEFAULT 0,
+                    dashboard_schema_signature TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -1803,6 +1811,9 @@ class AppRepository:
         ma_bao_cao: str,
         cau_lenh_sql: str,
         cac_tham_so: list[str],
+        *,
+        is_dashboard_source: bool = False,
+        dashboard_refresh_minutes: int = 5,
     ) -> int:
         now = self._now()
         params_payload = json.dumps(cac_tham_so, ensure_ascii=False)
@@ -1811,19 +1822,19 @@ class AppRepository:
                 connection.execute(
                     """
                     UPDATE sql_reports
-                    SET ten_bao_cao=?, ma_bao_cao=?, cau_lenh_sql=?, cac_tham_so=?, updated_at=?
+                    SET ten_bao_cao=?, ma_bao_cao=?, cau_lenh_sql=?, cac_tham_so=?, is_dashboard_source=?, dashboard_refresh_minutes=?, dashboard_table_name=?, updated_at=?
                     WHERE id=?
                     """,
-                    (ten_bao_cao, ma_bao_cao, cau_lenh_sql, params_payload, now, report_id),
+                    (ten_bao_cao, ma_bao_cao, cau_lenh_sql, params_payload, int(is_dashboard_source), min(max(int(dashboard_refresh_minutes or 5), 1), 1440), re.sub(r"[^a-z0-9_]", "_", ma_bao_cao.lower())[:63], now, report_id),
                 )
                 return int(report_id)
             cursor = connection.execute(
                 """
                 INSERT INTO sql_reports
-                (ten_bao_cao, ma_bao_cao, cau_lenh_sql, cac_tham_so, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (ten_bao_cao, ma_bao_cao, cau_lenh_sql, cac_tham_so, is_dashboard_source, dashboard_refresh_minutes, dashboard_table_name, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (ten_bao_cao, ma_bao_cao, cau_lenh_sql, params_payload, now, now),
+                (ten_bao_cao, ma_bao_cao, cau_lenh_sql, params_payload, int(is_dashboard_source), min(max(int(dashboard_refresh_minutes or 5), 1), 1440), re.sub(r"[^a-z0-9_]", "_", ma_bao_cao.lower())[:63], now, now),
             )
             return int(cursor.lastrowid)
 
@@ -3237,6 +3248,7 @@ class AppRepository:
         except json.JSONDecodeError:
             params = []
         row["cac_tham_so"] = params if isinstance(params, list) else []
+        row["is_dashboard_source"] = bool(row.get("is_dashboard_source"))
         return row
 
     @staticmethod

@@ -961,12 +961,18 @@ class SupabaseRepository:
         ma_bao_cao: str,
         cau_lenh_sql: str,
         cac_tham_so: list[str],
+        *,
+        is_dashboard_source: bool = False,
+        dashboard_refresh_minutes: int = 5,
     ) -> int:
         payload = {
             "ten_bao_cao": ten_bao_cao,
             "ma_bao_cao": ma_bao_cao,
             "cau_lenh_sql": cau_lenh_sql,
             "cac_tham_so": cac_tham_so,
+            "is_dashboard_source": bool(is_dashboard_source),
+            "dashboard_refresh_minutes": min(max(int(dashboard_refresh_minutes or 5), 1), 1440),
+            "dashboard_table_name": re.sub(r"[^a-z0-9_]", "_", ma_bao_cao.lower())[:63],
             "updated_at": self._now(),
         }
         if report_id:
@@ -977,6 +983,28 @@ class SupabaseRepository:
 
     def delete_sql_report(self, report_id: int) -> None:
         self._delete("sql_reports", {"id": f"eq.{report_id}"})
+
+    def mark_dashboard_dataset_status(self, report_id: int, *, status: str, error: str = "", row_count: int | None = None, signature: str = "") -> None:
+        payload: dict[str, Any] = {"dashboard_last_status": status, "dashboard_last_error": str(error or "")[:2000], "updated_at": self._now()}
+        if row_count is not None:
+            payload.update({"dashboard_row_count": int(row_count), "dashboard_last_refresh_at": self._now()})
+        if signature:
+            payload["dashboard_schema_signature"] = signature
+        self._patch("sql_reports", {"id": f"eq.{report_id}"}, payload)
+
+    def replace_dashboard_dataset(self, report: dict[str, Any], columns: list[dict[str, str]], rows: list[dict[str, Any]]) -> dict[str, Any]:
+        return self._rpc("dashboard_replace_dataset", {
+            "p_table_name": report.get("dashboard_table_name") or str(report.get("ma_bao_cao") or "").lower(),
+            "p_columns": columns,
+            "p_rows": rows,
+        })
+
+    def query_dashboard_dataset(self, report: dict[str, Any], query: str) -> list[dict[str, Any]]:
+        result = self._rpc("dashboard_query_dataset", {
+            "p_table_name": report.get("dashboard_table_name") or str(report.get("ma_bao_cao") or "").lower(),
+            "p_query": query,
+        })
+        return result if isinstance(result, list) else []
 
     def list_onebss_reports(self) -> list[dict[str, Any]]:
         rows = self._get("onebss_reports", {"order": "ten_bao_cao.asc"})
@@ -2349,6 +2377,7 @@ class SupabaseRepository:
     def _decode_sql_report(row: dict[str, Any]) -> dict[str, Any]:
         params = row.get("cac_tham_so") or []
         row["cac_tham_so"] = params if isinstance(params, list) else []
+        row["is_dashboard_source"] = bool(row.get("is_dashboard_source"))
         return row
 
     @staticmethod
@@ -2718,6 +2747,9 @@ class SupabaseRepository:
 
     def _get(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
         return self._request("GET", table, params=params) or []
+
+    def _rpc(self, function_name: str, payload: dict[str, Any]) -> Any:
+        return self._request("POST", f"rpc/{function_name}", json=payload)
 
     def _insert(self, table: str, payload: dict[str, Any]) -> dict[str, Any]:
         try:

@@ -14,6 +14,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.application.connection_service import ConnectionService
 from app.application.task_scheduler import (
     dashboard_chart_cache_scheduler,
+    dashboard_dataset_scheduler,
     data_mining_scheduler,
     internal_email_sync_scheduler,
     task_report_auto_scheduler,
@@ -101,6 +102,8 @@ async def lifespan(_: FastAPI):
         work_task_scheduler.start()
         dashboard_chart_cache_scheduler.configure(repository, settings)
         dashboard_chart_cache_scheduler.start()
+        dashboard_dataset_scheduler.configure(repository, settings)
+        dashboard_dataset_scheduler.start()
         zalo_auto_message_scheduler.configure(repository, settings)
         zalo_auto_message_scheduler.start()
         data_mining_scheduler.configure(repository, settings)
@@ -136,6 +139,7 @@ async def lifespan(_: FastAPI):
         data_mining_scheduler.stop()
         zalo_auto_message_scheduler.stop()
         dashboard_chart_cache_scheduler.stop()
+        dashboard_dataset_scheduler.stop()
         work_task_scheduler.stop()
 
 
