@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 import logging
 import queue
 import threading
-import uuid
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -626,11 +625,11 @@ class DashboardDatasetScheduler:
             if last and last.tzinfo is None: last = last.replace(tzinfo=LOCAL_TIMEZONE)
             minutes = min(max(int(report.get("dashboard_refresh_minutes") or 5), 1), 1440)
             if last and current.astimezone(last.tzinfo) < last + timedelta(minutes=minutes): continue
-            report_id = int(report.get("id") or 0)
-            run_id = f"dataset_{report_id}_{uuid.uuid4().hex[:12]}"
-            payload = {"ma_bao_cao": report.get("ma_bao_cao"), "filters": {}, "page": 1, "page_size": 20000, "search": "", "search_columns": [], "report_id": report_id, "report_name": report.get("ten_bao_cao")}
-            self.repository.save_report_run({"job_id": run_id, "run_id": run_id, "run_type": "load", "status": "queued_worker", "message": "Đang chờ máy trạm nạp dữ liệu Dashboard.", "created_by": f"dashboard_dataset:{report_id}:scheduler", "report_code": report.get("ma_bao_cao"), "report_name": report.get("ten_bao_cao"), "payload": payload})
-            self.repository.mark_dashboard_dataset_status(report_id, status="queued", error="")
+            # Import at execution time to avoid a module cycle during FastAPI startup.
+            # The shared queue helper keeps the full job metadata in both memory and
+            # Supabase, so worker status updates cannot discard the dataset marker.
+            from app.presentation.routes import _queue_dashboard_dataset_refresh
+            _queue_dashboard_dataset_refresh(report, "scheduler")
             count += 1
         return count
 
