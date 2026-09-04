@@ -41,6 +41,34 @@ PUBLIC_USER_KEYS = (
     "is_active",
     "must_change_password",
 )
+TASK_REPORT_AUTO_ERROR_CHAT_ID = "e5517d7f74299d77c438"
+
+
+def notify_task_report_auto_error(
+    repository: Any,
+    settings: Settings,
+    *,
+    feature: str,
+    item: str,
+    error: Any,
+) -> bool:
+    """Send a best-effort private alert without changing the failed job result."""
+    message = (
+        f"Lỗi ở chức năng: {str(feature or 'Task report auto').strip()}\n"
+        f"Task/nội dung điểm tin: {str(item or 'Không xác định').strip()}\n"
+        f"Lỗi: {str(error or 'Không xác định').strip()[:1500]}"
+    )
+    try:
+        sent = ZaloBotClient(settings).send_message(TASK_REPORT_AUTO_ERROR_CHAT_ID, message)
+        repository.add_audit_log(
+            "task_report_auto",
+            "task_report_auto_error_alert_sent" if sent else "task_report_auto_error_alert_failed",
+            message,
+        )
+        return sent
+    except Exception:
+        logger.exception("Cannot send Task report auto error alert")
+        return False
 
 
 def public_base_url(settings: Settings) -> str:

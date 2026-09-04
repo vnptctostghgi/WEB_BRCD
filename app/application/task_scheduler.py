@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.application.onebss_data_mining_service import run_data_mining_schedule
 from app.application.task_report_auto_service import TaskReportAutoRunner
-from app.application.zalo_auto_message_service import send_zalo_auto_message
+from app.application.zalo_auto_message_service import notify_task_report_auto_error, send_zalo_auto_message
 from app.application.database_service import DatabaseService
 from app.data_access.internal_api_client import InternalApiClient
 from app.application.telegram_notifier import TelegramNotifier
@@ -295,6 +295,17 @@ class ZaloAutoMessageScheduler:
             bool(result.get("ok")),
             "" if result.get("ok") else str(result.get("message") or ""),
         )
+        if not result.get("ok"):
+            schedule_id = str(schedule.get("schedule_id") or "Không rõ lịch").strip()
+            schedule_name = str(schedule.get("name") or schedule.get("caption") or "").strip()
+            item = f"{schedule_id} - {schedule_name}" if schedule_name else schedule_id
+            notify_task_report_auto_error(
+                self.repository,
+                self.settings,
+                feature="Gửi điểm tin tự động",
+                item=item,
+                error=result.get("message") or "Không gửi được điểm tin.",
+            )
         return bool(result.get("ok"))
 
     @classmethod

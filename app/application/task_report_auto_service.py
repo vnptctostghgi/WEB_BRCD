@@ -24,6 +24,7 @@ from app.application.google_drive_service import (
 from app.application.onebss_data_mining_service import resolve_dynamic_parameters, safe_filename_part
 from app.application.zalo_auto_message_service import (
     install_playwright_chromium,
+    notify_task_report_auto_error,
     playwright_needs_browser_install,
     public_base_url,
 )
@@ -207,6 +208,13 @@ class TaskReportAutoRunner:
         if not task:
             result = {"ok": False, "status": "failed", "message": "Khong tim thay cau hinh Task report auto."}
             self._finish_run(run, result)
+            notify_task_report_auto_error(
+                self.repository,
+                self.settings,
+                feature="Lịch chạy báo cáo tự động",
+                item=str(run.get("task_id") or "Không rõ task"),
+                error=result["message"],
+            )
             return result
 
         started = time.monotonic()
@@ -247,13 +255,33 @@ class TaskReportAutoRunner:
             result = {"ok": False, "status": "failed", "message": str(error), "failed_step": error.step, "details": error.details}
             self._finish_run(run, result, started=started, current_step=error.step)
             self.repository.mark_task_report_auto_task_run(str(task.get("task_id") or ""), str(run.get("run_key") or ""), False, result)
+            self._notify_failure(task, error.step, str(error))
             return result
         except Exception as error:
             logger.exception("Task report auto run failed: %s", run_id)
             result = {"ok": False, "status": "failed", "message": str(error)[:1000] or "Task report auto phat sinh loi."}
             self._finish_run(run, result, started=started)
             self.repository.mark_task_report_auto_task_run(str(task.get("task_id") or ""), str(run.get("run_key") or ""), False, result)
+            self._notify_failure(task, "failed", result["message"])
             return result
+
+    def _notify_failure(self, task: dict[str, Any], step: str, message: str) -> None:
+        step_names = {
+            "mine": "Đào dữ liệu tự động",
+            "sheet": "Nạp dữ liệu Google Sheet",
+            "capture": "Chụp ảnh điểm tin",
+            "zalo": "Gửi điểm tin",
+        }
+        task_id = str(task.get("task_id") or "Không rõ task").strip()
+        task_name = str(task.get("name") or task.get("source_code") or "").strip()
+        item = f"{task_id} - {task_name}" if task_name else task_id
+        notify_task_report_auto_error(
+            self.repository,
+            self.settings,
+            feature=step_names.get(step, "Lịch chạy báo cáo tự động"),
+            item=item,
+            error=message,
+        )
 
     def _finish_run(
         self,
