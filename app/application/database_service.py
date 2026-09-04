@@ -984,6 +984,34 @@ class DatabaseService:
         return f"{report_id or ''}|{sql_code}|{normalized_filters}"
 
     @staticmethod
+    def _dashboard_filter_cached_result(result: dict[str, Any], row_filters: dict[str, Any]) -> dict[str, Any]:
+        if not row_filters or not isinstance(result.get("rows"), list):
+            return result
+        try:
+            from app.application.onebss_data_mining_service import resolve_dynamic_parameters
+
+            resolved_filters = resolve_dynamic_parameters(row_filters)
+        except Exception:
+            resolved_filters = row_filters
+
+        def matches(row: dict[str, Any]) -> bool:
+            normalized_row = {str(key).strip().upper(): value for key, value in row.items()}
+            for key, expected in resolved_filters.items():
+                actual = normalized_row.get(str(key).strip().upper())
+                candidates = expected if isinstance(expected, (list, tuple, set)) else [expected]
+                if not any(str(actual if actual is not None else "").strip().casefold() == str(item if item is not None else "").strip().casefold() for item in candidates):
+                    return False
+            return True
+
+        filtered_rows = [row for row in result["rows"] if isinstance(row, dict) and matches(row)]
+        filtered = {**result, "rows": filtered_rows}
+        pagination = result.get("pagination") if isinstance(result.get("pagination"), dict) else {}
+        filtered["pagination"] = {**pagination, "total": len(filtered_rows)}
+        details = result.get("details") if isinstance(result.get("details"), dict) else {}
+        filtered["details"] = {**details, "dashboard_row_filters": resolved_filters}
+        return filtered
+
+    @staticmethod
     def _csv_settings(value: Any) -> set[str]:
         return {
             item.strip().upper()
@@ -1381,7 +1409,7 @@ class DatabaseService:
                     "ma_bao_cao": sql_code,
                     "filters": filters,
                     "page": 1,
-                    "page_size": 50,
+                    "page_size": min(max(1, int(source.get("row_limit") or 1000)), 20000) if source else 50,
                     "report_id": effective_widget.get("report_id"),
                     "report_name": widget.get("title"),
                 })
@@ -1398,6 +1426,7 @@ class DatabaseService:
                     "data_source_code": widget.get("data_source_code") or "",
                     "data": result,
                     "_cache_key": cache_key,
+                    "_row_filters": widget.get("row_filters") if isinstance(widget.get("row_filters"), dict) else {},
                 })
 
         cached_results = self._dashboard_cache_results_by_key(query_cache_metadata)
@@ -1441,7 +1470,8 @@ class DatabaseService:
         all_ok = True
         for item in widget_results:
             cache_key = item.pop("_cache_key", "")
-            item["data"] = data_cache.get(cache_key, item.get("data") or {})
+            row_filters = item.pop("_row_filters", {})
+            item["data"] = self._dashboard_filter_cached_result(data_cache.get(cache_key, item.get("data") or {}), row_filters)
             all_ok = all_ok and bool((item.get("data") or {}).get("ok"))
 
         failed_widgets = [

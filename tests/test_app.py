@@ -8609,6 +8609,54 @@ def test_dashboard_layout_tab_uses_bulk_chart_cache_for_cached_widgets() -> None
     assert all(widget["data"]["details"]["dashboard_cache"]["hit"] is True for widget in result["widgets"])
 
 
+def test_dashboard_shared_source_supports_per_widget_cached_row_filters() -> None:
+    class FakeSettings:
+        dashboard_chart_cache_enabled = True
+        dashboard_chart_cache_report_ids = "*"
+        dashboard_chart_cache_report_codes = "*"
+        dashboard_chart_cache_ttl_seconds = 900
+        dashboard_tab_max_workers = 10
+
+    class FakeInternalApi:
+        settings = FakeSettings()
+
+    class FakeRepository:
+        def get_dashboard_layout(self, page_id):
+            return {
+                "layout": {
+                    "tabs": [{
+                        "tab_id": "tab_ptm",
+                        "data_sources": [{"source_code": "PTM", "sql_code": "PTM_SQL", "report_id": 46, "filters": {}}],
+                        "grid_layout": [{"row_id": 1, "widgets": [
+                            {"position": 1, "type": "total_data_card", "data_source_code": "PTM", "row_filters": {"MACHITIEU": "FIBER"}},
+                            {"position": 2, "type": "total_data_card", "data_source_code": "PTM", "row_filters": {"MACHITIEU": "MYTV"}},
+                        ]}],
+                    }],
+                },
+            }
+
+        def list_sql_reports(self):
+            return [{"id": 46, "ma_bao_cao": "PTM_SQL", "ten_bao_cao": "PTM"}]
+
+        def get_dashboard_chart_cache_many(self, chart_keys):
+            return [{
+                "chart_key": chart_keys[0],
+                "status": "success",
+                "payload": {"ok": True, "columns": ["MACHITIEU", "TH"], "rows": [
+                    {"MACHITIEU": "FIBER", "TH": 10},
+                    {"MACHITIEU": "MYTV", "TH": 20},
+                ]},
+                "refreshed_at": "2026-09-04T00:00:00+00:00",
+                "expires_at": "2099-09-04T00:15:00+00:00",
+            }]
+
+    result = DatabaseService(FakeInternalApi(), FakeRepository()).run_dashboard_layout_tab(page_id="PTM", tab_id="tab_ptm")
+
+    assert result["ok"] is True
+    assert result["widgets"][0]["data"]["rows"] == [{"MACHITIEU": "FIBER", "TH": 10}]
+    assert result["widgets"][1]["data"]["rows"] == [{"MACHITIEU": "MYTV", "TH": 20}]
+
+
 def test_dashboard_layout_pages_include_overview_and_reports_not_web_admin() -> None:
     with TestClient(app) as client:
         login(client)

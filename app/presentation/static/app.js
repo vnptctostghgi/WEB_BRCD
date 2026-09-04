@@ -3006,6 +3006,7 @@ function normalizeDashboardLayoutData(layout, pageName = "") {
         filters: source.filters && typeof source.filters === "object" && !Array.isArray(source.filters) ? source.filters : {},
         cache_ttl_seconds: Number(source.cache_ttl_seconds || 900),
         refresh_interval_seconds: Number(source.refresh_interval_seconds || 300),
+        row_limit: Number(source.row_limit || 1000),
       })) : [],
       grid_layout: Array.isArray(tab.grid_layout) ? tab.grid_layout.map((row, rowIndex) => ({
         row_id: Number(row.row_id || rowIndex + 1),
@@ -3018,6 +3019,7 @@ function normalizeDashboardLayoutData(layout, pageName = "") {
           data_source_code: String(widget.data_source_code || "").trim().toUpperCase(),
           report_id: widget.report_id ?? null,
           filters: widget.filters && typeof widget.filters === "object" && !Array.isArray(widget.filters) ? widget.filters : {},
+          row_filters: widget.row_filters && typeof widget.row_filters === "object" && !Array.isArray(widget.row_filters) ? widget.row_filters : {},
           chart_config: widget.chart_config && typeof widget.chart_config === "object" && !Array.isArray(widget.chart_config) ? widget.chart_config : {},
           text_content: repairTextEncoding(String(widget.text_content || "")),
           icon_url: String(widget.icon_url || ""),
@@ -3730,6 +3732,7 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
       filters: parseDashboardFilters(card.querySelector("[name='source_filters']")?.value || "", strictFilters),
       cache_ttl_seconds: Number(card.querySelector("[name='source_ttl']")?.value || 900),
       refresh_interval_seconds: Number(card.querySelector("[name='source_refresh']")?.value || 300),
+      row_limit: Number(card.querySelector("[name='source_row_limit']")?.value || 1000),
     };
   }).filter((source) => source.source_code && source.sql_code);
   const rows = [...document.querySelectorAll("#dashboard-builder-workspace .builder-row")];
@@ -3748,6 +3751,7 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
       const textContent = card.querySelector("[name='text_content']")?.value.trim() || "";
       const iconUrl = card.querySelector("[name='icon_url']")?.value.trim() || "";
       const filters = parseDashboardFilters(card.querySelector("[name='filters']")?.value || "", strictFilters);
+      const rowFilters = parseDashboardFilters(card.querySelector("[name='row_filters']")?.value || "", strictFilters);
       const activeConfig = card.querySelector(".dashboard-widget-config.active");
       const chartConfig = {
         orientation: type === "horizontal_multi_bar_chart" ? "horizontal" : activeConfig?.querySelector("[name='chart_orientation']")?.value || "vertical",
@@ -3777,6 +3781,7 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
         data_source_code: dataSourceCode,
         report_id: selectedReportId ? Number(selectedReportId) : null,
         filters,
+        row_filters: rowFilters,
         chart_config: chartConfig,
         text_content: textContent,
         icon_url: iconUrl,
@@ -3804,6 +3809,7 @@ function renderDashboardWorkspace() {
         <label>Bộ lọc nguồn<textarea class="form-control" name="source_filters" rows="2" placeholder='{"P_THANG":"202608"}'>${escapeHtml(dashboardFiltersToText(source.filters || {}))}</textarea></label>
         <label>Refresh (giây)<input class="form-control" name="source_refresh" type="number" min="60" value="${Number(source.refresh_interval_seconds || 300)}" /></label>
         <label>TTL (giây)<input class="form-control" name="source_ttl" type="number" min="300" value="${Number(source.cache_ttl_seconds || 900)}" /></label>
+        <label>Số dòng tối đa<input class="form-control" name="source_row_limit" type="number" min="1" max="20000" value="${Number(source.row_limit || 1000)}" /><small>Toàn bộ biểu đồ dùng chung dữ liệu trong giới hạn này.</small></label>
       </div>
     </article>`).join("");
   const sourcePanel = `<section class="data-card dashboard-data-source-panel"><div class="section-heading compact"><div><p class="eyebrow">Tối ưu truy vấn</p><h3>Nguồn dữ liệu Dashboard</h3><p>Mỗi Tab nên có 1–3 nguồn; nhiều biểu đồ có thể dùng chung một nguồn và bộ lọc.</p></div><button class="table-action" data-add-dashboard-source type="button">+ Thêm nguồn</button></div><div id="dashboard-data-sources" class="grid gap-3">${sourceCards || '<small>Chưa có nguồn dùng chung. Biểu đồ hiện vẫn dùng SQL riêng.</small>'}</div></section>`;
@@ -3935,6 +3941,7 @@ function renderDashboardBuilderRow(row, index) {
     const report = dashboardReportByCode(widget.sql_code || "");
     const params = dashboardReportParams(report);
     const existingFilters = widget.filters && typeof widget.filters === "object" && !Array.isArray(widget.filters) ? widget.filters : {};
+    const existingRowFilters = widget.row_filters && typeof widget.row_filters === "object" && !Array.isArray(widget.row_filters) ? widget.row_filters : {};
     const filterText = Object.keys(existingFilters).length ? dashboardFiltersToText(existingFilters) : dashboardParamFiltersToText(params);
     const showFilterField = requiresSql && (params.length || Object.keys(existingFilters).length);
     return `
@@ -3945,6 +3952,7 @@ function renderDashboardBuilderRow(row, index) {
         <label class="dashboard-sql-field ${requiresSql ? "" : "hidden"}">Nguồn dữ liệu dùng chung<select class="form-control" name="data_source_code">${dashboardDataSourceOptions(widget.data_source_code || "")}</select><small>Chọn nguồn chung để không chạy lại SQL riêng cho ô này.</small></label>
         <label class="dashboard-sql-field ${requiresSql ? "" : "hidden"}">Mã SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "", widget.report_id)}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
         <label class="dashboard-filter-field ${showFilterField ? "" : "hidden"}">Bộ lọc mặc định<textarea class="form-control dashboard-filter-json" name="filters" rows="3" placeholder='{"LOAIHINH":""}'>${escapeHtml(filterText)}</textarea></label>
+        <label class="dashboard-sql-field ${requiresSql && widget.data_source_code ? "" : "hidden"}">Bộ lọc dòng dữ liệu đã nạp<textarea class="form-control dashboard-filter-json" name="row_filters" rows="3" placeholder='{"MACHITIEU":"SL_FIBER_COE_V2"}'>${escapeHtml(dashboardFiltersToText(existingRowFilters))}</textarea><small>Chỉ lọc kết quả trong cache Supabase, không chạy thêm SQL.</small></label>
         ${renderDashboardWidgetAdvancedConfig(widget)}
       </div>
     `;
@@ -3980,7 +3988,7 @@ function handleDashboardWorkspaceClick(event) {
     collectDashboardBuilderStateFromDom();
     const tab = currentDashboardTab();
     const index = (tab.data_sources || []).length + 1;
-    tab.data_sources = [...(tab.data_sources || []), { source_code: `SOURCE_${index}`, name: `Nguồn ${index}`, sql_code: "", report_id: null, filters: {}, refresh_interval_seconds: 300, cache_ttl_seconds: 900 }];
+    tab.data_sources = [...(tab.data_sources || []), { source_code: `SOURCE_${index}`, name: `Nguồn ${index}`, sql_code: "", report_id: null, filters: {}, refresh_interval_seconds: 300, cache_ttl_seconds: 900, row_limit: 1000 }];
     renderDashboardWorkspace();
     return;
   }
@@ -4051,11 +4059,12 @@ function applyDashboardSqlSelection(select) {
 function handleDashboardWorkspaceChange(event) {
   const rowType = event.target.closest("[name='layout_type']");
   const sqlSelect = event.target.closest("[name='sql_code']");
+  const dataSourceSelect = event.target.closest("[name='data_source_code']");
   const widgetType = event.target.closest("[name='type']");
   if (sqlSelect) applyDashboardSqlSelection(sqlSelect);
   collectDashboardBuilderStateFromDom();
   delete dashboardBuilderLoadedTabs[dashboardTabCacheKey(dashboardBuilderActiveTabId)];
-  if (rowType || widgetType) renderDashboardBuilder();
+  if (rowType || widgetType || dataSourceSelect) renderDashboardBuilder();
   else renderDashboardPreview();
 }
 
