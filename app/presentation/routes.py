@@ -250,7 +250,7 @@ DASHBOARD_LAYOUT_TYPES = {
     "6_columns_2_4": 2,
     "6_columns_4_2": 2,
 }
-DASHBOARD_WIDGET_TYPES = {"bar_chart", "pie_chart", "line_chart", "combo_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "multi_line_chart", "data_table", "metric", "data_card", "total_data_card", "google_sheet_embed", "text_title"}
+DASHBOARD_WIDGET_TYPES = {"bar_chart", "percent_bar_chart", "pie_chart", "line_chart", "combo_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "multi_line_chart", "data_table", "metric", "data_card", "total_data_card", "google_sheet_embed", "text_title"}
 DASHBOARD_NON_SQL_WIDGET_TYPES = {"google_sheet_embed", "text_title"}
 PUBLIC_FEATURE_CODES = {"linkbaocao"}
 REPORT_LINK_TYPES = {
