@@ -3212,6 +3212,16 @@ function dashboardWidgetParamHint(sqlCode) {
     : "Nguồn Layout cũ; hãy bật chế độ SQL Dashboard trong Quản trị kết nối.";
 }
 
+function dashboardReportFromQuery(query) {
+  const match = String(query || "").match(/\bfrom\s+(?:dashboard_data\.)?([a-z_][a-z0-9_]*)/i);
+  if (!match) return null;
+  const tableName = match[1].toLowerCase();
+  return sqlReports.find((report) => (
+    report.is_dashboard_source
+    && String(report.dashboard_table_name || report.ma_bao_cao || "").toLowerCase() === tableName
+  )) || null;
+}
+
 function dashboardFiltersToText(filters) {
   if (!filters || typeof filters !== "object" || Array.isArray(filters) || !Object.keys(filters).length) return "";
   return JSON.stringify(filters, null, 2);
@@ -3749,10 +3759,14 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
       const position = Number(card.dataset.position || 1);
       if (position > dashboardLayoutColumnCount(layoutType)) return null;
       const type = card.querySelector("[name='type']")?.value || "bar_chart";
-      const sqlSelect = card.querySelector("[name='sql_code']");
-      const sqlCode = sqlSelect?.value.trim().toUpperCase() || "";
-      const dataSourceCode = card.querySelector("[name='data_source_code']")?.value.trim().toUpperCase() || "";
-      const selectedReportId = sqlSelect?.selectedOptions?.[0]?.dataset.reportId || "";
+      const supabaseQuery = card.querySelector("[name='supabase_query']")?.value.trim() || "";
+      const queryReport = dashboardReportFromQuery(supabaseQuery);
+      if (strictFilters && !dashboardNonSqlWidgetTypes.has(type) && supabaseQuery && !queryReport) {
+        throw new Error(`Ô ${position}: không nhận ra bảng trong lệnh SQL. Hãy dùng tên bảng đã tạo ở Quản trị kết nối.`);
+      }
+      const sqlCode = String(queryReport?.ma_bao_cao || "").toUpperCase();
+      const dataSourceCode = "";
+      const selectedReportId = queryReport?.id || "";
       const title = card.querySelector("[name='title']")?.value.trim() || "";
       const textContent = card.querySelector("[name='text_content']")?.value.trim() || "";
       const iconUrl = card.querySelector("[name='icon_url']")?.value.trim() || "";
@@ -3777,7 +3791,7 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
         embed_width: activeConfig?.querySelector("[name='embed_width']")?.value.trim() || "",
         color_scale: Boolean(activeConfig?.querySelector("[name='color_scale']")?.checked),
       };
-      const hasDisplayConfig = title || textContent || iconUrl || sqlCode || dataSourceCode || chartConfig.embed_url;
+      const hasDisplayConfig = title || textContent || iconUrl || supabaseQuery || chartConfig.embed_url;
       if (!hasDisplayConfig) return null;
       return {
         position,
@@ -3788,7 +3802,7 @@ function collectDashboardBuilderStateFromDom({ strictFilters = false } = {}) {
         report_id: selectedReportId ? Number(selectedReportId) : null,
         filters,
         row_filters: rowFilters,
-        supabase_query: card.querySelector("[name='supabase_query']")?.value.trim() || "",
+        supabase_query: supabaseQuery,
         chart_config: chartConfig,
         text_content: textContent,
         icon_url: iconUrl,
@@ -3949,17 +3963,15 @@ function renderDashboardBuilderRow(row, index) {
     const widget = widgetsByPosition.get(position) || { position, type: "bar_chart", title: "", sql_code: "", report_id: null, chart_config: {}, filters: {} };
     const requiresSql = !dashboardNonSqlWidgetTypes.has(widget.type);
     const report = dashboardReportByCode(widget.sql_code || "");
-    const isSupabaseDataset = Boolean(report?.is_dashboard_source);
     const datasetTable = report?.dashboard_table_name || String(report?.ma_bao_cao || "").toLowerCase();
+    const defaultQuery = widget.supabase_query || (datasetTable ? `SELECT * FROM ${datasetTable} LIMIT 1000` : "");
     return `
       <div class="builder-widget-card dashboard-layout-cell" style="${dashboardCellStyle(row.layout_type, cellIndex)}" data-position="${position}">
         <div class="dashboard-v2-widget-heading"><span>Ô ${position}</span><b>${escapeHtml(widget.title || "Chưa đặt tên")}</b></div>
         <label>Tiêu đề<input class="form-control" name="title" value="${escapeHtml(widget.title || "")}" placeholder="Tên biểu đồ, thẻ hoặc tiêu đề" /></label>
         <label>Loại hiển thị<select class="form-control" name="type">${dashboardWidgetTypeOptions(widget.type)}</select></label>
-        <label class="dashboard-sql-field ${requiresSql ? "" : "hidden"}">Nguồn dữ liệu Dashboard<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "", widget.report_id)}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
-        <div class="result success ${requiresSql && isSupabaseDataset ? "" : "hidden"}"><strong>Bảng Supabase đã tạo</strong><br><code>dashboard_data.${escapeHtml(datasetTable)}</code></div>
-        <label class="dashboard-sql-field ${requiresSql && isSupabaseDataset ? "" : "hidden"}">SQL lọc dữ liệu Supabase<textarea class="form-control inline-admin-code" name="supabase_query" rows="5" placeholder="SELECT * FROM ${escapeHtml(datasetTable)} WHERE ...">${escapeHtml(widget.supabase_query || (isSupabaseDataset ? `SELECT * FROM ${datasetTable} LIMIT 1000` : ""))}</textarea><small>Có thể dùng tên ngắn <code>${escapeHtml(datasetTable)}</code>; hệ thống tự chuyển sang schema <code>dashboard_data</code>. Chỉ được SELECT bảng nguồn đã chọn.</small></label>
-        ${renderDashboardWidgetAdvancedConfig(widget)}
+        <label class="dashboard-sql-field ${requiresSql ? "" : "hidden"}">Lệnh SQL<textarea class="form-control inline-admin-code" name="supabase_query" rows="6" placeholder="SELECT * FROM ten_bang WHERE ...">${escapeHtml(defaultQuery)}</textarea><small>Viết SELECT từ bảng đã nạp ở Quản trị kết nối. Hệ thống tự nhận bảng nguồn trong mệnh đề FROM.</small></label>
+        ${requiresSql ? "" : renderDashboardWidgetAdvancedConfig(widget)}
       </div>
     `;
   }).join("");
