@@ -1707,6 +1707,7 @@ def normalize_dashboard_layout(payload: DashboardLayoutPayload) -> tuple[str, st
                 widget_type = str(widget.get("type") or "").strip()
                 sql_code = str(widget.get("sql_code") or "").strip()
                 data_source_code = str(widget.get("data_source_code") or "").strip().upper()
+                supabase_query = str(widget.get("supabase_query") or "").strip()
                 title = str(widget.get("title") or "").strip()
                 text_content = str(widget.get("text_content") or "").strip()
                 raw_chart_config = widget.get("chart_config") if isinstance(widget.get("chart_config"), dict) else {}
@@ -1717,7 +1718,7 @@ def normalize_dashboard_layout(payload: DashboardLayoutPayload) -> tuple[str, st
                 elif widget_type == "google_sheet_embed":
                     if not str(chart_config.get("embed_url") or "").strip():
                         continue
-                elif not sql_code and not data_source_code:
+                elif not sql_code and not data_source_code and not supabase_query:
                     continue
                 if widget_type not in DASHBOARD_WIDGET_TYPES:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Loại hiển thị không hợp lệ.")
@@ -1739,6 +1740,7 @@ def normalize_dashboard_layout(payload: DashboardLayoutPayload) -> tuple[str, st
                     "data_source_code": data_source_code if data_source_code in seen_sources else "",
                     "report_id": report_id,
                     "filters": filters,
+                    "supabase_query": supabase_query[:20000],
                     "chart_config": chart_config,
                     "text_content": text_content,
                     "icon_url": str(widget.get("icon_url") or "").strip(),

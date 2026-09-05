@@ -1017,6 +1017,7 @@ class DatabaseService:
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", table):
             raise ValueError("Tên bảng dữ liệu Dashboard không hợp lệ.")
         query = str(configured_query or "").strip() or f"SELECT * FROM dashboard_data.{table} LIMIT 1000"
+        query = re.sub(r";\s*$", "", query).strip()
         if not re.match(r"(?is)^select\s", query) or re.search(r";|--|/\*|\*/", query):
             raise ValueError("SQL biểu đồ chỉ được chứa một câu SELECT.")
         if re.search(r"(?i)\b(insert|update|delete|drop|alter|create|grant|revoke|truncate|copy|call|do|execute)\b", query):
