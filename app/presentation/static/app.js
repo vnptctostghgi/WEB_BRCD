@@ -729,7 +729,9 @@ function selectElementText(element) {
 function renderMobileOtpCopyCell(code) {
   const value = String(code || "").trim();
   const canCopy = value && value !== "null" && !/^\*+$/.test(value);
-  return `
+  return `<details class="dashboard-widget-advanced">
+    <summary><span>Cấu hình nâng cao</span><small>Chỉ mở khi cần chỉ định cột dữ liệu hoặc màu sắc</small></summary>
+    <div class="dashboard-widget-advanced-body">
     <div class="mobile-otp-copy-cell">
       <code class="mobile-otp-code" data-mobile-otp-code tabindex="0">${escapeHtml(value || "null")}</code>
       <button class="table-action mobile-otp-copy-button" data-mobile-copy-otp="${escapeHtml(value)}" type="button" ${canCopy ? "" : "disabled"}>Copy</button>
@@ -1475,7 +1477,8 @@ function renderDashboardViewer() {
       <h2>Tab chưa có Layout</h2>
       <p>Mở chức năng Thiết kế Layout báo cáo để thêm biểu đồ cho Tab này.</p>
     </div>
-  `;
+    </div>
+  </details>`;
   schedulePendingDashboardCharts();
   schedulePendingDashboardSheets();
 }
@@ -3861,7 +3864,9 @@ function dashboardColorScaleOption(widget) {
 function renderDashboardWidgetAdvancedConfig(widget) {
   const type = widget.type || "bar_chart";
   const orientation = widget.chart_config?.orientation || "vertical";
-  return `
+  return `<details class="dashboard-widget-advanced">
+    <summary><span>Cấu hình nâng cao</span><small>Chỉ mở khi cần chỉ định cột dữ liệu hoặc màu sắc</small></summary>
+    <div class="dashboard-widget-advanced-body">
     <div class="dashboard-widget-config ${type === "bar_chart" ? "active" : ""}" data-config-for="bar_chart">
       <label>Hướng biểu đồ cột<select class="form-control" name="chart_orientation"><option value="vertical" ${orientation !== "horizontal" ? "selected" : ""}>Cột đứng</option><option value="horizontal" ${orientation === "horizontal" ? "selected" : ""}>Cột ngang</option></select></label>
       <div class="grid gap-2 md:grid-cols-2">
@@ -3931,7 +3936,8 @@ function renderDashboardWidgetAdvancedConfig(widget) {
     <div class="dashboard-widget-config ${type === "text_title" ? "active" : ""}" data-config-for="text_title">
       <label>Nội dung text<textarea class="form-control" name="text_content" rows="3" placeholder="Nhập mô tả hoặc tiêu đề phụ">${escapeHtml(widget.text_content || "")}</textarea></label>
     </div>
-  `;
+    </div>
+  </details>`;
 }
 
 function renderDashboardBuilderRow(row, index) {
@@ -3951,10 +3957,10 @@ function renderDashboardBuilderRow(row, index) {
     const datasetTable = report?.dashboard_table_name || String(report?.ma_bao_cao || "").toLowerCase();
     return `
       <div class="builder-widget-card dashboard-layout-cell" style="${dashboardCellStyle(row.layout_type, cellIndex)}" data-position="${position}">
-        <small>Ô ${position}</small>
+        <div class="dashboard-v2-widget-heading"><span>Ô ${position}</span><b>${escapeHtml(widget.title || "Chưa đặt tên")}</b></div>
         <label>Tiêu đề<input class="form-control" name="title" value="${escapeHtml(widget.title || "")}" placeholder="Tên biểu đồ, thẻ hoặc tiêu đề" /></label>
         <label>Loại hiển thị<select class="form-control" name="type">${dashboardWidgetTypeOptions(widget.type)}</select></label>
-        <label class="dashboard-sql-field ${requiresSql ? "" : "hidden"}">Nguồn dữ liệu dùng chung<select class="form-control" name="data_source_code">${dashboardDataSourceOptions(widget.data_source_code || "")}</select><small>Chọn nguồn chung để không chạy lại SQL riêng cho ô này.</small></label>
+        <label class="dashboard-sql-field ${requiresSql && !isSupabaseDataset ? "" : "hidden"}">Nguồn dữ liệu cũ<select class="form-control" name="data_source_code">${dashboardDataSourceOptions(widget.data_source_code || "")}</select><small>Chỉ dùng cho Layout cũ chưa chuyển sang bảng Supabase.</small></label>
         <label class="dashboard-sql-field ${requiresSql ? "" : "hidden"}">Mã SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "", widget.report_id)}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
         <label class="dashboard-filter-field ${showFilterField ? "" : "hidden"}">Bộ lọc mặc định<textarea class="form-control dashboard-filter-json" name="filters" rows="3" placeholder='{"LOAIHINH":""}'>${escapeHtml(filterText)}</textarea></label>
         <div class="result success ${requiresSql && isSupabaseDataset ? "" : "hidden"}"><strong>Bảng Supabase đã tạo</strong><br><code>dashboard_data.${escapeHtml(datasetTable)}</code></div>

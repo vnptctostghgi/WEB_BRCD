@@ -10,10 +10,11 @@
     {% if shell_only %}
     <link rel="preload" href="/static/shell.js?v=42" as="script" />
     {% else %}
-    <link rel="preload" href="/static/app.js?v=234" as="script" />
+    <link rel="preload" href="/static/app.js?v=235" as="script" />
     {% endif %}
     <link rel="stylesheet" href="/static/tailwind-built.css?v=1" />
     <link rel="stylesheet" href="/static/styles.css?v=143" />
+    {% if render_view("dashboard-builder") %}<link rel="stylesheet" href="/static/dashboard-builder-v2.css?v=1" />{% endif %}
   </head>
   <body class="app-booting min-h-screen bg-sky-50 text-slate-900 antialiased" data-role="{{ user.role }}" data-nav-cache-key="{{ user.id }}:{{ user.role }}:{{ user.permissions|length }}" data-must-change="{{ user.must_change_password }}" data-billing-blocked="{{ user.billing_access_blocked }}" data-can-manage-vault="{{ can_use('themvasuataikhoan') }}" data-can-reveal-vault="{{ can_use('xemmatkhaudaluu') }}">
     <svg class="icon-sprite" aria-hidden="true">
@@ -341,13 +342,19 @@
 
         {% if render_view("dashboard-builder") %}
         <section class="app-view" id="view-dashboard-builder">
-          <div class="page-header">
-            <div><p class="eyebrow">Dashboard Builder</p><h1>Thiết kế Layout báo cáo</h1><p class="subtitle">Cấu hình Trang, Tab, Layout và biểu đồ theo quyền được cấp.</p></div>
+          <div class="page-header dashboard-v2-header">
+            <div><p class="eyebrow">Thiết kế trực quan</p><h1>Thiết kế Dashboard</h1><p class="subtitle">Tạo trang báo cáo theo từng bước. Dữ liệu được đọc nhanh từ bảng Supabase đã nạp sẵn.</p></div>
             <div class="action-group">
               <button class="btn-secondary" id="new-dashboard-page" type="button">Tạo trang báo cáo</button>
               <button class="btn-primary" id="save-dashboard-layout" type="button"><span class="button-label">Lưu Layout</span><span class="spinner"></span></button>
             </div>
           </div>
+          <section class="dashboard-v2-guide" aria-label="Hướng dẫn nhanh">
+            <div><b>1</b><span><strong>Chọn trang</strong><small>Mở Dashboard cần sửa ở cột trái</small></span></div>
+            <div><b>2</b><span><strong>Chọn Tab và bố cục</strong><small>Thêm dòng 1–6 ô theo nhu cầu</small></span></div>
+            <div><b>3</b><span><strong>Cấu hình từng ô</strong><small>Chọn kiểu hiển thị và nguồn SQL</small></span></div>
+            <div><b>4</b><span><strong>Xem trước và lưu</strong><small>Kiểm tra kết quả trước khi sử dụng</small></span></div>
+          </section>
           <div id="dashboard-builder-message" class="result hidden mb-4"></div>
           <section class="dashboard-builder-status" aria-live="polite">
             <div>
@@ -370,6 +377,7 @@
 
             <section class="dashboard-builder-main">
               <section class="data-card">
+                <div class="dashboard-v2-section-title"><b>Bước 1</b><div><strong>Thông tin trang</strong><small>Chọn vị trí menu và đặt tên dễ nhận biết</small></div></div>
                 <div class="dashboard-page-form">
                   <label>M&#7909;c menu cha<select class="form-control" id="dashboard-parent-code"></select></label>
                   <label>Mã trang báo cáo<input class="form-control" id="dashboard-page-id" placeholder="DASHBOARD_KINH_DOANH" /></label>
@@ -386,20 +394,22 @@
                     <button class="btn-secondary" id="refresh-dashboard-sql-reports" type="button"><span class="button-label">Làm mới danh mục SQL</span><span class="spinner"></span></button>
                   </div>
                 </div>
+                <div class="dashboard-v2-section-title"><b>Bước 2</b><div><strong>Tab và bố cục</strong><small>Mỗi Tab chứa nhiều dòng; mỗi dòng có từ 1 đến 6 ô</small></div></div>
                 <div class="builder-tabs-wrap">
                   <div class="builder-tabs" id="dashboard-builder-tabs" role="tablist" aria-label="Tab thiết kế dashboard"></div>
                   <button class="builder-add-tab" id="add-dashboard-tab" type="button">+ Thêm Tab mới</button>
                 </div>
                 <div class="builder-toolbar">
                   <label class="builder-layout-picker">Kiểu Layout<select class="form-control" id="dashboard-row-type"></select></label>
-                  <button class="btn-secondary" id="add-dashboard-row" type="button">Thêm Layout</button>
+                  <button class="btn-primary" id="add-dashboard-row" type="button">+ Thêm dòng</button>
                 </div>
+                <div class="dashboard-v2-section-title"><b>Bước 3</b><div><strong>Cấu hình các ô</strong><small>Chọn loại biểu đồ, nguồn SQL và chỉ mở “Cấu hình nâng cao” khi cần</small></div></div>
                 <div class="dashboard-workspace-grid" id="dashboard-builder-workspace"></div>
               </section>
 
-              <section class="data-card mt-4">
+              <section class="data-card mt-4 dashboard-v2-preview">
                 <div class="section-heading">
-                  <div><p class="eyebrow">Xem Dashboard</p><h2>Preview theo Tab</h2><p>Dữ liệu chỉ được gọi khi Tab được mở.</p></div>
+                  <div><p class="eyebrow">Bước 4</p><h2>Xem trước kết quả</h2><p>Kiểm tra Tab đang mở, sau đó bấm “Lưu Layout” ở đầu trang.</p></div>
                   <button class="btn-secondary" id="refresh-dashboard-preview" type="button"><span class="button-label">Tải lại Tab đang mở</span><span class="spinner"></span></button>
                 </div>
                 <div id="dashboard-preview-message" class="result hidden mb-4"></div>
@@ -1036,7 +1046,7 @@
     {% if shell_only %}
     <script defer src="/static/shell.js?v=42"></script>
     {% else %}
-    <script defer src="/static/app.js?v=234"></script>
+    <script defer src="/static/app.js?v=235"></script>
     {% endif %}
   </body>
 </html>
