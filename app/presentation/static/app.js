@@ -79,7 +79,7 @@ const dashboardLayoutDefinitions = {
   "6_columns_4_2": { total: 6, spans: [4, 2], label: "6 cột: 4 + 2" },
 };
 const dashboardLayoutColumns = Object.fromEntries(Object.entries(dashboardLayoutDefinitions).map(([key, definition]) => [key, definition.spans.length]));
-const dashboardDataWidgetTypes = new Set(["bar_chart", "percent_bar_chart", "pie_chart", "line_chart", "combo_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "multi_line_chart", "data_table", "metric", "data_card", "total_data_card"]);
+const dashboardDataWidgetTypes = new Set(["bar_chart", "percent_bar_chart", "percent_column_chart", "pie_chart", "line_chart", "combo_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "multi_line_chart", "data_table", "metric", "data_card", "total_data_card"]);
 const dashboardNonSqlWidgetTypes = new Set(["text_title", "google_sheet_embed"]);
 const dashboardColorScaleStops = [
   { ratio: 0, rgb: [239, 68, 68] },
@@ -3116,6 +3116,7 @@ function dashboardWidgetTypeLabel(type) {
   const extraLabels = {
     multi_bar_chart: "Biểu đồ cột nhiều đơn vị",
     percent_bar_chart: "Biểu đồ cột ngang 100%",
+    percent_column_chart: "Biểu đồ cột đứng 100%",
     horizontal_multi_bar_chart: "Bi\u1ec3u \u0111\u1ed3 c\u1ed9t ngang nhi\u1ec1u \u0111\u01a1n v\u1ecb",
     multi_line_chart: "Biểu đồ đường nhiều đơn vị",
   };
@@ -3134,7 +3135,7 @@ function dashboardWidgetTypeLabel(type) {
 }
 
 function dashboardWidgetTypeOptions(selectedType) {
-  return ["bar_chart", "percent_bar_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "pie_chart", "line_chart", "multi_line_chart", "combo_chart", "data_table", "metric", "data_card", "total_data_card", "google_sheet_embed", "text_title"].map((type) => (
+  return ["bar_chart", "percent_bar_chart", "percent_column_chart", "multi_bar_chart", "horizontal_multi_bar_chart", "pie_chart", "line_chart", "multi_line_chart", "combo_chart", "data_table", "metric", "data_card", "total_data_card", "google_sheet_embed", "text_title"].map((type) => (
     `<option value="${type}" ${selectedType === type ? "selected" : ""}>${dashboardWidgetTypeLabel(type)}</option>`
   )).join("");
 }
@@ -4911,7 +4912,7 @@ function dashboardChartHeight(widgetType, chartData) {
   if (widgetType === "combo_chart") return Math.min(620, Math.max(260, count * 18 + 112));
   if (widgetType === "multi_bar_chart" || widgetType === "multi_line_chart") return Math.min(700, Math.max(270, count * 20 + 118));
   if (widgetType === "line_chart") return Math.min(560, Math.max(250, count * 14 + 96));
-  if (widgetType === "bar_chart") return Math.min(640, Math.max(260, count * 18 + 104));
+  if (widgetType === "bar_chart" || widgetType === "percent_column_chart") return Math.min(640, Math.max(260, count * 18 + 104));
   return 260;
 }
 
@@ -5133,8 +5134,9 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
       fill: isLine,
     }];
     const isPercentBar = widgetType === "percent_bar_chart";
+    const isPercentColumn = widgetType === "percent_column_chart";
     const isHorizontalAxis = isPercentBar || widgetType === "horizontal_multi_bar_chart" || widgetType === "bar_chart" && chartData.orientation === "horizontal";
-    const primaryAxisMax = isPercentBar ? 100 : dashboardAxisMax(dashboardChartPrimaryValues(chartData));
+    const primaryAxisMax = isPercentBar || isPercentColumn ? 100 : dashboardAxisMax(dashboardChartPrimaryValues(chartData));
     const chartFontFamily = "Arial, system-ui, sans-serif";
     const axisTickStyle = { color: theme.axisColor, font: { size: 15, weight: "700", family: chartFontFamily }, textStrokeColor: theme.labelStroke, textStrokeWidth: 1 };
     const axisGridStyle = { color: theme.gridColor };
@@ -5144,7 +5146,7 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
       y1: { beginAtZero: true, max: dashboardAxisMax(chartData.lineValues), position: "right", ticks: { color: theme.secondaryAxisColor, font: { size: 15, weight: "700", family: chartFontFamily }, textStrokeColor: theme.labelStroke, textStrokeWidth: 1 }, grid: { drawOnChartArea: false } },
     } : {
       x: { beginAtZero: isHorizontalAxis, max: isHorizontalAxis ? primaryAxisMax : undefined, ticks: { ...axisTickStyle, autoSkip: false, maxRotation: 55, minRotation: 0, ...(isPercentBar ? { stepSize: 20, callback: (value) => `${value}%` } : {}) }, grid: axisGridStyle },
-      y: { beginAtZero: true, max: isHorizontalAxis ? undefined : primaryAxisMax, ticks: { ...axisTickStyle, autoSkip: false }, grid: axisGridStyle },
+      y: { beginAtZero: true, max: isHorizontalAxis ? undefined : primaryAxisMax, ticks: { ...axisTickStyle, autoSkip: false, ...(isPercentColumn ? { stepSize: 20, callback: (value) => `${value}%` } : {}) }, grid: axisGridStyle },
     };
     const valueLabelPlugin = {
       id: `dashboardValueLabels-${elementId}`,
@@ -5166,7 +5168,7 @@ async function renderPendingDashboardCharts(token = dashboardChartRenderToken) {
             const position = point.tooltipPosition();
             const horizontal = chart.options.indexAxis === "y" && dataset.type !== "line";
             ctx.textAlign = horizontal ? "left" : "center";
-            const label = isPercentBar ? `${formatDashboardNumber(value)}%` : formatDashboardNumber(value);
+            const label = isPercentBar || isPercentColumn ? `${formatDashboardNumber(value)}%` : formatDashboardNumber(value);
             const x = position.x + (horizontal ? 8 : 0);
             const y = position.y - (horizontal ? 0 : 8);
             ctx.strokeText(label, x, y);
