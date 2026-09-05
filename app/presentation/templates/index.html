@@ -10,7 +10,7 @@
     {% if shell_only %}
     <link rel="preload" href="/static/shell.js?v=42" as="script" />
     {% else %}
-    <link rel="preload" href="/static/app.js?v=235" as="script" />
+    <link rel="preload" href="/static/app.js?v=236" as="script" />
     {% endif %}
     <link rel="stylesheet" href="/static/tailwind-built.css?v=1" />
     <link rel="stylesheet" href="/static/styles.css?v=143" />
@@ -352,7 +352,7 @@
           <section class="dashboard-v2-guide" aria-label="Hướng dẫn nhanh">
             <div><b>1</b><span><strong>Chọn trang</strong><small>Mở Dashboard cần sửa ở cột trái</small></span></div>
             <div><b>2</b><span><strong>Chọn Tab và bố cục</strong><small>Thêm dòng 1–6 ô theo nhu cầu</small></span></div>
-            <div><b>3</b><span><strong>Cấu hình từng ô</strong><small>Chọn kiểu hiển thị và nguồn SQL</small></span></div>
+            <div><b>3</b><span><strong>Viết SELECT cho từng ô</strong><small>Lọc dữ liệu trực tiếp từ bảng Supabase</small></span></div>
             <div><b>4</b><span><strong>Xem trước và lưu</strong><small>Kiểm tra kết quả trước khi sử dụng</small></span></div>
           </section>
           <div id="dashboard-builder-message" class="result hidden mb-4"></div>
@@ -403,7 +403,7 @@
                   <label class="builder-layout-picker">Kiểu Layout<select class="form-control" id="dashboard-row-type"></select></label>
                   <button class="btn-primary" id="add-dashboard-row" type="button">+ Thêm dòng</button>
                 </div>
-                <div class="dashboard-v2-section-title"><b>Bước 3</b><div><strong>Cấu hình các ô</strong><small>Chọn loại biểu đồ, nguồn SQL và chỉ mở “Cấu hình nâng cao” khi cần</small></div></div>
+                <div class="dashboard-v2-section-title"><b>Bước 3</b><div><strong>Viết SQL cho từng ô</strong><small>Chọn bảng nguồn rồi viết SELECT; việc nạp Oracle đã chạy tự động ở Quản trị kết nối</small></div></div>
                 <div class="dashboard-workspace-grid" id="dashboard-builder-workspace"></div>
               </section>
 
@@ -1046,7 +1046,7 @@
     {% if shell_only %}
     <script defer src="/static/shell.js?v=42"></script>
     {% else %}
-    <script defer src="/static/app.js?v=235"></script>
+    <script defer src="/static/app.js?v=236"></script>
     {% endif %}
   </body>
 </html>

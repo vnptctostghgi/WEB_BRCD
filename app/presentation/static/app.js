@@ -3204,11 +3204,12 @@ function dashboardSqlOptions(selectedCode, selectedReportId = null) {
 }
 
 function dashboardWidgetParamHint(sqlCode) {
-  if (!sqlCode) return "Chọn mã SQL từ danh mục Cấu hình báo cáo động.";
+  if (!sqlCode) return "Chọn nguồn đã bật “Dùng SQL này để chạy Dashboard”.";
   const report = dashboardReportByCode(sqlCode);
-  if (!report) return "Mã này chưa có trong Cấu hình báo cáo động. Hãy thêm SQL hoặc đổi sang mã khác.";
-  const params = dashboardReportParams(report);
-  return params.length ? `Tham số hỗ trợ: ${params.join(", ")}` : "Báo cáo này không có tham số lọc.";
+  if (!report) return "Nguồn này chưa có trong cấu hình SQL Dashboard.";
+  return report.is_dashboard_source
+    ? `Dữ liệu đã được nạp tự động vào bảng ${report.dashboard_table_name || String(report.ma_bao_cao || "").toLowerCase()}.`
+    : "Nguồn Layout cũ; hãy bật chế độ SQL Dashboard trong Quản trị kết nối.";
 }
 
 function dashboardFiltersToText(filters) {
@@ -3948,11 +3949,6 @@ function renderDashboardBuilderRow(row, index) {
     const widget = widgetsByPosition.get(position) || { position, type: "bar_chart", title: "", sql_code: "", report_id: null, chart_config: {}, filters: {} };
     const requiresSql = !dashboardNonSqlWidgetTypes.has(widget.type);
     const report = dashboardReportByCode(widget.sql_code || "");
-    const params = dashboardReportParams(report);
-    const existingFilters = widget.filters && typeof widget.filters === "object" && !Array.isArray(widget.filters) ? widget.filters : {};
-    const existingRowFilters = widget.row_filters && typeof widget.row_filters === "object" && !Array.isArray(widget.row_filters) ? widget.row_filters : {};
-    const filterText = Object.keys(existingFilters).length ? dashboardFiltersToText(existingFilters) : dashboardParamFiltersToText(params);
-    const showFilterField = requiresSql && (params.length || Object.keys(existingFilters).length);
     const isSupabaseDataset = Boolean(report?.is_dashboard_source);
     const datasetTable = report?.dashboard_table_name || String(report?.ma_bao_cao || "").toLowerCase();
     return `
@@ -3960,12 +3956,9 @@ function renderDashboardBuilderRow(row, index) {
         <div class="dashboard-v2-widget-heading"><span>Ô ${position}</span><b>${escapeHtml(widget.title || "Chưa đặt tên")}</b></div>
         <label>Tiêu đề<input class="form-control" name="title" value="${escapeHtml(widget.title || "")}" placeholder="Tên biểu đồ, thẻ hoặc tiêu đề" /></label>
         <label>Loại hiển thị<select class="form-control" name="type">${dashboardWidgetTypeOptions(widget.type)}</select></label>
-        <label class="dashboard-sql-field ${requiresSql && !isSupabaseDataset ? "" : "hidden"}">Nguồn dữ liệu cũ<select class="form-control" name="data_source_code">${dashboardDataSourceOptions(widget.data_source_code || "")}</select><small>Chỉ dùng cho Layout cũ chưa chuyển sang bảng Supabase.</small></label>
-        <label class="dashboard-sql-field ${requiresSql ? "" : "hidden"}">Mã SQL<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "", widget.report_id)}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
-        <label class="dashboard-filter-field ${showFilterField ? "" : "hidden"}">Bộ lọc mặc định<textarea class="form-control dashboard-filter-json" name="filters" rows="3" placeholder='{"LOAIHINH":""}'>${escapeHtml(filterText)}</textarea></label>
+        <label class="dashboard-sql-field ${requiresSql ? "" : "hidden"}">Nguồn dữ liệu Dashboard<select class="form-control" name="sql_code" data-previous-code="${escapeHtml(widget.sql_code || "")}">${dashboardSqlOptions(widget.sql_code || "", widget.report_id)}</select><small data-sql-param-hint>${escapeHtml(dashboardWidgetParamHint(widget.sql_code || ""))}</small></label>
         <div class="result success ${requiresSql && isSupabaseDataset ? "" : "hidden"}"><strong>Bảng Supabase đã tạo</strong><br><code>dashboard_data.${escapeHtml(datasetTable)}</code></div>
         <label class="dashboard-sql-field ${requiresSql && isSupabaseDataset ? "" : "hidden"}">SQL lọc dữ liệu Supabase<textarea class="form-control inline-admin-code" name="supabase_query" rows="5" placeholder="SELECT * FROM ${escapeHtml(datasetTable)} WHERE ...">${escapeHtml(widget.supabase_query || (isSupabaseDataset ? `SELECT * FROM ${datasetTable} LIMIT 1000` : ""))}</textarea><small>Có thể dùng tên ngắn <code>${escapeHtml(datasetTable)}</code>; hệ thống tự chuyển sang schema <code>dashboard_data</code>. Chỉ được SELECT bảng nguồn đã chọn.</small></label>
-        <label class="dashboard-sql-field ${requiresSql && widget.data_source_code ? "" : "hidden"}">Bộ lọc dòng dữ liệu đã nạp<textarea class="form-control dashboard-filter-json" name="row_filters" rows="3" placeholder='{"MACHITIEU":"SL_FIBER_COE_V2"}'>${escapeHtml(dashboardFiltersToText(existingRowFilters))}</textarea><small>Chỉ lọc kết quả trong cache Supabase, không chạy thêm SQL.</small></label>
         ${renderDashboardWidgetAdvancedConfig(widget)}
       </div>
     `;
